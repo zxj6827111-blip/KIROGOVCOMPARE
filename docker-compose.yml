@@ -1,45 +1,85 @@
-version: '3.8'
+version: "3.9"
 
 services:
   postgres:
     image: postgres:15-alpine
     environment:
-      POSTGRES_DB: gov_report_diff
+      POSTGRES_DB: report_db
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d report_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
-  app:
+  api:
     build: .
-    environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_NAME: gov_report_diff
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      PORT: 3000
-      NODE_ENV: production
-    ports:
-      - "3000:3000"
-    depends_on:
-      - postgres
-      - redis
+    command: ["npm", "run", "start:api"]
+    expose:
+      - "3000"
     volumes:
-      - ./uploads:/app/uploads
-      - ./exports:/app/exports
+      - uploads:/app/uploads
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/report_db
+      REDIS_URL: redis://redis:6379
+      PORT: 3000
+      # 禁止在 API 进程中注册处理器
+      DISABLE_PROCESSORS: "1"
+      # 禁止 TS 表格兜底（仅 debug 才允许打开）
+      ENABLE_TS_TABLE_FALLBACK: "0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    command: ["npm", "run", "start:worker"]
+    volumes:
+      - uploads:/app/uploads
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/report_db
+      REDIS_URL: redis://redis:6379
+      # Worker 并发可控
+      WORKER_CONCURRENCY: "2"
+      # Python 调用超时（毫秒）
+      PY_TABLE_TIMEOUT_MS: "180000"
+      # 禁止 TS 表格兜底
+      ENABLE_TS_TABLE_FALLBACK: "0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./frontend/build:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
 
 volumes:
-  postgres_data:
+  pgdata:
   redis_data:
+  uploads:

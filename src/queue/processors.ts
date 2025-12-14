@@ -13,7 +13,10 @@ import pool from '../config/database';
  * 比对任务处理器
  */
 export async function setupCompareTaskProcessor(): Promise<void> {
-  compareTaskQueue.process(async (job) => {
+  // 从环境变量读取并发参数（默认 1）
+  const concurrency = parseInt(process.env.WORKER_CONCURRENCY || '2', 10);
+  
+  compareTaskQueue.process(concurrency, async (job) => {
     const { taskId } = job.data;
 
     try {
@@ -153,7 +156,9 @@ export async function setupCompareTaskProcessor(): Promise<void> {
  * AI建议处理器
  */
 export async function setupAISuggestionProcessor(): Promise<void> {
-  aiSuggestionQueue.process(async (job) => {
+  const concurrency = parseInt(process.env.WORKER_CONCURRENCY || '2', 10);
+  
+  aiSuggestionQueue.process(concurrency, async (job) => {
     const { suggestionId, compareTaskId } = job.data;
 
     try {
@@ -174,7 +179,9 @@ export async function setupAISuggestionProcessor(): Promise<void> {
  * DOCX导出处理器
  */
 export async function setupDocxExportProcessor(): Promise<void> {
-  docxExportQueue.process(async (job) => {
+  const concurrency = parseInt(process.env.WORKER_CONCURRENCY || '2', 10);
+  
+  docxExportQueue.process(concurrency, async (job) => {
     const { exportId, taskId, includeAiSuggestion } = job.data;
 
     try {
@@ -195,7 +202,9 @@ export async function setupDocxExportProcessor(): Promise<void> {
  * 批量比对处理器
  */
 export async function setupBatchJobProcessor(): Promise<void> {
-  batchJobQueue.process(async (job) => {
+  const concurrency = parseInt(process.env.WORKER_CONCURRENCY || '2', 10);
+  
+  batchJobQueue.process(concurrency, async (job) => {
     const { batchId } = job.data;
 
     try {
