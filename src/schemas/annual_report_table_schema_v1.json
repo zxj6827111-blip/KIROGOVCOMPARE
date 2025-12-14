@@ -1,0 +1,131 @@
+{
+  "version": "1.0",
+  "description": "政府信息公开年度报告 - 三张核心表格 Canonical Schema",
+  "tables": [
+    {
+      "tableId": "table_active_disclosure",
+      "chapterNumber": "二",
+      "chapterTitle": "主动公开政府信息情况",
+      "titleKeywords": ["主动公开", "政府信息情况"],
+      "description": "主动公开政府信息情况统计表",
+      "columns": [
+        {
+          "colId": "col_1",
+          "colIndex": 0,
+          "name": "信息类别",
+          "key": "category",
+          "type": "string",
+          "required": true
+        },
+        {
+          "colId": "col_2",
+          "colIndex": 1,
+          "name": "公开条数",
+          "key": "count",
+          "type": "number",
+          "required": true
+        }
+      ],
+      "expectedRows": [
+        { "category": "机构信息", "count": null },
+        { "category": "法律法规", "count": null },
+        { "category": "规划计划", "count": null },
+        { "category": "业务动态", "count": null },
+        { "category": "其他", "count": null }
+      ],
+      "minRows": 3,
+      "maxRows": 10,
+      "degradeIfMissing": true,
+      "warningCode": "TABLE_PARSE_FAILED",
+      "warningCodePartial": "TABLE_ALIGN_PARTIAL"
+    },
+    {
+      "tableId": "table_foia_requests",
+      "chapterNumber": "三",
+      "chapterTitle": "收到和处理政府信息公开申请情况",
+      "titleKeywords": ["收到和处理", "政府信息公开申请"],
+      "description": "政府信息公开申请处理情况统计表",
+      "columns": [
+        {
+          "colId": "col_1",
+          "colIndex": 0,
+          "name": "申请类型",
+          "key": "requestType",
+          "type": "string",
+          "required": true
+        },
+        {
+          "colId": "col_2",
+          "colIndex": 1,
+          "name": "申请数量",
+          "key": "requestCount",
+          "type": "number",
+          "required": true
+        },
+        {
+          "colId": "col_3",
+          "colIndex": 2,
+          "name": "处理数量",
+          "key": "processedCount",
+          "type": "number",
+          "required": true
+        }
+      ],
+      "expectedRows": [
+        { "requestType": "当面申请", "requestCount": null, "processedCount": null },
+        { "requestType": "邮件申请", "requestCount": null, "processedCount": null },
+        { "requestType": "网络申请", "requestCount": null, "processedCount": null },
+        { "requestType": "其他方式", "requestCount": null, "processedCount": null }
+      ],
+      "minRows": 3,
+      "maxRows": 10,
+      "degradeIfMissing": true,
+      "warningCode": "TABLE_PARSE_FAILED",
+      "warningCodePartial": "TABLE_ALIGN_PARTIAL"
+    },
+    {
+      "tableId": "table_administrative_review",
+      "chapterNumber": "四",
+      "chapterTitle": "政府信息公开行政复议、行政诉讼情况",
+      "titleKeywords": ["行政复议", "行政诉讼"],
+      "description": "行政复议和行政诉讼情况统计表",
+      "columns": [
+        {
+          "colId": "col_1",
+          "colIndex": 0,
+          "name": "事项类型",
+          "key": "itemType",
+          "type": "string",
+          "required": true
+        },
+        {
+          "colId": "col_2",
+          "colIndex": 1,
+          "name": "数量",
+          "key": "count",
+          "type": "number",
+          "required": true
+        }
+      ],
+      "expectedRows": [
+        { "itemType": "行政复议申请", "count": null },
+        { "itemType": "行政诉讼案件", "count": null }
+      ],
+      "minRows": 2,
+      "maxRows": 5,
+      "degradeIfMissing": true,
+      "warningCode": "TABLE_PARSE_FAILED",
+      "warningCodePartial": "TABLE_ALIGN_PARTIAL"
+    }
+  ],
+  "extractionStrategy": {
+    "description": "表格提取策略",
+    "steps": [
+      "1. 按章节号和标题关键字定位表格位置",
+      "2. 基于 PDF 文本块坐标（x/y）聚类提取表内值",
+      "3. 按行文本规则匹配预期行",
+      "4. 填入固定表格骨架（schema）",
+      "5. 若提取失败，标记为 degraded=true 并写入 warnings"
+    ]
+  }
+}

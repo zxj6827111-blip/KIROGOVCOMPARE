@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>后台管理 - 年报比对系统</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+      background-color: #f5f7fa;
+      color: #333;
+    }
+
+    .container {
+      display: flex;
+      height: 100vh;
+    }
+
+    .sidebar {
+      width: 250px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 20px;
+      overflow-y: auto;
+      box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
+    }
+
+    .sidebar h2 {
+      margin-bottom: 30px;
+      font-size: 20px;
+    }
+
+    .nav-menu {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .nav-item {
+      padding: 12px 15px;
+      background: rgba(255, 255, 255, 0.1);
+      border: none;
+      color: white;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.3s;
+      text-align: left;
+    }
+
+    .nav-item:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .nav-item.active {
+      background: rgba(255, 255, 255, 0.3);
+      border-left: 4px solid white;
+      padding-left: 11px;
+    }
+
+    .content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 30px;
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 30px;
+      padding-bottom: 20px;
+      border-bottom: 2px solid #e0e0e0;
+    }
+
+    .header h1 {
+      font-size: 28px;
+      color: #333;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .btn-primary {
+      background-color: #667eea;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background-color: #5568d3;
+    }
+
+    .btn-success {
+      background-color: #48bb78;
+      color: white;
+    }
+
+    .btn-success:hover {
+      background-color: #38a169;
+    }
+
+    .btn-danger {
+      background-color: #f56565;
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background-color: #e53e3e;
+    }
+
+    .section {
+      display: none;
+    }
+
+    .section.active {
+      display: block;
+    }
+
+    .card {
+      background: white;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .card h3 {
+      margin-bottom: 15px;
+      color: #333;
+      font-size: 16px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
+    }
+
+    thead {
+      background-color: #f7fafc;
+      border-bottom: 2px solid #e0e0e0;
+    }
+
+    th {
+      padding: 12px;
+      text-align: left;
+      font-weight: 600;
+      color: #555;
+      font-size: 14px;
+    }
+
+    td {
+      padding: 12px;
+      border-bottom: 1px solid #e0e0e0;
+      font-size: 14px;
+    }
+
+    tbody tr:hover {
+      background-color: #f9fafb;
+    }
+
+    .form-group {
+      margin-bottom: 15px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: 600;
+      color: #555;
+      font-size: 14px;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+    }
+
+    .alert {
+      padding: 12px 16px;
+      border-radius: 4px;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+
+    .alert-success {
+      background-color: #c6f6d5;
+      color: #22543d;
+      border-left: 4px solid #22543d;
+    }
+
+    .alert-error {
+      background-color: #fed7d7;
+      color: #c53030;
+      border-left: 4px solid #c53030;
+    }
+
+    .stat-card {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 20px;
+      border-radius: 8px;
+      text-align: center;
+      min-width: 150px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      display: inline-block;
+      margin-right: 20px;
+      margin-bottom: 20px;
+    }
+
+    .stat-value {
+      font-size: 32px;
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+
+    .stat-label {
+      font-size: 14px;
+      opacity: 0.9;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px;
+      color: #999;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .actions .btn {
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="sidebar">
+      <h2>🎛️ 后台管理</h2>
+      <div class="nav-menu">
+        <button class="nav-item active" onclick="switchSection('regions')">🗺️ 地区管理</button>
+        <button class="nav-item" onclick="switchSection('reports')">📊 年报汇总</button>
+        <button class="nav-item" onclick="switchSection('tasks')">📋 比对记录</button>
+      </div>
+    </div>
+
+    <div class="content">
+      <!-- 地区管理 -->
+      <div id="regions" class="section active">
+        <div class="header">
+          <h1>🗺️ 地区管理</h1>
+          <button class="btn btn-primary" onclick="showAddRegionForm()">➕ 新增地区</button>
+        </div>
+
+        <div id="regionAlert"></div>
+
+        <div id="addRegionForm" class="card" style="display: none;">
+          <h3>新增地区</h3>
+          <div class="form-row">
+            <div class="form-group">
+              <label>地区 ID</label>
+              <input type="text" id="regionId" placeholder="如：beijing_city">
+            </div>
+            <div class="form-group">
+              <label>地区名称</label>
+              <input type="text" id="regionName" placeholder="如：北京市">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>级别</label>
+              <select id="regionLevel">
+                <option value="province">省份</option>
+                <option value="city">地级市</option>
+                <option value="district">县级市</option>
+                <option value="township">街道乡镇</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>父级 ID（可选）</label>
+              <input type="text" id="regionParent" placeholder="如：guangdong_prov">
+            </div>
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <button class="btn btn-success" onclick="addRegion()">💾 保存</button>
+            <button class="btn" style="background: #cbd5e0; color: #333;" onclick="hideAddRegionForm()">❌ 取消</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>地区列表</h3>
+          <div id="regionsList" class="loading">加载中...</div>
+        </div>
+      </div>
+
+      <!-- 年报汇总 -->
+      <div id="reports" class="section">
+        <div class="header">
+          <h1>📊 年报汇总</h1>
+          <button class="btn btn-primary" onclick="showUploadForm()">⬆️ 上传年报</button>
+        </div>
+
+        <div id="reportAlert"></div>
+
+        <div id="uploadForm" class="card" style="display: none;">
+          <h3>上传年报</h3>
+          <div class="form-row">
+            <div class="form-group">
+              <label>地区</label>
+              <select id="uploadRegion"></select>
+            </div>
+            <div class="form-group">
+              <label>年份</label>
+              <input type="number" id="uploadYear" placeholder="如：2024">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>选择文件</label>
+            <input type="file" id="uploadFile" accept=".pdf">
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <button class="btn btn-success" onclick="uploadReport()">💾 上传</button>
+            <button class="btn" style="background: #cbd5e0; color: #333;" onclick="hideUploadForm()">❌ 取消</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>年报列表</h3>
+          <div id="reportsList" class="loading">加载中...</div>
+        </div>
+      </div>
+
+      <!-- 年报详情页面 -->
+      <div id="reportDetail" class="section">
+        <div class="header">
+          <button class="btn" style="background: #cbd5e0; color: #333; margin-right: 10px;" onclick="backToReports()">← 返回</button>
+          <h1 id="reportDetailPageTitle">年报详情</h1>
+        </div>
+        <div id="reportDetailPageContent" style="background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+          <div style="text-align: center; padding: 40px; color: #999;">加载中...</div>
+        </div>
+      </div>
+
+      <!-- 比对记录 -->
+      <div id="tasks" class="section">
+        <div class="header">
+          <h1>📋 比对记录</h1>
+        </div>
+
+        <div class="card">
+          <div style="display: flex; gap: 20; margin-bottom: 20px;">
+            <div class="stat-card">
+              <div class="stat-value" id="totalTasks">0</div>
+              <div class="stat-label">总比对数</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="completedTasks">0</div>
+              <div class="stat-label">已完成</div>
+            </div>
+          </div>
+
+          <h3>比对记录列表</h3>
+          <div id="tasksList" class="loading">加载中...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = 'http://localhost:3000/api/v1';
+
+    function switchSection(sectionId) {
+      // 隐藏所有 section
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+
+      // 显示选中的 section
+      document.getElementById(sectionId).classList.add('active');
+      event.target.classList.add('active');
+
+      // 加载数据
+      if (sectionId === 'regions') {
+        loadRegions();
+      } else if (sectionId === 'reports') {
+        // 先加载地区列表（用于下拉框），再加载年报列表
+        loadRegions().then(() => loadReports());
+      } else if (sectionId === 'tasks') {
+        loadTasks();
+      }
+    }
+
+    // ===== 地区管理 =====
+    function showAddRegionForm() {
+      document.getElementById('addRegionForm').style.display = 'block';
+    }
+
+    function hideAddRegionForm() {
+      document.getElementById('addRegionForm').style.display = 'none';
+    }
+
+    async function addRegion() {
+      const regionId = document.getElementById('regionId').value;
+      const regionName = document.getElementById('regionName').value;
+      const level = document.getElementById('regionLevel').value;
+      const parentId = document.getElementById('regionParent').value;
+
+      if (!regionId || !regionName) {
+        showAlert('regionAlert', '请填写地区 ID 和名称', 'error');
+        return;
+      }
+
+      try {
+        await fetch(`${API_BASE}/admin/regions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            regionId,
+            name: regionName,
+            level,
+            parentId: parentId || undefined,
+          }),
+        });
+
+        showAlert('regionAlert', '✅ 地区添加成功', 'success');
+        hideAddRegionForm();
+        document.getElementById('regionId').value = '';
+        document.getElementById('regionName').value = '';
+        document.getElementById('regionParent').value = '';
+        loadRegions();
+      } catch (err) {
+        showAlert('regionAlert', '❌ 添加失败', 'error');
+      }
+    }
+
+    async function loadRegions() {
+      try {
+        const res = await fetch(`${API_BASE}/admin/regions`);
+        const data = await res.json();
+        const regions = data.regions || [];
+
+        let html = '<table><thead><tr><th>ID</th><th>名称</th><th>级别</th><th>父级</th><th>操作</th></tr></thead><tbody>';
+        regions.forEach(r => {
+          html += `<tr>
+            <td>${r.regionId}</td>
+            <td>${r.name}</td>
+            <td>${r.level}</td>
+            <td>${r.parentId || '-'}</td>
+            <td><button class="btn btn-danger" onclick="deleteRegion('${r.regionId}')">🗑️ 删除</button></td>
+          </tr>`;
+        });
+        html += '</tbody></table>';
+
+        document.getElementById('regionsList').innerHTML = html;
+
+        // 更新上传表单的地区选项
+        let options = '<option value="">-- 请选择地区 --</option>';
+        regions.forEach(r => {
+          options += `<option value="${r.regionId}">${r.name}</option>`;
+        });
+        const uploadRegionSelect = document.getElementById('uploadRegion');
+        if (uploadRegionSelect) {
+          uploadRegionSelect.innerHTML = options;
+        }
+        
+        return regions;
+      } catch (err) {
+        console.error('加载地区失败:', err);
+        document.getElementById('regionsList').innerHTML = '<div class="empty-state">加载失败</div>';
+        return [];
+      }
+    }
+
+    async function deleteRegion(regionId) {
+      if (!confirm('确定要删除这个地区吗？')) return;
+
+      try {
+        await fetch(`${API_BASE}/admin/regions/${regionId}`, { method: 'DELETE' });
+        showAlert('regionAlert', '✅ 地区删除成功', 'success');
+        loadRegions();
+      } catch (err) {
+        showAlert('regionAlert', '❌ 删除失败', 'error');
+      }
+    }
+
+    // ===== 年报汇总 =====
+    function showUploadForm() {
+      document.getElementById('uploadForm').style.display = 'block';
+    }
+
+    function hideUploadForm() {
+      document.getElementById('uploadForm').style.display = 'none';
+    }
+
+    async function uploadReport() {
+      const regionId = document.getElementById('uploadRegion').value;
+      const year = document.getElementById('uploadYear').value;
+      const file = document.getElementById('uploadFile').files[0];
+
+      if (!regionId || !year || !file) {
+        showAlert('reportAlert', '请填写所有字段', 'error');
+        return;
+      }
+
+      try {
+        const response = await fetch(`${API_BASE}/admin/assets/upload`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            regionId,
+            year: parseInt(year),
+            fileName: file.name,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('上传失败');
+        }
+
+        showAlert('reportAlert', '✅ 年报上传成功', 'success');
+        hideUploadForm();
+        document.getElementById('uploadYear').value = '';
+        document.getElementById('uploadFile').value = '';
+        loadReports();
+      } catch (err) {
+        showAlert('reportAlert', '❌ 上传失败: ' + err.message, 'error');
+      }
+    }
+
+    async function loadReports() {
+      try {
+        const res = await fetch(`${API_BASE}/admin/reports`);
+        const data = await res.json();
+        const reports = data.assets || [];
+
+        if (reports.length === 0) {
+          document.getElementById('reportsList').innerHTML = '<div class="empty-state">暂无年报数据</div>';
+          return;
+        }
+
+        let html = '<table><thead><tr><th>文件名</th><th>地区</th><th>年份</th><th>状态</th><th>上传时间</th><th>操作</th></tr></thead><tbody>';
+        reports.forEach(r => {
+          const uploadDate = r.uploadedAt ? new Date(r.uploadedAt).toLocaleDateString('zh-CN') : '-';
+          const regionDisplay = r.regionName || r.region || '-';
+          html += `<tr>
+            <td>${r.fileName}</td>
+            <td>${regionDisplay}</td>
+            <td>${r.year || '-'}</td>
+            <td>${r.status || '-'}</td>
+            <td>${uploadDate}</td>
+            <td>
+              <div class="actions">
+                <button class="btn btn-primary" onclick="openReportDetailPage('${r.assetId}', '${r.fileName}')">👁️ 查看</button>
+                <button class="btn btn-danger" onclick="deleteReport('${r.assetId}')">🗑️ 删除</button>
+              </div>
+            </td>
+          </tr>`;
+        });
+        html += '</tbody></table>';
+
+        document.getElementById('reportsList').innerHTML = html;
+      } catch (err) {
+        console.error('加载年报失败:', err);
+        document.getElementById('reportsList').innerHTML = '<div class="empty-state">加载失败</div>';
+      }
+    }
+
+    async function deleteReport(assetId) {
+      if (!confirm('确定要删除这份年报吗？')) return;
+
+      try {
+        await fetch(`${API_BASE}/admin/reports/${assetId}`, { method: 'DELETE' });
+        showAlert('reportAlert', '✅ 年报删除成功', 'success');
+        loadReports();
+      } catch (err) {
+        showAlert('reportAlert', '❌ 删除失败', 'error');
+      }
+    }
+
+    // ===== 比对记录 =====
+    async function loadTasks() {
+      try {
+        const res = await fetch(`${API_BASE}/tasks`);
+        const data = await res.json();
+        const tasks = data.tasks || [];
+
+        document.getElementById('totalTasks').textContent = tasks.length;
+        document.getElementById('completedTasks').textContent = tasks.filter(t => t.status === 'completed').length;
+
+        let html = '<table><thead><tr><th>任务 ID</th><th>地区</th><th>年份 A</th><th>年份 B</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody>';
+        tasks.forEach(t => {
+          html += `<tr>
+            <td>${t.taskId}</td>
+            <td>${t.region || '-'}</td>
+            <td>${t.yearA || '-'}</td>
+            <td>${t.yearB || '-'}</td>
+            <td>${t.status}</td>
+            <td>${new Date(t.createdAt).toLocaleDateString('zh-CN')}</td>
+            <td><a href="http://localhost:3001?taskId=${t.taskId}" target="_blank" class="btn btn-primary" style="padding: 6px 12px; font-size: 12px; text-decoration: none; display: inline-block;">👁️ 查看详情</a></td>
+          </tr>`;
+        });
+        html += '</tbody></table>';
+
+        document.getElementById('tasksList').innerHTML = html;
+      } catch (err) {
+        document.getElementById('tasksList').innerHTML = '<div class="empty-state">加载失败</div>';
+      }
+    }
+
+    // ===== 工具函数 =====
+    function showAlert(elementId, message, type) {
+      const alert = document.getElementById(elementId);
+      alert.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
+      setTimeout(() => {
+        alert.innerHTML = '';
+      }, 3000);
+    }
+
+    // ===== 年报详情页面 =====
+    async function openReportDetailPage(assetId, fileName) {
+      try {
+        // 切换到详情页面
+        document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+        document.getElementById('reportDetail').classList.add('active');
+        document.getElementById('reportDetailPageTitle').textContent = `年报详情 - ${fileName}`;
+        document.getElementById('reportDetailPageContent').innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">加载中...</div>';
+
+        // 获取资产基本信息
+        let res = await fetch(`${API_BASE}/assets/${assetId}`);
+        let assetData = await res.json();
+
+        if (!assetData) {
+          document.getElementById('reportDetailPageContent').innerHTML = '<div style="color: #e74c3c;">无法加载年报信息</div>';
+          return;
+        }
+
+        // 获取解析数据
+        let parseRes = await fetch(`${API_BASE}/assets/${assetId}/parse`);
+        let parseData = null;
+        if (parseRes.ok) {
+          parseData = await parseRes.json();
+        }
+
+        // 构建详情页面内容
+        let html = '';
+
+        // 基本信息
+        html += '<div style="background: #f9f9f9; padding: 20px; border-radius: 8px; margin-bottom: 30px;">';
+        html += '<h3 style="margin-top: 0;">📋 基本信息</h3>';
+        html += '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">';
+        html += `<div><strong>文件名:</strong> ${assetData.fileName || '-'}</div>`;
+        html += `<div><strong>年份:</strong> ${assetData.year || '-'}</div>`;
+        html += `<div><strong>地区:</strong> ${assetData.region || '-'}</div>`;
+        html += `<div><strong>状态:</strong> ${assetData.status || '-'}</div>`;
+        html += `<div><strong>上传时间:</strong> ${assetData.uploadedAt ? new Date(assetData.uploadedAt).toLocaleString('zh-CN') : '-'}</div>`;
+        html += `<div><strong>解析版本:</strong> ${assetData.parseVersion || '-'}</div>`;
+        html += '</div></div>';
+
+        // 年报内容（六大板块）
+        html += '<div style="border-top: 2px solid #e0e0e0; padding-top: 20px;">';
+        html += '<h2 style="margin-top: 0; margin-bottom: 20px; font-size: 24px; color: #1a1a1a;">📄 年报内容</h2>';
+        
+        if (parseData && parseData.parsedContent && parseData.parsedContent.sections) {
+          // 使用解析数据渲染
+          const sections = parseData.parsedContent.sections;
+          
+          sections.forEach((section, idx) => {
+            html += '<div style="margin-bottom: 30px; padding: 20px; background: #f9f9f9; border-left: 5px solid #5b6bff; border-radius: 4px;">';
+            html += `<h3 style="margin: 0 0 15px 0; color: #333; font-size: 18px;">${section.title || '第' + (idx + 1) + '章'}</h3>`;
+            
+            // 显示文本内容（支持字符串和数组两种格式）
+            if (section.content) {
+              html += '<div style="margin-bottom: 15px;">';
+              if (typeof section.content === 'string') {
+                // 如果是字符串，直接显示
+                html += `<p style="margin: 0 0 10px 0; color: #666; line-height: 1.8; text-align: justify;">${section.content}</p>`;
+              } else if (Array.isArray(section.content) && section.content.length > 0) {
+                // 如果是数组，遍历显示
+                section.content.forEach(para => {
+                  html += `<p style="margin: 0 0 10px 0; color: #666; line-height: 1.8; text-align: justify;">${para.text || para}</p>`;
+                });
+              }
+              html += '</div>';
+            }
+            
+            // 显示表格
+            if (section.tables && section.tables.length > 0) {
+              section.tables.forEach(table => {
+                html += renderTableHTML(table);
+              });
+            }
+            
+            if (!section.content && (!section.tables || section.tables.length === 0)) {
+              html += '<p style="margin: 0; color: #999; line-height: 1.8;">暂无内容</p>';
+            }
+            
+            html += '</div>';
+          });
+        } else {
+          // 降级显示：没有解析数据时显示默认结构
+          const defaultSections = [
+            { title: '一、总体情况', type: 'text' },
+            { title: '二、主动公开政府信息情况', type: 'table' },
+            { title: '三、收到和处理政府信息公开申请情况', type: 'table' },
+            { title: '四、因政府信息公开工作被申请行政复议、提起行政诉讼情况', type: 'table' },
+            { title: '五、存在的主要问题及改进情况', type: 'text' },
+            { title: '六、其他需要报告的事项', type: 'text' }
+          ];
+
+          defaultSections.forEach((section, idx) => {
+            html += '<div style="margin-bottom: 30px; padding: 20px; background: #f9f9f9; border-left: 5px solid #5b6bff; border-radius: 4px;">';
+            html += `<h3 style="margin: 0 0 15px 0; color: #333; font-size: 18px;">${section.title}</h3>`;
+            html += '<p style="margin: 0; color: #999; line-height: 1.8;">暂无解析数据，请稍后重试</p>';
+            html += '</div>';
+          });
+        }
+        
+        html += '</div>';
+
+        document.getElementById('reportDetailPageContent').innerHTML = html;
+      } catch (error) {
+        console.error('加载年报详情失败:', error);
+        document.getElementById('reportDetailPageContent').innerHTML = '<div style="color: #e74c3c;">加载失败: ' + error.message + '</div>';
+      }
+    }
+
+    // 渲染表格为 HTML
+    function renderTableHTML(table) {
+      if (!table || !table.rows || table.rows.length === 0) {
+        return '<p style="color: #999;">暂无表格数据</p>';
+      }
+
+      let html = '<div style="margin-top: 15px; overflow-x: auto;">';
+      html += `<h4 style="margin: 0 0 10px 0; color: #555;">${table.title || '表格'}</h4>`;
+      html += '<table style="width: 100%; border-collapse: collapse; font-size: 13px;">';
+      
+      // 表头（从第一行的 cells 中提取）
+      if (table.rows[0] && table.rows[0].cells && table.rows[0].cells.length > 0) {
+        html += '<thead style="background-color: #f0f0f0; border-bottom: 2px solid #ddd;">';
+        html += '<tr>';
+        table.rows[0].cells.forEach((cell, idx) => {
+          // 支持多种格式：cell.colName, cell.colKey, cell.value, 或直接是字符串
+          const headerText = cell.colName || cell.colKey || cell.value || cell || ('列' + (idx + 1));
+          html += `<th style="padding: 10px; text-align: left; border-right: 1px solid #ddd; font-weight: 600;">${headerText}</th>`;
+        });
+        html += '</tr>';
+        html += '</thead>';
+      }
+      
+      // 表体
+      html += '<tbody>';
+      table.rows.forEach((row, rowIdx) => {
+        html += `<tr style="border-bottom: 1px solid #ddd; background-color: ${rowIdx % 2 === 0 ? '#fff' : '#f9f9f9'};">`;
+        if (row.cells && Array.isArray(row.cells)) {
+          row.cells.forEach((cell, colIdx) => {
+            // 支持多种格式：cell.value 或直接是字符串/数字
+            const value = (cell && cell.value !== null && cell.value !== undefined) ? cell.value : (cell || '-');
+            const displayValue = value === null || value === undefined ? '-' : value;
+            html += `<td style="padding: 10px; border-right: 1px solid #ddd; text-align: ${typeof displayValue === 'number' ? 'right' : 'left'};">${displayValue}</td>`;
+          });
+        }
+        html += '</tr>';
+      });
+      html += '</tbody>';
+      
+      html += '</table>';
+      
+      if (table.degraded) {
+        html += '<p style="margin-top: 10px; color: #ff9800; font-size: 12px;">⚠️ 此表格数据可能不完整，请参考原始 PDF 文件</p>';
+      }
+      
+      html += '</div>';
+      return html;
+    }
+
+    function backToReports() {
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      document.getElementById('reports').classList.add('active');
+      loadReports();
+    }
+
+
+
+    // 初始化
+    loadRegions();
+  </script>
+</body>
+</html>

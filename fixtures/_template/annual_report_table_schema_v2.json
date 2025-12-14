@@ -1,0 +1,507 @@
+{
+  "version": "2.0",
+  "name": "Annual Report Table Schema (GBGKBH[2021]30)",
+  "source": "国办公开办函〔2021〕30号《中华人民共和国政府信息公开工作年度报告格式》",
+  "notes": [
+    "本 schema 以“固定行列+行键(rowKey)+列键(colKey)”为目标，便于跨年稳定比对。",
+    "章节二拆分为四个子表（第二十条第（一）（五）（六）（八）项），以规避模板中“跨列合并”导致的列漂移。"
+  ],
+  "tables": [
+    {
+      "id": "sec2_art20_1",
+      "section": "二、主动公开政府信息情况",
+      "title": "第二十条第（一）项",
+      "locateKeywords": [
+        "二、主动公开政府信息情况",
+        "第二十条第（一）项"
+      ],
+      "labelColumns": 1,
+      "columns": [
+        {
+          "key": "issued",
+          "name": "本年制发件数",
+          "type": "number"
+        },
+        {
+          "key": "repealed",
+          "name": "本年废止件数",
+          "type": "number"
+        },
+        {
+          "key": "valid",
+          "name": "现行有效件数",
+          "type": "number"
+        }
+      ],
+      "rows": [
+        {
+          "key": "rules",
+          "label": "规章",
+          "match": [
+            "规章"
+          ]
+        },
+        {
+          "key": "normative_files",
+          "label": "行政规范性文件",
+          "match": [
+            "行政规范性文件",
+            "规范性文件"
+          ]
+        }
+      ],
+      "options": {
+        "headerRowsToSkip": 1
+      }
+    },
+    {
+      "id": "sec2_art20_5",
+      "section": "二、主动公开政府信息情况",
+      "title": "第二十条第（五）项",
+      "locateKeywords": [
+        "二、主动公开政府信息情况",
+        "第二十条第（五）项"
+      ],
+      "labelColumns": 1,
+      "columns": [
+        {
+          "key": "decisions",
+          "name": "本年处理决定数量",
+          "type": "number"
+        }
+      ],
+      "rows": [
+        {
+          "key": "admin_license",
+          "label": "行政许可",
+          "match": [
+            "行政许可"
+          ]
+        }
+      ],
+      "options": {
+        "headerRowsToSkip": 1
+      }
+    },
+    {
+      "id": "sec2_art20_6",
+      "section": "二、主动公开政府信息情况",
+      "title": "第二十条第（六）项",
+      "locateKeywords": [
+        "二、主动公开政府信息情况",
+        "第二十条第（六）项"
+      ],
+      "labelColumns": 1,
+      "columns": [
+        {
+          "key": "decisions",
+          "name": "本年处理决定数量",
+          "type": "number"
+        }
+      ],
+      "rows": [
+        {
+          "key": "admin_penalty",
+          "label": "行政处罚",
+          "match": [
+            "行政处罚"
+          ]
+        },
+        {
+          "key": "admin_coercion",
+          "label": "行政强制",
+          "match": [
+            "行政强制"
+          ]
+        }
+      ],
+      "options": {
+        "headerRowsToSkip": 1
+      }
+    },
+    {
+      "id": "sec2_art20_8",
+      "section": "二、主动公开政府信息情况",
+      "title": "第二十条第（八）项",
+      "locateKeywords": [
+        "二、主动公开政府信息情况",
+        "第二十条第（八）项"
+      ],
+      "labelColumns": 1,
+      "columns": [
+        {
+          "key": "amount_wanyuan",
+          "name": "本年收费金额（万元）",
+          "type": "number"
+        }
+      ],
+      "rows": [
+        {
+          "key": "admin_fees",
+          "label": "行政事业性收费",
+          "match": [
+            "行政事业性收费"
+          ]
+        }
+      ],
+      "options": {
+        "headerRowsToSkip": 1,
+        "unit": "万元"
+      }
+    },
+    {
+      "id": "sec3_requests",
+      "section": "三、收到和处理政府信息公开申请情况",
+      "title": "收到和处理政府信息公开申请情况",
+      "locateKeywords": [
+        "三、收到和处理政府信息公开申请情况",
+        "收到和处理政府信息公开申请情况"
+      ],
+      "labelColumns": 3,
+      "columns": [
+        {
+          "key": "natural_person",
+          "name": "自然人",
+          "type": "number"
+        },
+        {
+          "key": "commercial_enterprise",
+          "name": "商业企业",
+          "type": "number"
+        },
+        {
+          "key": "research_institute",
+          "name": "科研机构",
+          "type": "number"
+        },
+        {
+          "key": "social_org",
+          "name": "社会公益组织",
+          "type": "number"
+        },
+        {
+          "key": "legal_service",
+          "name": "法律服务机构",
+          "type": "number"
+        },
+        {
+          "key": "other",
+          "name": "其他",
+          "type": "number"
+        },
+        {
+          "key": "total",
+          "name": "总计",
+          "type": "number"
+        }
+      ],
+      "rows": [
+        {
+          "key": "new_received",
+          "label": "一、本年新收政府信息公开申请数量",
+          "match": [
+            "本年新收",
+            "申请数量"
+          ]
+        },
+        {
+          "key": "carry_over",
+          "label": "二、上年结转政府信息公开申请数量",
+          "match": [
+            "上年结转",
+            "申请数量"
+          ]
+        },
+        {
+          "key": "result_open",
+          "label": "三、本年度办理结果 /（一）予以公开",
+          "match": [
+            "予以公开"
+          ]
+        },
+        {
+          "key": "result_partial",
+          "label": "三、本年度办理结果 /（二）部分公开",
+          "match": [
+            "部分公开"
+          ]
+        },
+        {
+          "key": "not_open_secret",
+          "label": "三、本年度办理结果 /（三）不予公开 /1.属于国家秘密",
+          "match": [
+            "不予公开",
+            "国家秘密"
+          ]
+        },
+        {
+          "key": "not_open_other_law",
+          "label": "三、本年度办理结果 /（三）不予公开 /2.其他法律行政法规禁止公开",
+          "match": [
+            "不予公开",
+            "禁止公开"
+          ]
+        },
+        {
+          "key": "not_open_3s1w",
+          "label": "三、本年度办理结果 /（三）不予公开 /3.危及“三安全一稳定”",
+          "match": [
+            "不予公开",
+            "三安全"
+          ]
+        },
+        {
+          "key": "not_open_third_party",
+          "label": "三、本年度办理结果 /（三）不予公开 /4.保护第三方合法权益",
+          "match": [
+            "不予公开",
+            "第三方"
+          ]
+        },
+        {
+          "key": "not_open_internal",
+          "label": "三、本年度办理结果 /（三）不予公开 /5.属于三类内部事务信息",
+          "match": [
+            "不予公开",
+            "内部事务"
+          ]
+        },
+        {
+          "key": "not_open_process",
+          "label": "三、本年度办理结果 /（三）不予公开 /6.属于四类过程性信息",
+          "match": [
+            "不予公开",
+            "过程性"
+          ]
+        },
+        {
+          "key": "not_open_casefile",
+          "label": "三、本年度办理结果 /（三）不予公开 /7.属于行政执法案卷",
+          "match": [
+            "不予公开",
+            "执法案卷"
+          ]
+        },
+        {
+          "key": "not_open_query",
+          "label": "三、本年度办理结果 /（三）不予公开 /8.属于行政查询事项",
+          "match": [
+            "不予公开",
+            "查询事项"
+          ]
+        },
+        {
+          "key": "cannot_provide_not_held",
+          "label": "三、本年度办理结果 /（四）无法提供 /1.本机关不掌握相关政府信息",
+          "match": [
+            "无法提供",
+            "不掌握"
+          ]
+        },
+        {
+          "key": "cannot_provide_need_make",
+          "label": "三、本年度办理结果 /（四）无法提供 /2.没有现成信息需要另行制作",
+          "match": [
+            "无法提供",
+            "另行制作"
+          ]
+        },
+        {
+          "key": "cannot_provide_unclear",
+          "label": "三、本年度办理结果 /（四）无法提供 /3.补正后申请内容仍不明确",
+          "match": [
+            "无法提供",
+            "补正"
+          ]
+        },
+        {
+          "key": "no_process_petition",
+          "label": "三、本年度办理结果 /（五）不予处理 /1.信访举报投诉类申请",
+          "match": [
+            "不予处理",
+            "信访"
+          ]
+        },
+        {
+          "key": "no_process_repeat",
+          "label": "三、本年度办理结果 /（五）不予处理 /2.重复申请",
+          "match": [
+            "不予处理",
+            "重复"
+          ]
+        },
+        {
+          "key": "no_process_publications",
+          "label": "三、本年度办理结果 /（五）不予处理 /3.要求提供公开出版物",
+          "match": [
+            "不予处理",
+            "出版物"
+          ]
+        },
+        {
+          "key": "no_process_massive",
+          "label": "三、本年度办理结果 /（五）不予处理 /4.无正当理由大量反复申请",
+          "match": [
+            "不予处理",
+            "大量"
+          ]
+        },
+        {
+          "key": "no_process_confirm",
+          "label": "三、本年度办理结果 /（五）不予处理 /5.要求行政机关确认或重新出具已获取信息",
+          "match": [
+            "不予处理",
+            "确认"
+          ]
+        },
+        {
+          "key": "other_fix_timeout",
+          "label": "三、本年度办理结果 /（六）其他处理 /1.申请人无正当理由逾期不补正…",
+          "match": [
+            "其他处理",
+            "逾期",
+            "补正"
+          ]
+        },
+        {
+          "key": "other_fee_unpaid",
+          "label": "三、本年度办理结果 /（六）其他处理 /2.申请人逾期未按收费通知要求缴纳费用…",
+          "match": [
+            "其他处理",
+            "缴纳费用"
+          ]
+        },
+        {
+          "key": "other_other",
+          "label": "三、本年度办理结果 /（六）其他处理 /3.其他",
+          "match": [
+            "其他处理",
+            "其他"
+          ]
+        },
+        {
+          "key": "result_total",
+          "label": "三、本年度办理结果 /（七）总计",
+          "match": [
+            "（七）总计",
+            "总计"
+          ]
+        },
+        {
+          "key": "carry_to_next",
+          "label": "四、结转下年度继续办理",
+          "match": [
+            "结转",
+            "下年度"
+          ]
+        }
+      ],
+      "options": {
+        "headerRowsToSkip": 3
+      }
+    },
+    {
+      "id": "sec4_review_litigation",
+      "section": "四、因政府信息公开工作被申请行政复议、提起行政诉讼情况",
+      "title": "政府信息公开行政复议、行政诉讼情况",
+      "locateKeywords": [
+        "四、因政府信息公开工作被申请行政复议、提起行政诉讼情况",
+        "行政复议",
+        "行政诉讼"
+      ],
+      "labelColumns": 0,
+      "columns": [
+        {
+          "key": "review_keep",
+          "name": "行政复议-结果维持",
+          "type": "number"
+        },
+        {
+          "key": "review_correct",
+          "name": "行政复议-结果纠正",
+          "type": "number"
+        },
+        {
+          "key": "review_other",
+          "name": "行政复议-其他结果",
+          "type": "number"
+        },
+        {
+          "key": "review_pending",
+          "name": "行政复议-尚未审结",
+          "type": "number"
+        },
+        {
+          "key": "review_total",
+          "name": "行政复议-总计",
+          "type": "number"
+        },
+        {
+          "key": "lawsuit_direct_keep",
+          "name": "行政诉讼(未经复议直接起诉)-结果维持",
+          "type": "number"
+        },
+        {
+          "key": "lawsuit_direct_correct",
+          "name": "行政诉讼(未经复议直接起诉)-结果纠正",
+          "type": "number"
+        },
+        {
+          "key": "lawsuit_direct_other",
+          "name": "行政诉讼(未经复议直接起诉)-其他结果",
+          "type": "number"
+        },
+        {
+          "key": "lawsuit_direct_pending",
+          "name": "行政诉讼(未经复议直接起诉)-尚未审结",
+          "type": "number"
+        },
+        {
+          "key": "lawsuit_direct_total",
+          "name": "行政诉讼(未经复议直接起诉)-总计",
+          "type": "number"
+        },
+        {
+          "key": "lawsuit_after_keep",
+          "name": "行政诉讼(复议后起诉)-结果维持",
+          "type": "number"
+        },
+        {
+          "key": "lawsuit_after_correct",
+          "name": "行政诉讼(复议后起诉)-结果纠正",
+          "type": "number"
+        },
+        {
+          "key": "lawsuit_after_other",
+          "name": "行政诉讼(复议后起诉)-其他结果",
+          "type": "number"
+        },
+        {
+          "key": "lawsuit_after_pending",
+          "name": "行政诉讼(复议后起诉)-尚未审结",
+          "type": "number"
+        },
+        {
+          "key": "lawsuit_after_total",
+          "name": "行政诉讼(复议后起诉)-总计",
+          "type": "number"
+        }
+      ],
+      "rows": [
+        {
+          "key": "counts",
+          "label": "数量",
+          "match": [
+            "行政复议",
+            "行政诉讼",
+            "总计"
+          ]
+        }
+      ],
+      "options": {
+        "headerRowsToSkip": 3,
+        "valueRowHeuristic": "maxNumericCount"
+      }
+    }
+  ]
+}
