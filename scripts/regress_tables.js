@@ -1,199 +1,283 @@
 #!/usr/bin/env node
 
 /**
- * 表格解析回归测试脚本
- * 用于验证 Python pdfplumber 表格提取引擎的输出质量
+ * 表格提取回归测试脚本
+ * 用于验证 Python 表格提取引擎的质量
  * 
  * 使用方式：
  *   node scripts/regress_tables.js
+ * 
+ * 输出：
+ *   - 控制台：实时进度
+ *   - test-sample-pdfs-report.json：详细报告
  */
 
-const fs = require('fs');
+const { spawn } = require('child_process');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const fs = require('fs');
 
-// 配置
 const SAMPLE_PDFS_DIR = path.join(__dirname, '../sample_pdfs_v1');
 const SCHEMA_PATH = path.join(__dirname, '../src/schemas/annual_report_table_schema_v2.json');
-const OUTPUT_DIR = path.join(__dirname, '../output');
+const REPORT_PATH = path.join(__dirname, '../test-sample-pdfs-report.json');
 const PY_SCRIPT = path.join(__dirname, '../python/extract_tables_pdfplumber.py');
 
-// 确保输出目录存在
-if (!fs.existsSync(OUTPUT_DIR)) {
-  fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-}
-
 /**
- * 获取样例 PDF 列表
+ * 运行 Python 表格提取
  */
-function getSamplePdfs() {
-  if (!fs.existsSync(SAMPLE_PDFS_DIR)) {
-    console.warn(`⚠ 样例 PDF 目录不存在: ${SAMPLE_PDFS_DIR}`);
-    return [];
-  }
+function runPythonExtraction(pdfPath, timeoutMs = 180000) {
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
 
-  return fs.readdirSync(SAMPLE_PDFS_DIR)
-    .filter(file => file.endsWith('.pdf'))
-    .map(file => path.join(SAMPLE_PDFS_DIR, file));
-}
-
-/**
- * 运行 Python 表格提取脚本
- */
-function extractTables(pdfPath) {
-  try {
-    const output = execFileSync('python3', [
+    const pythonProcess = spawn('python3', [
       PY_SCRIPT,
       pdfPath,
-      '--schema', SCHEMA_PATH,
-      '--out', '-'
-    ], {
-      encoding: 'utf-8',
-      timeout: 180000, // 3 分钟超时
+      '--schema',
+      SCHEMA_PATH,
+      '--out',
+      '-',
+    ]);
+
+    const timeoutHandle = setTimeout(() => {
+      timedOut = true;
+      console.error(`  ⏱️  超时 (${timeoutMs}ms)，正在杀死进程...`);
+      pythonProcess.kill('SIGKILL');
+    }, timeoutMs);
+
+    pythonProcess.stdout?.on('data', (data) => {
+      stdout += data.toString();
     });
 
-    return JSON.parse(output);
-  } catch (error) {
-    console.error(`✗ 提取失败 (${path.basename(pdfPath)}):`, error.message);
-    return null;
-  }
-}
+    pythonProcess.stderr?.on('data', (data) => {
+      stderr += data.toString();
+    });
 
-/**
- * 生成表格摘要
- */
-function generateTableSummary(tableId, tableData) {
-  const metrics = tableData.metrics || {};
-  const completeness = tableData.completeness || 'unknown';
-  const confidence = tableData.confidence || 0;
-  const issues = (tableData.issues || []).slice(0, 3); // 前 3 条问题
+    pythonProcess.on('close', (code) => {
+      clearTimeout(timeoutHandle);
+      const elapsedMs = Date.now() - startTime;
 
-  return {
-    tableId,
-    completeness,
-    confidence: confidence.toFixed(2),
-    nonEmptyCells: metrics.nonEmptyCells || 0,
-    totalCells: metrics.totalCells || 0,
-    nonEmptyRatio: (metrics.nonEmptyRatio || 0).toFixed(4),
-    matchedRows: metrics.matchedRows || 0,
-    expectedRows: metrics.expectedRows || 0,
-    rowMatchRate: (metrics.rowMatchRate || 0).toFixed(4),
-    numericParseRate: (metrics.numericParseRate || 0).toFixed(4),
-    issues: issues.length > 0 ? issues : ['无'],
-  };
-}
+      if (timedOut) {
+        return resolve({
+          success: false,
+          error: `进程超时 (${timeoutMs}ms)`,
+          elapsedMs,
+        });
+      }
 
-/**
- * 打印表格摘要（控制台表格格式）
- */
-function printTableSummary(pdfName, summaries) {
-  console.log(`\n📄 ${pdfName}`);
-  console.log('─'.repeat(120));
+      if (code !== 0) {
+        return resolve({
+          success: false,
+          error: `进程异常退出 (code=${code}): ${stderr}`,
+          elapsedMs,
+        });
+      }
 
-  const headers = [
-    '表格 ID',
-    '完整性',
-    '置信度',
-    '非空单元格',
-    '总单元格',
-    '非空比例',
-    '匹配行',
-    '预期行',
-    '行匹配率',
-    '数值解析率',
-  ];
+      try {
+        const result = JSON.parse(stdout);
+        return resolve({
+          success: true,
+          result,
+          elapsedMs,
+        });
+      } catch (parseError) {
+        return resolve({
+          success: false,
+          error: `JSON 解析失败: ${parseError.message}`,
+          elapsedMs,
+        });
+      }
+    });
 
-  console.log(
-    headers.map(h => h.padEnd(15)).join('│')
-  );
-  console.log('─'.repeat(120));
-
-  summaries.forEach(summary => {
-    const row = [
-      summary.tableId.padEnd(15),
-      summary.completeness.padEnd(15),
-      summary.confidence.padEnd(15),
-      String(summary.nonEmptyCells).padEnd(15),
-      String(summary.totalCells).padEnd(15),
-      summary.nonEmptyRatio.padEnd(15),
-      String(summary.matchedRows).padEnd(15),
-      String(summary.expectedRows).padEnd(15),
-      summary.rowMatchRate.padEnd(15),
-      summary.numericParseRate.padEnd(15),
-    ];
-    console.log(row.join('│'));
-
-    if (summary.issues.length > 0 && summary.issues[0] !== '无') {
-      console.log(`  ⚠ 问题: ${summary.issues.join('; ')}`);
-    }
+    pythonProcess.on('error', (err) => {
+      clearTimeout(timeoutHandle);
+      const elapsedMs = Date.now() - startTime;
+      resolve({
+        success: false,
+        error: `进程启动失败: ${err.message}`,
+        elapsedMs,
+      });
+    });
   });
+}
+
+/**
+ * 分析表格质量
+ */
+function analyzeTableQuality(result) {
+  const tables = result.tables || {};
+  const analysis = {
+    totalTables: Object.keys(tables).length,
+    tables: {},
+    summary: {
+      avgConfidence: 0,
+      avgNonEmptyCellRate: 0,
+      avgRowMatchRate: 0,
+      completeCount: 0,
+      partialCount: 0,
+      failedCount: 0,
+    },
+  };
+
+  let totalConfidence = 0;
+  let totalNonEmptyRate = 0;
+  let totalRowMatchRate = 0;
+
+  for (const [tableId, table] of Object.entries(tables)) {
+    const metrics = table.metrics || {};
+    const completeness = table.completeness || 'unknown';
+
+    analysis.tables[tableId] = {
+      title: table.title || tableId,
+      completeness,
+      metrics: {
+        nonEmptyCells: metrics.nonEmptyCells || 0,
+        totalCells: metrics.totalCells || 0,
+        nonEmptyRatio: (metrics.nonEmptyRatio || 0).toFixed(2),
+        matchedRows: metrics.matchedRows || 0,
+        expectedRows: metrics.expectedRows || 0,
+        rowMatchRate: (metrics.rowMatchRate || 0).toFixed(2),
+        numericParseRate: (metrics.numericParseRate || 0).toFixed(2),
+      },
+      confidence: (table.confidence || 0).toFixed(2),
+      issues: table.issues || [],
+    };
+
+    totalConfidence += table.confidence || 0;
+    totalNonEmptyRate += metrics.nonEmptyRatio || 0;
+    totalRowMatchRate += metrics.rowMatchRate || 0;
+
+    if (completeness === 'complete') {
+      analysis.summary.completeCount++;
+    } else if (completeness === 'partial') {
+      analysis.summary.partialCount++;
+    } else {
+      analysis.summary.failedCount++;
+    }
+  }
+
+  const tableCount = Object.keys(tables).length;
+  if (tableCount > 0) {
+    analysis.summary.avgConfidence = (totalConfidence / tableCount).toFixed(2);
+    analysis.summary.avgNonEmptyCellRate = (totalNonEmptyRate / tableCount).toFixed(2);
+    analysis.summary.avgRowMatchRate = (totalRowMatchRate / tableCount).toFixed(2);
+  }
+
+  return analysis;
 }
 
 /**
  * 主函数
  */
 async function main() {
-  console.log('🔍 表格解析回归测试');
-  console.log('═'.repeat(120));
+  console.log('📊 表格提取回归测试');
+  console.log(`📁 样例目录: ${SAMPLE_PDFS_DIR}`);
+  console.log(`📋 Schema: ${SCHEMA_PATH}`);
+  console.log('');
 
-  const pdfFiles = getSamplePdfs();
+  // 检查目录和文件
+  if (!fs.existsSync(SAMPLE_PDFS_DIR)) {
+    console.error(`❌ 样例目录不存在: ${SAMPLE_PDFS_DIR}`);
+    process.exit(1);
+  }
+
+  if (!fs.existsSync(SCHEMA_PATH)) {
+    console.error(`❌ Schema 文件不存在: ${SCHEMA_PATH}`);
+    process.exit(1);
+  }
+
+  if (!fs.existsSync(PY_SCRIPT)) {
+    console.error(`❌ Python 脚本不存在: ${PY_SCRIPT}`);
+    process.exit(1);
+  }
+
+  // 获取样例 PDF 列表
+  const pdfFiles = fs.readdirSync(SAMPLE_PDFS_DIR)
+    .filter(f => f.endsWith('.pdf'))
+    .map(f => path.join(SAMPLE_PDFS_DIR, f));
+
   if (pdfFiles.length === 0) {
-    console.error('✗ 未找到样例 PDF 文件');
+    console.warn(`⚠️  样例目录中没有 PDF 文件`);
+    console.log(`请将至少 3 份样例 PDF 放入: ${SAMPLE_PDFS_DIR}`);
     process.exit(1);
   }
 
   console.log(`✓ 找到 ${pdfFiles.length} 份样例 PDF\n`);
 
-  const allResults = [];
-  let successCount = 0;
+  // 运行测试
+  const report = {
+    timestamp: new Date().toISOString(),
+    sampleCount: pdfFiles.length,
+    results: [],
+    summary: {
+      totalPdfs: pdfFiles.length,
+      successCount: 0,
+      failureCount: 0,
+      avgElapsedMs: 0,
+    },
+  };
 
-  for (const pdfPath of pdfFiles) {
+  let totalElapsedMs = 0;
+
+  for (let i = 0; i < pdfFiles.length; i++) {
+    const pdfPath = pdfFiles[i];
     const pdfName = path.basename(pdfPath);
-    process.stdout.write(`处理中: ${pdfName}... `);
 
-    const result = extractTables(pdfPath);
-    if (!result) {
-      console.log('✗ 失败');
-      continue;
+    console.log(`[${i + 1}/${pdfFiles.length}] 处理: ${pdfName}`);
+
+    const pyResult = await runPythonExtraction(pdfPath);
+
+    if (pyResult.success) {
+      console.log(`  ✓ 成功 (${pyResult.elapsedMs}ms)`);
+      const analysis = analyzeTableQuality(pyResult.result);
+      console.log(`  📊 ${analysis.totalTables} 张表: ${analysis.summary.completeCount} 完整, ${analysis.summary.partialCount} 部分, ${analysis.summary.failedCount} 失败`);
+      console.log(`  📈 平均置信度: ${analysis.summary.avgConfidence}`);
+
+      report.results.push({
+        pdfName,
+        status: 'success',
+        elapsedMs: pyResult.elapsedMs,
+        analysis,
+      });
+
+      report.summary.successCount++;
+      totalElapsedMs += pyResult.elapsedMs;
+    } else {
+      console.log(`  ❌ 失败: ${pyResult.error}`);
+      report.results.push({
+        pdfName,
+        status: 'failure',
+        error: pyResult.error,
+        elapsedMs: pyResult.elapsedMs,
+      });
+
+      report.summary.failureCount++;
     }
 
-    console.log('✓ 成功');
-    successCount++;
-
-    // 生成摘要
-    const tables = result.tables || {};
-    const summaries = Object.entries(tables).map(([tableId, tableData]) =>
-      generateTableSummary(tableId, tableData)
-    );
-
-    // 打印摘要
-    printTableSummary(pdfName, summaries);
-
-    // 保存完整结果
-    allResults.push({
-      pdfName,
-      timestamp: new Date().toISOString(),
-      result,
-      summaries,
-    });
+    console.log('');
   }
 
-  // 保存汇总报告
-  const summaryPath = path.join(OUTPUT_DIR, 'regress_tables_summary.json');
-  fs.writeFileSync(summaryPath, JSON.stringify({
-    timestamp: new Date().toISOString(),
-    totalPdfs: pdfFiles.length,
-    successCount,
-    failureCount: pdfFiles.length - successCount,
-    results: allResults,
-  }, null, 2));
+  // 计算平均耗时
+  if (report.summary.successCount > 0) {
+    report.summary.avgElapsedMs = Math.round(totalElapsedMs / report.summary.successCount);
+  }
 
-  console.log('\n' + '═'.repeat(120));
-  console.log(`✓ 回归测试完成: ${successCount}/${pdfFiles.length} 成功`);
-  console.log(`✓ 汇总报告已保存: ${summaryPath}`);
+  // 输出报告
+  console.log('📋 测试完成');
+  console.log(`  ✓ 成功: ${report.summary.successCount}/${report.summary.totalPdfs}`);
+  console.log(`  ❌ 失败: ${report.summary.failureCount}/${report.summary.totalPdfs}`);
+  console.log(`  ⏱️  平均耗时: ${report.summary.avgElapsedMs}ms`);
+  console.log(`\n📄 详细报告: ${REPORT_PATH}`);
+
+  // 保存报告
+  fs.writeFileSync(REPORT_PATH, JSON.stringify(report, null, 2), 'utf-8');
+
+  // 如果有失败，退出码为 1
+  process.exit(report.summary.failureCount > 0 ? 1 : 0);
 }
 
-main().catch(error => {
-  console.error('✗ 回归测试失败:', error);
+main().catch((error) => {
+  console.error('❌ 脚本异常:', error);
   process.exit(1);
 });

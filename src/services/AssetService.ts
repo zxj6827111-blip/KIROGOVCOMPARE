@@ -257,25 +257,14 @@ export class AssetService {
         return null;
       }
 
-      // 返回资产的基本信息和元数据
-      // 注意：这里只返回元数据，实际的解析内容应该从 structuredDataPath 读取
-      return {
-        assetId: asset.assetId,
-        fileName: asset.fileName,
-        fileHash: asset.fileHash,
-        fileSize: asset.fileSize,
-        year: asset.year,
-        region: asset.region,
-        department: asset.department,
-        reportType: asset.reportType,
-        tags: asset.tags,
-        status: asset.status,
-        revision: asset.revision,
-        uploadedAt: asset.uploadedAt,
-        updatedAt: asset.updatedAt,
-        parseVersion: asset.parseVersion,
-        structuredDataPath: asset.structuredDataPath,
-      };
+      // 直接返回结构化解析数据（内部调用 getAssetParseData）
+      const parseData = await ParsedDataStorageService.loadParseData(assetId);
+      
+      if (!parseData) {
+        return null;
+      }
+
+      return parseData;
     } catch (error) {
       console.error('获取资产内容失败:', error);
       return null;

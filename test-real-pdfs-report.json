@@ -1,0 +1,128 @@
+{
+  "timestamp": "2025-12-15T06:02:39.286Z",
+  "totalPdfs": 10,
+  "successCount": 10,
+  "failureCount": 0,
+  "results": [
+    {
+      "pdfName": "haq2023.pdf",
+      "pdfPath": "/Users/zhang/Documents/软件开发/年报比对软件/KIROGOVCOMPARE/fixtures/sample_pdfs_v1/haq2023.pdf",
+      "fileSize": 310013,
+      "success": true,
+      "elapsedMs": 1001,
+      "tableCount": 6,
+      "nonEmptyCells": 0,
+      "confidence": 0,
+      "completeness": "failed",
+      "issues": []
+    },
+    {
+      "pdfName": "haq2024.pdf",
+      "pdfPath": "/Users/zhang/Documents/软件开发/年报比对软件/KIROGOVCOMPARE/fixtures/sample_pdfs_v1/haq2024.pdf",
+      "fileSize": 338289,
+      "success": true,
+      "elapsedMs": 727,
+      "tableCount": 6,
+      "nonEmptyCells": 0,
+      "confidence": 0,
+      "completeness": "failed",
+      "issues": []
+    },
+    {
+      "pdfName": "hyq2023.pdf",
+      "pdfPath": "/Users/zhang/Documents/软件开发/年报比对软件/KIROGOVCOMPARE/fixtures/sample_pdfs_v1/hyq2023.pdf",
+      "fileSize": 347173,
+      "success": true,
+      "elapsedMs": 876,
+      "tableCount": 6,
+      "nonEmptyCells": 0,
+      "confidence": 0,
+      "completeness": "failed",
+      "issues": []
+    },
+    {
+      "pdfName": "hyq2024.pdf",
+      "pdfPath": "/Users/zhang/Documents/软件开发/年报比对软件/KIROGOVCOMPARE/fixtures/sample_pdfs_v1/hyq2024.pdf",
+      "fileSize": 312920,
+      "success": true,
+      "elapsedMs": 469,
+      "tableCount": 6,
+      "nonEmptyCells": 0,
+      "confidence": 0,
+      "completeness": "failed",
+      "issues": []
+    },
+    {
+      "pdfName": "hzq2023.pdf",
+      "pdfPath": "/Users/zhang/Documents/软件开发/年报比对软件/KIROGOVCOMPARE/fixtures/sample_pdfs_v1/hzq2023.pdf",
+      "fileSize": 293525,
+      "success": true,
+      "elapsedMs": 698,
+      "tableCount": 6,
+      "nonEmptyCells": 29,
+      "confidence": 0.63,
+      "completeness": "complete",
+      "issues": []
+    },
+    {
+      "pdfName": "hzq2024.pdf",
+      "pdfPath": "/Users/zhang/Documents/软件开发/年报比对软件/KIROGOVCOMPARE/fixtures/sample_pdfs_v1/hzq2024.pdf",
+      "fileSize": 240143,
+      "success": true,
+      "elapsedMs": 568,
+      "tableCount": 6,
+      "nonEmptyCells": 29,
+      "confidence": 0.63,
+      "completeness": "complete",
+      "issues": []
+    },
+    {
+      "pdfName": "jhx2023.pdf",
+      "pdfPath": "/Users/zhang/Documents/软件开发/年报比对软件/KIROGOVCOMPARE/fixtures/sample_pdfs_v1/jhx2023.pdf",
+      "fileSize": 251566,
+      "success": true,
+      "elapsedMs": 502,
+      "tableCount": 6,
+      "nonEmptyCells": 0,
+      "confidence": 0,
+      "completeness": "failed",
+      "issues": []
+    },
+    {
+      "pdfName": "jhx2024.pdf",
+      "pdfPath": "/Users/zhang/Documents/软件开发/年报比对软件/KIROGOVCOMPARE/fixtures/sample_pdfs_v1/jhx2024.pdf",
+      "fileSize": 260738,
+      "success": true,
+      "elapsedMs": 472,
+      "tableCount": 6,
+      "nonEmptyCells": 0,
+      "confidence": 0,
+      "completeness": "failed",
+      "issues": []
+    },
+    {
+      "pdfName": "上海市黄浦区人民政府2022年政府信息公开工作年度报告（超链版）.pdf",
+      "pdfPath": "/Users/zhang/Documents/软件开发/年报比对软件/KIROGOVCOMPARE/fixtures/sample_pdfs_v1/上海市黄浦区人民政府2022年政府信息公开工作年度报告（超链版）.pdf",
+      "fileSize": 273807,
+      "success": true,
+      "elapsedMs": 562,
+      "tableCount": 6,
+      "nonEmptyCells": 0,
+      "confidence": 0,
+      "completeness": "failed",
+      "issues": []
+    },
+    {
+      "pdfName": "上海市黄浦区人民政府2023年政府信息公开工作年度报告.pdf",
+      "pdfPath": "/Users/zhang/Documents/软件开发/年报比对软件/KIROGOVCOMPARE/fixtures/sample_pdfs_v1/上海市黄浦区人民政府2023年政府信息公开工作年度报告.pdf",
+      "fileSize": 270124,
+      "success": true,
+      "elapsedMs": 475,
+      "tableCount": 6,
+      "nonEmptyCells": 0,
+      "confidence": 0,
+      "completeness": "failed",
+      "issues": []
+    }
+  ]
+}

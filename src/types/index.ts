@@ -6,6 +6,7 @@ export type ProcessStage =
   | 'ingesting'
   | 'downloading'
   | 'parsing'
+  | 'table_extraction'
   | 'structuring'
   | 'diffing'
   | 'summarizing'

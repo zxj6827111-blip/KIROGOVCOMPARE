@@ -7,7 +7,31 @@ import DocxExportService from '../services/DocxExportService';
 import ExportJobService from '../services/ExportJobService';
 import PdfParseService from '../services/PdfParseService';
 import StructuringService from '../services/StructuringService';
+import PythonTableExtractionService from '../services/PythonTableExtractionService';
 import pool from '../config/database';
+import * as path from 'path';
+
+/**
+ * 合并 Python 提取的表格到文档
+ */
+const mergeTablesIntoDocument = (document: any, pythonTables: any[]): void => {
+  if (!document.sections || !Array.isArray(document.sections)) {
+    return;
+  }
+
+  for (const table of pythonTables) {
+    if (!table.section) continue;
+
+    // 根据 section 找到对应的章节
+    const section = document.sections.find((s: any) => s.title?.includes(table.section));
+    if (section) {
+      if (!section.tables) {
+        section.tables = [];
+      }
+      section.tables.push(table);
+    }
+  }
+};
 
 /**
  * 比对任务处理器
@@ -62,9 +86,64 @@ export async function setupCompareTaskProcessor(): Promise<void> {
 
       await TaskService.updateTaskProgress(taskId, 25);
 
-      // 阶段2: 结构化
+      // 阶段2: Python 表格提取（接入主链路）
+      await TaskService.updateTaskStage(taskId, 'table_extraction');
+      await TaskService.updateTaskProgress(taskId, 30);
+
+      const schemaPath = path.join(__dirname, '../schemas/annual_report_table_schema_v2.json');
+      const pyTimeoutMs = parseInt(process.env.PY_TABLE_TIMEOUT_MS || '180000', 10);
+
+      console.log(`[Worker] 启动 Python 表格提取 (A)`);
+      const pyResultA = await PythonTableExtractionService.extractTablesFromPdf(
+        assetA.storagePath,
+        schemaPath,
+        pyTimeoutMs
+      );
+
+      if (pyResultA.success && pyResultA.tables) {
+        console.log(`[Worker] Python 表格提取成功 (A): ${pyResultA.tables.length} 张表`);
+        if (pyResultA.metrics) {
+          console.log(`  耗时: ${pyResultA.metrics.elapsedMs}ms, 置信度: ${pyResultA.metrics.confidence}`);
+        }
+        // 合并 Python 提取的表格到 docA
+        if (docA.sections) {
+          mergeTablesIntoDocument(docA, pyResultA.tables);
+        }
+      } else {
+        console.warn(`[Worker] Python 表格提取失败 (A): ${pyResultA.error}`);
+        if (pyResultA.warnings) {
+          resultA.warnings.push(...pyResultA.warnings);
+        }
+      }
+
+      console.log(`[Worker] 启动 Python 表格提取 (B)`);
+      const pyResultB = await PythonTableExtractionService.extractTablesFromPdf(
+        assetB.storagePath,
+        schemaPath,
+        pyTimeoutMs
+      );
+
+      if (pyResultB.success && pyResultB.tables) {
+        console.log(`[Worker] Python 表格提取成功 (B): ${pyResultB.tables.length} 张表`);
+        if (pyResultB.metrics) {
+          console.log(`  耗时: ${pyResultB.metrics.elapsedMs}ms, 置信度: ${pyResultB.metrics.confidence}`);
+        }
+        // 合并 Python 提取的表格到 docB
+        if (docB.sections) {
+          mergeTablesIntoDocument(docB, pyResultB.tables);
+        }
+      } else {
+        console.warn(`[Worker] Python 表格提取失败 (B): ${pyResultB.error}`);
+        if (pyResultB.warnings) {
+          resultB.warnings.push(...pyResultB.warnings);
+        }
+      }
+
+      await TaskService.updateTaskProgress(taskId, 40);
+
+      // 阶段3: 结构化
       await TaskService.updateTaskStage(taskId, 'structuring');
-      await TaskService.updateTaskProgress(taskId, 35);
+      await TaskService.updateTaskProgress(taskId, 45);
 
       const structuredResultA = await StructuringService.structureDocument(resultA);
       const structuredResultB = await StructuringService.structureDocument(resultB);
@@ -76,7 +155,7 @@ export async function setupCompareTaskProcessor(): Promise<void> {
       const structuredDocA = structuredResultA.document;
       const structuredDocB = structuredResultB.document;
 
-      await TaskService.updateTaskProgress(taskId, 45);
+      await TaskService.updateTaskProgress(taskId, 50);
 
       // 阶段3: 比对
       await TaskService.updateTaskStage(taskId, 'diffing');

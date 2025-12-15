@@ -247,6 +247,19 @@ export interface Table {
   columns: number;
   pageNumber?: number;
   position?: TablePosition;
+  metrics?: {
+    nonEmptyCells: number;
+    totalCells: number;
+    nonEmptyCellRate: string;
+    matchedRows: number;
+    expectedRows: number;
+    rowMatchRate: string;
+    numericParseRate: string;
+    confidence: string;
+    complete: boolean;
+    issues: string[];
+  };
+  complete?: boolean;
 }
 
 export interface TableRow {

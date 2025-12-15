@@ -13,6 +13,7 @@ import argparse
 import pdfplumber
 from typing import Dict, List, Any, Optional, Tuple
 import re
+import time
 
 # 表格 ID 映射
 TABLE_IDS = {
@@ -27,14 +28,25 @@ class TableExtractor:
 
     def __init__(self, schema: Dict[str, Any]):
         self.schema = schema
-        self.tables_schema = schema.get('tables', {})
+        # 支持 tables 为 list 或 dict
+        tables_raw = schema.get('tables', [])
+        if isinstance(tables_raw, list):
+            # 转换 list 为 dict（key 为 table id）
+            self.tables_schema = {}
+            for table_def in tables_raw:
+                table_id = table_def.get('id', f'table_{len(self.tables_schema)}')
+                self.tables_schema[table_id] = table_def
+        else:
+            self.tables_schema = tables_raw
 
     def extract_tables(self, pdf_path: str) -> Dict[str, Any]:
         """从 PDF 中提取所有表格"""
+        start_time = time.time()
         result = {
             'schema_version': 'annual_report_table_schema_v2',
-            'tables': {},
+            'tables': [],
             'issues': [],
+            'confidence': 0.5,
             'runtime': {
                 'engine': 'pdfplumber',
                 'elapsed_ms': 0,
@@ -49,21 +61,26 @@ class TableExtractor:
                         continue
 
                     extracted = self._extract_single_table(pdf, table_id, table_def)
-                    result['tables'][table_id] = extracted
+                    result['tables'].append(extracted)
 
         except Exception as e:
             result['issues'].append(f'PDF 打开失败: {str(e)}')
             return result
+
+        # 计算耗时
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        result['runtime']['elapsed_ms'] = elapsed_ms
 
         return result
 
     def _extract_single_table(self, pdf: Any, table_id: str, table_def: Dict[str, Any]) -> Dict[str, Any]:
         """提取单个表格"""
         table_result = {
-            'table_id': table_id,
-            'rows': table_def.get('rows', []),
+            'id': table_id,
+            'title': table_def.get('title', ''),
+            'section': table_def.get('section', ''),
+            'rows': [],
             'columns': table_def.get('columns', []),
-            'cells': {},
             'metrics': {
                 'totalCells': 0,
                 'nonEmptyCells': 0,

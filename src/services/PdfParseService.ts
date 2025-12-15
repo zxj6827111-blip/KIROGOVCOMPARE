@@ -981,7 +981,7 @@ export class PdfParseService {
   /**
    * 填充固定行列骨架（v2 schema）
    * 确保精确的行列结构（如28行10列）
-   * 如果没有提取到数据，使用示例数据
+   * 禁止示例数据兜底：空表只返回空 cells + issues
    */
   private fillFixedTableRowsV2(
     extractedData: any[],
@@ -994,7 +994,7 @@ export class PdfParseService {
 
     console.log(`[PdfParseService.fillFixedTableRowsV2] 表格 ${tableSchema.title}: 提取数据行数=${extractedData.length}`);
 
-    // 如果没有提取到数据或数据为空，使用示例数据
+    // 检查是否有有效数据
     const hasValidData = extractedData.length > 0 && 
                          extractedData.some((row: any) => 
                            Object.keys(row).some(key => 
@@ -1004,16 +1004,17 @@ export class PdfParseService {
     
     console.log(`[PdfParseService.fillFixedTableRowsV2] hasValidData=${hasValidData}`);
     
+    // 禁止示例数据兜底：如果没有有效数据，记录 warning 但不填充虚假数据
     if (!hasValidData) {
-      console.log(`[PdfParseService] 表格 ${tableSchema.title} 数据为空或无效，生成示例数据`);
-      extractedData = this.generateSampleTableData(tableSchema);
-      console.log(`[PdfParseService] 生成了 ${extractedData.length} 行示例数据`);
+      console.log(`[PdfParseService] 表格 ${tableSchema.title} 数据为空，返回空骨架`);
       warnings.push({
         code: 'TABLE_DATA_EMPTY',
-        message: `表格 ${tableSchema.title} 数据为空，使用示例数据`,
+        message: `表格 ${tableSchema.title} 数据为空或无法提取`,
         stage: 'parsing',
         tableId: tableSchema.id,
       });
+      // 返回空骨架，不填充示例数据
+      extractedData = [];
     }
 
     for (let rowIdx = 0; rowIdx < expectedRowCount; rowIdx++) {
@@ -1145,6 +1146,109 @@ export class PdfParseService {
 
 
   /**
+   * 计算表格质量指标
+   */
+  private calculateTableMetrics(canonicalTable: any): any {
+    const rows = canonicalTable.rows || [];
+    const expectedRows = canonicalTable.expectedRows || rows.length;
+    const expectedCols = canonicalTable.columns || 0;
+
+    // 计算非空单元格数
+    let nonEmptyCells = 0;
+    let totalCells = 0;
+    let numericParseRate = 0;
+    let numericCells = 0;
+    let numericParsed = 0;
+
+    for (const row of rows) {
+      const cells = row.cells || [];
+      for (const cell of cells) {
+        totalCells++;
+        const value = cell.value;
+        
+        // 非空单元格计数
+        if (value !== '' && value !== null && value !== undefined && value !== 0) {
+          nonEmptyCells++;
+        }
+
+        // 数字字段解析率
+        if (cell.colType === 'number') {
+          numericCells++;
+          if (typeof value === 'number' && !isNaN(value) && value !== 0) {
+            numericParsed++;
+          }
+        }
+      }
+    }
+
+    if (numericCells > 0) {
+      numericParseRate = numericParsed / numericCells;
+    }
+
+    // 行匹配率
+    const matchedRows = rows.length;
+    const rowMatchRate = expectedRows > 0 ? matchedRows / expectedRows : 0;
+
+    // 综合置信度（0-1）
+    const nonEmptyCellRate = totalCells > 0 ? nonEmptyCells / totalCells : 0;
+    const confidence = (rowMatchRate * 0.4 + nonEmptyCellRate * 0.3 + numericParseRate * 0.3);
+
+    // complete 判定：必须满足所有核心指标
+    const isComplete = 
+      rowMatchRate === 1.0 &&  // 行数必须完全匹配
+      nonEmptyCellRate > 0.5 &&  // 非空单元格率 > 50%
+      numericParseRate > 0.7 &&  // 数字解析率 > 70%
+      confidence > 0.7;  // 综合置信度 > 70%
+
+    return {
+      nonEmptyCells,
+      totalCells,
+      nonEmptyCellRate: (nonEmptyCells / totalCells).toFixed(2),
+      matchedRows,
+      expectedRows,
+      rowMatchRate: rowMatchRate.toFixed(2),
+      numericParseRate: numericParseRate.toFixed(2),
+      confidence: confidence.toFixed(2),
+      complete: isComplete,
+      issues: this.generateTableIssues(canonicalTable, {
+        rowMatchRate,
+        nonEmptyCellRate,
+        numericParseRate,
+        confidence,
+      }),
+    };
+  }
+
+  /**
+   * 生成表格问题列表
+   */
+  private generateTableIssues(canonicalTable: any, metrics: any): string[] {
+    const issues: string[] = [];
+
+    if (metrics.rowMatchRate < 1.0) {
+      issues.push(`行数不匹配：期望 ${canonicalTable.expectedRows} 行，实际 ${canonicalTable.rows.length} 行`);
+    }
+
+    if (metrics.nonEmptyCellRate < 0.5) {
+      issues.push(`非空单元格率过低：${(metrics.nonEmptyCellRate * 100).toFixed(1)}%`);
+    }
+
+    if (metrics.numericParseRate < 0.7) {
+      issues.push(`数字解析率过低：${(metrics.numericParseRate * 100).toFixed(1)}%`);
+    }
+
+    if (metrics.confidence < 0.7) {
+      issues.push(`综合置信度过低：${(metrics.confidence * 100).toFixed(1)}%`);
+    }
+
+    if (issues.length === 0) {
+      issues.push('表格质量良好');
+    }
+
+    return issues;
+  }
+
+  /**
    * 将规范表格转换为 Table 模型
    */
   private canonicalTableToTable(canonicalTable: any): Table {
@@ -1159,11 +1263,16 @@ export class PdfParseService {
       })),
     }));
 
+    // 计算表格质量指标
+    const metrics = this.calculateTableMetrics(canonicalTable);
+
     return {
       id: canonicalTable.id,
       title: canonicalTable.title,
       rows,
       columns: canonicalTable.columns,
+      metrics,
+      complete: metrics.complete,
     };
   }
 }
