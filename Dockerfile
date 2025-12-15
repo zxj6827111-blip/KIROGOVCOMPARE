@@ -33,9 +33,10 @@ FROM node:18-bullseye-slim
 
 WORKDIR /app
 
-# 安装 Python 运行时
+# 安装 Python 运行时和 pip
 RUN apt-get update && apt-get install -y \
     python3 \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制 package 文件
@@ -47,9 +48,14 @@ RUN npm ci --only=production
 # 从 builder 阶段复制构建产物
 COPY --from=builder /app/dist ./dist
 
-# 复制 Python 脚本和依赖
-COPY --from=builder /app/python ./python
-COPY --from=builder /usr/local/lib/python3.*/dist-packages /usr/local/lib/python3.11/dist-packages
+# 复制 Python 脚本
+COPY python ./python
+
+# 在 runtime 阶段直接安装 Python 依赖（禁止跨镜像复制固定路径）
+RUN pip3 install --no-cache-dir -r python/requirements.txt
+
+# 验证 Python 依赖安装成功
+RUN python3 -c "import pdfplumber; print('✓ pdfplumber 已安装')"
 
 # 复制 schema 文件
 COPY src/schemas ./src/schemas

@@ -139,6 +139,25 @@ export async function setupCompareTaskProcessor(): Promise<void> {
         }
       }
 
+      // P0-2 修复：合并 Python 表格后必须落盘，保证 /content 接口拿到最新数据
+      console.log(`[Worker] 保存合并后的解析数据 (A)`);
+      try {
+        const ParsedDataStorageService = (await import('../services/ParsedDataStorageService')).default;
+        await ParsedDataStorageService.saveParseData(task.assetId_A, docA);
+        console.log(`✓ 解析数据已保存 (A)`);
+      } catch (error) {
+        console.warn(`⚠️ 保存解析数据失败 (A):`, error);
+      }
+
+      console.log(`[Worker] 保存合并后的解析数据 (B)`);
+      try {
+        const ParsedDataStorageService = (await import('../services/ParsedDataStorageService')).default;
+        await ParsedDataStorageService.saveParseData(task.assetId_B, docB);
+        console.log(`✓ 解析数据已保存 (B)`);
+      } catch (error) {
+        console.warn(`⚠️ 保存解析数据失败 (B):`, error);
+      }
+
       await TaskService.updateTaskProgress(taskId, 40);
 
       // 阶段3: 结构化

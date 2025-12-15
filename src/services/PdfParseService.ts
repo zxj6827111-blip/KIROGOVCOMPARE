@@ -54,8 +54,11 @@ export class PdfParseService {
       const fullText = pages.map(p => p.fullText).join('\n');
       const sections = this.extractSectionsByChapter(fullText, pages, warnings);
 
-      // 提取 v2 schema 的固定表格
-      const canonicalTables = await this.extractCanonicalTablesV2(pages, warnings);
+      // 提取 v2 schema 的固定表格（仅 debug 模式，默认关闭）
+      const enableTsTableFallback = process.env.ENABLE_TS_TABLE_FALLBACK === '1';
+      const canonicalTables = enableTsTableFallback 
+        ? await this.extractCanonicalTablesV2(pages, warnings)
+        : [];
 
       // 将表格关联到对应的章节
       this.attachTablesToSections(sections, canonicalTables);
@@ -507,6 +510,7 @@ export class PdfParseService {
 
   /**
    * 创建空的固定行列骨架（v2 schema）
+   * 禁止"骨架完整即 complete"：空表必须标记为 degraded=true, complete=false
    */
   private createEmptyTableBySchemaV2(tableSchema: any): any {
     const rows: any[] = [];
@@ -520,6 +524,7 @@ export class PdfParseService {
         rows: [],
         columns: 0,
         degraded: true,
+        complete: false,
       };
     }
 
@@ -532,6 +537,7 @@ export class PdfParseService {
         rows: [],
         columns: tableSchema.columns ? tableSchema.columns.length : 0,
         degraded: true,
+        complete: false,
       };
     }
 
@@ -544,6 +550,7 @@ export class PdfParseService {
         rows: [],
         columns: 0,
         degraded: true,
+        complete: false,
       };
     }
 
@@ -577,6 +584,7 @@ export class PdfParseService {
       rows,
       columns: tableSchema.columns.length,
       degraded: true,
+      complete: false,  // 禁止"骨架完整即 complete"
     };
   }
 
@@ -982,6 +990,7 @@ export class PdfParseService {
    * 填充固定行列骨架（v2 schema）
    * 确保精确的行列结构（如28行10列）
    * 禁止示例数据兜底：空表只返回空 cells + issues
+   * 禁止"骨架完整即 complete"：必须有实际数据才能标记为 complete
    */
   private fillFixedTableRowsV2(
     extractedData: any[],
@@ -1006,7 +1015,7 @@ export class PdfParseService {
     
     // 禁止示例数据兜底：如果没有有效数据，记录 warning 但不填充虚假数据
     if (!hasValidData) {
-      console.log(`[PdfParseService] 表格 ${tableSchema.title} 数据为空，返回空骨架`);
+      console.log(`[PdfParseService] 表格 ${tableSchema.title} 数据为空，返回空骨架（不填充示例数据）`);
       warnings.push({
         code: 'TABLE_DATA_EMPTY',
         message: `表格 ${tableSchema.title} 数据为空或无法提取`,
