@@ -40,7 +40,13 @@ class TableExtractorV3:
         按 schema locateKeywords 在全 PDF pages 里找最匹配页
         返回页码（0-based），如果找不到返回 None
         """
-        locate_keywords = self.schema.get('locateKeywords', [])
+        # 从第一个表的 locateKeywords 获取关键词
+        tables_def = self.schema.get('tables', [])
+        if not tables_def:
+            self.results['issues'].append('no_tables_defined')
+            return None
+        
+        locate_keywords = tables_def[0].get('locateKeywords', [])
         if not locate_keywords:
             self.results['issues'].append('no_locate_keywords')
             return None
@@ -229,11 +235,16 @@ class TableExtractorV3:
         """
         提取单个表格
         """
-        schema_rows = self.schema.get('rows', [])
-        schema_cols = self.schema.get('columns', [])
+        schema_rows = table_def.get('rows', [])
+        schema_cols = table_def.get('columns', [])
 
-        # 定位区域
+        # 定位区域：优先使用 locateKeyword，其次使用 locateKeywords 中的第一个
         locate_keyword = table_def.get('locateKeyword', '')
+        if not locate_keyword:
+            locate_keywords = table_def.get('locateKeywords', [])
+            if locate_keywords:
+                locate_keyword = locate_keywords[0]
+        
         if not locate_keyword:
             return None
 

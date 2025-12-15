@@ -1,0 +1,66 @@
+{
+  "timestamp": "2025-12-15T07:57:05.845Z",
+  "totalPdfs": 5,
+  "passedPdfs": 5,
+  "failedPdfs": 0,
+  "pdfs": [
+    {
+      "pdfName": "hzq2023_working.pdf",
+      "pdfPath": "/Users/zhang/Documents/软件开发/年报比对软件/KIROGOVCOMPARE/sample_pdfs_v1/hzq2023_working.pdf",
+      "success": true,
+      "tableCount": 0,
+      "tables": [],
+      "passedTables": 0,
+      "failedTables": 0
+    },
+    {
+      "pdfName": "hzq2024_working.pdf",
+      "pdfPath": "/Users/zhang/Documents/软件开发/年报比对软件/KIROGOVCOMPARE/sample_pdfs_v1/hzq2024_working.pdf",
+      "success": true,
+      "tableCount": 0,
+      "tables": [],
+      "passedTables": 0,
+      "failedTables": 0
+    },
+    {
+      "pdfName": "sample_report_2023_beijing.pdf",
+      "pdfPath": "/Users/zhang/Documents/软件开发/年报比对软件/KIROGOVCOMPARE/sample_pdfs_v1/sample_report_2023_beijing.pdf",
+      "success": true,
+      "tableCount": 0,
+      "tables": [],
+      "passedTables": 0,
+      "failedTables": 0
+    },
+    {
+      "pdfName": "sample_report_2023_guangzhou.pdf",
+      "pdfPath": "/Users/zhang/Documents/软件开发/年报比对软件/KIROGOVCOMPARE/sample_pdfs_v1/sample_report_2023_guangzhou.pdf",
+      "success": true,
+      "tableCount": 0,
+      "tables": [],
+      "passedTables": 0,
+      "failedTables": 0
+    },
+    {
+      "pdfName": "sample_report_2023_shanghai.pdf",
+      "pdfPath": "/Users/zhang/Documents/软件开发/年报比对软件/KIROGOVCOMPARE/sample_pdfs_v1/sample_report_2023_shanghai.pdf",
+      "success": true,
+      "tableCount": 0,
+      "tables": [],
+      "passedTables": 0,
+      "failedTables": 0
+    }
+  ],
+  "summary": {
+    "totalTables": 0,
+    "passedTables": 0,
+    "failedTables": 0,
+    "avgConfidence": 0,
+    "avgMatchedRows": 0,
+    "avgNumericParseRate": 0
+  },
+  "thresholds": {
+    "matchedRows": 0.9,
+    "numericParseRate": 0.95,
+    "confidence": 0.75
+  }
+}
