@@ -9,6 +9,7 @@ import assetsRouter from './routes/assets';
 import suggestionsRouter from './routes/suggestions';
 import batchJobsRouter from './routes/batch-jobs';
 import adminRouter from './routes/admin';
+import reportsRouter from './routes/reports';
 
 dotenv.config();
 
@@ -24,6 +25,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // 健康检查
 app.use('/api', healthRouter);
+app.use('/api', reportsRouter);
 
 // 根路由
 app.get('/', (_req, res) => {
