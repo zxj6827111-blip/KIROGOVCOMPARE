@@ -10,11 +10,8 @@ BASE_URL=${BASE_URL:-http://localhost:3000/api}
 SQLITE_DB_PATH=${SQLITE_DB_PATH:-data/llm_dev.db}
 PDF_PATH=${PDF_PATH:-resources/sample-upload.pdf}
 
-if command -v python3 >/dev/null 2>&1; then
-  PYTHON_BIN=python3
-elif command -v python >/dev/null 2>&1; then
-  PYTHON_BIN=python
-else
+PYTHON_BIN=${PYTHON_BIN:-$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)}
+if [ -z "${PYTHON_BIN}" ]; then
   echo "python3 或 python 未安装" >&2
   exit 1
 fi
