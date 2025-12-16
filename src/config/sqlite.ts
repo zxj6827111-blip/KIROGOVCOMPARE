@@ -15,7 +15,7 @@ function ensureDataDir(): void {
 
 function runSqlStatements(sql: string): any[] {
   ensureDataDir();
-  const output = execFileSync('sqlite3', ['-json', SQLITE_DB_PATH, sql], { encoding: 'utf-8' }).trim();
+  const output = execFileSync('sqlite3', ['-json', SQLITE_DB_PATH], { encoding: 'utf-8', input: sql }).trim();
   if (!output) {
     return [];
   }

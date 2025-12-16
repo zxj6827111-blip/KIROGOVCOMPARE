@@ -62,30 +62,32 @@ export class LlmJobRunner {
   private claimNextJob(): QueuedJob | null {
     ensureSqliteMigrations();
 
-    const rows = querySqlite(`
-      WITH next_job AS (
-        SELECT id
-        FROM jobs
-        WHERE status = 'queued'
-        ORDER BY created_at ASC
-        LIMIT 1
-      ),
-      updated AS (
-        UPDATE jobs
-        SET status = 'running', started_at = datetime('now')
-        WHERE id IN (SELECT id FROM next_job)
-        RETURNING *
+    const updatedJobs = querySqlite(`
+      UPDATE jobs
+      SET status = 'running', started_at = datetime('now')
+      WHERE id = (
+        SELECT id FROM jobs WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1
       )
-      SELECT updated.id, updated.report_id, updated.version_id, rv.storage_path, rv.file_hash
-      FROM updated
-      LEFT JOIN report_versions rv ON rv.id = updated.version_id;
+      RETURNING id, report_id, version_id;
     `);
 
-    if (!rows.length) {
+    if (!updatedJobs.length) {
       return null;
     }
 
-    return rows[0] as QueuedJob;
+    const jobRow = updatedJobs[0] as { id: number; report_id: number; version_id: number };
+
+    const versionRow = querySqlite(
+      `SELECT storage_path, file_hash FROM report_versions WHERE id = ${sqlValue(jobRow.version_id)} LIMIT 1;`
+    )[0];
+
+    return {
+      id: jobRow.id,
+      report_id: jobRow.report_id,
+      version_id: jobRow.version_id,
+      storage_path: versionRow?.storage_path,
+      file_hash: versionRow?.file_hash,
+    } as QueuedJob;
   }
 
   private async processJob(job: QueuedJob): Promise<void> {
@@ -118,7 +120,7 @@ export class LlmJobRunner {
     } catch (error: any) {
       const message = typeof error?.message === 'string' ? error.message : 'unknown_error';
       querySqlite(
-        `UPDATE jobs SET status = 'failed', error_message = ${sqlValue(message)}, finished_at = datetime('now') WHERE id = ${sqlValue(job.id)};`
+        `UPDATE jobs SET status = 'failed', error_code = 'STUB_PARSE_FAILED', error_message = ${sqlValue(message)}, finished_at = datetime('now') WHERE id = ${sqlValue(job.id)};`
       );
       console.error(`LLM job ${job.id} failed:`, error);
     }

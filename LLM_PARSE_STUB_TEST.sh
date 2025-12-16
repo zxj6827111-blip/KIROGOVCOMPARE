@@ -24,6 +24,7 @@ sqlite3 "$DB_PATH" "PRAGMA foreign_keys = ON; INSERT OR IGNORE INTO regions(id, 
 
 echo "Uploading sample PDF..."
 UPLOAD_RESPONSE=$(curl -s -f -F "region_id=1" -F "year=2024" -F "file=@${PDF_PATH}" "$UPLOAD_URL")
+export UPLOAD_RESPONSE
 
 JOB_ID=$(python - <<'PY'
 import json, os, sys
@@ -54,6 +55,7 @@ echo "Created job $JOB_ID for version $VERSION_ID. Waiting for completion..."
 STATUS="queued"
 for attempt in $(seq 1 30); do
   JOB_RESPONSE=$(curl -s -f "$JOB_URL_BASE/$JOB_ID")
+  export JOB_RESPONSE
   STATUS=$(python - <<'PY'
 import json, os
 resp = json.loads(os.environ.get('JOB_RESPONSE', '{}'))
