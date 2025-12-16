@@ -5,6 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "ts-node src/index.ts",
+    "dev:llm": "DATABASE_TYPE=sqlite ts-node src/index-llm.ts",
     "build": "tsc && cp -r src/public dist/",
     "start": "node dist/index.js",
     "test": "jest",
@@ -37,6 +38,7 @@
     "pdfjs-dist": "^3.11.174",
     "pg": "^8.11.3",
     "redis": "^4.6.12",
+    "sqlite3": "^5.1.6",
     "uuid": "^9.0.1"
   },
   "devDependencies": {
