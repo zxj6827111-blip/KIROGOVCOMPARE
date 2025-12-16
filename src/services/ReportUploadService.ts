@@ -24,9 +24,9 @@ export interface ReportUploadResult {
 
 const storageDir = path.join(process.cwd(), 'data', 'uploads');
 
-function ensureStorageDir(): void {
-  if (!fs.existsSync(storageDir)) {
-    fs.mkdirSync(storageDir, { recursive: true });
+function ensureStorageDir(dir: string = storageDir): void {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
   }
 }
 
@@ -52,11 +52,16 @@ export class ReportUploadService {
       `SELECT * FROM report_versions WHERE report_id = ${sqlValue(report.id)} AND file_hash = ${sqlValue(fileHash)} LIMIT 1;`
     )[0];
 
-    const storageRelative = path.join('data', 'uploads', `${fileHash}.pdf`);
+    const storageRelativeDir = path.join('data', 'uploads', `${payload.regionId}`, `${payload.year}`);
+    const storageRelative = path.join(storageRelativeDir, `${fileHash}.pdf`);
     let versionId = existingVersion?.id as number | undefined;
     let reusedVersion = false;
 
     if (!existingVersion) {
+      querySqlite(
+        `UPDATE report_versions SET is_active = 0 WHERE report_id = ${sqlValue(report.id)} AND is_active = 1;`
+      );
+
       const version = querySqlite(
         `INSERT INTO report_versions (
           report_id, file_name, file_hash, file_size, storage_path, text_path,
@@ -97,6 +102,8 @@ export class ReportUploadService {
       jobId = newJob.id;
     }
 
+    const storageAbsoluteDir = path.join(process.cwd(), storageRelativeDir);
+    ensureStorageDir(storageAbsoluteDir);
     const storageAbsolute = path.join(process.cwd(), storageRelative);
     if (!fs.existsSync(storageAbsolute)) {
       fs.copyFileSync(payload.tempFilePath, storageAbsolute);

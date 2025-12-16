@@ -59,7 +59,7 @@ router.post('/reports', upload.single('file'), async (req, res) => {
       size: file.size,
     });
 
-    const statusCode = result.reusedVersion ? 200 : 201;
+    const statusCode = result.reusedVersion ? 409 : 201;
     return res.status(statusCode).json({
       report_id: result.reportId,
       version_id: result.versionId,
