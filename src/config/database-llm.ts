@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import sqlite3 from 'sqlite3';
 import path from 'path';
+import { SQLITE_DB_PATH } from './sqlite';
 
 const dbType = process.env.DATABASE_TYPE || 'sqlite';
 
@@ -21,7 +22,8 @@ if (dbType === 'postgres') {
   });
 } else {
   // SQLite 配置
-  const dbPath = process.env.SQLITE_PATH || path.join(process.cwd(), 'data', 'llm_ingestion.db');
+  const dbPath =
+    process.env.SQLITE_PATH || process.env.SQLITE_DB_PATH || SQLITE_DB_PATH || path.join(process.cwd(), 'data', 'llm_ingestion.db');
   
   // 创建数据目录
   const fs = require('fs');

@@ -64,6 +64,15 @@ CREATE TABLE IF NOT EXISTS jobs (
 
 CREATE INDEX IF NOT EXISTS idx_jobs_report ON jobs(report_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+
+CREATE TABLE IF NOT EXISTS report_version_parses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  report_version_id INTEGER NOT NULL REFERENCES report_versions(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  output_json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 const postgresSchema = `
@@ -128,6 +137,15 @@ CREATE TABLE IF NOT EXISTS jobs (
 
 CREATE INDEX IF NOT EXISTS idx_jobs_report ON jobs(report_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+
+CREATE TABLE IF NOT EXISTS report_version_parses (
+  id BIGSERIAL PRIMARY KEY,
+  report_version_id BIGINT NOT NULL REFERENCES report_versions(id) ON DELETE CASCADE,
+  provider VARCHAR(50) NOT NULL,
+  model VARCHAR(100) NOT NULL,
+  output_json JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 `;
 
 export async function runLLMMigrations(): Promise<void> {
