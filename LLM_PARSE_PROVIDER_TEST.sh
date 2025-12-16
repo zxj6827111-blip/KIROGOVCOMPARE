@@ -1,124 +1,127 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# LLM Provider 抽象验收脚本
-# 验证 Stub Provider 和真实 Provider 的可配置性
+BASE_URL="${BASE_URL:-http://localhost:3000/api}"
+UPLOAD_URL="$BASE_URL/reports"
+JOB_URL_BASE="$BASE_URL/jobs"
+PDF_PATH="${PDF_PATH:-resources/sample-upload.pdf}"
+DB_PATH="${SQLITE_DB_PATH:-$(pwd)/data/llm_ingestion.db}"
+PROVIDER_ENV="${LLM_PROVIDER:-}" # captured for logs only
 
-set -e
-
-echo "=========================================="
-echo "LLM Provider 抽象验收测试"
-echo "=========================================="
-
-# 清理函数
-cleanup() {
-  if [ ! -z "$BACKEND_PID" ]; then
-    kill $BACKEND_PID 2>/dev/null || true
-    wait $BACKEND_PID 2>/dev/null || true
-  fi
-}
-
-trap cleanup EXIT
-
-# 测试 Stub Provider
-echo ""
-echo "1️⃣ 测试 Stub Provider..."
-export LLM_PROVIDER=stub
-export DATABASE_TYPE=sqlite
-
-npm run dev:llm > /tmp/llm_backend.log 2>&1 &
-BACKEND_PID=$!
-sleep 3
-
-# 检查后端是否启动
-if ! curl -s http://localhost:3000/api/health > /dev/null; then
-  echo "❌ 后端启动失败"
-  cat /tmp/llm_backend.log
+if ! command -v sqlite3 >/dev/null 2>&1; then
+  echo "sqlite3 command is required" >&2
   exit 1
 fi
 
-echo "✅ 后端启动成功"
-
-# 创建城市
-echo "2️⃣ 创建城市..."
-REGION=$(curl -s -X POST http://localhost:3000/api/regions \
-  -H "Content-Type: application/json" \
-  -d '{"code":"test_stub","name":"测试城市","province":"测试省"}')
-
-REGION_ID=$(echo $REGION | jq -r '.id')
-if [ -z "$REGION_ID" ] || [ "$REGION_ID" = "null" ]; then
-  echo "❌ 创建城市失败"
-  echo $REGION
+if [ ! -f "$PDF_PATH" ]; then
+  echo "Sample PDF not found at $PDF_PATH" >&2
   exit 1
 fi
 
-echo "✅ 城市创建成功: ID=$REGION_ID"
+provider_to_use="stub"
+if [ "${GEMINI_API_KEY:-}" != "" ] && [ "${LLM_PROVIDER:-stub}" = "gemini" ]; then
+  provider_to_use="gemini"
+fi
 
-# 上传报告
-echo "3️⃣ 上传报告..."
-if [ ! -f "sample.pdf" ]; then
-  echo "⚠️ sample.pdf 不存在，跳过上传测试"
-else
-  UPLOAD=$(curl -s -X POST http://localhost:3000/api/reports \
-    -F "region_id=$REGION_ID" \
-    -F "year=2024" \
-    -F "file=@sample.pdf")
-  
-  JOB_ID=$(echo $UPLOAD | jq -r '.job_id')
-  REPORT_ID=$(echo $UPLOAD | jq -r '.report_id')
-  
-  if [ -z "$JOB_ID" ] || [ "$JOB_ID" = "null" ]; then
-    echo "❌ 上传报告失败"
-    echo $UPLOAD
+echo "[info] Requested provider via env: ${PROVIDER_ENV:-unset}; resolved provider: $provider_to_use"
+
+echo "[setup] ensuring sqlite schema at $DB_PATH"
+mkdir -p "$(dirname "$DB_PATH")"
+sqlite3 "$DB_PATH" < migrations/sqlite/001_llm_ingestion_schema.sql
+if [ -f migrations/sqlite/002_report_version_parses.sql ]; then
+  sqlite3 "$DB_PATH" < migrations/sqlite/002_report_version_parses.sql
+fi
+
+sqlite3 "$DB_PATH" "PRAGMA foreign_keys = ON; INSERT OR IGNORE INTO regions(id, code, name, province) VALUES (1, 'stub-region', 'Stub Region', 'Stub Province');"
+
+run_upload_and_wait() {
+  echo "[upload] uploading sample PDF with provider=$provider_to_use"
+  UPLOAD_RESPONSE=$(curl -s -w "\n%{http_code}" -F "region_id=1" -F "year=2024" -F "file=@${PDF_PATH}" "$UPLOAD_URL")
+  UPLOAD_BODY=$(echo "$UPLOAD_RESPONSE" | head -n 1)
+  UPLOAD_STATUS=$(echo "$UPLOAD_RESPONSE" | tail -n 1)
+  export UPLOAD_BODY
+
+  if [ "$UPLOAD_STATUS" != "201" ] && [ "$UPLOAD_STATUS" != "409" ]; then
+    echo "Unexpected upload status: $UPLOAD_STATUS body=$UPLOAD_BODY" >&2
     exit 1
   fi
-  
-  echo "✅ 报告上传成功: JOB_ID=$JOB_ID, REPORT_ID=$REPORT_ID"
-  
-  # 轮询 Job 直到完成
-  echo "4️⃣ 等待解析完成..."
-  for i in {1..30}; do
-    JOB=$(curl -s http://localhost:3000/api/jobs/$JOB_ID)
-    STATUS=$(echo $JOB | jq -r '.status')
-    
+
+  JOB_ID=$(python3 - <<'PY' 2>/dev/null || python - <<'PY'
+import json, os, sys
+raw = os.environ.get('UPLOAD_BODY')
+if not raw:
+    sys.exit('missing upload response')
+data = json.loads(raw)
+print(data.get('job_id'))
+PY
+)
+
+  VERSION_ID=$(python3 - <<'PY' 2>/dev/null || python - <<'PY'
+import json, os, sys
+raw = os.environ.get('UPLOAD_BODY')
+if not raw:
+    sys.exit('missing upload response')
+data = json.loads(raw)
+print(data.get('version_id'))
+PY
+)
+
+  if [ -z "$JOB_ID" ] || [ -z "$VERSION_ID" ]; then
+    echo "Failed to parse job_id or version_id from upload response: $UPLOAD_BODY" >&2
+    exit 1
+  fi
+
+  echo "[jobs] Created job $JOB_ID for version $VERSION_ID. Waiting for completion..."
+  STATUS="queued"
+  for attempt in $(seq 1 45); do
+    JOB_RESPONSE=$(curl -s -f "$JOB_URL_BASE/$JOB_ID") || true
+    export JOB_RESPONSE
+    STATUS=$(python3 - <<'PY' 2>/dev/null || python - <<'PY'
+import json, os
+resp = json.loads(os.environ.get('JOB_RESPONSE', '{}'))
+print(resp.get('status', 'unknown'))
+PY
+)
+
+    echo "Attempt $attempt: status=$STATUS"
+
     if [ "$STATUS" = "succeeded" ]; then
-      echo "✅ 解析成功"
       break
-    elif [ "$STATUS" = "failed" ]; then
-      echo "❌ 解析失败"
-      echo $JOB
+    fi
+
+    if [ "$STATUS" = "failed" ]; then
+      echo "Job failed early: $JOB_RESPONSE" >&2
       exit 1
     fi
-    
-    echo "⏳ 状态: $STATUS (等待中...)"
-    sleep 1
+
+    sleep 2
   done
-  
-  # 验证 Provider 字段
-  echo "5️⃣ 验证 Provider 字段..."
-  REPORT=$(curl -s http://localhost:3000/api/reports/$REPORT_ID)
-  PROVIDER=$(echo $REPORT | jq -r '.active_version.provider')
-  MODEL=$(echo $REPORT | jq -r '.active_version.model')
-  
-  if [ "$PROVIDER" != "stub-llm" ]; then
-    echo "❌ Provider 字段错误: $PROVIDER (期望: stub-llm)"
+
+  if [ "$STATUS" != "succeeded" ]; then
+    echo "Job did not finish successfully within timeout" >&2
     exit 1
   fi
-  
-  if [ "$MODEL" != "stub-v1" ]; then
-    echo "❌ Model 字段错误: $MODEL (期望: stub-v1)"
+
+  echo "[assert] verifying parse record for version $VERSION_ID"
+  PARSE_ROW=$(sqlite3 "$DB_PATH" "SELECT provider, model FROM report_version_parses WHERE report_version_id = $VERSION_ID ORDER BY id DESC LIMIT 1;")
+  if [ -z "$PARSE_ROW" ]; then
+    echo "Parse output not found for version $VERSION_ID" >&2
     exit 1
   fi
-  
-  echo "✅ Provider 字段正确: $PROVIDER"
-  echo "✅ Model 字段正确: $MODEL"
+
+  PARSED_JSON=$(sqlite3 "$DB_PATH" "SELECT parsed_json FROM report_versions WHERE id = $VERSION_ID;")
+  if [ -z "$PARSED_JSON" ]; then
+    echo "parsed_json missing for version $VERSION_ID" >&2
+    exit 1
+  fi
+
+  echo "[done] provider=$PARSE_ROW parsed_json_length=${#PARSED_JSON}"
+}
+
+if [ "$provider_to_use" = "gemini" ]; then
+  echo "[mode] Running Gemini provider acceptance"
+  run_upload_and_wait
+else
+  echo "[mode] GEMINI_API_KEY not provided or provider not set to gemini; using stub provider"
+  run_upload_and_wait
 fi
-
-# 停止后端
-kill $BACKEND_PID
-wait $BACKEND_PID 2>/dev/null || true
-BACKEND_PID=""
-
-echo ""
-echo "=========================================="
-echo "✅ LLM Provider 抽象验收通过"
-echo "=========================================="

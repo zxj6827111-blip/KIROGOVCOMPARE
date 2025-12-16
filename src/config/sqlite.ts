@@ -21,10 +21,19 @@ function runSqlStatements(sql: string): any[] {
     return [];
   }
 
-  return output
-    .split(/\n+/)
-    .filter(Boolean)
-    .flatMap((line) => JSON.parse(line));
+  try {
+    const parsed = JSON.parse(output);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch (error) {
+    return output
+      .split(/\n+/)
+      .map((chunk) => chunk.trim())
+      .filter(Boolean)
+      .flatMap((chunk) => {
+        const value = JSON.parse(chunk);
+        return Array.isArray(value) ? value : [value];
+      });
+  }
 }
 
 export function ensureSqliteMigrations(): void {
