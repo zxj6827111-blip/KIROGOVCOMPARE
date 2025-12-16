@@ -3,6 +3,7 @@ import path from 'path';
 import dotenv from 'dotenv';
 import { initializeDatabase } from './db/init';
 import { setupAllProcessors } from './queue/processors';
+import healthRouter from './routes/health';
 import tasksRouter from './routes/tasks';
 import assetsRouter from './routes/assets';
 import suggestionsRouter from './routes/suggestions';
@@ -22,9 +23,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // 健康检查
-app.get('/health', (_req, res) => {
-  res.json({ status: 'ok' });
-});
+app.use('/api', healthRouter);
 
 // 根路由
 app.get('/', (_req, res) => {
@@ -32,7 +31,7 @@ app.get('/', (_req, res) => {
     message: '政府信息公开年度报告差异比对系统 API',
     version: '1.0.0',
     endpoints: {
-      health: '/health',
+      health: '/api/health',
       admin: '/admin',
       tasks: '/api/v1/tasks',
       assets: '/api/v1/assets',
