@@ -8,6 +8,10 @@ PDF_PATH="${PDF_PATH:-resources/sample-upload.pdf}"
 DB_PATH="${SQLITE_DB_PATH:-$(pwd)/data/llm_ingestion.db}"
 PROVIDER_ENV="${LLM_PROVIDER:-}" # captured for logs only
 
+PYTHON_BIN="python3"
+command -v python3 >/dev/null 2>&1 || PYTHON_BIN="python"
+command -v "$PYTHON_BIN" >/dev/null 2>&1 || { echo "python3/python is required" >&2; exit 1; }
+
 if ! command -v sqlite3 >/dev/null 2>&1; then
   echo "sqlite3 command is required" >&2
   exit 1
@@ -17,6 +21,8 @@ if [ ! -f "$PDF_PATH" ]; then
   echo "Sample PDF not found at $PDF_PATH" >&2
   exit 1
 fi
+
+echo "[notice] Ensure the running server uses SQLITE_DB_PATH=$DB_PATH to match this script"
 
 provider_to_use="stub"
 if [ "${GEMINI_API_KEY:-}" != "" ] && [ "${LLM_PROVIDER:-stub}" = "gemini" ]; then
@@ -46,7 +52,7 @@ run_upload_and_wait() {
     exit 1
   fi
 
-  JOB_ID=$(python3 - <<'PY' 2>/dev/null || python - <<'PY'
+  JOB_ID=$($PYTHON_BIN - <<'PY'
 import json, os, sys
 raw = os.environ.get('UPLOAD_BODY')
 if not raw:
@@ -56,7 +62,7 @@ print(data.get('job_id'))
 PY
 )
 
-  VERSION_ID=$(python3 - <<'PY' 2>/dev/null || python - <<'PY'
+  VERSION_ID=$($PYTHON_BIN - <<'PY'
 import json, os, sys
 raw = os.environ.get('UPLOAD_BODY')
 if not raw:
@@ -76,7 +82,7 @@ PY
   for attempt in $(seq 1 45); do
     JOB_RESPONSE=$(curl -s -f "$JOB_URL_BASE/$JOB_ID") || true
     export JOB_RESPONSE
-    STATUS=$(python3 - <<'PY' 2>/dev/null || python - <<'PY'
+    STATUS=$($PYTHON_BIN - <<'PY'
 import json, os
 resp = json.loads(os.environ.get('JOB_RESPONSE', '{}'))
 print(resp.get('status', 'unknown'))

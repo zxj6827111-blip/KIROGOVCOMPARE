@@ -1,11 +1,23 @@
 /// <reference path="../types/sqlite3.d.ts" />
 import { Pool } from 'pg';
 import path from 'path';
-import { SQLITE_DB_PATH, querySqlite } from './sqlite';
+import { SQLITE_DB_PATH, querySqlite, sqlValue } from './sqlite';
 
 const dbType = process.env.DATABASE_TYPE || 'sqlite';
 
 let pool: any;
+
+function formatParams(statement: string, params?: any[]): string {
+  if (!params || params.length === 0) {
+    return statement;
+  }
+
+  return params.reduce((sql, param, index) => {
+    const placeholder = `$${index + 1}`;
+    const value = sqlValue(param as any);
+    return sql.split(placeholder).join(value);
+  }, statement);
+}
 
 if (dbType === 'postgres') {
   // PostgreSQL 配置
@@ -35,7 +47,7 @@ if (dbType === 'postgres') {
   try {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const sqlite3 = require('sqlite3');
-    pool = new sqlite3.Database(dbPath, (err: any) => {
+    const sqliteDb = new sqlite3.Database(dbPath, (err: any) => {
       if (err) {
         console.error('SQLite connection error:', err);
       } else {
@@ -43,20 +55,62 @@ if (dbType === 'postgres') {
       }
     });
 
-    // 启用外键约束
-    pool.run('PRAGMA foreign_keys = ON');
+    sqliteDb.run('PRAGMA foreign_keys = ON');
+
+    pool = {
+      ...sqliteDb,
+      query: (statement: string, params?: any[]) =>
+        new Promise((resolve, reject) => {
+          const finalSql = formatParams(statement, params);
+          sqliteDb.all(finalSql, (err: any, rows: any[]) => {
+            if (err) {
+              reject(err);
+              return;
+            }
+            resolve({ rows });
+          });
+        }),
+      run: (statement: string, paramsOrCb?: any[] | ((err?: any) => void), callback?: (err?: any) => void) => {
+        const cb = typeof paramsOrCb === 'function' ? paramsOrCb : callback;
+        const params = Array.isArray(paramsOrCb) ? paramsOrCb : [];
+        const finalSql = formatParams(statement, params);
+        sqliteDb.run(finalSql, (err: any) => {
+          cb?.(err ?? null);
+        });
+      },
+    };
   } catch (error) {
     console.warn('sqlite3 native module unavailable, using CLI-backed adapter');
     pool = {
-      run: (statement: string, callback: (err?: any) => void) => {
+      run: (statement: string, paramsOrCb?: any[] | ((err?: any) => void), callback?: (err?: any) => void) => {
+        const cb = typeof paramsOrCb === 'function' ? paramsOrCb : callback;
+        const params = Array.isArray(paramsOrCb) ? paramsOrCb : [];
+        const finalSql = formatParams(statement, params);
         try {
-          querySqlite(statement);
-          callback?.(null);
+          querySqlite(finalSql);
+          cb?.(null);
         } catch (err) {
-          callback?.(err);
+          cb?.(err);
         }
       },
-      query: (statement: string) => Promise.resolve(querySqlite(statement)),
+      query: (statement: string, params?: any[]) => {
+        const finalSql = formatParams(statement, params);
+        try {
+          const rows = querySqlite(finalSql);
+          return Promise.resolve({ rows });
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      },
+      execute: (statement: string, params?: any[]) => {
+        const finalSql = formatParams(statement, params);
+        try {
+          querySqlite(finalSql);
+          return Promise.resolve({ rows: [] });
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      },
     };
   }
 }
