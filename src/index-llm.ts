@@ -5,7 +5,8 @@ import llmHealthRouter from './routes/llm-health';
 import llmRegionsRouter from './routes/llm-regions';
 import llmJobsRouter from './routes/llm-jobs';
 import reportsRouter from './routes/reports';
-import pool, { dbType } from './config/database-llm';
+import { dbType } from './config/database-llm';
+import { llmJobRunner } from './services/LlmJobRunner';
 
 dotenv.config();
 
@@ -52,6 +53,8 @@ async function start(): Promise<void> {
 
     // 运行迁移
     await runLLMMigrations();
+
+    llmJobRunner.start();
 
     app.listen(PORT, () => {
       console.log(`✓ LLM API server running on port ${PORT}`);
