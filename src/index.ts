@@ -1,4 +1,5 @@
 import express from 'express';
+import path from 'path';
 import dotenv from 'dotenv';
 import { initializeDatabase } from './db/init';
 import { setupAllProcessors } from './queue/processors';
@@ -6,6 +7,7 @@ import tasksRouter from './routes/tasks';
 import assetsRouter from './routes/assets';
 import suggestionsRouter from './routes/suggestions';
 import batchJobsRouter from './routes/batch-jobs';
+import adminRouter from './routes/admin';
 
 dotenv.config();
 
@@ -16,15 +18,40 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// 提供静态文件
+app.use(express.static(path.join(__dirname, 'public')));
+
 // 健康检查
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
+});
+
+// 根路由
+app.get('/', (_req, res) => {
+  res.json({ 
+    message: '政府信息公开年度报告差异比对系统 API',
+    version: '1.0.0',
+    endpoints: {
+      health: '/health',
+      admin: '/admin',
+      tasks: '/api/v1/tasks',
+      assets: '/api/v1/assets',
+      suggestions: '/api/v1/tasks/suggestions',
+      batchJobs: '/api/v1/admin/batch-jobs'
+    }
+  });
+});
+
+// 后台管理页面
+app.get('/admin', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
 
 // API路由
 app.use('/api/v1/tasks', tasksRouter);
 app.use('/api/v1/assets', assetsRouter);
 app.use('/api/v1/tasks', suggestionsRouter);
+app.use('/api/v1/admin', adminRouter);
 app.use('/api/v1/admin/batch-jobs', batchJobsRouter);
 
 // 错误处理
