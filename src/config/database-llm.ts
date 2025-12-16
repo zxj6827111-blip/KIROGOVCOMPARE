@@ -1,3 +1,4 @@
+/// <reference path="../types/sqlite3.d.ts" />
 import { Pool } from 'pg';
 import sqlite3 from 'sqlite3';
 import path from 'path';
