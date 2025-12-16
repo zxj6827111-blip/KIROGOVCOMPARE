@@ -19,7 +19,6 @@ app.use(express.urlencoded({ extended: true }));
 
 // 健康检查
 app.use('/api', llmHealthRouter);
-app.use('/api', reportsRouter);
 
 // 根路由
 app.get('/', (_req, res) => {
@@ -39,6 +38,7 @@ app.get('/', (_req, res) => {
 // API 路由
 app.use('/api/regions', llmRegionsRouter);
 app.use('/api/jobs', llmJobsRouter);
+app.use('/api', reportsRouter);
 
 // 错误处理
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
