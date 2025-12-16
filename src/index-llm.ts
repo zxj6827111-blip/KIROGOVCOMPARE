@@ -3,6 +3,8 @@ import dotenv from 'dotenv';
 import { runLLMMigrations } from './db/migrations-llm';
 import llmHealthRouter from './routes/llm-health';
 import llmRegionsRouter from './routes/llm-regions';
+import llmJobsRouter from './routes/llm-jobs';
+import reportsRouter from './routes/reports';
 import pool, { dbType } from './config/database-llm';
 
 dotenv.config();
@@ -16,6 +18,7 @@ app.use(express.urlencoded({ extended: true }));
 
 // 健康检查
 app.use('/api', llmHealthRouter);
+app.use('/api', reportsRouter);
 
 // 根路由
 app.get('/', (_req, res) => {
@@ -25,13 +28,16 @@ app.get('/', (_req, res) => {
     database: dbType,
     endpoints: {
       health: '/api/health',
-      regions: '/api/regions'
+      regions: '/api/regions',
+      reports: '/api/reports',
+      jobs: '/api/jobs/:id'
     }
   });
 });
 
 // API 路由
 app.use('/api/regions', llmRegionsRouter);
+app.use('/api/jobs', llmJobsRouter);
 
 // 错误处理
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
