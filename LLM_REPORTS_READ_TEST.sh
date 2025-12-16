@@ -2,9 +2,22 @@
 
 set -euo pipefail
 
+# 注意：测试脚本使用的 SQLITE_DB_PATH 必须与运行中的服务保持一致。
+# 若服务以默认配置启动（process.cwd()/data/llm_dev.db），无需修改；
+# 如服务通过环境变量指定了其他路径，请将同样的值传给脚本。
+
 BASE_URL=${BASE_URL:-http://localhost:3000/api}
 SQLITE_DB_PATH=${SQLITE_DB_PATH:-data/llm_dev.db}
 PDF_PATH=${PDF_PATH:-resources/sample-upload.pdf}
+
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN=python3
+elif command -v python >/dev/null 2>&1; then
+  PYTHON_BIN=python
+else
+  echo "python3 或 python 未安装" >&2
+  exit 1
+fi
 
 if ! command -v sqlite3 >/dev/null 2>&1; then
   echo "sqlite3 command is required" >&2
@@ -36,7 +49,7 @@ if [[ "${UPLOAD_STATUS}" != "201" && "${UPLOAD_STATUS}" != "409" ]]; then
   exit 1
 fi
 
-REPORT_ID=$(UPLOAD_BODY="${UPLOAD_BODY}" python - <<'PY'
+REPORT_ID=$(UPLOAD_BODY="${UPLOAD_BODY}" ${PYTHON_BIN} - <<'PY'
 import json, os
 body = os.environ.get('UPLOAD_BODY', '{}')
 try:
@@ -46,7 +59,7 @@ except Exception:
     print('')
 PY
 )
-JOB_ID=$(UPLOAD_BODY="${UPLOAD_BODY}" python - <<'PY'
+JOB_ID=$(UPLOAD_BODY="${UPLOAD_BODY}" ${PYTHON_BIN} - <<'PY'
 import json, os
 body = os.environ.get('UPLOAD_BODY', '{}')
 try:
@@ -74,7 +87,7 @@ for attempt in $(seq 1 30); do
     exit 1
   fi
 
-  STATUS=$(JOB_BODY="${JOB_BODY}" python - <<'PY'
+  STATUS=$(JOB_BODY="${JOB_BODY}" ${PYTHON_BIN} - <<'PY'
 import json, os
 body = os.environ.get('JOB_BODY', '{}')
 try:
@@ -116,7 +129,7 @@ if [[ "${LIST_STATUS}" != "200" ]]; then
   exit 1
 fi
 
-LIST_BODY="${LIST_BODY}" REPORT_ID="${REPORT_ID}" python - <<'PY'
+LIST_BODY="${LIST_BODY}" REPORT_ID="${REPORT_ID}" ${PYTHON_BIN} - <<'PY'
 import json, os, sys
 body = os.environ.get('LIST_BODY', '{}')
 report_id = os.environ.get('REPORT_ID')
@@ -160,7 +173,7 @@ if [[ "${DETAIL_STATUS}" != "200" ]]; then
   exit 1
 fi
 
-DETAIL_BODY="${DETAIL_BODY}" python - <<'PY'
+DETAIL_BODY="${DETAIL_BODY}" ${PYTHON_BIN} - <<'PY'
 import json, os, sys
 body = os.environ.get('DETAIL_BODY', '{}')
 try:
