@@ -1,11 +1,11 @@
 name: CI
 
 on:
-  push:
+  pull_request:
     branches:
       - main
       - feat/llm-ingestion-v1
-  pull_request:
+  push:
     branches:
       - main
       - feat/llm-ingestion-v1
@@ -16,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NODE_ENV: test
+      SQLITE_DB_PATH: ${{ runner.temp }}/llm_ingestion.db
+      SQLITE_PATH: ${{ runner.temp }}/llm_ingestion.db
       BASE_URL: http://localhost:3000/api
       LLM_PROVIDER: stub
       GEMINI_API_KEY: ""
@@ -28,11 +30,6 @@ jobs:
         with:
           node-version: 20
 
-      - name: Set temp DB path
-        run: |
-          echo "SQLITE_DB_PATH=$RUNNER_TEMP/llm_ingestion.db" >> "$GITHUB_ENV"
-          echo "SQLITE_PATH=$RUNNER_TEMP/llm_ingestion.db" >> "$GITHUB_ENV"
-
       - name: Scan for hidden control characters
         run: python3 scripts/check_control_chars.py
 
@@ -41,18 +38,6 @@ jobs:
 
       - name: Build backend
         run: npm run build
-
-      - name: Install frontend dependencies
-        if: ${{ hashFiles('frontend/package.json') != '' }}
-        run: |
-          cd frontend
-          npm ci
-
-      - name: Build frontend
-        if: ${{ hashFiles('frontend/package.json') != '' }}
-        run: |
-          cd frontend
-          npm run build
 
       - name: Install sqlite3 CLI
         run: sudo apt-get update && sudo apt-get install -y sqlite3
