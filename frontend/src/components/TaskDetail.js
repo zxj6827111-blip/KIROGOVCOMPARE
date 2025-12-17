@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import TextComparison from './TextComparison';
 import TableComparison from './TableComparison';
+import JobStatus from './JobStatus';
 import './TaskDetail.css';
 
 const API_BASE_URL = 'http://localhost:3000/api/v1';
@@ -12,6 +13,7 @@ function TaskDetail({ task, onBack }) {
   const [viewModel, setViewModel] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('summary');
+  const jobId = task?.jobId || task?.job_id;
 
   useEffect(() => {
     const fetchDetails = async () => {
@@ -51,6 +53,11 @@ function TaskDetail({ task, onBack }) {
         <h2>{task.taskId}</h2>
         <p>资产 A: {task.assetId_A}</p>
         <p>资产 B: {task.assetId_B}</p>
+        {jobId && (
+          <div className="job-status-container">
+            <JobStatus jobId={jobId} />
+          </div>
+        )}
       </div>
 
       <div className="tabs">
