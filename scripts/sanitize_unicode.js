@@ -41,16 +41,40 @@ function sanitizeFile(filePath, scanOnly = false) {
   console.log(`cleaned ${filePath}; removed ${matches.length} control char(s)`);
 }
 
+function gatherPaths(paths) {
+  const results = [];
+
+  paths.forEach((p) => {
+    const stat = fs.statSync(p);
+    if (stat.isDirectory()) {
+      for (const entry of fs.readdirSync(p)) {
+        const childPath = `${p}/${entry}`;
+        const childStat = fs.statSync(childPath);
+        if (childStat.isDirectory()) {
+          results.push(...gatherPaths([childPath]));
+        } else if (childStat.isFile()) {
+          results.push(childPath);
+        }
+      }
+    } else if (stat.isFile()) {
+      results.push(p);
+    }
+  });
+
+  return results;
+}
+
 function main() {
   const args = process.argv.slice(2);
   const scanOnly = args[0] === '--scan';
-  const files = scanOnly ? args.slice(1) : args;
+  const targets = scanOnly ? args.slice(1) : args;
 
-  if (files.length === 0) {
-    console.error('Usage: node scripts/sanitize_unicode.js [--scan] <file1> [file2 ...]');
+  if (targets.length === 0) {
+    console.error('Usage: node scripts/sanitize_unicode.js [--scan] <file_or_dir1> [file_or_dir2 ...]');
     process.exit(1);
   }
 
+  const files = gatherPaths(targets);
   files.forEach((file) => sanitizeFile(file, scanOnly));
 }
 
