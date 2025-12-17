@@ -1,6 +1,6 @@
 name: CI
 
-'on':
+on:
   push:
     branches:
       - main
@@ -16,44 +16,47 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NODE_ENV: test
-      SQLITE_DB_PATH: ${{ runner.temp }}/llm_ingestion.db
-      SQLITE_PATH: ${{ runner.temp }}/llm_ingestion.db
       BASE_URL: http://localhost:3000/api
       LLM_PROVIDER: stub
       GEMINI_API_KEY: ""
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      
+
       - name: Use Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
-      
+
+      - name: Set temp DB path
+        run: |
+          echo "SQLITE_DB_PATH=$RUNNER_TEMP/llm_ingestion.db" >> "$GITHUB_ENV"
+          echo "SQLITE_PATH=$RUNNER_TEMP/llm_ingestion.db" >> "$GITHUB_ENV"
+
       - name: Scan for hidden control characters
         run: python3 scripts/check_control_chars.py
-      
+
       - name: Install backend dependencies
         run: npm ci
-      
+
       - name: Build backend
         run: npm run build
-      
+
       - name: Install frontend dependencies
-        if: hashFiles('frontend/package.json') != ''
+        if: ${{ hashFiles('frontend/package.json') != '' }}
         run: |
           cd frontend
           npm ci
-      
+
       - name: Build frontend
-        if: hashFiles('frontend/package.json') != ''
+        if: ${{ hashFiles('frontend/package.json') != '' }}
         run: |
           cd frontend
           npm run build
-      
+
       - name: Install sqlite3 CLI
         run: sudo apt-get update && sudo apt-get install -y sqlite3
-      
+
       - name: Start backend server
         run: |
           npm run dev:llm > server.log 2>&1 &
@@ -71,7 +74,7 @@ jobs:
             cat server.log
             exit 1
           fi
-      
+
       - name: Run acceptance scripts
         run: |
           set -euo pipefail
@@ -84,7 +87,7 @@ jobs:
               echo "[skip] $script (not found)"
             fi
           done
-      
+
       - name: Stop backend server
         if: always()
         run: |
