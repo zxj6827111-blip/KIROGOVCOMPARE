@@ -3,12 +3,10 @@ import re
 import sys
 from pathlib import Path
 
-CONTROL_RANGES = [
-    "\ufeff",  # BOM
-    *(chr(c) for c in range(0x200B, 0x2010)),  # Zero-width, bidi marks
-    *(chr(c) for c in range(0x202A, 0x202F)),
-    *(chr(c) for c in range(0x2066, 0x206A)),
-]
+CONTROL_RANGES = ["\ufeff"]
+CONTROL_RANGES += [chr(c) for c in range(0x200B, 0x2010)]
+CONTROL_RANGES += [chr(c) for c in range(0x202A, 0x202F)]
+CONTROL_RANGES += [chr(c) for c in range(0x2066, 0x206A)]
 
 SKIP_DIRS = {
     ".git",

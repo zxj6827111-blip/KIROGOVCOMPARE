@@ -76,7 +76,13 @@ jobs:
       - name: Run acceptance scripts
         run: |
           set -euo pipefail
-          scripts=(LLM_UPLOAD_TEST.sh LLM_JOB_TEST.sh LLM_PARSE_STUB_TEST.sh LLM_REPORTS_READ_TEST.sh LLM_PARSE_PROVIDER_TEST.sh)
+          scripts=(
+            LLM_UPLOAD_TEST.sh
+            LLM_JOB_TEST.sh
+            LLM_PARSE_STUB_TEST.sh
+            LLM_REPORTS_READ_TEST.sh
+            LLM_PARSE_PROVIDER_TEST.sh
+          )
           for script in "${scripts[@]}"; do
             if [ -f "$script" ]; then
               echo "[run] $script"
