@@ -33,45 +33,8 @@ if [ ! -s "${TMP_DOCX}" ]; then
   exit 1
 fi
 
-validate_with_unzip() {
-  if ! command -v unzip >/dev/null 2>&1; then
-    return 1
-  fi
-
-  if ! unzip -t "${TMP_DOCX}" >/dev/null 2>&1; then
-    return 1
-  fi
-
-  if ! unzip -l "${TMP_DOCX}" | grep -q "word/document.xml"; then
-    return 1
-  fi
-
-  return 0
-}
-
-validate_with_python() {
-  "${PYTHON_BIN}" - <<'PY'
-import sys
-import zipfile
-from pathlib import Path
-
-docx_path = Path('${TMP_DOCX}').resolve()
-try:
-    with zipfile.ZipFile(docx_path, 'r') as zf:
-        names = zf.namelist()
-        if 'word/document.xml' not in names:
-            sys.exit('missing word/document.xml in docx archive')
-except Exception as exc:
-    sys.exit(f'failed to validate docx: {exc}')
-print('[assert] docx archive is valid')
-PY
-}
-
-if ! validate_with_unzip; then
-  echo "[warn] unzip not available or validation failed, falling back to python"
-  validate_with_python
-else
-  echo "[assert] docx archive validated via unzip"
-fi
+REQUIRED_DOCX_ENTRIES=${REQUIRED_DOCX_ENTRIES:-word/document.xml,[Content_Types].xml}
+echo "[validate] checking docx archive entries"
+PYTHON_BIN="${PYTHON_BIN}" REQUIRED_DOCX_ENTRIES="${REQUIRED_DOCX_ENTRIES}" node scripts/validate-docx-entries.js "${TMP_DOCX}"
 
 echo "[success] export docx saved to ${TMP_DOCX}"
