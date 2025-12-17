@@ -1,4 +1,4 @@
-name: CI
+name: CI Regression
 
 on:
   push:
@@ -9,6 +9,7 @@ on:
     branches:
       - main
       - feat/llm-ingestion-v1
+  workflow_dispatch:
 
 jobs:
   build-and-regression:
@@ -39,13 +40,13 @@ jobs:
         run: npm run build
 
       - name: Install frontend dependencies
-        if: "hashFiles('frontend/package.json') != ''"
+        if: hashFiles('frontend/package.json') != ''
         run: |
           cd frontend
           npm ci
 
       - name: Build frontend
-        if: "hashFiles('frontend/package.json') != ''"
+        if: hashFiles('frontend/package.json') != ''
         run: |
           cd frontend
           npm run build
@@ -61,17 +62,14 @@ jobs:
           for i in {1..30}; do
             if curl -fsS "http://localhost:3000/api/health" >/dev/null; then
               echo "Server is up"
-              ready=1
-              break
+              exit 0
             fi
             sleep 2
           done
 
-          if [ "${ready:-0}" != "1" ]; then
-            echo "Server failed to start"
-            cat server.log
-            exit 1
-          fi
+          echo "Server failed to start"
+          cat server.log
+          exit 1
 
       - name: Run acceptance scripts
         run: |
@@ -83,6 +81,7 @@ jobs:
             LLM_REPORTS_READ_TEST.sh
             LLM_PARSE_PROVIDER_TEST.sh
           )
+
           for script in "${scripts[@]}"; do
             if [ -f "$script" ]; then
               echo "[run] $script"
