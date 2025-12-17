@@ -1,25 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
 import TextComparison from './TextComparison';
 import TableComparison from './TableComparison';
+import JobStatus from './JobStatus';
 import './TaskDetail.css';
+import { apiClient } from '../apiClient';
 
-const API_BASE_URL = 'http://localhost:3000/api/v1';
+const API_ROOT = 'http://localhost:3000/api';
 
 function TaskDetail({ task, onBack }) {
   const [diffResult, setDiffResult] = useState(null);
   const [summary, setSummary] = useState(null);
   const [viewModel, setViewModel] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [downloadError, setDownloadError] = useState('');
   const [activeTab, setActiveTab] = useState('summary');
+  const jobId = task?.jobId || task?.job_id;
 
   useEffect(() => {
     const fetchDetails = async () => {
       try {
         const [diffRes, summaryRes, viewModelRes] = await Promise.all([
-          axios.get(`${API_BASE_URL}/tasks/${task.taskId}/diff`),
-          axios.get(`${API_BASE_URL}/tasks/${task.taskId}/summary`),
-          axios.get(`${API_BASE_URL}/tasks/${task.taskId}/view-model`),
+          apiClient.get(`/v1/tasks/${task.taskId}/diff`),
+          apiClient.get(`/v1/tasks/${task.taskId}/summary`),
+          apiClient.get(`/v1/tasks/${task.taskId}/view-model`),
         ]);
         setDiffResult(diffRes.data);
         setSummary(summaryRes.data);
@@ -33,6 +36,32 @@ function TaskDetail({ task, onBack }) {
 
     fetchDetails();
   }, [task.taskId]);
+
+  const handleDownload = () => {
+    setDownloadError('');
+    const url = `${API_ROOT}/comparisons/${task.taskId}/export?format=docx`;
+
+    fetch(url)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error('下载失败');
+        }
+        return response.blob();
+      })
+      .then((blob) => {
+        const blobUrl = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = `comparison-${task.taskId}.docx`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(blobUrl);
+      })
+      .catch(() => {
+        setDownloadError('下载失败，请稍后重试');
+      });
+  };
 
   if (loading) {
     return (
@@ -51,6 +80,17 @@ function TaskDetail({ task, onBack }) {
         <h2>{task.taskId}</h2>
         <p>资产 A: {task.assetId_A}</p>
         <p>资产 B: {task.assetId_B}</p>
+        <div className="actions">
+          <button className="primary-btn" onClick={handleDownload}>
+            下载 Word
+          </button>
+          {downloadError && <span className="error-text">{downloadError}</span>}
+        </div>
+        {jobId && (
+          <div className="job-status-container">
+            <JobStatus jobId={jobId} />
+          </div>
+        )}
       </div>
 
       <div className="tabs">

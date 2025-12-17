@@ -10,5 +10,6 @@ export { ExportJobService, default as exportJobService } from './ExportJobServic
 export { CompareTaskProcessor, default as compareTaskProcessor } from './CompareTaskProcessor';
 export { AISuggestionService, default as aiSuggestionService } from './AISuggestionService';
 export { AISuggestionCacheService, default as aiSuggestionCacheService } from './AISuggestionCacheService';
-export { PdfParseService, default as pdfParseService } from './PdfParseService';
-export { StructuringService, default as structuringService } from './StructuringService';
+// Legacy services - commented out as they no longer exist
+// export { PdfParseService, default as pdfParseService } from './PdfParseService';
+// export { StructuringService, default as structuringService } from './StructuringService';

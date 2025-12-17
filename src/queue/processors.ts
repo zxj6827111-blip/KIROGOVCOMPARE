@@ -5,8 +5,9 @@ import DiffService from '../services/DiffService';
 import SummaryService from '../services/SummaryService';
 import DocxExportService from '../services/DocxExportService';
 import ExportJobService from '../services/ExportJobService';
-import PdfParseService from '../services/PdfParseService';
-import StructuringService from '../services/StructuringService';
+// Legacy services - commented out as they no longer exist
+// import PdfParseService from '../services/PdfParseService';
+// import StructuringService from '../services/StructuringService';
 import pool from '../config/database';
 
 /**
@@ -43,19 +44,20 @@ export async function setupCompareTaskProcessor(): Promise<void> {
       await TaskService.updateTaskStage(taskId, 'parsing');
       await TaskService.updateTaskProgress(taskId, 15);
 
-      const resultA = await PdfParseService.parsePDF(assetA.storagePath, task.assetId_A);
-      const resultB = await PdfParseService.parsePDF(assetB.storagePath, task.assetId_B);
-
-      if (!resultA.success || !resultB.success) {
-        throw new Error('PDF解析失败');
-      }
-
-      const docA = resultA.document;
-      const docB = resultB.document;
-
-      if (!docA || !docB) {
-        throw new Error('PDF 解析结果为空');
-      }
+      // Legacy services commented out - these no longer exist
+      // const resultA = await PdfParseService.parsePDF(assetA.storagePath, task.assetId_A);
+      // const resultB = await PdfParseService.parsePDF(assetB.storagePath, task.assetId_B);
+      //
+      // if (!resultA.success || !resultB.success) {
+      //   throw new Error('PDF解析失败');
+      // }
+      //
+      // const docA = resultA.document;
+      // const docB = resultB.document;
+      //
+      // if (!docA || !docB) {
+      //   throw new Error('PDF 解析结果为空');
+      // }
 
       await TaskService.updateTaskProgress(taskId, 25);
 
@@ -63,82 +65,24 @@ export async function setupCompareTaskProcessor(): Promise<void> {
       await TaskService.updateTaskStage(taskId, 'structuring');
       await TaskService.updateTaskProgress(taskId, 35);
 
-      const structuredResultA = await StructuringService.structureDocument(resultA);
-      const structuredResultB = await StructuringService.structureDocument(resultB);
+      // const structuredResultA = await StructuringService.structureDocument(resultA);
+      // const structuredResultB = await StructuringService.structureDocument(resultB);
+      //
+      // if (!structuredResultA.document || !structuredResultB.document) {
+      //   throw new Error('文档结构化失败');
+      // }
+      //
+      // const structuredDocA = structuredResultA.document;
+      // const structuredDocB = structuredResultB.document;
 
-      if (!structuredResultA.document || !structuredResultB.document) {
-        throw new Error('文档结构化失败');
-      }
-
-      const structuredDocA = structuredResultA.document;
-      const structuredDocB = structuredResultB.document;
-
-      await TaskService.updateTaskProgress(taskId, 45);
-
-      // 阶段3: 比对
-      await TaskService.updateTaskStage(taskId, 'diffing');
-      await TaskService.updateTaskProgress(taskId, 55);
-
-      const diffResult = await DiffService.diffDocuments(structuredDocA, structuredDocB);
-
-      // 保存差异结果到数据库
-      await pool.query(
-        `
-        INSERT INTO diff_results (task_id, diff_result, created_at)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (task_id) DO UPDATE SET diff_result = $2, updated_at = $3
-        `,
-        [taskId, JSON.stringify(diffResult), new Date()]
-      );
-
-      await TaskService.updateTaskProgress(taskId, 65);
-
-      // 阶段4: 生成摘要
-      await TaskService.updateTaskStage(taskId, 'summarizing');
-      await TaskService.updateTaskProgress(taskId, 75);
-
-      const summary = SummaryService.generateSummary(diffResult);
-
-      // 保存摘要到任务
-      await pool.query(
-        `
-        UPDATE compare_tasks
-        SET summary = $1, updated_at = $2
-        WHERE task_id = $3
-        `,
-        [JSON.stringify(summary), new Date(), taskId]
-      );
-
-      await TaskService.updateTaskProgress(taskId, 85);
-
-      // 阶段5: 导出DOCX
-      await TaskService.updateTaskStage(taskId, 'exporting');
-      await TaskService.updateTaskProgress(taskId, 90);
-
-      const docxPath = await DocxExportService.generateDiffReport(diffResult, summary, {
-        title: `${assetA.fileName} vs ${assetB.fileName}`,
-      });
-
-      // 创建导出任务记录
-      const exportJob = await ExportJobService.createExportJob({
+      // 说明：PdfParseService / StructuringService 已在当前版本移除。
+      // 为避免运行时/编译期错误，这里明确标记该队列处理器暂不可用。
+      await TaskService.setTaskError(
         taskId,
-        type: 'diff',
-      });
-
-      if (exportJob) {
-        await ExportJobService.updateExportJobStatus(
-          exportJob.exportId,
-          'succeeded',
-          docxPath
-        );
-      }
-
-      // 更新任务为成功
-      await TaskService.updateTaskProgress(taskId, 100);
-      await TaskService.updateTaskStatus(taskId, 'succeeded');
-
-      console.log(`✓ 比对任务 ${taskId} 处理完成`);
-      return { success: true, taskId };
+        'Compare pipeline disabled: PdfParseService/StructuringService not available'
+      );
+      await TaskService.updateTaskStatus(taskId, 'failed', 'structuring');
+      return { success: false, taskId, reason: 'COMPARE_DISABLED' };
     } catch (error) {
       console.error(`比对任务 ${taskId} 处理失败:`, error);
       await TaskService.setTaskError(taskId, `${error}`);

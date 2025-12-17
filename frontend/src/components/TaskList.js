@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
-import axios from 'axios';
 import './TaskList.css';
-
-const API_BASE_URL = 'http://localhost:3000/api/v1';
+import { apiClient, buildApiUrl } from '../apiClient';
 
 function TaskList({ tasks, loading, onRefresh, onViewTask }) {
   const [deleting, setDeleting] = useState(null);
@@ -48,7 +46,7 @@ function TaskList({ tasks, loading, onRefresh, onViewTask }) {
 
     setDeleting(taskId);
     try {
-      await axios.delete(`${API_BASE_URL}/tasks/${taskId}`);
+      await apiClient.delete(`/v1/tasks/${taskId}`);
       onRefresh();
     } catch (error) {
       alert('删除失败: ' + (error.response?.data?.error || error.message));
@@ -58,7 +56,7 @@ function TaskList({ tasks, loading, onRefresh, onViewTask }) {
   };
 
   const handleDownload = (taskId, type = 'diff') => {
-    const url = `${API_BASE_URL}/tasks/${taskId}/download/${type}`;
+    const url = buildApiUrl(`/v1/tasks/${taskId}/download/${type}`);
     window.open(url, '_blank');
   };
 

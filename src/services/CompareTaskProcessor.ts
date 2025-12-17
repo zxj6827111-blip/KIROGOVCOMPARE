@@ -4,8 +4,9 @@ import DiffService from './DiffService';
 import SummaryService from './SummaryService';
 import DocxExportService from './DocxExportService';
 import ExportJobService from './ExportJobService';
-import PdfParseService from './PdfParseService';
-import StructuringService from './StructuringService';
+// Legacy services - commented out as they no longer exist
+// import PdfParseService from './PdfParseService';
+// import StructuringService from './StructuringService';
 import { Warning } from '../types/models';
 import pool from '../config/database';
 
@@ -77,12 +78,13 @@ export class CompareTaskProcessor {
       }
 
       // 解析两个PDF - 使用正确的 parsePDF 方法签名
-      const resultA = await PdfParseService.parsePDF(pathA, task.assetId_A);
-      const resultB = await PdfParseService.parsePDF(pathB, task.assetId_B);
-
-      if (!resultA.success || !resultB.success) {
-        throw new Error('PDF解析失败');
-      }
+      // Legacy service commented out - no longer exists
+      // const resultA = await PdfParseService.parsePDF(pathA, task.assetId_A);
+      // const resultB = await PdfParseService.parsePDF(pathB, task.assetId_B);
+      //
+      // if (!resultA.success || !resultB.success) {
+      //   throw new Error('PDF解析失败');
+      // }
 
       // 保存到临时存储
       await pool.query(

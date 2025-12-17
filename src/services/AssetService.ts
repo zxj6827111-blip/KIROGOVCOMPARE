@@ -2,7 +2,8 @@ import { v4 as uuidv4 } from 'uuid';
 import pool from '../config/database';
 import { ReportAsset } from '../models';
 import StorageService from './StorageService';
-import ParsedDataStorageService from './ParsedDataStorageService';
+// Legacy service - commented out as it no longer exists
+// import ParsedDataStorageService from './ParsedDataStorageService';
 
 export interface QueryOptions {
   year?: number;
@@ -290,8 +291,10 @@ export class AssetService {
       }
 
       // 从存储中读取解析数据
-      const parseData = await ParsedDataStorageService.loadParseData(assetId);
-      return parseData;
+      // Legacy service - commented out as it no longer exists
+      // const parseData = await ParsedDataStorageService.loadParseData(assetId);
+      // return parseData;
+      return null;
     } catch (error) {
       console.error('获取资产解析数据失败:', error);
       return null;
