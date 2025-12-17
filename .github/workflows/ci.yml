@@ -1,4 +1,4 @@
-name: CI Regression
+name: CI
 
 on:
   push:
@@ -40,13 +40,13 @@ jobs:
         run: npm run build
 
       - name: Install frontend dependencies
-        if: hashFiles('frontend/package.json') != ''
+        if: "hashFiles('frontend/package.json') != ''"
         run: |
           cd frontend
           npm ci
 
       - name: Build frontend
-        if: hashFiles('frontend/package.json') != ''
+        if: "hashFiles('frontend/package.json') != ''"
         run: |
           cd frontend
           npm run build
@@ -58,30 +58,24 @@ jobs:
         run: |
           npm run dev:llm > server.log 2>&1 &
           echo $! > server.pid
-
           for i in {1..30}; do
             if curl -fsS "http://localhost:3000/api/health" >/dev/null; then
               echo "Server is up"
-              exit 0
+              ready=1
+              break
             fi
             sleep 2
           done
-
-          echo "Server failed to start"
-          cat server.log
-          exit 1
+          if [ "${ready:-0}" != "1" ]; then
+            echo "Server failed to start"
+            cat server.log
+            exit 1
+          fi
 
       - name: Run acceptance scripts
         run: |
           set -euo pipefail
-          scripts=(
-            LLM_UPLOAD_TEST.sh
-            LLM_JOB_TEST.sh
-            LLM_PARSE_STUB_TEST.sh
-            LLM_REPORTS_READ_TEST.sh
-            LLM_PARSE_PROVIDER_TEST.sh
-          )
-
+          scripts=(LLM_UPLOAD_TEST.sh LLM_JOB_TEST.sh LLM_PARSE_STUB_TEST.sh LLM_REPORTS_READ_TEST.sh LLM_PARSE_PROVIDER_TEST.sh)
           for script in "${scripts[@]}"; do
             if [ -f "$script" ]; then
               echo "[run] $script"
