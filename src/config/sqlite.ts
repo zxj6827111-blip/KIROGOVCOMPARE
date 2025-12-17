@@ -3,7 +3,6 @@ import path from 'path';
 import { execFileSync } from 'child_process';
 
 const dataDir = path.join(process.cwd(), 'data');
-// 统一使用 llm_ingestion.db 作为 LLM 功能的数据库名
 export const SQLITE_DB_PATH = process.env.SQLITE_DB_PATH || path.join(dataDir, 'llm_ingestion.db');
 
 let migrationsRan = false;
@@ -21,10 +20,19 @@ function runSqlStatements(sql: string): any[] {
     return [];
   }
 
-  return output
-    .split(/\n+/)
-    .filter(Boolean)
-    .flatMap((line) => JSON.parse(line));
+  try {
+    const parsed = JSON.parse(output);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch (error) {
+    return output
+      .split(/\n+/)
+      .map((chunk) => chunk.trim())
+      .filter(Boolean)
+      .flatMap((chunk) => {
+        const value = JSON.parse(chunk);
+        return Array.isArray(value) ? value : [value];
+      });
+  }
 }
 
 export function ensureSqliteMigrations(): void {
@@ -51,14 +59,28 @@ export function ensureSqliteMigrations(): void {
   migrationsRan = true;
 }
 
-function escapeValue(value: string | number | null): string {
-  if (value === null) {
+function escapeValue(value: string | number | boolean | null | Date | Record<string, unknown> | undefined): string {
+  if (value === null || value === undefined) {
     return 'NULL';
   }
+
+  if (value instanceof Date) {
+    return `'${value.toISOString().replace(/'/g, "''")}'`;
+  }
+
   if (typeof value === 'number') {
     return value.toString();
   }
-  return `'${value.replace(/'/g, "''")}'`;
+
+  if (typeof value === 'boolean') {
+    return value ? '1' : '0';
+  }
+
+  if (typeof value === 'string') {
+    return `'${value.replace(/'/g, "''")}'`;
+  }
+
+  return `'${JSON.stringify(value).replace(/'/g, "''")}'`;
 }
 
 export function querySqlite(sql: string): any[] {
@@ -69,6 +91,6 @@ export function executeSqlite(sql: string): void {
   runSqlStatements(sql);
 }
 
-export function sqlValue(value: string | number | null): string {
+export function sqlValue(value: string | number | boolean | null | Date | Record<string, unknown> | undefined): string {
   return escapeValue(value);
 }

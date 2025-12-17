@@ -1,5 +1,6 @@
 import { ensureSqliteMigrations, querySqlite, sqlValue } from '../config/sqlite';
-import { stubLlmProvider } from './StubLlmProvider';
+import { LlmParseResult, LlmProvider, LlmProviderError } from './LlmProvider';
+import { createLlmProvider } from './LlmProviderFactory';
 
 interface QueuedJob {
   id: number;
@@ -14,6 +15,8 @@ const POLL_INTERVAL_MS = 2000;
 export class LlmJobRunner {
   private running = false;
   private processing = false;
+  private provider: LlmProvider | null = null;
+  private parsedJsonColumnExists: boolean | null = null;
 
   start(): void {
     if (this.running) {
@@ -96,34 +99,73 @@ export class LlmJobRunner {
         throw new Error('Job missing required version or storage');
       }
 
-      const parseResult = await stubLlmProvider.parse({
+      const provider = this.getProvider();
+      const parseResult = await provider.parse({
         reportId: job.report_id,
         versionId: job.version_id,
         storagePath: job.storage_path,
         fileHash: job.file_hash,
       });
 
-      const outputJson = JSON.stringify(parseResult);
+      const outputJson = this.stringifyOutput(parseResult);
 
       querySqlite(
         `INSERT INTO report_version_parses (report_version_id, provider, model, output_json, created_at)
          VALUES (${sqlValue(job.version_id)}, ${sqlValue(parseResult.provider)}, ${sqlValue(parseResult.model)}, ${sqlValue(outputJson)}, datetime('now'));`
       );
 
-      querySqlite(
-        `UPDATE report_versions SET parsed_json = ${sqlValue(outputJson)} WHERE id = ${sqlValue(job.version_id)};`
-      );
+      if (this.hasParsedJsonColumn()) {
+        querySqlite(
+          `UPDATE report_versions SET parsed_json = ${sqlValue(outputJson)} WHERE id = ${sqlValue(job.version_id)};`
+        );
+      }
 
       querySqlite(
         `UPDATE jobs SET status = 'succeeded', progress = 100, finished_at = datetime('now') WHERE id = ${sqlValue(job.id)};`
       );
     } catch (error: any) {
-      const message = typeof error?.message === 'string' ? error.message : 'unknown_error';
+      const { code, message } = this.normalizeError(error);
       querySqlite(
-        `UPDATE jobs SET status = 'failed', error_code = 'STUB_PARSE_FAILED', error_message = ${sqlValue(message)}, finished_at = datetime('now') WHERE id = ${sqlValue(job.id)};`
+        `UPDATE jobs SET status = 'failed', error_code = ${sqlValue(code)}, error_message = ${sqlValue(message)}, finished_at = datetime('now') WHERE id = ${sqlValue(job.id)};`
       );
       console.error(`LLM job ${job.id} failed:`, error);
     }
+  }
+
+  private getProvider(): LlmProvider {
+    if (!this.provider) {
+      this.provider = createLlmProvider();
+    }
+
+    return this.provider;
+  }
+
+  private stringifyOutput(parseResult: LlmParseResult): string {
+    const output = parseResult?.output ?? parseResult;
+    try {
+      return JSON.stringify(output);
+    } catch (error) {
+      throw new LlmProviderError('Failed to serialize LLM output', 'llm_output_serialization_error');
+    }
+  }
+
+  private hasParsedJsonColumn(): boolean {
+    if (this.parsedJsonColumnExists !== null) {
+      return this.parsedJsonColumnExists;
+    }
+
+    const columns = querySqlite('PRAGMA table_info(report_versions);') as Array<{ name?: string }>;
+    this.parsedJsonColumnExists = columns.some((column) => column.name === 'parsed_json');
+    return this.parsedJsonColumnExists;
+  }
+
+  private normalizeError(error: unknown): { code: string; message: string } {
+    if (error instanceof LlmProviderError) {
+      return { code: error.code || 'LLM_PROVIDER_ERROR', message: error.message };
+    }
+
+    const message = typeof (error as any)?.message === 'string' ? (error as any).message : 'unknown_error';
+    return { code: 'LLM_JOB_ERROR', message };
   }
 }
 

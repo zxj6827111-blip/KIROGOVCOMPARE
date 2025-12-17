@@ -1,11 +1,23 @@
 /// <reference path="../types/sqlite3.d.ts" />
 import { Pool } from 'pg';
 import path from 'path';
-import { SQLITE_DB_PATH } from './sqlite';
+import { SQLITE_DB_PATH, querySqlite, sqlValue } from './sqlite';
 
 const dbType = process.env.DATABASE_TYPE || 'sqlite';
 
 let pool: any;
+
+function formatParams(statement: string, params?: any[]): string {
+  if (!params || params.length === 0) {
+    return statement;
+  }
+
+  return params.reduce((sql, param, index) => {
+    const placeholder = `$${index + 1}`;
+    const value = sqlValue(param as any);
+    return sql.split(placeholder).join(value);
+  }, statement);
+}
 
 if (dbType === 'postgres') {
   // PostgreSQL 配置
@@ -21,35 +33,47 @@ if (dbType === 'postgres') {
     console.error('Unexpected error on idle client', err);
   });
 } else {
-  // SQLite 配置 - 统一使用 SQLITE_DB_PATH
-  const dbPath = process.env.SQLITE_PATH || SQLITE_DB_PATH;
-  
-  // 动态加载 sqlite3（避免启动时加载失败）
-  let sqlite3: any;
-  try {
-    sqlite3 = require('sqlite3');
-  } catch (err) {
-    console.error('❌ 无法加载 sqlite3 模块，请运行: npm install sqlite3');
-    throw err;
-  }
-  
-  // 创建数据目录
+  // SQLite 配置（使用 CLI 适配器，避免强依赖 sqlite3 原生模块）
+  const dbPath =
+    process.env.SQLITE_PATH || process.env.SQLITE_DB_PATH || SQLITE_DB_PATH || path.join(process.cwd(), 'data', 'llm_ingestion.db');
+
   const fs = require('fs');
   const dir = path.dirname(dbPath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  pool = new sqlite3.Database(dbPath, (err: any) => {
-    if (err) {
-      console.error('SQLite connection error:', err);
-    } else {
-      console.log('✓ SQLite database connected:', dbPath);
-    }
-  });
-
-  // 启用外键约束
-  pool.run('PRAGMA foreign_keys = ON');
+  pool = {
+    run: (statement: string, paramsOrCb?: any[] | ((err?: any) => void), callback?: (err?: any) => void) => {
+      const cb = typeof paramsOrCb === 'function' ? paramsOrCb : callback;
+      const params = Array.isArray(paramsOrCb) ? paramsOrCb : [];
+      const finalSql = formatParams(statement, params);
+      try {
+        querySqlite(finalSql);
+        cb?.(null);
+      } catch (err) {
+        cb?.(err);
+      }
+    },
+    query: (statement: string, params?: any[]) => {
+      const finalSql = formatParams(statement, params);
+      try {
+        const rows = querySqlite(finalSql);
+        return Promise.resolve({ rows });
+      } catch (err) {
+        return Promise.reject(err);
+      }
+    },
+    execute: (statement: string, params?: any[]) => {
+      const finalSql = formatParams(statement, params);
+      try {
+        querySqlite(finalSql);
+        return Promise.resolve({ rows: [] });
+      } catch (err) {
+        return Promise.reject(err);
+      }
+    },
+  };
 }
 
 export default pool;
