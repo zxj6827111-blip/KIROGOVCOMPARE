@@ -5,8 +5,9 @@ import DiffService from '../services/DiffService';
 import SummaryService from '../services/SummaryService';
 import DocxExportService from '../services/DocxExportService';
 import ExportJobService from '../services/ExportJobService';
-import PdfParseService from '../services/PdfParseService';
-import StructuringService from '../services/StructuringService';
+// Legacy services - commented out as they no longer exist
+// import PdfParseService from '../services/PdfParseService';
+// import StructuringService from '../services/StructuringService';
 import pool from '../config/database';
 
 /**
@@ -43,19 +44,20 @@ export async function setupCompareTaskProcessor(): Promise<void> {
       await TaskService.updateTaskStage(taskId, 'parsing');
       await TaskService.updateTaskProgress(taskId, 15);
 
-      const resultA = await PdfParseService.parsePDF(assetA.storagePath, task.assetId_A);
-      const resultB = await PdfParseService.parsePDF(assetB.storagePath, task.assetId_B);
-
-      if (!resultA.success || !resultB.success) {
-        throw new Error('PDF解析失败');
-      }
-
-      const docA = resultA.document;
-      const docB = resultB.document;
-
-      if (!docA || !docB) {
-        throw new Error('PDF 解析结果为空');
-      }
+      // Legacy services commented out - these no longer exist
+      // const resultA = await PdfParseService.parsePDF(assetA.storagePath, task.assetId_A);
+      // const resultB = await PdfParseService.parsePDF(assetB.storagePath, task.assetId_B);
+      //
+      // if (!resultA.success || !resultB.success) {
+      //   throw new Error('PDF解析失败');
+      // }
+      //
+      // const docA = resultA.document;
+      // const docB = resultB.document;
+      //
+      // if (!docA || !docB) {
+      //   throw new Error('PDF 解析结果为空');
+      // }
 
       await TaskService.updateTaskProgress(taskId, 25);
 
@@ -63,15 +65,15 @@ export async function setupCompareTaskProcessor(): Promise<void> {
       await TaskService.updateTaskStage(taskId, 'structuring');
       await TaskService.updateTaskProgress(taskId, 35);
 
-      const structuredResultA = await StructuringService.structureDocument(resultA);
-      const structuredResultB = await StructuringService.structureDocument(resultB);
-
-      if (!structuredResultA.document || !structuredResultB.document) {
-        throw new Error('文档结构化失败');
-      }
-
-      const structuredDocA = structuredResultA.document;
-      const structuredDocB = structuredResultB.document;
+      // const structuredResultA = await StructuringService.structureDocument(resultA);
+      // const structuredResultB = await StructuringService.structureDocument(resultB);
+      //
+      // if (!structuredResultA.document || !structuredResultB.document) {
+      //   throw new Error('文档结构化失败');
+      // }
+      //
+      // const structuredDocA = structuredResultA.document;
+      // const structuredDocB = structuredResultB.document;
 
       await TaskService.updateTaskProgress(taskId, 45);
 
