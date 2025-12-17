@@ -10,6 +10,7 @@ import suggestionsRouter from './routes/suggestions';
 import batchJobsRouter from './routes/batch-jobs';
 import adminRouter from './routes/admin';
 import reportsRouter from './routes/reports';
+import comparisonsRouter from './routes/comparisons';
 
 dotenv.config();
 
@@ -54,6 +55,7 @@ app.use('/api/v1/assets', assetsRouter);
 app.use('/api/v1/tasks', suggestionsRouter);
 app.use('/api/v1/admin', adminRouter);
 app.use('/api/v1/admin/batch-jobs', batchJobsRouter);
+app.use('/api/comparisons', comparisonsRouter);
 
 // 错误处理
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
