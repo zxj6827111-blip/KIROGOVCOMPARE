@@ -18,8 +18,8 @@ jobs:
     env:
       NODE_ENV: test
       DATABASE_TYPE: sqlite
-      SQLITE_DB_PATH: ${{ runner.temp }}/llm_ingestion.db
-      SQLITE_PATH: ${{ runner.temp }}/llm_ingestion.db
+      SQLITE_DB_PATH: /tmp/llm_ingestion.db
+      SQLITE_PATH: /tmp/llm_ingestion.db
       BASE_URL: http://localhost:3000/api
       LLM_PROVIDER: stub
       GEMINI_API_KEY: ""
