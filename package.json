@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "ts-node src/index.ts",
     "dev:llm": "DATABASE_TYPE=sqlite ts-node src/index-llm.ts",
-    "build": "tsc && cp -r src/public dist/",
+    "build": "tsc && node -e \"const fs=require('fs'); const path=require('path'); const src=path.join('src','public'); const dest=path.join('dist','public'); const copyAsync=()=>fs.cp(src,dest,{recursive:true},err=>{if(err){console.error('fs.cp failed',err); process.exit(1);}}); fs.mkdirSync('dist',{recursive:true}); const canUseCpSync=typeof fs.cpSync==='function' && process.platform!=='win32'; if(canUseCpSync){ try{ fs.cpSync(src,dest,{recursive:true}); } catch(err){ console.warn('fs.cpSync failed, falling back to fs.cp', err); if(typeof fs.cp==='function'){ copyAsync(); } else { throw err; } } } else if(typeof fs.cp==='function'){ console.warn('fs.cpSync unavailable on this platform; using fs.cp'); copyAsync(); } else { console.error('Neither fs.cpSync nor fs.cp is available. Please use Node 16+'); process.exit(1); }\"",
     "start": "node dist/index.js",
     "test": "jest",
     "test:watch": "jest --watch",
