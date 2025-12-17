@@ -78,6 +78,17 @@ if (dbType === 'postgres') {
           cb?.(err ?? null);
         });
       },
+      execute: (statement: string, params?: any[]) =>
+        new Promise((resolve, reject) => {
+          const finalSql = formatParams(statement, params);
+          sqliteDb.run(finalSql, (err: any) => {
+            if (err) {
+              reject(err);
+              return;
+            }
+            resolve({ rows: [] });
+          });
+        }),
     };
   } catch (error) {
     console.warn('sqlite3 native module unavailable, using CLI-backed adapter');
