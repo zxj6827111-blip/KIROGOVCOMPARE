@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import axios from 'axios';
+import { apiClient } from '../apiClient';
 
 const STOP_STATUSES = ['succeeded', 'failed'];
 
@@ -36,7 +36,7 @@ export function useJobPolling(jobId, options = {}) {
 
     const fetchJob = async () => {
       try {
-        const response = await axios.get(`/api/jobs/${jobId}`);
+        const response = await apiClient.get(`/jobs/${jobId}`);
         if (cancelled) return;
 
         const data = response.data;

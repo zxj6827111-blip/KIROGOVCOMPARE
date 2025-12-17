@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import axios from 'axios';
 import './UploadReport.css';
-import { buildApiUrl } from '../apiClient';
+import { apiClient } from '../apiClient';
 
 const extractField = (payload, key) => payload?.[key] || payload?.[key.replace(/_./g, (m) => m[1].toUpperCase())];
 
@@ -30,7 +29,7 @@ function UploadReport() {
 
     setLoading(true);
     try {
-      const response = await axios.post(buildApiUrl('/api/reports'), formData, {
+      const response = await apiClient.post('/reports', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       const payload = response.data || {};

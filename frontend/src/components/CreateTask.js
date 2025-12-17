@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
 import './CreateTask.css';
-
-const API_BASE_URL = 'http://localhost:3000/api/v1';
+import { apiClient } from '../apiClient';
 
 function CreateTask({ onCreateTask }) {
   const [region, setRegion] = useState('');
@@ -23,7 +21,7 @@ function CreateTask({ onCreateTask }) {
   useEffect(() => {
     const loadRegions = async () => {
       try {
-        const response = await axios.get(`${API_BASE_URL}/catalog/regions`);
+        const response = await apiClient.get('/v1/catalog/regions');
         const regionsList = response.data.regions || [];
         setRegions(regionsList);
         
@@ -44,7 +42,7 @@ function CreateTask({ onCreateTask }) {
       try {
         if (!region) return;
         
-        const response = await axios.get(`${API_BASE_URL}/catalog/years?region=${region}`);
+        const response = await apiClient.get(`/v1/catalog/years?region=${region}`);
         const yearsList = response.data.years.map(y => y.year).sort((a, b) => b - a);
         setYears(yearsList);
         
@@ -81,7 +79,7 @@ function CreateTask({ onCreateTask }) {
 
     setLoading(true);
     try {
-      const response = await axios.post(`${API_BASE_URL}/tasks/compare/region-year`, {
+      const response = await apiClient.post('/v1/tasks/compare/region-year', {
         region,
         yearA: parseInt(yearA),
         yearB: parseInt(yearB),
@@ -108,7 +106,7 @@ function CreateTask({ onCreateTask }) {
 
     setLoading(true);
     try {
-      const response = await axios.post(`${API_BASE_URL}/tasks/compare/url`, {
+      const response = await apiClient.post('/v1/tasks/compare/url', {
         urlA,
         urlB,
       });
@@ -141,8 +139,8 @@ function CreateTask({ onCreateTask }) {
       formData.append('fileA', fileA);
       formData.append('fileB', fileB);
 
-      const response = await axios.post(
-        `${API_BASE_URL}/tasks/compare/upload`,
+      const response = await apiClient.post(
+        '/v1/tasks/compare/upload',
         formData,
         {
           headers: {
