@@ -1,8 +1,9 @@
-import { Router } from 'express';
+import express from 'express';
 
-const router = Router();
+const router = express.Router();
 
-// Catalog routes will be implemented here
-// Currently placeholder to prevent build errors
+router.get('/', (_req, res) => {
+  res.json({ message: 'catalog endpoint placeholder' });
+});
 
 export default router;

@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   max_retries INTEGER NOT NULL DEFAULT 3,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   started_at TEXT,
-  finished_at TEXT
+  finished_at TEXT,
+  comparison_id INTEGER REFERENCES comparisons(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_report ON jobs(report_id);

@@ -56,6 +56,15 @@ export function ensureSqliteMigrations(): void {
     runSqlStatements(sql);
   }
 
+  const columns = runSqlStatements('PRAGMA table_info(jobs);') as Array<{ name?: string }>;
+  const hasComparisonId = columns.some((column) => column.name === 'comparison_id');
+  if (!hasComparisonId) {
+    runSqlStatements(
+      'ALTER TABLE jobs ADD COLUMN comparison_id INTEGER REFERENCES comparisons(id) ON DELETE SET NULL;'
+    );
+  }
+  runSqlStatements('CREATE INDEX IF NOT EXISTS idx_jobs_comparison ON jobs(comparison_id);');
+
   migrationsRan = true;
 }
 

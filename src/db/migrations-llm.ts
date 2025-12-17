@@ -46,6 +46,24 @@ CREATE TABLE IF NOT EXISTS report_versions (
 CREATE INDEX IF NOT EXISTS idx_report_versions_report_active
 ON report_versions(report_id, is_active);
 
+CREATE TABLE IF NOT EXISTS comparisons (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  region_id INTEGER NOT NULL REFERENCES regions(id),
+  year_a INTEGER NOT NULL,
+  year_b INTEGER NOT NULL,
+  left_report_id INTEGER NOT NULL REFERENCES reports(id),
+  right_report_id INTEGER NOT NULL REFERENCES reports(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(region_id, year_a, year_b)
+);
+
+CREATE TABLE IF NOT EXISTS comparison_results (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  comparison_id INTEGER NOT NULL UNIQUE REFERENCES comparisons(id) ON DELETE CASCADE,
+  diff_json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
@@ -59,11 +77,13 @@ CREATE TABLE IF NOT EXISTS jobs (
   max_retries INTEGER NOT NULL DEFAULT 3,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   started_at TEXT,
-  finished_at TEXT
+  finished_at TEXT,
+  comparison_id INTEGER REFERENCES comparisons(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_report ON jobs(report_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+CREATE INDEX IF NOT EXISTS idx_jobs_comparison ON jobs(comparison_id);
 
 CREATE TABLE IF NOT EXISTS report_version_parses (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -119,6 +139,24 @@ ON report_versions(report_id, file_hash);
 CREATE INDEX IF NOT EXISTS idx_report_versions_report_active
 ON report_versions(report_id, is_active);
 
+CREATE TABLE IF NOT EXISTS comparisons (
+  id BIGSERIAL PRIMARY KEY,
+  region_id BIGINT NOT NULL REFERENCES regions(id),
+  year_a INTEGER NOT NULL,
+  year_b INTEGER NOT NULL,
+  left_report_id BIGINT NOT NULL REFERENCES reports(id),
+  right_report_id BIGINT NOT NULL REFERENCES reports(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(region_id, year_a, year_b)
+);
+
+CREATE TABLE IF NOT EXISTS comparison_results (
+  id BIGSERIAL PRIMARY KEY,
+  comparison_id BIGINT NOT NULL UNIQUE REFERENCES comparisons(id) ON DELETE CASCADE,
+  diff_json JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS jobs (
   id BIGSERIAL PRIMARY KEY,
   report_id BIGINT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
@@ -132,11 +170,13 @@ CREATE TABLE IF NOT EXISTS jobs (
   max_retries INTEGER NOT NULL DEFAULT 3,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   started_at TIMESTAMPTZ,
-  finished_at TIMESTAMPTZ
+  finished_at TIMESTAMPTZ,
+  comparison_id BIGINT REFERENCES comparisons(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_report ON jobs(report_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+CREATE INDEX IF NOT EXISTS idx_jobs_comparison ON jobs(comparison_id);
 
 CREATE TABLE IF NOT EXISTS report_version_parses (
   id BIGSERIAL PRIMARY KEY,
