@@ -26,6 +26,18 @@
   border-bottom: 2px solid #f0f0f0;
 }
 
+.detail-header .actions {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.detail-header .error-text {
+  color: #e53935;
+  font-size: 12px;
+}
+
 .detail-header h2 {
   font-size: 24px;
   color: #333;
