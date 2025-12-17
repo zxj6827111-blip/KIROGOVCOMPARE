@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - feat/llm-ingestion-v1
+  pull_request:
+    branches:
+      - main
+      - feat/llm-ingestion-v1
+
+jobs:
+  build-and-regression:
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+      SQLITE_DB_PATH: ${{ runner.temp }}/llm_ingestion.db
+      SQLITE_PATH: ${{ runner.temp }}/llm_ingestion.db
+      BASE_URL: http://localhost:3000/api
+      LLM_PROVIDER: stub
+      GEMINI_API_KEY: ""
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Scan for hidden control characters
+        run: python3 scripts/check_control_chars.py
+
+      - name: Install backend dependencies
+        run: npm ci
+
+      - name: Build backend
+        run: npm run build
+
+      - name: Install frontend dependencies
+        if: "hashFiles('frontend/package.json') != ''"
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Build frontend
+        if: "hashFiles('frontend/package.json') != ''"
+        run: |
+          cd frontend
+          npm run build
+
+      - name: Install sqlite3 CLI
+        run: sudo apt-get update && sudo apt-get install -y sqlite3
+
+      - name: Start backend server
+        run: |
+          npm run dev:llm > server.log 2>&1 &
+          echo $! > server.pid
+
+          for i in {1..30}; do
+            if curl -fsS "http://localhost:3000/api/health" >/dev/null; then
+              echo "Server is up"
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "${ready:-0}" != "1" ]; then
+            echo "Server failed to start"
+            cat server.log
+            exit 1
+          fi
+
+      - name: Run acceptance scripts
+        run: |
+          set -euo pipefail
+          scripts=(LLM_UPLOAD_TEST.sh LLM_JOB_TEST.sh LLM_PARSE_STUB_TEST.sh LLM_REPORTS_READ_TEST.sh LLM_PARSE_PROVIDER_TEST.sh)
+          for script in "${scripts[@]}"; do
+            if [ -f "$script" ]; then
+              echo "[run] $script"
+              bash "$script"
+            else
+              echo "[skip] $script (not found)"
+            fi
+          done
+
+      - name: Stop backend server
+        if: always()
+        run: |
+          if [ -f server.pid ]; then
+            kill "$(cat server.pid)" || true
+          fi
+          if [ -f server.log ]; then
+            echo "--- server.log ---"
+            cat server.log
+          fi
