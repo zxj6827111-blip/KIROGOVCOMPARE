@@ -6,6 +6,7 @@ import llmHealthRouter from './routes/llm-health';
 import llmRegionsRouter from './routes/llm-regions';
 import llmJobsRouter from './routes/llm-jobs';
 import reportsRouter from './routes/reports';
+import llmComparisonsRouter from './routes/llm-comparisons';
 import { llmJobRunner } from './services/LlmJobRunner';
 
 dotenv.config();
@@ -38,6 +39,7 @@ app.get('/', (_req, res) => {
 // API 路由
 app.use('/api/regions', llmRegionsRouter);
 app.use('/api/jobs', llmJobsRouter);
+app.use('/api', llmComparisonsRouter);
 app.use('/api', reportsRouter);
 
 // 错误处理

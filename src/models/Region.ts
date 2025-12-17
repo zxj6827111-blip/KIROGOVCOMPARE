@@ -41,7 +41,7 @@ export const RegionModel = {
       level: input.level,
       parentId: input.parentId,
       status: input.status ?? 'active',
-      sortOrder: input.sortOrder,
+      sortOrder: input.sortOrder ?? 0,
       createdAt: now,
       updatedAt: now,
     };
