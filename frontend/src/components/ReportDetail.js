@@ -1,12 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
 import './ReportDetail.css';
+import { apiClient } from '../apiClient';
 
-function ReportDetail({ apiBaseUrl, reportId, onBack }) {
+function ReportDetail({ reportId: propReportId, onBack }) {
+  const reportId = propReportId || window.location.pathname.split('/').pop();
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [showParsed, setShowParsed] = useState(false);
+  const handleBack = () => {
+    if (onBack) return onBack();
+    window.history.back();
+  };
 
   useEffect(() => {
     const fetchDetail = async () => {
@@ -14,7 +19,7 @@ function ReportDetail({ apiBaseUrl, reportId, onBack }) {
       setLoading(true);
       setError('');
       try {
-        const response = await axios.get(`${apiBaseUrl}/reports/${reportId}`);
+        const response = await apiClient.get(`/reports/${reportId}`);
         const payload = response.data?.data ?? response.data?.report ?? response.data;
         setReport(payload || null);
       } catch (err) {
@@ -26,7 +31,7 @@ function ReportDetail({ apiBaseUrl, reportId, onBack }) {
     };
 
     fetchDetail();
-  }, [apiBaseUrl, reportId]);
+  }, [reportId]);
 
   const renderParsedContent = (parsed) => {
     if (!parsed) return <p className="meta">暂无解析内容</p>;
@@ -78,7 +83,7 @@ function ReportDetail({ apiBaseUrl, reportId, onBack }) {
             <p className="subtitle">查看报告、最新任务与生效版本信息</p>
           </div>
           <div className="actions">
-            <button className="secondary-btn" onClick={onBack}>
+            <button className="secondary-btn" onClick={handleBack}>
               返回列表
             </button>
           </div>

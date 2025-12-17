@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
 import './ReportsList.css';
+import { apiClient } from '../apiClient';
 
-function ReportsList({ apiBaseUrl, onSelectReport }) {
+function ReportsList({ onSelectReport }) {
   const [filters, setFilters] = useState({ regionId: '', year: '' });
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -16,7 +16,7 @@ function ReportsList({ apiBaseUrl, onSelectReport }) {
       if (filters.regionId.trim()) params.region_id = filters.regionId.trim();
       if (filters.year.trim()) params.year = filters.year.trim();
 
-      const response = await axios.get(`${apiBaseUrl}/reports`, { params });
+      const response = await apiClient.get('/reports', { params });
       const rows = response.data?.data ?? response.data?.reports ?? response.data ?? [];
       setReports(Array.isArray(rows) ? rows : []);
     } catch (err) {

@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
 import TextComparison from './TextComparison';
 import TableComparison from './TableComparison';
 import JobStatus from './JobStatus';
 import './TaskDetail.css';
-
-const API_BASE_URL = 'http://localhost:3000/api/v1';
+import { apiClient } from '../apiClient';
 
 function TaskDetail({ task, onBack }) {
   const [diffResult, setDiffResult] = useState(null);
@@ -19,9 +17,9 @@ function TaskDetail({ task, onBack }) {
     const fetchDetails = async () => {
       try {
         const [diffRes, summaryRes, viewModelRes] = await Promise.all([
-          axios.get(`${API_BASE_URL}/tasks/${task.taskId}/diff`),
-          axios.get(`${API_BASE_URL}/tasks/${task.taskId}/summary`),
-          axios.get(`${API_BASE_URL}/tasks/${task.taskId}/view-model`),
+          apiClient.get(`/v1/tasks/${task.taskId}/diff`),
+          apiClient.get(`/v1/tasks/${task.taskId}/summary`),
+          apiClient.get(`/v1/tasks/${task.taskId}/view-model`),
         ]);
         setDiffResult(diffRes.data);
         setSummary(summaryRes.data);
