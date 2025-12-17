@@ -263,3 +263,4 @@ print('[assert] comparison detail contains diff_json with expected structure')
 PY
 
 echo "[success] compare flow completed"
+echo "COMPARISON_ID=${COMPARISON_ID}"

@@ -1,4 +1,5 @@
 import express from 'express';
+import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
 import { ensureSqliteMigrations, querySqlite, sqlValue } from '../config/sqlite';
 
 const router = express.Router();
@@ -70,6 +71,60 @@ function fetchParsedVersion(reportId: number): ParsedVersion | undefined {
     version_id: version.version_id,
     parsed_json: parseJsonSafe(version.parsed_json),
   };
+}
+
+function stringifyValue(value: unknown): string {
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch (error) {
+    return String(value);
+  }
+}
+
+function buildDiffSection(title: string, entries: any[], emphasize: string): Paragraph[] {
+  const paragraphs: Paragraph[] = [
+    new Paragraph({
+      text: title,
+      heading: HeadingLevel.HEADING_2,
+      spacing: { after: 200 },
+    }),
+  ];
+
+  if (!entries || !entries.length) {
+    paragraphs.push(
+      new Paragraph({
+        children: [new TextRun({ text: '无变化项', italics: true })],
+        spacing: { after: 150 },
+      })
+    );
+    return paragraphs;
+  }
+
+  for (const entry of entries) {
+    const bulletParts: TextRun[] = [
+      new TextRun({ text: `路径：${entry.path || '(空路径)'}`, bold: true }),
+      new TextRun({ text: `（${emphasize}）`, break: 1, bold: true }),
+    ];
+
+    if (entry.left !== undefined) {
+      bulletParts.push(new TextRun({ text: `左侧：${stringifyValue(entry.left)}`, break: 1 }));
+    }
+    if (entry.right !== undefined) {
+      bulletParts.push(new TextRun({ text: `右侧：${stringifyValue(entry.right)}`, break: 1 }));
+    }
+
+    paragraphs.push(
+      new Paragraph({
+        children: bulletParts,
+        spacing: { after: 200 },
+      })
+    );
+  }
+
+  return paragraphs;
 }
 
 router.post('/comparisons', (req, res) => {
@@ -303,6 +358,74 @@ router.get('/comparisons/:id', (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching comparison detail:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/comparisons/:id/export', async (req, res) => {
+  try {
+    const comparisonId = Number(req.params.id);
+    if (!Number.isInteger(comparisonId) || comparisonId < 1) {
+      return res.status(400).json({ error: 'comparison_id 无效' });
+    }
+
+    ensureSqliteMigrations();
+
+    const comparison = querySqlite(`
+      SELECT id, region_id, year_a, year_b, left_report_id, right_report_id
+      FROM comparisons
+      WHERE id = ${sqlValue(comparisonId)}
+      LIMIT 1;
+    `)[0];
+
+    if (!comparison) {
+      return res.status(404).json({ error: 'comparison 不存在' });
+    }
+
+    const resultRow = querySqlite(`
+      SELECT diff_json FROM comparison_results WHERE comparison_id = ${sqlValue(comparisonId)} LIMIT 1;
+    `)[0];
+
+    if (!resultRow?.diff_json) {
+      return res.status(404).json({ error: 'comparison_result 不存在或尚未生成' });
+    }
+
+    const parsedDiff = parseJsonSafe(resultRow.diff_json);
+    const diffJson = parsedDiff || { added: [], removed: [], changed: [] };
+
+    const paragraphs: Paragraph[] = [
+      new Paragraph({
+        text: '年度报告比对导出',
+        heading: HeadingLevel.TITLE,
+        spacing: { after: 300 },
+      }),
+      new Paragraph({
+        text: `比对ID：${comparison.id}`,
+      }),
+      new Paragraph({
+        text: `地区：${comparison.region_id}，年份：${comparison.year_a} vs ${comparison.year_b}`,
+        spacing: { after: 200 },
+      }),
+    ];
+
+    paragraphs.push(...buildDiffSection('新增', diffJson.added || [], '新增'));
+    paragraphs.push(...buildDiffSection('删除', diffJson.removed || [], '删除'));
+    paragraphs.push(...buildDiffSection('变更', diffJson.changed || [], '变更'));
+
+    const doc = new Document({
+      sections: [
+        {
+          children: paragraphs,
+        },
+      ],
+    });
+
+    const buffer = await Packer.toBuffer(doc);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="comparison_${comparison.id}.docx"`);
+    return res.send(buffer);
+  } catch (error) {
+    console.error('Error exporting comparison docx:', error);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
