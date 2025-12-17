@@ -3,7 +3,8 @@ import path from 'path';
 import { execFileSync } from 'child_process';
 
 const dataDir = path.join(process.cwd(), 'data');
-export const SQLITE_DB_PATH = process.env.SQLITE_DB_PATH || path.join(dataDir, 'llm_dev.db');
+// 统一使用 llm_ingestion.db 作为 LLM 功能的数据库名
+export const SQLITE_DB_PATH = process.env.SQLITE_DB_PATH || path.join(dataDir, 'llm_ingestion.db');
 
 let migrationsRan = false;
 

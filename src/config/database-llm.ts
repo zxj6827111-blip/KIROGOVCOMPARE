@@ -1,6 +1,5 @@
 /// <reference path="../types/sqlite3.d.ts" />
 import { Pool } from 'pg';
-import sqlite3 from 'sqlite3';
 import path from 'path';
 import { SQLITE_DB_PATH } from './sqlite';
 
@@ -22,9 +21,17 @@ if (dbType === 'postgres') {
     console.error('Unexpected error on idle client', err);
   });
 } else {
-  // SQLite 配置
-  const dbPath =
-    process.env.SQLITE_PATH || process.env.SQLITE_DB_PATH || SQLITE_DB_PATH || path.join(process.cwd(), 'data', 'llm_ingestion.db');
+  // SQLite 配置 - 统一使用 SQLITE_DB_PATH
+  const dbPath = process.env.SQLITE_PATH || SQLITE_DB_PATH;
+  
+  // 动态加载 sqlite3（避免启动时加载失败）
+  let sqlite3: any;
+  try {
+    sqlite3 = require('sqlite3');
+  } catch (err) {
+    console.error('❌ 无法加载 sqlite3 模块，请运行: npm install sqlite3');
+    throw err;
+  }
   
   // 创建数据目录
   const fs = require('fs');
