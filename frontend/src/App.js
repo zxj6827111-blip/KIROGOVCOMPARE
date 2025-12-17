@@ -1,15 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './App.css';
-import TaskList from './components/TaskList';
 import CreateTask from './components/CreateTask';
 import TaskDetail from './components/TaskDetail';
 import AssetCatalog from './components/AssetCatalog';
-
-const API_BASE_URL = 'http://localhost:3000/api/v1';
+import UploadReport from './components/UploadReport';
+import { buildApiUrl, API_BASE_URL } from './apiClient';
 
 function App() {
-  const [currentPage, setCurrentPage] = useState('create');
+  const [currentPage, setCurrentPage] = useState('upload');
   const [selectedTask, setSelectedTask] = useState(null);
 
   // 初始化：检查 URL 中是否有 taskId 参数
@@ -21,7 +20,7 @@ function App() {
       // 从后端获取任务详情
       const fetchTask = async () => {
         try {
-          const response = await axios.get(`${API_BASE_URL}/tasks/${taskId}`);
+          const response = await axios.get(buildApiUrl(`/api/v1/tasks/${taskId}`));
           setSelectedTask(response.data);
           setCurrentPage('detail');
         } catch (error) {
@@ -42,12 +41,6 @@ function App() {
     }
   };
 
-  // 查看任务详情
-  const handleViewTask = (task) => {
-    setSelectedTask(task);
-    setCurrentPage('detail');
-  };
-
   return (
     <div className="app">
       <header className="header">
@@ -65,6 +58,12 @@ function App() {
           ➕ 创建任务
         </button>
         <button
+          className={`nav-btn ${currentPage === 'upload' ? 'active' : ''}`}
+          onClick={() => setCurrentPage('upload')}
+        >
+          📤 上传报告
+        </button>
+        <button
           className={`nav-btn ${currentPage === 'catalog' ? 'active' : ''}`}
           onClick={() => setCurrentPage('catalog')}
         >
@@ -77,6 +76,10 @@ function App() {
           <CreateTask onCreateTask={handleCreateTask} />
         )}
 
+        {currentPage === 'upload' && (
+          <UploadReport />
+        )}
+
         {currentPage === 'catalog' && (
           <AssetCatalog />
         )}
@@ -87,7 +90,7 @@ function App() {
       </main>
 
       <footer className="footer">
-        <p>© 2025 政府信息公开年度报告差异比对系统 | 后端 API: http://localhost:3000</p>
+        <p>© 2025 政府信息公开年度报告差异比对系统 | 后端 API: {API_BASE_URL || '同域 /dev proxy'}</p>
       </footer>
     </div>
   );

@@ -72,13 +72,14 @@ frontend/
 
 ## 🔗 API 端点
 
-前端连接到后端 API: `http://localhost:3000/api/v1`
+前端默认通过同域或开发代理访问后端 API，必要时可通过环境变量指定基地址。
 
 ### 目录相关（Phase 5 新增）
 
 - `GET /catalog/regions` - 获取城市列表
 - `GET /catalog/years?region=XXX` - 获取年份列表
 - `GET /catalog/regions/:region` - 获取城市详情
+- `POST /reports` - 上传 PDF 报告，返回 job_id/version_id/report_id（201 或 409）
 
 ### 任务相关
 
@@ -96,10 +97,10 @@ frontend/
 
 ## 📝 环境变量
 
-在 `.env` 文件中配置:
+在 `.env` 文件中配置（可选，默认同域或 package.json proxy 指定的地址）:
 
 ```
-REACT_APP_API_URL=http://localhost:3000/api/v1
+REACT_APP_API_BASE_URL=http://localhost:3000
 ```
 
 ## 🧪 测试
