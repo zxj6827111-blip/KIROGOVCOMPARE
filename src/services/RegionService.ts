@@ -109,7 +109,7 @@ export class RegionService {
    */
   static async getAllRegions(): Promise<Region[]> {
     const regions = Array.from(regionsStore.values());
-    return regions.sort((a, b) => a.sortOrder - b.sortOrder);
+    return regions.sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
   }
 
   /**
@@ -179,7 +179,7 @@ export class RegionService {
     const regions = Array.from(regionsStore.values());
     return regions
       .filter(r => r.level === level)
-      .sort((a, b) => a.sortOrder - b.sortOrder);
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
   }
 
   /**
@@ -189,7 +189,7 @@ export class RegionService {
     const regions = Array.from(regionsStore.values());
     return regions
       .filter(r => r.parentId === parentId)
-      .sort((a, b) => a.sortOrder - b.sortOrder);
+      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
   }
 
   /**
