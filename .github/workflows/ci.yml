@@ -34,7 +34,7 @@ jobs:
           node-version: 20
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y sqlite3 unzip
+        run: sudo apt-get update && sudo apt-get install -y sqlite3
 
       - name: Scan for hidden control characters
         run: python3 scripts/check_control_chars.py
