@@ -3,37 +3,86 @@ import pool, { dbType } from '../config/database-llm';
 
 const router = express.Router();
 
-// POST /api/regions - 创建城市
+// POST /api/regions - 创建区域（支持层级）
 router.post('/', async (req: Request, res: Response) => {
   try {
     const { code, name, province } = req.body;
+    // 兼容前端 parentId / parent_id 传参
+    const parent_id = req.body.parent_id ?? req.body.parentId ?? null;
 
     if (!code || !name) {
       return res.status(400).json({ error: 'code and name are required' });
     }
 
-    if (dbType === 'sqlite') {
-      const result = await new Promise<any>((resolve, reject) => {
-        pool.run(
-          'INSERT INTO regions (code, name, province) VALUES (?, ?, ?)',
-          [code, name, province || null],
-          function(this: any, err: any) {
+    // 计算 level：若 parent_id 存在则查询父级 level，否则为 1
+    let level = 1;
+    if (parent_id) {
+      const parentIdNumber = Number(parent_id);
+      if (!Number.isFinite(parentIdNumber)) {
+        return res.status(400).json({ error: 'parent_id must be a number' });
+      }
+      if (dbType === 'sqlite') {
+        const parent = await new Promise<any>((resolve, reject) => {
+          pool.get('SELECT level FROM regions WHERE id = ?', [parentIdNumber], (err: any, row: any) => {
             if (err) reject(err);
-            else resolve({ id: this.lastID });
-          }
-        );
+            else resolve(row);
+          });
+        });
+        if (!parent) {
+          return res.status(404).json({ error: 'Parent region not found' });
+        }
+        const parentLevel = Number(parent.level);
+        const normalizedParentLevel = Number.isFinite(parentLevel) && parentLevel >= 1 ? parentLevel : 1;
+        level = normalizedParentLevel + 1;
+      } else {
+        const parentResult = await pool.query('SELECT level FROM regions WHERE id = $1', [parentIdNumber]);
+        if (parentResult.rows.length === 0) {
+          return res.status(404).json({ error: 'Parent region not found' });
+        }
+        const parentLevel = Number(parentResult.rows[0].level);
+        const normalizedParentLevel = Number.isFinite(parentLevel) && parentLevel >= 1 ? parentLevel : 1;
+        level = normalizedParentLevel + 1;
+      }
+    }
+
+    if (!Number.isFinite(level)) {
+      return res.status(400).json({ error: 'Level calculation failed' });
+    }
+    if (level < 1 || level > 4) {
+      return res.status(400).json({ error: 'Region level must be between 1 and 4' });
+    }
+
+    const levelValue = level;
+
+    // 统一使用 $n 占位符，sqlite 也会被格式化函数替换
+    const insertSql = 'INSERT INTO regions (code, name, province, parent_id, level) VALUES ($1, $2, $3, $4, $5)';
+    const params = [code, name, province || null, parent_id ? Number(parent_id) : null, levelValue];
+
+    if (dbType === 'sqlite') {
+      await new Promise<void>((resolve, reject) => {
+        pool.run(insertSql, params, (err: any) => {
+          if (err) reject(err);
+          else resolve();
+        });
       });
 
-      res.status(201).json({
-        id: result.id,
-        code,
-        name,
-        province: province || null
-      });
+      const inserted = await pool.query('SELECT id, code, name, province, parent_id, level FROM regions WHERE code = $1', [code]);
+      const region = inserted.rows?.[0];
+
+      res.status(201).json(
+        region || {
+          id: null,
+          code,
+          name,
+          province: province || null,
+          parent_id: parent_id || null,
+          level: levelValue,
+        }
+      );
     } else {
       const result = await pool.query(
-        'INSERT INTO regions (code, name, province) VALUES ($1, $2, $3) RETURNING id, code, name, province',
-        [code, name, province || null]
+        `${insertSql} RETURNING id, code, name, province, parent_id, level`,
+        params
       );
 
       res.status(201).json(result.rows[0]);
@@ -47,12 +96,12 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/regions - 获取城市列表
+// GET /api/regions - 获取区域列表（带层级）
 router.get('/', async (_req: Request, res: Response) => {
   try {
     if (dbType === 'sqlite') {
       const rows = await new Promise<any[]>((resolve, reject) => {
-        pool.all('SELECT id, code, name, province FROM regions ORDER BY id', (err: any, rows: any[]) => {
+        pool.all('SELECT id, code, name, province, parent_id, level FROM regions ORDER BY level, id', (err: any, rows: any[]) => {
           if (err) reject(err);
           else resolve(rows || []);
         });
@@ -60,7 +109,7 @@ router.get('/', async (_req: Request, res: Response) => {
 
       res.json({ data: rows });
     } else {
-      const result = await pool.query('SELECT id, code, name, province FROM regions ORDER BY id');
+      const result = await pool.query('SELECT id, code, name, province, parent_id, level FROM regions ORDER BY level, id');
       res.json({ data: result.rows });
     }
   } catch (error) {
@@ -69,14 +118,14 @@ router.get('/', async (_req: Request, res: Response) => {
   }
 });
 
-// GET /api/regions/:id - 获取城市详情
+// GET /api/regions/:id - 获取区域详情
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
     if (dbType === 'sqlite') {
       const row = await new Promise<any>((resolve, reject) => {
-        pool.get('SELECT id, code, name, province FROM regions WHERE id = ?', [id], (err: any, row: any) => {
+        pool.get('SELECT id, code, name, province, parent_id, level FROM regions WHERE id = ?', [id], (err: any, row: any) => {
           if (err) reject(err);
           else resolve(row);
         });
@@ -88,7 +137,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 
       res.json(row);
     } else {
-      const result = await pool.query('SELECT id, code, name, province FROM regions WHERE id = $1', [id]);
+      const result = await pool.query('SELECT id, code, name, province, parent_id, level FROM regions WHERE id = $1', [id]);
 
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'Region not found' });
@@ -98,6 +147,35 @@ router.get('/:id', async (req: Request, res: Response) => {
     }
   } catch (error) {
     console.error('Error fetching region:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// DELETE /api/regions/:id - 删除区域
+router.delete('/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    if (dbType === 'sqlite') {
+      await new Promise<void>((resolve, reject) => {
+        pool.run('DELETE FROM regions WHERE id = ?', [id], (err: any) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+
+      res.json({ message: 'Region deleted successfully' });
+    } else {
+      const result = await pool.query('DELETE FROM regions WHERE id = $1 RETURNING id', [id]);
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Region not found' });
+      }
+
+      res.json({ message: 'Region deleted successfully' });
+    }
+  } catch (error) {
+    console.error('Error deleting region:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
