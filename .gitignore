@@ -8,6 +8,10 @@ dist/
 .vscode/
 .idea/
 coverage/
+data/
+*.db
+*.patch
+*.rej
 uploads/
 *.swp
 *.swo

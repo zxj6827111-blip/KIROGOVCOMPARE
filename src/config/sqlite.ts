@@ -2,21 +2,72 @@ import fs from 'fs';
 import path from 'path';
 import { execFileSync } from 'child_process';
 
-const dataDir = path.join(process.cwd(), 'data');
-export const SQLITE_DB_PATH = process.env.SQLITE_DB_PATH || path.join(dataDir, 'llm_ingestion.db');
+function resolveProjectRoot(): string {
+  // 在 src/ 与编译后的 dist/ 下运行都能定位到仓库根目录。
+  const candidate = path.resolve(__dirname, '..', '..');
+  if (fs.existsSync(path.join(candidate, 'package.json'))) {
+    return candidate;
+  }
+  const candidate2 = path.resolve(__dirname, '..', '..', '..');
+  if (fs.existsSync(path.join(candidate2, 'package.json'))) {
+    return candidate2;
+  }
+  return process.cwd();
+}
+
+export const PROJECT_ROOT = resolveProjectRoot();
+export const DATA_DIR = path.join(PROJECT_ROOT, 'data');
+export const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
+export const UPLOADS_TMP_DIR = path.join(UPLOADS_DIR, 'tmp');
+
+export const SQLITE_DB_PATH = process.env.SQLITE_DB_PATH || path.join(DATA_DIR, 'llm_ingestion.db');
+
+let sqlite3Command = process.env.SQLITE3_BIN || 'sqlite3';
+
+function bundledSqlite3Path(): string {
+  // 在源码目录与编译后 dist 目录都可定位到仓库根目录下的 tools/sqlite/sqlite3.exe
+  return path.resolve(PROJECT_ROOT, 'tools', 'sqlite', 'sqlite3.exe');
+}
+
+function resolveSqlite3Command(): string {
+  if (process.env.SQLITE3_BIN) {
+    return process.env.SQLITE3_BIN;
+  }
+
+  // 若 PATH 中没有 sqlite3，则回退到项目自带的 sqlite3.exe
+  // 注意：不在这里主动探测 PATH（探测会产生额外开销），在执行时按需回退。
+  return sqlite3Command;
+}
 
 let migrationsRan = false;
 let loggedDbPath = false;
 
 function ensureDataDir(): void {
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
   }
 }
 
 function runSqlStatements(sql: string): any[] {
   ensureDataDir();
-  const output = execFileSync('sqlite3', ['-json', SQLITE_DB_PATH], { encoding: 'utf-8', input: sql }).trim();
+  const cmd = resolveSqlite3Command();
+  let output = '';
+  try {
+    output = execFileSync(cmd, ['-json', SQLITE_DB_PATH], { encoding: 'utf-8', input: sql }).trim();
+  } catch (error: any) {
+    // Windows 环境常见：sqlite3 不在 PATH。优先回退到仓库自带的 sqlite3.exe
+    if (error?.code === 'ENOENT' && cmd === 'sqlite3') {
+      const fallback = bundledSqlite3Path();
+      if (fs.existsSync(fallback)) {
+        sqlite3Command = fallback;
+        output = execFileSync(sqlite3Command, ['-json', SQLITE_DB_PATH], { encoding: 'utf-8', input: sql }).trim();
+      } else {
+        throw error;
+      }
+    } else {
+      throw error;
+    }
+  }
   if (!output) {
     return [];
   }
@@ -46,7 +97,7 @@ export function ensureSqliteMigrations(): void {
     return;
   }
 
-  const migrationsDir = path.join(__dirname, '../../migrations/sqlite');
+  const migrationsDir = path.join(PROJECT_ROOT, 'migrations', 'sqlite');
   if (!fs.existsSync(migrationsDir)) {
     migrationsRan = true;
     return;
@@ -88,6 +139,23 @@ export function ensureSqliteMigrations(): void {
     runSqlStatements('UPDATE regions SET level = 1 WHERE level IS NULL OR level < 1;');
   }
   runSqlStatements('CREATE INDEX IF NOT EXISTS idx_regions_parent ON regions(parent_id);');
+
+  // 兼容新增字段：reports.unit_name
+  const reportColumns = runSqlStatements('PRAGMA table_info(reports);') as Array<{ name?: string }>;
+  const hasUnitName = reportColumns.some((column) => column.name === 'unit_name');
+  if (!hasUnitName) {
+    runSqlStatements('ALTER TABLE reports ADD COLUMN unit_name TEXT;');
+  }
+
+  // 以前版本曾引入 deleted_at 软删除字段；当前版本使用硬删除。
+  // 不强制新增该字段，保持旧库兼容即可。
+
+  // 兼容新增字段：report_versions.raw_text
+  const versionColumns = runSqlStatements('PRAGMA table_info(report_versions);') as Array<{ name?: string }>;
+  const hasRawText = versionColumns.some((column) => column.name === 'raw_text');
+  if (!hasRawText) {
+    runSqlStatements('ALTER TABLE report_versions ADD COLUMN raw_text TEXT;');
+  }
 
   migrationsRan = true;
 }
