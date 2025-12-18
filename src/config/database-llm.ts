@@ -12,11 +12,27 @@ function formatParams(statement: string, params?: any[]): string {
     return statement;
   }
 
-  return params.reduce((sql, param, index) => {
-    const placeholder = `$${index + 1}`;
-    const value = sqlValue(param as any);
-    return sql.split(placeholder).join(value);
-  }, statement);
+  let formatted = statement;
+  
+  // 先检查是否使用 $N 格式（PostgreSQL风格）
+  const hasPostgresPlaceholders = /\$\d+/.test(formatted);
+  
+  if (hasPostgresPlaceholders) {
+    // PostgreSQL 风格：$1, $2 等
+    params.forEach((param, index) => {
+      const placeholder = `$${index + 1}`;
+      const value = sqlValue(param as any);
+      formatted = formatted.split(placeholder).join(value);
+    });
+  } else {
+    // SQLite 风格：? 占位符
+    for (const param of params) {
+      const value = sqlValue(param as any);
+      formatted = formatted.replace(/\?/, value);
+    }
+  }
+
+  return formatted;
 }
 
 if (dbType === 'postgres') {
@@ -50,7 +66,34 @@ if (dbType === 'postgres') {
       const finalSql = formatParams(statement, params);
       try {
         querySqlite(finalSql);
-        cb?.(null);
+        const context: Record<string, unknown> = {};
+        if (/insert\s+into/i.test(finalSql)) {
+          const lastRow = querySqlite('SELECT last_insert_rowid() AS id;');
+          context.lastID = lastRow?.[0]?.id ?? null;
+        }
+        cb?.call(context, null);
+      } catch (err) {
+        cb?.(err);
+      }
+    },
+    all: (statement: string, paramsOrCb?: any[] | ((err?: any, rows?: any[]) => void), callback?: (err?: any, rows?: any[]) => void) => {
+      const cb = typeof paramsOrCb === 'function' ? paramsOrCb : callback;
+      const params = Array.isArray(paramsOrCb) ? paramsOrCb : [];
+      const finalSql = formatParams(statement, params);
+      try {
+        const rows = querySqlite(finalSql);
+        cb?.(null, rows || []);
+      } catch (err) {
+        cb?.(err);
+      }
+    },
+    get: (statement: string, paramsOrCb?: any[] | ((err?: any, row?: any) => void), callback?: (err?: any, row?: any) => void) => {
+      const cb = typeof paramsOrCb === 'function' ? paramsOrCb : callback;
+      const params = Array.isArray(paramsOrCb) ? paramsOrCb : [];
+      const finalSql = formatParams(statement, params);
+      try {
+        const rows = querySqlite(finalSql);
+        cb?.(null, rows?.[0]);
       } catch (err) {
         cb?.(err);
       }
