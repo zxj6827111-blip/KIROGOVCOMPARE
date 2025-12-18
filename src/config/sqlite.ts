@@ -6,6 +6,7 @@ const dataDir = path.join(process.cwd(), 'data');
 export const SQLITE_DB_PATH = process.env.SQLITE_DB_PATH || path.join(dataDir, 'llm_ingestion.db');
 
 let migrationsRan = false;
+let loggedDbPath = false;
 
 function ensureDataDir(): void {
   if (!fs.existsSync(dataDir)) {
@@ -36,6 +37,11 @@ function runSqlStatements(sql: string): any[] {
 }
 
 export function ensureSqliteMigrations(): void {
+  if (!loggedDbPath) {
+    console.log(`[sqlite] Using database at ${SQLITE_DB_PATH}`);
+    loggedDbPath = true;
+  }
+
   if (migrationsRan) {
     return;
   }
@@ -64,6 +70,24 @@ export function ensureSqliteMigrations(): void {
     );
   }
   runSqlStatements('CREATE INDEX IF NOT EXISTS idx_jobs_comparison ON jobs(comparison_id);');
+
+  const regionColumns = runSqlStatements('PRAGMA table_info(regions);') as Array<{ name?: string }>;
+  const hasParentId = regionColumns.some((column) => column.name === 'parent_id');
+  if (!hasParentId) {
+    runSqlStatements('ALTER TABLE regions ADD COLUMN parent_id INTEGER;');
+  }
+
+  let levelColumns = hasParentId ? regionColumns : runSqlStatements('PRAGMA table_info(regions);');
+  let hasLevel = levelColumns.some((column) => column.name === 'level');
+  if (!hasLevel) {
+    runSqlStatements('ALTER TABLE regions ADD COLUMN level INTEGER NOT NULL DEFAULT 1;');
+    levelColumns = runSqlStatements('PRAGMA table_info(regions);');
+    hasLevel = true;
+  }
+  if (hasLevel) {
+    runSqlStatements('UPDATE regions SET level = 1 WHERE level IS NULL OR level < 1;');
+  }
+  runSqlStatements('CREATE INDEX IF NOT EXISTS idx_regions_parent ON regions(parent_id);');
 
   migrationsRan = true;
 }

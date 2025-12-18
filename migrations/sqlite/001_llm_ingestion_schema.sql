@@ -6,9 +6,13 @@ CREATE TABLE IF NOT EXISTS regions (
   code TEXT UNIQUE NOT NULL,
   name TEXT NOT NULL,
   province TEXT,
+  parent_id INTEGER,
+  level INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_regions_parent ON regions(parent_id);
 
 CREATE TABLE IF NOT EXISTS reports (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
