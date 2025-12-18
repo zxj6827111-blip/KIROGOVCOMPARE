@@ -1,6 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import fs from 'fs';
+import fsPromises from 'fs/promises';
 import path from 'path';
 import { ensureSqliteMigrations, querySqlite, sqlValue } from '../config/sqlite';
 import { reportUploadService } from '../services/ReportUploadService';
@@ -29,6 +30,7 @@ const upload = multer({
 });
 
 router.post('/reports', upload.single('file'), async (req, res) => {
+  const tmpFilePath = req.file?.path;
   try {
     const regionId = Number(req.body.region_id);
     const year = Number(req.body.year);
@@ -47,7 +49,6 @@ router.post('/reports', upload.single('file'), async (req, res) => {
     }
 
     if (file.mimetype !== 'application/pdf' && !file.originalname.toLowerCase().endsWith('.pdf')) {
-      fs.unlink(file.path, () => undefined);
       return res.status(400).json({ error: '仅支持 PDF 文件' });
     }
 
@@ -88,6 +89,10 @@ router.post('/reports', upload.single('file'), async (req, res) => {
 
     console.error('Upload error:', error);
     return res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    if (tmpFilePath) {
+      await fsPromises.unlink(tmpFilePath).catch(() => undefined);
+    }
   }
 });
 

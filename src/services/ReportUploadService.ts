@@ -23,6 +23,8 @@ export interface ReportUploadResult {
 }
 
 const storageDir = path.join(process.cwd(), 'data', 'uploads');
+const dbClient = (process.env.DB_CLIENT || process.env.DB_DRIVER || '').toLowerCase();
+const updatedAtExpression = ['pg', 'postgres', 'postgresql'].includes(dbClient) ? 'NOW()' : "datetime('now')";
 
 function ensureStorageDir(dir: string = storageDir): void {
   if (!fs.existsSync(dir)) {
@@ -44,7 +46,7 @@ export class ReportUploadService {
 
     const report = querySqlite(
       `INSERT INTO reports (region_id, year) VALUES (${sqlValue(payload.regionId)}, ${sqlValue(payload.year)})
-       ON CONFLICT(region_id, year) DO UPDATE SET updated_at = excluded.updated_at
+       ON CONFLICT(region_id, year) DO UPDATE SET updated_at = ${updatedAtExpression}
        RETURNING id;`
     )[0];
 
