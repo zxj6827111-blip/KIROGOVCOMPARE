@@ -312,6 +312,51 @@ router.get('/reports/:id', (req, res) => {
   }
 });
 
+router.post('/reports/:id/parse', (req, res) => {
+  try {
+    const reportId = Number(req.params.id);
+    if (!reportId || Number.isNaN(reportId) || !Number.isInteger(reportId) || reportId < 1) {
+      return res.status(400).json({ error: 'report_id 无效' });
+    }
+
+    ensureSqliteMigrations();
+
+    const report = querySqlite(`SELECT id FROM reports WHERE id = ${sqlValue(reportId)} LIMIT 1;`)[0] as
+      | { id?: number }
+      | undefined;
+    if (!report?.id) {
+      return res.status(404).json({ error: 'report 不存在' });
+    }
+
+    const version = querySqlite(
+      `SELECT id FROM report_versions WHERE report_id = ${sqlValue(reportId)} AND is_active = 1 ORDER BY id DESC LIMIT 1;`
+    )[0] as { id?: number } | undefined;
+
+    if (!version?.id) {
+      return res.status(404).json({ error: 'report_version 不存在' });
+    }
+
+    const existingJob = querySqlite(
+      `SELECT id FROM jobs WHERE report_id = ${sqlValue(reportId)} AND version_id = ${sqlValue(version.id)} AND kind = 'parse' AND status IN ('queued','running') ORDER BY id DESC LIMIT 1;`
+    )[0] as { id?: number } | undefined;
+
+    if (existingJob?.id) {
+      return res.json({ job_id: existingJob.id, reused: true });
+    }
+
+    const newJob = querySqlite(
+      `INSERT INTO jobs (report_id, version_id, kind, status, progress)
+       VALUES (${sqlValue(reportId)}, ${sqlValue(version.id)}, 'parse', 'queued', 0)
+       RETURNING id;`
+    )[0] as { id?: number } | undefined;
+
+    return res.status(201).json({ job_id: newJob?.id || null, reused: false });
+  } catch (error) {
+    console.error('Error enqueue parse job:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.delete('/reports/:id', async (req, res) => {
   try {
     const reportId = Number(req.params.id);

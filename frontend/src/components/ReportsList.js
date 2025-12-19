@@ -55,6 +55,18 @@ function ReportsList({ onSelectReport }) {
     );
   };
 
+  const handleDeleteReport = async (reportId) => {
+    if (!window.confirm(`确认删除报告 #${reportId} 吗？该操作将删除版本与任务记录。`)) return;
+    setError('');
+    try {
+      await apiClient.delete(`/reports/${reportId}`);
+      await fetchReports();
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || '请求失败';
+      setError(`删除报告失败：${message}`);
+    }
+  };
+
   return (
     <div className="reports-list">
       <div className="card">
@@ -120,6 +132,9 @@ function ReportsList({ onSelectReport }) {
               <div className="report-footer">
                 <button className="link-btn" onClick={() => onSelectReport(report)}>
                   查看详情 →
+                </button>
+                <button className="link-btn" onClick={() => handleDeleteReport(report.report_id)}>
+                  删除报告
                 </button>
               </div>
             </div>
