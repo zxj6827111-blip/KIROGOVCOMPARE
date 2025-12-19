@@ -59,8 +59,57 @@ async function main() {
   console.log('POST /api/reports/text status:', post.status);
   console.log(postBody.slice(0, 800));
 
+  let created;
+  try {
+    created = JSON.parse(postBody);
+  } catch {
+    created = null;
+  }
+
+  if (created) {
+    console.log('Created report_id:', created.report_id, 'version_id:', created.version_id, 'job_id:', created.job_id);
+  }
+
+  if (created?.job_id) {
+    let attempts = 0;
+    let jobStatus = 'queued';
+    while (attempts < 30 && jobStatus !== 'succeeded' && jobStatus !== 'failed') {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const jobResp = await fetch(`${base}/api/jobs/${created.job_id}`);
+      const jobText = await jobResp.text();
+      try {
+        const jobJson = JSON.parse(jobText);
+        jobStatus = jobJson?.status || jobStatus;
+        console.log('Job status:', jobStatus);
+        if (jobJson?.error_message) {
+          console.log('Job error:', jobJson.error_message.slice(0, 400));
+        }
+      } catch {
+        console.log('Job raw response:', jobText.slice(0, 400));
+      }
+      attempts += 1;
+      if (jobStatus === 'succeeded' || jobStatus === 'failed') break;
+    }
+  }
+
   const list = await fetch(`${base}/api/reports`).then(r => r.text());
   console.log('GET /api/reports:', list.slice(0, 1200));
+
+  if (created?.report_id) {
+    const reportDetailRes = await fetch(`${base}/api/reports/${created.report_id}`);
+    const detailText = await reportDetailRes.text();
+    console.log('GET /api/reports/:id status:', reportDetailRes.status);
+    try {
+      const detailJson = JSON.parse(detailText);
+      const parsed = detailJson?.active_version?.parsed_json;
+      console.log('Parsed JSON keys:', parsed ? Object.keys(parsed).slice(0, 20) : 'missing');
+      if (parsed?.tableData && parsed?.reviewLitigationData) {
+        console.log('tableData & reviewLitigationData present');
+      }
+    } catch {
+      console.log('Report detail raw:', detailText.slice(0, 800));
+    }
+  }
 
   if (!post.ok && post.status !== 409) process.exit(1);
 }

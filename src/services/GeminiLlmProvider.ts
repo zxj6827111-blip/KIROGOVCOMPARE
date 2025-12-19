@@ -2,6 +2,7 @@ import axios, { AxiosError } from 'axios';
 import fs from 'fs';
 import path from 'path';
 import { calculateFileHash } from '../utils/fileHash';
+import { normalizeParsedReport, buildTable3Skeleton, buildActiveDisclosureSkeleton, buildReviewLitigationSkeleton } from '../utils/normalizeParsedReport';
 import { LlmParseRequest, LlmParseResult, LlmProvider, LlmProviderError } from './LlmProvider';
 import PdfParseService from './PdfParseService';
 
@@ -20,58 +21,55 @@ function stripMarkdownJsonFences(text: string): string {
     .trim();
 }
 
-function buildTable3Skeleton(): any {
-  const results = {
-    granted: 0,
-    partialGrant: 0,
-    denied: {
-      stateSecret: 0,
-      lawForbidden: 0,
-      safetyStability: 0,
-      thirdPartyRights: 0,
-      internalAffairs: 0,
-      processInfo: 0,
-      enforcementCase: 0,
-      adminQuery: 0,
-    },
-    unableToProvide: {
-      noInfo: 0,
-      needCreation: 0,
-      unclear: 0,
-    },
-    notProcessed: {
-      complaint: 0,
-      repeat: 0,
-      publication: 0,
-      massiveRequests: 0,
-      confirmInfo: 0,
-    },
-    other: {
-      overdueCorrection: 0,
-      overdueFee: 0,
-      otherReasons: 0,
-    },
-    totalProcessed: 0,
-    carriedForward: 0,
-  };
+function extractFirstJsonObject(text: string): any {
+  const stripped = stripMarkdownJsonFences(text);
+  try {
+    return JSON.parse(stripped);
+  } catch (error) {
+    /* fallthrough */
+  }
 
-  const entity = () => ({ newReceived: 0, carriedOver: 0, results: JSON.parse(JSON.stringify(results)) });
+  const start = stripped.indexOf('{');
+  if (start >= 0) {
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let i = start; i < stripped.length; i += 1) {
+      const ch = stripped[i];
+      if (inString) {
+        if (escape) {
+          escape = false;
+        } else if (ch === '\\') {
+          escape = true;
+        } else if (ch === '"') {
+          inString = false;
+        }
+      } else if (ch === '"') {
+        inString = true;
+      } else if (ch === '{') {
+        depth += 1;
+      } else if (ch === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          const candidate = stripped.slice(start, i + 1);
+          try {
+            return JSON.parse(candidate);
+          } catch (error) {
+            break;
+          }
+        }
+      }
+    }
+  }
 
-  return {
-    naturalPerson: entity(),
-    legalPerson: {
-      commercial: entity(),
-      research: entity(),
-      social: entity(),
-      legal: entity(),
-      other: entity(),
-    },
-    total: entity(),
-  };
+  const snippet = stripped.slice(0, 800);
+  throw new LlmProviderError(`Gemini returned non-JSON content: ${snippet}`, 'gemini_invalid_json');
 }
 
 function buildSystemInstruction(): string {
   const table3 = buildTable3Skeleton();
+  const activeDisclosure = buildActiveDisclosureSkeleton();
+  const reviewLitigation = buildReviewLitigationSkeleton();
   const system = [
     'You are a professional assistant for extracting structured data from Chinese Government Information Disclosure Annual Reports (政府信息公开工作年度报告).',
     'Your task is to analyze the OCR text provided by the user and return a JSON object representing the FULL document structure.',
@@ -87,18 +85,7 @@ function buildSystemInstruction(): string {
     '6. Other Matters (六、其他需要报告的事项) -> type: "text"',
     '',
     'Active Disclosure (table_2) extract into activeDisclosureData:',
-    JSON.stringify(
-      {
-        regulations: { made: 0, repealed: 0, valid: 0 },
-        normativeDocuments: { made: 0, repealed: 0, valid: 0 },
-        licensing: { processed: 0 },
-        punishment: { processed: 0 },
-        coercion: { processed: 0 },
-        fees: { amount: 0 },
-      },
-      null,
-      2
-    ),
+    JSON.stringify(activeDisclosure, null, 2),
     '',
     'CRITICAL for table_3:',
     '- You MUST extract it into tableData with the EXACT structure below.',
@@ -107,15 +94,7 @@ function buildSystemInstruction(): string {
     JSON.stringify(table3, null, 2),
     '',
     'Administrative Review/Litigation (table_4) extract into reviewLitigationData:',
-    JSON.stringify(
-      {
-        review: { maintain: 0, correct: 0, other: 0, unfinished: 0, total: 0 },
-        litigationDirect: { maintain: 0, correct: 0, other: 0, unfinished: 0, total: 0 },
-        litigationPostReview: { maintain: 0, correct: 0, other: 0, unfinished: 0, total: 0 },
-      },
-      null,
-      2
-    ),
+    JSON.stringify(reviewLitigation, null, 2),
     '',
     'OUTPUT FORMAT (Return ONLY JSON):',
     JSON.stringify(
@@ -182,6 +161,8 @@ export class GeminiLlmProvider implements LlmProvider {
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`;
 
+    const timeout = Number(process.env.GEMINI_TIMEOUT_MS || 120000);
+
     try {
       const response = await axios.post<GeminiResponse>(
         url,
@@ -192,6 +173,9 @@ export class GeminiLlmProvider implements LlmProvider {
               parts: [{ text: userText }],
             },
           ],
+          system_instruction: {
+            parts: [{ text: systemInstructionText }],
+          },
           systemInstruction: {
             parts: [{ text: systemInstructionText }],
           },
@@ -200,9 +184,11 @@ export class GeminiLlmProvider implements LlmProvider {
           },
         },
         {
-          params: { key: this.apiKey },
-          headers: { 'Content-Type': 'application/json' },
-          timeout: 60000,
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': this.apiKey,
+          },
+          timeout,
         }
       );
 
@@ -213,10 +199,16 @@ export class GeminiLlmProvider implements LlmProvider {
 
       let parsed: any;
       try {
-        parsed = JSON.parse(stripMarkdownJsonFences(text));
+        parsed = extractFirstJsonObject(text);
       } catch (error) {
-        parsed = { raw_text: text };
+        if (error instanceof LlmProviderError) {
+          throw error;
+        }
+        const snippet = stripMarkdownJsonFences(text).slice(0, 800);
+        throw new LlmProviderError(`Gemini returned invalid JSON: ${snippet}`, 'gemini_invalid_json');
       }
+
+      const normalized = normalizeParsedReport(parsed);
 
       const output = {
         report_id: request.reportId,
@@ -225,7 +217,7 @@ export class GeminiLlmProvider implements LlmProvider {
         file_hash: fileHash,
         file_size: fileStats.size,
         generated_at: new Date().toISOString(),
-        ...parsed,
+        ...normalized,
       };
 
       return {
@@ -239,10 +231,22 @@ export class GeminiLlmProvider implements LlmProvider {
       }
 
       const axiosError = error as AxiosError;
+      if (axiosError?.code === 'ECONNABORTED') {
+        throw new LlmProviderError(`Gemini request timed out after ${timeout}ms`, 'gemini_timeout');
+      }
+
       if (axiosError?.response) {
         const status = axiosError.response.status;
         const statusText = axiosError.response.statusText || 'unknown_error';
-        throw new LlmProviderError(`Gemini request failed with status ${status}: ${statusText}`, 'gemini_http_error');
+        const data = axiosError.response.data;
+        const body = typeof data === 'string' ? data : JSON.stringify(data);
+        const truncated = body ? body.slice(0, 1200) : '';
+        const geminiMessage = (axiosError.response.data as any)?.error?.message;
+        const detail = geminiMessage ? ` - ${geminiMessage}` : '';
+        throw new LlmProviderError(
+          `Gemini request failed with status ${status}: ${statusText}${detail}. Response: ${truncated}`,
+          'gemini_http_error'
+        );
       }
 
       const message = axiosError?.message || 'Gemini request failed';

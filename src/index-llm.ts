@@ -8,6 +8,7 @@ import llmJobsRouter from './routes/llm-jobs';
 import reportsRouter from './routes/reports';
 import llmComparisonsRouter from './routes/llm-comparisons';
 import { llmJobRunner } from './services/LlmJobRunner';
+import { activeProviderName } from './services/LlmProviderFactory';
 
 dotenv.config();
 
@@ -52,6 +53,16 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 async function start(): Promise<void> {
   try {
     console.log(`Starting LLM ingestion system with ${dbType} database...`);
+    const provider = activeProviderName();
+    console.log(`✓ Active LLM provider: ${provider}`);
+    if (provider === 'gemini') {
+      const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+      console.log(`✓ Gemini model: ${model}`);
+      if (!process.env.GEMINI_API_KEY) {
+        console.error('GEMINI_API_KEY is required when LLM_PROVIDER=gemini');
+        process.exit(1);
+      }
+    }
 
     // 运行迁移
     await runLLMMigrations();
