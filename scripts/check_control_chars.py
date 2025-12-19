@@ -45,8 +45,15 @@ def main():
         if filepath.name in exclude_files:
             continue
         
-        # Skip binary files
-        if filepath.suffix in {".jpg", ".jpeg", ".png", ".gif", ".ico", ".bin", ".pdf", ".exe", ".dll", ".so"}:
+        # Skip binary / archive files (CI should only scan text-like sources)
+        if filepath.suffix.lower() in {
+            ".jpg", ".jpeg", ".png", ".gif", ".ico",
+            ".bin", ".pdf",
+            ".exe", ".dll", ".so",
+            ".zip", ".7z", ".rar", ".gz", ".bz2", ".xz", ".tar", ".tgz",
+            ".jar",
+            ".woff", ".woff2", ".ttf", ".otf",
+        }:
             continue
         
         # Skip node_modules and dist anywhere in path (double check)
