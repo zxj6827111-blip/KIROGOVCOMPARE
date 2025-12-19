@@ -10,6 +10,8 @@ dist/
 coverage/
 data/
 *.db
+logs/
+check_db*.js
 *.patch
 *.rej
 uploads/

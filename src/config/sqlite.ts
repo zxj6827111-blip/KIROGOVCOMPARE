@@ -24,6 +24,8 @@ export const SQLITE_DB_PATH = process.env.SQLITE_DB_PATH || path.join(DATA_DIR, 
 
 let sqlite3Command = process.env.SQLITE3_BIN || 'sqlite3';
 
+const SQLITE_CMD_TIMEOUT_MS = Number(process.env.SQLITE_CMD_TIMEOUT_MS || 8000);
+
 function bundledSqlite3Path(): string {
   // 在源码目录与编译后 dist 目录都可定位到仓库根目录下的 tools/sqlite/sqlite3.exe
   return path.resolve(PROJECT_ROOT, 'tools', 'sqlite', 'sqlite3.exe');
@@ -53,14 +55,22 @@ function runSqlStatements(sql: string): any[] {
   const cmd = resolveSqlite3Command();
   let output = '';
   try {
-    output = execFileSync(cmd, ['-json', SQLITE_DB_PATH], { encoding: 'utf-8', input: sql }).trim();
+    output = execFileSync(cmd, ['-json', SQLITE_DB_PATH], {
+      encoding: 'utf-8',
+      input: sql,
+      timeout: SQLITE_CMD_TIMEOUT_MS,
+    }).trim();
   } catch (error: any) {
     // Windows 环境常见：sqlite3 不在 PATH。优先回退到仓库自带的 sqlite3.exe
     if (error?.code === 'ENOENT' && cmd === 'sqlite3') {
       const fallback = bundledSqlite3Path();
       if (fs.existsSync(fallback)) {
         sqlite3Command = fallback;
-        output = execFileSync(sqlite3Command, ['-json', SQLITE_DB_PATH], { encoding: 'utf-8', input: sql }).trim();
+        output = execFileSync(sqlite3Command, ['-json', SQLITE_DB_PATH], {
+          encoding: 'utf-8',
+          input: sql,
+          timeout: SQLITE_CMD_TIMEOUT_MS,
+        }).trim();
       } else {
         throw error;
       }
