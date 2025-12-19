@@ -2,11 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import './App.css';
 import CreateTask from './components/CreateTask';
 import TaskDetail from './components/TaskDetail';
-import AssetCatalog from './components/AssetCatalog';
 import UploadReport from './components/UploadReport';
 import ReportsList from './components/ReportsList';
 import ReportDetail from './components/ReportDetail';
+import CityIndex from './components/CityIndex';
 import ComparePage from './components/ComparePage';
+import RegionsManager from './components/RegionsManager';
 import { apiClient, API_BASE_URL } from './apiClient';
 
 function TaskDetailPage({ taskId, initialTask, onBack }) {
@@ -92,6 +93,7 @@ function App() {
 
   const renderContent = () => {
     if (pathname === '/upload') return <UploadReport />;
+    if (pathname === '/regions') return <RegionsManager />;
     if (pathname === '/tasks/create') return <CreateTask onCreateTask={handleCreateTask} />;
     if (pathname === '/tasks/detail') {
       const taskId = searchParams.get('taskId');
@@ -103,18 +105,8 @@ function App() {
         />
       );
     }
-    if (pathname === '/catalog') return <AssetCatalog />;
-    if (pathname === '/catalog/reports') {
-      return (
-        <ReportsList
-          onSelectReport={(report) => {
-            const reportId = report?.report_id || report?.reportId;
-            if (reportId) {
-              navigate(`/catalog/reports/${reportId}`);
-            }
-          }}
-        />
-      );
+    if (pathname === '/catalog' || pathname === '/catalog/reports') {
+      return <CityIndex onSelectReport={(reportId) => navigate(`/catalog/reports/${reportId}`)} />;
     }
     if (pathname.startsWith('/catalog/reports/')) {
       const reportId = pathname.split('/').pop();
@@ -136,6 +128,13 @@ function App() {
       </header>
 
       <nav className="nav">
+        <button
+          type="button"
+          className={`nav-btn ${isNavActive('/regions') ? 'active' : ''}`}
+          onClick={() => navigate('/regions')}
+        >
+          🏙️ 城市管理
+        </button>
         <button
           type="button"
           className={`nav-btn ${isNavActive('/tasks') ? 'active' : ''}`}

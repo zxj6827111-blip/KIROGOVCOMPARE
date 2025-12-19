@@ -33,6 +33,73 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     fetchDetail();
   }, [reportId]);
 
+  const refresh = async () => {
+    if (!reportId) return;
+    setLoading(true);
+    setError('');
+    try {
+      const response = await apiClient.get(`/reports/${reportId}`);
+      const payload = response.data?.data ?? response.data?.report ?? response.data;
+      setReport(payload || null);
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || '请求失败';
+      setError(`刷新失败：${message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const pollJob = async (jobId, { timeoutMs = 120000, intervalMs = 1500 } = {}) => {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const resp = await apiClient.get(`/jobs/${jobId}`);
+      const status = (resp.data?.status || '').toLowerCase();
+      if (status === 'succeeded' || status === 'failed') {
+        return resp.data;
+      }
+      await new Promise((r) => setTimeout(r, intervalMs));
+    }
+    throw new Error('等待解析超时，请稍后再试');
+  };
+
+  const handleReparse = async () => {
+    if (!reportId) return;
+    if (!window.confirm('确认重新触发解析吗？将创建新的 parse job。')) return;
+    setError('');
+    setLoading(true);
+    try {
+      const resp = await apiClient.post(`/reports/${reportId}/parse`);
+      const jobId = resp.data?.job_id || resp.data?.jobId;
+      if (!jobId) throw new Error('未返回 job_id');
+
+      const job = await pollJob(jobId);
+      if ((job.status || '').toLowerCase() === 'failed') {
+        throw new Error(job.error || 'parse_failed');
+      }
+      await refresh();
+    } catch (err) {
+      setError(err.message || '重新解析失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!reportId) return;
+    if (!window.confirm(`确认删除报告 #${reportId} 吗？`)) return;
+    setError('');
+    setLoading(true);
+    try {
+      await apiClient.delete(`/reports/${reportId}`);
+      handleBack();
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || '请求失败';
+      setError(`删除失败：${message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const renderParsedContent = (parsed) => {
     if (!parsed) return <p className="meta">暂无解析内容</p>;
     const text = typeof parsed === 'string' ? parsed : JSON.stringify(parsed, null, 2);
@@ -83,6 +150,15 @@ function ReportDetail({ reportId: propReportId, onBack }) {
             <p className="subtitle">查看报告、最新任务与生效版本信息</p>
           </div>
           <div className="actions">
+            <button className="secondary-btn" onClick={refresh} disabled={loading}>
+              刷新
+            </button>
+            <button className="secondary-btn" onClick={handleReparse} disabled={loading}>
+              自动解析(轮询)
+            </button>
+            <button className="secondary-btn" onClick={handleDelete} disabled={loading}>
+              删除报告
+            </button>
             <button className="secondary-btn" onClick={handleBack}>
               返回列表
             </button>

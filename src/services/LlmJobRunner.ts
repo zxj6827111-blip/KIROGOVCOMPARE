@@ -72,7 +72,11 @@ export class LlmJobRunner {
       UPDATE jobs
       SET status = 'running', started_at = datetime('now')
       WHERE id = (
-        SELECT id FROM jobs WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1
+        SELECT id
+        FROM jobs
+        WHERE status = 'queued'
+        ORDER BY (CASE WHEN kind = 'compare' THEN 0 ELSE 1 END) ASC, created_at ASC
+        LIMIT 1
       )
       RETURNING id, report_id, version_id, kind, comparison_id;
     `);
@@ -148,7 +152,12 @@ export class LlmJobRunner {
 
     if (this.hasParsedJsonColumn()) {
       querySqlite(
-        `UPDATE report_versions SET parsed_json = ${sqlValue(outputJson)} WHERE id = ${sqlValue(job.version_id)};`
+        `UPDATE report_versions
+         SET parsed_json = ${sqlValue(outputJson)},
+             provider = ${sqlValue(parseResult.provider)},
+             model = ${sqlValue(parseResult.model)},
+             prompt_version = 'v1'
+         WHERE id = ${sqlValue(job.version_id)};`
       );
     }
 

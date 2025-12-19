@@ -17,7 +17,7 @@ export function createLlmProvider(): LlmProvider {
 
   if (provider === 'gemini') {
     const apiKey = process.env.GEMINI_API_KEY;
-    const model = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+    const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
     if (!apiKey) {
       throw new LlmProviderError('GEMINI_API_KEY is required for Gemini provider', 'gemini_missing_api_key');
