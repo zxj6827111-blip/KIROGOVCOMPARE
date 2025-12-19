@@ -59,8 +59,7 @@ export class ReportUploadService {
       `INSERT INTO reports (region_id, year, unit_name) VALUES (${sqlValue(payload.regionId)}, ${sqlValue(payload.year)}, ${sqlValue(unitName)})
        ON CONFLICT(region_id, year) DO UPDATE SET
          updated_at = ${updatedAtExpression},
-         unit_name = COALESCE(excluded.unit_name, reports.unit_name),
-         deleted_at = NULL
+         unit_name = COALESCE(excluded.unit_name, reports.unit_name)
        RETURNING id;`
     )[0];
 
@@ -159,8 +158,7 @@ export class ReportUploadService {
       `INSERT INTO reports (region_id, year, unit_name) VALUES (${sqlValue(payload.regionId)}, ${sqlValue(payload.year)}, ${sqlValue(unitName)})
        ON CONFLICT(region_id, year) DO UPDATE SET
          updated_at = ${updatedAtExpression},
-         unit_name = COALESCE(excluded.unit_name, reports.unit_name),
-         deleted_at = NULL
+         unit_name = COALESCE(excluded.unit_name, reports.unit_name)
        RETURNING id;`
     )[0];
 
