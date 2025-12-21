@@ -5,7 +5,7 @@ export { AssetService, default as assetService } from './AssetService';
 export { TaskService, default as taskService } from './TaskService';
 export { DiffService, default as diffService } from './DiffService';
 export { SummaryService, default as summaryService } from './SummaryService';
-export { DocxExportService, default as docxExportService } from './DocxExportService';
+
 export { ExportJobService, default as exportJobService } from './ExportJobService';
 export { CompareTaskProcessor, default as compareTaskProcessor } from './CompareTaskProcessor';
 export { AISuggestionService, default as aiSuggestionService } from './AISuggestionService';

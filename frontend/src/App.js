@@ -1,62 +1,25 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import './App.css';
-import CreateTask from './components/CreateTask';
-import TaskDetail from './components/TaskDetail';
+import Login from './components/Login';
 import UploadReport from './components/UploadReport';
-import ReportsList from './components/ReportsList';
 import ReportDetail from './components/ReportDetail';
 import CityIndex from './components/CityIndex';
-import ComparePage from './components/ComparePage';
 import RegionsManager from './components/RegionsManager';
-import { apiClient, API_BASE_URL } from './apiClient';
-
-function TaskDetailPage({ taskId, initialTask, onBack }) {
-  const [task, setTask] = useState(initialTask || null);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (!taskId || (initialTask && initialTask.taskId === taskId)) {
-      return;
-    }
-
-    let cancelled = false;
-    const fetchTask = async () => {
-      setLoading(true);
-      try {
-        const response = await apiClient.get(`/v1/tasks/${taskId}`);
-        if (cancelled) return;
-        setTask(response.data);
-      } catch (error) {
-        console.error('获取任务详情失败:', error);
-        alert('❌ 获取任务详情失败');
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-
-    fetchTask();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [initialTask, taskId]);
-
-  if (!taskId) {
-    return <div className="page-container">未提供 taskId 参数</div>;
-  }
-
-  if (loading || !task) {
-    return <div className="page-container">加载任务详情中...</div>;
-  }
-
-  return <TaskDetail task={task} onBack={onBack} />;
-}
+import ComparisonHistory from './components/ComparisonHistory';
+import { apiClient, API_BASE_URL, isAuthenticated, getCurrentUser, logout } from './apiClient';
 
 function App() {
   const [currentPath, setCurrentPath] = useState(`${window.location.pathname}${window.location.search}`);
-  const [initialTask, setInitialTask] = useState(null);
+  const [user, setUser] = useState(() => getCurrentUser());
+  const [authChecked, setAuthChecked] = useState(false);
+
+  // Check auth on mount
+  useEffect(() => {
+    if (isAuthenticated()) {
+      setUser(getCurrentUser());
+    }
+    setAuthChecked(true);
+  }, []);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -74,37 +37,41 @@ function App() {
 
   const location = useMemo(() => new URL(currentPath, window.location.origin), [currentPath]);
   const pathname = location.pathname;
-  const searchParams = location.searchParams;
 
   useEffect(() => {
     if (pathname === '/') {
-      navigate('/upload');
+      navigate('/catalog');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
-  const handleCreateTask = (task) => {
-    if (task && task.taskId) {
-      setInitialTask(task);
-      navigate(`/tasks/detail?taskId=${task.taskId}`);
-      alert(`✅ 任务创建成功！任务 ID: ${task.taskId}`);
-    }
+  const handleLoginSuccess = (userData) => {
+    setUser(userData);
+    navigate('/catalog');
   };
 
+  const handleLogout = () => {
+    logout();
+    setUser(null);
+  };
+
+  // Show loading while checking auth
+  if (!authChecked) {
+    return (
+      <div className="app" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+        <p>加载中...</p>
+      </div>
+    );
+  }
+
+  // Show login if not authenticated
+  if (!user) {
+    return <Login onLoginSuccess={handleLoginSuccess} />;
+  }
+
   const renderContent = () => {
-    if (pathname === '/upload') return <UploadReport />;
     if (pathname === '/regions') return <RegionsManager />;
-    if (pathname === '/tasks/create') return <CreateTask onCreateTask={handleCreateTask} />;
-    if (pathname === '/tasks/detail') {
-      const taskId = searchParams.get('taskId');
-      return (
-        <TaskDetailPage
-          taskId={taskId}
-          initialTask={initialTask && initialTask.taskId === taskId ? initialTask : null}
-          onBack={() => navigate('/tasks/create')}
-        />
-      );
-    }
+    if (pathname === '/upload') return <UploadReport />;
     if (pathname === '/catalog' || pathname === '/catalog/reports') {
       return <CityIndex onSelectReport={(reportId) => navigate(`/catalog/reports/${reportId}`)} />;
     }
@@ -112,8 +79,8 @@ function App() {
       const reportId = pathname.split('/').pop();
       return <ReportDetail reportId={reportId} onBack={() => navigate('/catalog/reports')} />;
     }
-    if (pathname === '/compare') return <ComparePage />;
-    return <UploadReport />;
+    if (pathname === '/history') return <ComparisonHistory />;
+    return <CityIndex onSelectReport={(reportId) => navigate(`/catalog/reports/${reportId}`)} />;
   };
 
   const isNavActive = (path) => pathname.startsWith(path);
@@ -123,7 +90,11 @@ function App() {
       <header className="header">
         <div className="header-content">
           <h1>📊 政府信息公开年度报告差异比对系统</h1>
-          <p>快速对比两份年度报告的差异</p>
+          <p>后台管理系统</p>
+        </div>
+        <div className="header-user">
+          <span>👤 {user.displayName || user.username}</span>
+          <button onClick={handleLogout} className="logout-btn">退出登录</button>
         </div>
       </header>
 
@@ -134,13 +105,6 @@ function App() {
           onClick={() => navigate('/regions')}
         >
           🏙️ 城市管理
-        </button>
-        <button
-          type="button"
-          className={`nav-btn ${isNavActive('/tasks') ? 'active' : ''}`}
-          onClick={() => navigate('/tasks/create')}
-        >
-          ➕ 创建任务
         </button>
         <button
           type="button"
@@ -158,10 +122,10 @@ function App() {
         </button>
         <button
           type="button"
-          className={`nav-btn ${isNavActive('/compare') ? 'active' : ''}`}
-          onClick={() => navigate('/compare')}
+          className={`nav-btn ${isNavActive('/history') ? 'active' : ''}`}
+          onClick={() => navigate('/history')}
         >
-          🔀 报告比对
+          📋 比对结果汇总
         </button>
       </nav>
 

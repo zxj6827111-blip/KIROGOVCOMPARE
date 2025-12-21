@@ -1,32 +1,165 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './UploadReport.css';
 import { apiClient } from '../apiClient';
 
 const extractField = (payload, key) => payload?.[key] || payload?.[key.replace(/_./g, (m) => m[1].toUpperCase())];
 
 function UploadReport() {
+  const [regions, setRegions] = useState([]);
   const [regionId, setRegionId] = useState('');
-  const [year, setYear] = useState('');
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [unitName, setUnitName] = useState('');
   const [file, setFile] = useState(null);
+  const [textContent, setTextContent] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [result, setResult] = useState(null);
-  const [regions, setRegions] = useState([]);
-  const [regionsLoaded, setRegionsLoaded] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef(null);
 
-  const loadRegions = async () => {
-    if (regionsLoaded) return;
+  // Load regions on mount
+  useEffect(() => {
+    const loadRegions = async () => {
+      try {
+        const resp = await apiClient.get('/regions');
+        const rows = resp.data?.data ?? resp.data?.regions ?? resp.data ?? [];
+        setRegions(Array.isArray(rows) ? rows : []);
+      } catch (err) {
+        // Ignore
+      }
+    };
+    loadRegions();
+  }, []);
+
+  // Auto-match region based on unit name
+  const autoMatchRegion = useCallback((name) => {
+    if (!name || !regions.length) return;
+    
+    let matchedId = null;
+    let maxLevel = 0;
+    
+    regions.forEach(r => {
+      if (name.includes(r.name)) {
+        if (r.level > maxLevel) {
+          maxLevel = r.level;
+          matchedId = r.id;
+        }
+      }
+    });
+    
+    if (matchedId) {
+      setRegionId(String(matchedId));
+    }
+  }, [regions]);
+
+  // Extract year from filename
+  const extractYearFromFilename = (filename) => {
+    const match = filename.match(/(\d{4})/);
+    if (match) {
+      const year = parseInt(match[1], 10);
+      if (year >= 2000 && year <= 2050) {
+        return year;
+      }
+    }
+    return null;
+  };
+
+  // Extract unit name from text content
+  const extractUnitNameFromText = (text) => {
+    // Try to find pattern like "XX市XX区政府信息公开年度报告"
+    const patterns = [
+      /(.{2,20}(?:市|区|县|省|自治区|直辖市))(?:人民)?政府信息公开/,
+      /^(.{2,30})政府信息公开年度报告/m,
+      /关于(.{2,20})政府信息公开/,
+    ];
+    
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (match && match[1]) {
+        return match[1].trim();
+      }
+    }
+    return '';
+  };
+
+  // Process file (PDF or HTML)
+  const processFile = async (file) => {
+    setFile(file);
+    setMessage('');
+    
+    const filename = file.name || '';
+    const extractedYear = extractYearFromFilename(filename);
+    if (extractedYear) {
+      setYear(extractedYear);
+    }
+
     try {
-      const resp = await apiClient.get('/regions');
-      const rows = resp.data?.data ?? resp.data?.regions ?? resp.data ?? [];
-      setRegions(Array.isArray(rows) ? rows : []);
+      if (file.type === 'application/pdf' || filename.toLowerCase().endsWith('.pdf')) {
+        // For PDF files, we'll just show a placeholder message
+        setTextContent('[ PDF 文件已选择，将由后端进行解析 ]');
+        // Try to extract unit name from filename
+        const unitMatch = filename.match(/(.+?)(?:年度)?(?:政府)?(?:信息公开)?(?:年报|报告)/);
+        if (unitMatch && unitMatch[1]) {
+          const cleanName = unitMatch[1].replace(/[\d_-]/g, '').trim();
+          if (cleanName.length >= 2) {
+            setUnitName(cleanName);
+            autoMatchRegion(cleanName);
+          }
+        }
+      } else if (file.type === 'text/html' || filename.toLowerCase().endsWith('.html')) {
+        // Read HTML file content
+        const text = await file.text();
+        const doc = new DOMParser().parseFromString(text, 'text/html');
+        const bodyText = doc.body?.textContent || '';
+        setTextContent(bodyText.slice(0, 5000));
+        
+        // Extract unit name
+        const extractedName = extractUnitNameFromText(bodyText);
+        if (extractedName) {
+          setUnitName(extractedName);
+          autoMatchRegion(extractedName);
+        }
+      } else {
+        setTextContent('不支持的文件类型，请上传 PDF 或 HTML 文件');
+      }
     } catch (err) {
-      // regions is optional; ignore
-    } finally {
-      setRegionsLoaded(true);
+      console.error('Error processing file:', err);
+      setTextContent('文件读取失败');
     }
   };
 
+  // Drag handlers
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const droppedFile = e.dataTransfer.files?.[0];
+    if (droppedFile) {
+      processFile(droppedFile);
+    }
+  };
+
+  const handleFileSelect = (e) => {
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) {
+      processFile(selectedFile);
+    }
+  };
+
+  const handleDropZoneClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  // Poll job status
   const pollJob = async (jobId, { timeoutMs = 120000, intervalMs = 1500 } = {}) => {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
@@ -37,175 +170,262 @@ function UploadReport() {
       }
       await new Promise((r) => setTimeout(r, intervalMs));
     }
-    throw new Error('等待解析超时，请稍后在“年报汇总/报告详情”中查看任务状态');
+    throw new Error('等待解析超时');
   };
 
-  const doUpload = async () => {
-
-    if (!regionId.trim() || !year.trim() || !file) {
-      throw new Error('请填写地区 ID、年份并选择 PDF 文件');
+  // Upload handler
+  const handleUpload = async (autoParse = false) => {
+    if (!regionId || !file) {
+      setMessage('❌ 请选择文件并选择所属区域');
+      return;
     }
 
-    const formData = new FormData();
-    formData.append('region_id', regionId.trim());
-    formData.append('year', parseInt(year.trim(), 10));
-    formData.append('file', file);
-
-    const response = await apiClient.post('/reports', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
-    const payload = response.data || {};
-    const next = {
-      reportId: extractField(payload, 'report_id'),
-      versionId: extractField(payload, 'version_id'),
-      jobId: extractField(payload, 'job_id'),
-    };
-    setResult(next);
-    return next;
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
     setLoading(true);
     setMessage('');
     setResult(null);
+
     try {
-      const uploaded = await doUpload();
-      setMessage('✅ 上传成功，已创建处理任务');
-      setResult(uploaded);
+      const formData = new FormData();
+      formData.append('region_id', regionId);
+      formData.append('year', year);
+      if (unitName) {
+        formData.append('unit_name', unitName);
+      }
+      formData.append('file', file);
+
+      const response = await apiClient.post('/reports', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+
+      const payload = response.data || {};
+      const uploadResult = {
+        reportId: extractField(payload, 'report_id'),
+        versionId: extractField(payload, 'version_id'),
+        jobId: extractField(payload, 'job_id'),
+      };
+      setResult(uploadResult);
+
+      if (autoParse && uploadResult.jobId) {
+        setMessage('⏳ 上传成功，正在解析...');
+        const job = await pollJob(uploadResult.jobId);
+        if ((job.status || '').toLowerCase() === 'succeeded') {
+          setMessage('✅ 上传并解析成功！');
+        } else {
+          setMessage(`❌ 解析失败：${job.error_message || '未知错误'}`);
+        }
+      } else {
+        setMessage('✅ 上传成功！');
+      }
     } catch (error) {
       const status = error.response?.status;
-      const payload = error.response?.data || {};
       if (status === 409) {
-        setMessage('⚠️ 报告已存在，重复上传');
-        setResult({
-          reportId: extractField(payload, 'report_id'),
-          versionId: extractField(payload, 'version_id'),
-          jobId: extractField(payload, 'job_id'),
-        });
+        setMessage('⚠️ 该报告已存在');
       } else {
-        setMessage(error.response?.data?.error || '上传失败，请稍后再试');
+        setMessage(`❌ ${error.response?.data?.error || error.message || '上传失败'}`);
       }
     } finally {
       setLoading(false);
     }
   };
 
-  const handleUploadAndParse = async (e) => {
-    e.preventDefault();
+  // Save text only (no file upload)
+  const handleSaveText = async () => {
+    if (!regionId || !textContent.trim()) {
+      setMessage('❌ 请填写文本内容并选择所属区域');
+      return;
+    }
+
     setLoading(true);
     setMessage('');
-    setResult(null);
+
     try {
-      const uploaded = await doUpload();
-      setMessage('⏳ 上传成功，正在自动解析…');
-      const job = await pollJob(uploaded.jobId);
-      if ((job.status || '').toLowerCase() === 'succeeded') {
-        setMessage('✅ 解析完成！可前往“年报汇总 → 报告详情”查看 parsed_json');
-      } else {
-        setMessage(`❌ 解析失败：${job.error || 'unknown_error'}`);
-      }
-      setResult(uploaded);
+      const response = await apiClient.post('/reports/text', {
+        region_id: regionId,
+        year,
+        unit_name: unitName || undefined,
+        raw_text: textContent,
+      });
+
+      const payload = response.data || {};
+      setResult({
+        reportId: extractField(payload, 'report_id'),
+        versionId: extractField(payload, 'version_id'),
+        jobId: extractField(payload, 'job_id'),
+      });
+      setMessage('✅ 文本保存成功！');
     } catch (error) {
-      setMessage(error.response?.data?.error || error.message || '上传/解析失败');
+      setMessage(`❌ ${error.response?.data?.error || error.message || '保存失败'}`);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleCancel = () => {
+    setFile(null);
+    setTextContent('');
+    setUnitName('');
+    setRegionId('');
+    setMessage('');
+    setResult(null);
+  };
+
+  // Build region path for display
+  const getRegionPath = (regionId) => {
+    const region = regions.find(r => String(r.id) === String(regionId));
+    if (!region) return '';
+    
+    const path = [region.name];
+    let current = region;
+    while (current.parent_id) {
+      const parent = regions.find(r => r.id === current.parent_id);
+      if (parent) {
+        path.unshift(parent.name);
+        current = parent;
+      } else {
+        break;
+      }
+    }
+    return path.join(' / ');
   };
 
   return (
-    <div className="upload-container">
-      <div className="upload-card">
-        <h2>📤 上传 PDF 报告</h2>
-        <p className="subtitle">支持“提交上传”或“上传并自动解析（轮询 job 状态）”</p>
+    <div className="upload-report-modal">
+      <div className="upload-modal-content">
+        <h2>录入新报告</h2>
 
-        <form onSubmit={handleSubmit} className="upload-form">
-          <div className="form-row">
-            <label htmlFor="regionId">地区 ID</label>
+        {/* File Drop Zone */}
+        <div className="form-section">
+          <label>选择文件 (PDF / HTML)</label>
+          <div
+            className={`drop-zone ${isDragging ? 'dragging' : ''} ${file ? 'has-file' : ''}`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            onClick={handleDropZoneClick}
+          >
             <input
-              id="regionId"
-              type="text"
-              placeholder="例如：310000"
-              value={regionId}
-              onChange={(e) => setRegionId(e.target.value)}
-              disabled={loading}
-              onFocus={loadRegions}
-            />
-            {!regionsLoaded ? null : regions.length ? (
-              <div style={{ marginTop: 8 }}>
-                <select
-                  value={regionId}
-                  onChange={(e) => setRegionId(e.target.value)}
-                  disabled={loading}
-                  style={{ width: '100%', padding: 10, borderRadius: 8, border: '1px solid #e5e7eb' }}
-                >
-                  <option value="">— 从列表选择（可选）—</option>
-                  {regions.map((r) => (
-                    <option key={r.id} value={String(r.id)}>
-                      {r.name} (#{r.id}{r.code ? `/${r.code}` : ''})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="form-row">
-            <label htmlFor="year">年份</label>
-            <input
-              id="year"
-              type="number"
-              placeholder="例如：2024"
-              value={year}
-              onChange={(e) => setYear(e.target.value)}
-              disabled={loading}
-            />
-          </div>
-
-          <div className="form-row">
-            <label htmlFor="pdfFile">选择 PDF 文件</label>
-            <input
-              id="pdfFile"
               type="file"
-              accept="application/pdf"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
-              disabled={loading}
+              ref={fileInputRef}
+              onChange={handleFileSelect}
+              accept=".pdf,.html"
+              style={{ display: 'none' }}
             />
-            {file && <p className="file-name">已选择：{file.name}</p>}
+            {file ? (
+              <div className="file-info">
+                <span className="file-icon">📄</span>
+                <span className="file-name">{file.name}</span>
+              </div>
+            ) : (
+              <div className="drop-hint">
+                <span className="upload-icon">⬆️</span>
+                <p><strong>点击上传</strong> 或 <strong>拖拽文件至此</strong></p>
+                <p className="hint">支持 PDF 或 HTML 文件</p>
+              </div>
+            )}
           </div>
+        </div>
 
-          <div style={{ display: 'flex', gap: 10 }}>
-            <button type="submit" className="upload-btn" disabled={loading}>
-              {loading ? '处理中...' : '提交上传'}
-            </button>
-            <button type="button" className="upload-btn" onClick={handleUploadAndParse} disabled={loading}>
-              {loading ? '处理中...' : '上传并自动解析'}
-            </button>
+        {/* Text Content */}
+        <div className="form-section">
+          <label>识别的文本内容 <span className="label-hint">(可手动修正)</span></label>
+          <textarea
+            value={textContent}
+            onChange={(e) => setTextContent(e.target.value)}
+            placeholder="此处显示识别出的文本，或者您可以直接粘贴文本内容..."
+            rows={8}
+          />
+        </div>
+
+        {/* Metadata */}
+        <div className="form-row-grid">
+          <div className="form-section">
+            <label>单位名称</label>
+            <input
+              type="text"
+              value={unitName}
+              onChange={(e) => {
+                setUnitName(e.target.value);
+                autoMatchRegion(e.target.value);
+              }}
+              placeholder="例如：淮安区"
+            />
           </div>
-        </form>
+          <div className="form-section">
+            <label>所属年度</label>
+            <input
+              type="number"
+              value={year}
+              onChange={(e) => setYear(parseInt(e.target.value) || new Date().getFullYear())}
+            />
+          </div>
+        </div>
 
-        {message && <div className="message">{message}</div>}
+        <div className="form-section">
+          <label>所属区域 <span className="label-hint">(自动匹配或手动选择)</span></label>
+          <select
+            value={regionId}
+            onChange={(e) => setRegionId(e.target.value)}
+          >
+            <option value="">-- 请选择 --</option>
+            {regions.map(r => (
+              <option key={r.id} value={r.id}>
+                {getRegionPath(r.id) || r.name}
+              </option>
+            ))}
+          </select>
+        </div>
 
-        {result && (
-          <div className="result-box">
-            <h3>返回信息</h3>
-            <ul>
-              <li>
-                <span>job_id</span>
-                <strong>{result.jobId || '—'}</strong>
-              </li>
-              <li>
-                <span>version_id</span>
-                <strong>{result.versionId || '—'}</strong>
-              </li>
-              <li>
-                <span>report_id</span>
-                <strong>{result.reportId || '—'}</strong>
-              </li>
-            </ul>
-            <p className="tips">提示：本页面不轮询状态，后续可在后台查询任务进度。</p>
+        {/* Messages */}
+        {message && (
+          <div className={`message ${message.startsWith('❌') ? 'error' : message.startsWith('⚠️') ? 'warning' : 'success'}`}>
+            {message}
           </div>
         )}
+
+        {result && (
+          <div className="result-info">
+            <p>报告 ID: <strong>{result.reportId || '—'}</strong></p>
+            <p>版本 ID: <strong>{result.versionId || '—'}</strong></p>
+            {result.jobId && <p>任务 ID: <strong>{result.jobId}</strong></p>}
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="form-actions">
+          {message.startsWith('✅') ? (
+            // Success state - show confirm button that resets form
+            <button 
+              type="button" 
+              className="btn-primary" 
+              onClick={handleCancel}
+            >
+              确定
+            </button>
+          ) : (
+            // Normal state - show upload buttons
+            <>
+              <button type="button" className="btn-cancel" onClick={handleCancel} disabled={loading}>
+                取消
+              </button>
+              <button 
+                type="button" 
+                className="btn-secondary" 
+                onClick={handleSaveText}
+                disabled={loading || !textContent.trim()}
+              >
+                仅保存文本
+              </button>
+              <button 
+                type="button" 
+                className="btn-primary" 
+                onClick={() => handleUpload(true)}
+                disabled={loading || !file}
+              >
+                {loading ? '处理中...' : '上传并启动解析'}
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

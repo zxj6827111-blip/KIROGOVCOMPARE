@@ -9,27 +9,30 @@ function CityIndex({ onSelectReport }) {
   const [error, setError] = useState('');
   const [path, setPath] = useState([]); // 保存层级路径的 region_id
   const [tab, setTab] = useState('children'); // children | current
+  const [selectedForCompare, setSelectedForCompare] = useState([]); // 选中用于比对的报告
+  const [comparing, setComparing] = useState(false);
+
+  const fetchAll = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const [regionsResp, reportsResp] = await Promise.all([
+        apiClient.get('/regions'),
+        apiClient.get('/reports'),
+      ]);
+      const regionRows = regionsResp.data?.data ?? regionsResp.data ?? [];
+      const reportRows = reportsResp.data?.data ?? reportsResp.data ?? [];
+      setRegions(Array.isArray(regionRows) ? regionRows : []);
+      setReports(Array.isArray(reportRows) ? reportRows : []);
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || '请求失败';
+      setError(`加载城市或报告失败：${message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchAll = async () => {
-      setLoading(true);
-      setError('');
-      try {
-        const [regionsResp, reportsResp] = await Promise.all([
-          apiClient.get('/regions'),
-          apiClient.get('/reports'),
-        ]);
-        const regionRows = regionsResp.data?.data ?? regionsResp.data ?? [];
-        const reportRows = reportsResp.data?.data ?? reportsResp.data ?? [];
-        setRegions(Array.isArray(regionRows) ? regionRows : []);
-        setReports(Array.isArray(reportRows) ? reportRows : []);
-      } catch (err) {
-        const message = err.response?.data?.error || err.message || '请求失败';
-        setError(`加载城市或报告失败：${message}`);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchAll();
   }, []);
 
@@ -77,16 +80,79 @@ function CityIndex({ onSelectReport }) {
   const handleEnter = (regionId) => {
     setPath((prev) => [...prev, regionId]);
     setTab('children');
+    setSelectedForCompare([]);
   };
 
   const handleBack = () => {
     setPath((prev) => prev.slice(0, -1));
     setTab('children');
+    setSelectedForCompare([]);
   };
 
   const handleReset = () => {
     setPath([]);
     setTab('children');
+    setSelectedForCompare([]);
+  };
+
+  const handleDeleteReport = async (e, reportId) => {
+    e.stopPropagation();
+    if (!window.confirm('确定要删除这份报告吗？此操作不可恢复。')) return;
+    try {
+      await apiClient.delete(`/reports/${reportId}`);
+      await fetchAll();
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || '删除失败';
+      alert(`删除失败：${message}`);
+    }
+  };
+
+  const toggleReportSelection = (e, reportId) => {
+    e.stopPropagation();
+    setSelectedForCompare((prev) => {
+      if (prev.includes(reportId)) {
+        return prev.filter((id) => id !== reportId);
+      }
+      if (prev.length >= 2) {
+        return [prev[1], reportId]; // 保留最后一个，添加新的
+      }
+      return [...prev, reportId];
+    });
+  };
+
+  const handleCompare = async () => {
+    if (selectedForCompare.length !== 2) {
+      alert('请选择两份报告进行比对');
+      return;
+    }
+    
+    setComparing(true);
+    try {
+      // Find the reports to get their years
+      const report1 = reports.find(r => r.report_id === selectedForCompare[0]);
+      const report2 = reports.find(r => r.report_id === selectedForCompare[1]);
+      
+      if (!report1 || !report2) {
+        throw new Error('未找到选中的报告');
+      }
+      
+      // Create comparison via API
+      await apiClient.post('/comparisons/create', {
+        region_id: currentParentId,
+        year_a: report1.year,
+        year_b: report2.year,
+        left_report_id: report1.report_id,
+        right_report_id: report2.report_id,
+      });
+      
+      alert('比对任务已创建！请在"比对结果汇总"页面查看。');
+      setSelectedForCompare([]);
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || '创建比对失败';
+      alert(`创建比对失败：${message}`);
+    } finally {
+      setComparing(false);
+    }
   };
 
   const cards = childrenOf(currentParentId);
@@ -168,15 +234,60 @@ function CityIndex({ onSelectReport }) {
               <h3>{currentRegion?.name || '当前城市'}的年报</h3>
               <p className="subtitle">共 {currentReports.length} 份</p>
             </div>
+            {selectedForCompare.length === 2 && (
+              <button 
+                className="compare-btn"
+                onClick={handleCompare}
+                disabled={comparing}
+              >
+                {comparing ? '比对中...' : '🔀 开始比对'}
+              </button>
+            )}
           </div>
+          
+          {selectedForCompare.length > 0 && (
+            <div className="selection-hint">
+              已选择 {selectedForCompare.length} 份报告
+              {selectedForCompare.length === 1 && '，请再选择一份进行比对'}
+              <button className="clear-btn" onClick={() => setSelectedForCompare([])}>清除选择</button>
+            </div>
+          )}
+          
           {currentReports.length === 0 && <div className="empty">暂无本级年报</div>}
           <div className="report-grid">
             {currentReports.map((r) => (
-              <div key={r.report_id} className="report-card" onClick={() => onSelectReport?.(r.report_id)}>
-                <div className="report-title">报告 #{r.report_id}</div>
+              <div 
+                key={r.report_id} 
+                className={`report-card ${selectedForCompare.includes(r.report_id) ? 'selected' : ''}`}
+              >
+                <div className="report-card-header">
+                  <input
+                    type="checkbox"
+                    checked={selectedForCompare.includes(r.report_id)}
+                    onChange={(e) => toggleReportSelection(e, r.report_id)}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  <span className="report-title" onClick={() => onSelectReport?.(r.report_id)}>
+                    报告 #{r.report_id}
+                  </span>
+                </div>
                 <div className="report-meta">年份：{r.year}</div>
                 <div className="report-meta">active_version: {r.active_version_id || '暂无'}</div>
                 <div className="report-meta">最新任务：{r.latest_job?.status || '无'}</div>
+                <div className="report-actions">
+                  <button 
+                    className="view-btn"
+                    onClick={() => onSelectReport?.(r.report_id)}
+                  >
+                    查看
+                  </button>
+                  <button 
+                    className="delete-report-btn"
+                    onClick={(e) => handleDeleteReport(e, r.report_id)}
+                  >
+                    删除
+                  </button>
+                </div>
               </div>
             ))}
           </div>

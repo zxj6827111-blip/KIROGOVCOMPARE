@@ -218,3 +218,100 @@
   color: #6b7280;
   font-size: 14px;
 }
+
+/* Report Card Enhancements */
+.report-card.selected {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
+
+.report-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.report-card-header input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.report-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.view-btn,
+.delete-report-btn {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.view-btn {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.view-btn:hover {
+  background: #bfdbfe;
+}
+
+.delete-report-btn {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.delete-report-btn:hover {
+  background: #fecaca;
+}
+
+/* Compare functionality */
+.compare-btn {
+  padding: 10px 20px;
+  background: #10b981;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.compare-btn:hover:not(:disabled) {
+  background: #059669;
+}
+
+.compare-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.selection-hint {
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+  padding: 10px 16px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+}
+
+.clear-btn {
+  background: transparent;
+  border: none;
+  color: #2563eb;
+  cursor: pointer;
+  font-size: 13px;
+  text-decoration: underline;
+}
