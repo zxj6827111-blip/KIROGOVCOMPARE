@@ -21,10 +21,13 @@ const upload = multer({
     },
   }),
   fileFilter: (_req, file, cb) => {
-    if (file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf')) {
+    const isPdf = file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf');
+    const isHtml = file.mimetype === 'text/html' || file.originalname.toLowerCase().endsWith('.html') || file.originalname.toLowerCase().endsWith('.htm');
+    
+    if (isPdf || isHtml) {
       cb(null, true);
     } else {
-      cb(new Error('仅支持 PDF 文件'));
+      cb(new Error('仅支持 PDF 或 HTML 文件'));
     }
   },
 });
@@ -50,8 +53,11 @@ router.post('/reports', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'file 不能为空' });
     }
 
-    if (file.mimetype !== 'application/pdf' && !file.originalname.toLowerCase().endsWith('.pdf')) {
-      return res.status(400).json({ error: '仅支持 PDF 文件' });
+    const isPdf = file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf');
+    const isHtml = file.mimetype === 'text/html' || file.originalname.toLowerCase().endsWith('.html') || file.originalname.toLowerCase().endsWith('.htm');
+
+    if (!isPdf && !isHtml) {
+      return res.status(400).json({ error: '仅支持 PDF 或 HTML 文件' });
     }
 
     const result = await reportUploadService.processUpload({

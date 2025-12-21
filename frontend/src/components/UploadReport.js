@@ -66,7 +66,26 @@ function UploadReport() {
 
   // Extract unit name from text content
   const extractUnitNameFromText = (text) => {
-    // Try to find pattern like "XX市XX区政府信息公开年度报告"
+    // 1. Try "标题：" format
+    const titleMatch = text.match(/标题：(.+)/);
+    if (titleMatch && titleMatch[1]) {
+        const title = titleMatch[1].trim();
+        // Try to extract year from title
+        const yearMatch = title.match(/(\d{4})年/);
+        if (yearMatch) {
+            setYear(parseInt(yearMatch[1], 10));
+        }
+        // Try to extract unit name from title suffix "宿迁市2024年...报告-宿迁市人民政府"
+        if (title.includes('-')) {
+            const parts = title.split('-');
+            return parts[parts.length - 1].trim();
+        }
+        // Or prefix: "宿迁市人民政府2024年..."
+        const prefixMatch = title.match(/^(.+?)(\d{4}年)?政府信息公开/);
+        if (prefixMatch) return prefixMatch[1].trim();
+    }
+
+    // 2. Try standard patterns
     const patterns = [
       /(.{2,20}(?:市|区|县|省|自治区|直辖市))(?:人民)?政府信息公开/,
       /^(.{2,30})政府信息公开年度报告/m,
@@ -219,7 +238,42 @@ function UploadReport() {
     } catch (error) {
       const status = error.response?.status;
       if (status === 409) {
-        setMessage('⚠️ 该报告已存在');
+        // Handle 409 but check if we can poll the explanation
+        const payload = error.response?.data || {};
+        const existingJobId = extractField(payload, 'job_id') || extractField(payload, 'jobId');
+        
+        if (autoParse && existingJobId) {
+             setMessage('⚠️ 该报告已存在，正在查询已有任务状态...');
+             try {
+                const job = await pollJob(existingJobId);
+                 if ((job.status || '').toLowerCase() === 'succeeded') {
+                  setMessage('✅ 报告已存在且解析成功 (直接复用)');
+                } else if ((job.status || '').toLowerCase() === 'failed') {
+                   // If failed, maybe we should trigger reparse? 
+                   // But for now, just show failed.
+                  setMessage(`❌ 报告已存在，但之前的解析失败：${job.error_message || '未知错误'}`);
+                } else {
+                   setMessage(`⏳ 报告已存在，任务状态：${job.status}`);
+                }
+                // Set Result so user can see IDs
+                setResult({
+                    reportId: extractField(payload, 'report_id'),
+                    versionId: extractField(payload, 'version_id'),
+                    jobId: existingJobId,
+                });
+             } catch (pollErr) {
+                 setMessage('⚠️ 该报告已存在 (查询任务状态失败)');
+             }
+        } else {
+            setMessage('⚠️ 该报告已存在');
+            if (existingJobId) {
+                 setResult({
+                    reportId: extractField(payload, 'report_id'),
+                    versionId: extractField(payload, 'version_id'),
+                    jobId: existingJobId,
+                });
+            }
+        }
       } else {
         setMessage(`❌ ${error.response?.data?.error || error.message || '上传失败'}`);
       }

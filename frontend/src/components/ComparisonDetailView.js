@@ -1,20 +1,105 @@
-import React, { useEffect, useState, useCallback } from 'react';
+
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import './ComparisonDetailView.css';
 import { apiClient } from '../apiClient';
 import { Table2View, Table3View, Table4View, SimpleDiffTable } from './TableViews';
 import DiffText from './DiffText';
 
-/**
- * ComparisonDetailView - Shows comparison results like the frontend
- * Includes summary, repetition rates, and side-by-side content
- */
-function ComparisonDetailView({ comparisonId, onBack }) {
+// ---- Tokenization & Similarity Algorithm (Ported) ----
+const tokenizeText = (text) => {
+  if (!text) return [];
+  const regex = /(\d+)|([a-zA-Z]+)|([\u4e00-\u9fff]+)|([\s\S])/g;
+  const tokens = [];
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    tokens.push(match[0]);
+  }
+  return tokens;
+};
+
+const isPunctuation = (str) => {
+  return /[，。、；：？！“”‘’（）《》【】—…\.,;:\?!'"\(\)\[\]\-\s]/.test(str);
+};
+
+function calculateTextSimilarity(text1, text2) {
+  if (!text1 && !text2) return 100;
+  if (!text1 || !text2) return 0;
+  
+  const t1 = tokenizeText(text1).filter(t => !isPunctuation(t));
+  const t2 = tokenizeText(text2).filter(t => !isPunctuation(t));
+  
+  if (t1.length === 0 && t2.length === 0) return 100;
+  if (t1.length === 0 || t2.length === 0) return 0;
+
+  // Simple intersection for speed in JS if Diff isn't fully available or too slow
+  // But preferably use Diff.diffArrays if available
+  // Fallback to simple set intersection if Diff lib heavy
+  const set1 = new Set(t1);
+  const set2 = new Set(t2);
+  let intersection = 0;
+  t1.forEach(t => { if (set2.has(t)) intersection++; });
+  const union = t1.length + t2.length; 
+  return Math.round((2 * intersection / union) * 100);
+}
+
+// Helper for Table 3 Rows (Ported)
+const getTable3Rows = (data) => {
+  if (!data || !data.total || !data.total.results) return [];
+  const t = data.total;
+  const r = t.results;
+  return [
+    { label: '本年新收政府信息公开申请数量', val: t.newReceived },
+    { label: '上年结转政府信息公开申请数量', val: t.carriedOver },
+    { label: '予以公开', val: r.granted },
+    { label: '部分公开', val: r.partialGrant },
+    { label: '不予公开-属于国家秘密', val: r.denied.stateSecret },
+    { label: '不予公开-其他法律行政法规禁止公开', val: r.denied.lawForbidden },
+    { label: '不予公开-危及“三安全一稳定”', val: r.denied.safetyStability },
+    { label: '不予公开-保护第三方合法权益', val: r.denied.thirdPartyRights },
+    { label: '不予公开-属于三类内部事务信息', val: r.denied.internalAffairs },
+    { label: '不予公开-属于四类过程性信息', val: r.denied.processInfo },
+    { label: '不予公开-属于行政执法案卷', val: r.denied.enforcementCase },
+    { label: '不予公开-属于行政查询事项', val: r.denied.adminQuery },
+    { label: '无法提供-本机关不掌握相关政府信息', val: r.unableToProvide.noInfo },
+    { label: '无法提供-没有现成信息需要另行制作', val: r.unableToProvide.needCreation },
+    { label: '无法提供-补正后申请内容仍不明确', val: r.unableToProvide.unclear },
+    { label: '不予处理-信访举报投诉类申请', val: r.notProcessed.complaint },
+    { label: '不予处理-重复申请', val: r.notProcessed.repeat },
+    { label: '不予处理-要求提供公开出版物', val: r.notProcessed.publication },
+    { label: '不予处理-无正当理由大量反复申请', val: r.notProcessed.massiveRequests },
+    { label: '不予处理-要求行政机关确认或重新出具', val: r.notProcessed.confirmInfo },
+    { label: '其他处理-申请人无正当理由逾期不补正...', val: r.other.overdueCorrection },
+    { label: '其他处理-申请人逾期未按收费通知...', val: r.other.overdueFee },
+    { label: '其他处理-其他', val: r.other.otherReasons },
+    { label: '总计', val: r.totalProcessed },
+    { label: '结转下年度继续办理', val: r.carriedForward }, 
+  ];
+};
+
+const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
+  const [printing, setPrinting] = useState(false);
+
+  // Auto-print effect
+  useEffect(() => {
+    if (autoPrint && data && !loading && !error) {
+       // Wait a brief moment for DOM info (DiffText) to paint
+       const timer = setTimeout(() => {
+          setPrinting(true);
+          window.print();
+          setPrinting(false);
+       }, 800);
+       return () => clearTimeout(timer);
+    }
+  }, [autoPrint, data, loading, error]);
+  
+  // Highlight States
   const [highlightIdentical, setHighlightIdentical] = useState(false);
   const [highlightDiff, setHighlightDiff] = useState(true);
 
+  // Fetch Data
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -32,383 +117,309 @@ function ComparisonDetailView({ comparisonId, onBack }) {
     fetchData();
   }, [fetchData]);
 
-  // Calculate simple similarity for display
-  const calculateSimilarity = (text1, text2) => {
-    if (!text1 || !text2) return 0;
-    const str1 = typeof text1 === 'string' ? text1 : JSON.stringify(text1);
-    const str2 = typeof text2 === 'string' ? text2 : JSON.stringify(text2);
-
-    const words1 = str1.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').split('');
-    const words2 = str2.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '').split('');
-
-    if (words1.length === 0 || words2.length === 0) return 0;
-
-    const set1 = new Set(words1);
-    const set2 = new Set(words2);
-    const intersection = [...set1].filter(x => set2.has(x));
-    const union = new Set([...words1, ...words2]);
-
-    return Math.round((intersection.length / union.size) * 100);
-  };
-
-  // Generate summary items based on content differences
-  const generateSummaryItems = (leftContent, rightContent) => {
-    const items = [];
-
-    if (!leftContent || !rightContent) {
-      items.push('无法生成差异摘要：缺少报告内容');
-      return items;
+  // Document Title
+  useEffect(() => {
+    if (data) {
+      const originalTitle = document.title;
+      document.title = `比对报告_${data.region_name}_${data.year_a}-${data.year_b}`;
+      return () => { document.title = originalTitle; };
     }
+  }, [data]);
 
-    // Compare sections if available
-    const leftSections = leftContent.sections || [];
-    const rightSections = rightContent.sections || [];
-
-    if (leftSections.length !== rightSections.length) {
-      items.push(`章节数量变化：从 ${leftSections.length} 个变为 ${rightSections.length} 个`);
-    }
-
-    // Check for summary differences
-    if (leftContent.summary !== rightContent.summary) {
-      items.push('总体情况章节的文字变化较大');
-    }
-
-    // Generic difference note
-    const similarity = calculateSimilarity(leftContent, rightContent);
-    if (similarity < 50) {
-      items.push(`整体相似度较低 (${similarity}%)，存在明显数据差异`);
-    } else if (similarity < 80) {
-      items.push(`整体相似度中等 (${similarity}%)，存在部分内容调整`);
-    } else {
-      items.push(`整体相似度较高 (${similarity}%)，内容变化不大`);
-    }
-
-    return items;
-  };
-
-  // Render content section
-  // Note: renderContent isn't used in main Comparison View logic anymore, 
-  // but kept if needed for fallback or single view
-  const renderContent = (content, year) => {
-    if (!content) {
-      return <div className="no-data">暂无解析数据</div>;
-    }
-
-    if (typeof content === 'string') {
-      return <pre className="text-content">{content}</pre>;
-    }
+  // Aligned Sections Calculation (Ported Logic)
+  const { alignedSections, summary } = useMemo(() => {
+    if (!data) return { alignedSections: [], summary: {} };
 
     const sections = [];
+    
+    // Process Left (Old)
+    const leftSections = data.left_content?.sections || [];
+    leftSections.forEach(s => sections.push({ title: s.title, oldSec: s }));
 
-    // Handle parsed content structure
-    if (content.sections && Array.isArray(content.sections)) {
-      content.sections.forEach((section, idx) => {
-        sections.push(
-          <div key={idx} className="content-section">
-            {section.title && <h4 className="section-title">{section.title}</h4>}
+    // Process Right (New)
+    const rightSections = data.right_content?.sections || [];
+    rightSections.forEach(s => {
+      const existing = sections.find(a => a.title === s.title);
+      if (existing) existing.newSec = s;
+      else sections.push({ title: s.title, newSec: s });
+    });
 
-            {section.type === 'text' && (
-              <div className="section-content">
-                {section.content || section.text || ''}
-              </div>
-            )}
+    // Sort Logic
+    const numerals = ['一', '二', '三', '四', '五', '六', '七', '八'];
+    sections.sort((a, b) => {
+       const isTitleA = a.title === '标题' || a.title?.includes('年度报告');
+       const isTitleB = b.title === '标题' || b.title?.includes('年度报告');
+       if (isTitleA && !isTitleB) return -1;
+       if (!isTitleA && isTitleB) return 1;
+       const idxA = numerals.findIndex(n => a.title?.includes(n));
+       const idxB = numerals.findIndex(n => b.title?.includes(n));
+       return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB);
+    });
 
-            {section.type === 'table_2' && section.activeDisclosureData && (
-              <Table2View data={section.activeDisclosureData} />
-            )}
+    // Calculate Summary Stats (Locally)
+    let totalTextSim = 0;
+    let textSectionsCount = 0;
+    let totalTableSim = 0;
+    let tableSectionsCount = 0;
+    const summaryItems = [];
 
-            {section.type === 'table_3' && section.tableData && (
-              <Table3View data={section.tableData} compact={true} />
-            )}
+    sections.forEach(sec => {
+      // Skip title section from statistics
+      if (sec.title === '标题' || sec.title?.includes('年度报告')) return;
 
-            {section.type === 'table_4' && section.reviewLitigationData && (
-              <Table4View data={section.reviewLitigationData} />
-            )}
+      // Text Comparison
+      if (sec.oldSec?.type === 'text' && sec.newSec?.type === 'text') {
+        const sim = calculateTextSimilarity(sec.oldSec.content || '', sec.newSec.content || '');
+        totalTextSim += sim;
+        textSectionsCount++;
+        
+        if (sim < 60) {
+          summaryItems.push(`${sec.title.split('、')[1] || sec.title}章节的文字变化较大，重复率约 ${Math.round(sim)}% （低于 60% 阈值）`);
+        }
+      } 
+      // Table Comparison
+      else if (['table_2', 'table_3', 'table_4'].includes(sec.newSec?.type || '')) {
+        let identical = false;
+        // Simple data presence check for diffs
+        if (sec.newSec?.type === 'table_2') identical = JSON.stringify(sec.oldSec?.activeDisclosureData) === JSON.stringify(sec.newSec?.activeDisclosureData);
+        else if (sec.newSec?.type === 'table_3') identical = JSON.stringify(sec.oldSec?.tableData) === JSON.stringify(sec.newSec?.tableData);
+        else if (sec.newSec?.type === 'table_4') identical = JSON.stringify(sec.oldSec?.reviewLitigationData) === JSON.stringify(sec.newSec?.reviewLitigationData);
 
-            {/* Fallback for mixed or unknown types */}
-            {(!['text', 'table_2', 'table_3', 'table_4'].includes(section.type)) && (
-              <div className="section-content">
-                {section.content || JSON.stringify(section)}
-              </div>
-            )}
-          </div>
+        if (identical) {
+          totalTableSim += 100;
+          tableSectionsCount++;
+        } else {
+           summaryItems.push(`${sec.title.split('、')[1] || sec.title}的表格重复率约 0%，存在明显数据差异`);
+        }
+      }
+    });
+
+    const avgTextRep = textSectionsCount > 0 ? Math.round(totalTextSim / textSectionsCount) : 0;
+    const avgTableRep = tableSectionsCount > 0 ? Math.round(totalTableSim / tableSectionsCount) : 0;
+    const overallRep = Math.round((avgTextRep + avgTableRep) / 2);
+
+    return { 
+      alignedSections: sections, 
+      summary: (data.diff_json?.summary && data.diff_json.summary.items && data.diff_json.summary.items.length > 0) 
+        ? data.diff_json.summary 
+        : {
+            textRepetition: avgTextRep,
+            tableRepetition: avgTableRep,
+            overallRepetition: overallRep,
+            items: summaryItems
+          }
+    };
+  }, [data]);
+
+  const renderSectionDiff = (row) => {
+      // 1. Active Disclosure Diff (Table 2)
+      if (row.newSec?.type === 'table_2' && row.newSec.activeDisclosureData && row.oldSec?.activeDisclosureData) {
+        const dA = row.oldSec.activeDisclosureData;
+        const dB = row.newSec.activeDisclosureData;
+        return (
+          <SimpleDiffTable 
+            title="主动公开数据差异"
+            headers={["指标", `${data.year_a}年`, `${data.year_b}年`]}
+            rows={[
+              { label: '规章-制发', valA: dA.regulations?.made, valB: dB.regulations?.made },
+              { label: '规范性文件-制发', valA: dA.normativeDocuments?.made, valB: dB.normativeDocuments?.made },
+              { label: '行政许可-处理', valA: dA.licensing?.processed, valB: dB.licensing?.processed },
+              { label: '行政处罚-处理', valA: dA.punishment?.processed, valB: dB.punishment?.processed },
+              { label: '行政事业性收费(万元)', valA: dA.fees?.amount, valB: dB.fees?.amount },
+            ]}
+          />
         );
-      });
-    } else if (content.summary) {
-      sections.push(
-        <div key="summary" className="content-section">
-          <h4 className="section-title">摘要</h4>
-          <div className="section-content">
-            {typeof content.summary === 'string' ? content.summary : JSON.stringify(content.summary, null, 2)}
-          </div>
-        </div>
-      );
-    }
+      }
+      
+      // 2. Review Litigation Diff (Table 4)
+      if (row.newSec?.type === 'table_4' && row.newSec.reviewLitigationData && row.oldSec?.reviewLitigationData) {
+         const dA = row.oldSec.reviewLitigationData;
+         const dB = row.newSec.reviewLitigationData;
+         return (
+           <SimpleDiffTable 
+             title="复议诉讼数据差异"
+             headers={["类型", `${data.year_a}总计`, `${data.year_b}总计`]}
+             rows={[
+               { label: '行政复议', valA: dA.review?.total, valB: dB.review?.total },
+               { label: '行政诉讼(直接)', valA: dA.litigationDirect?.total, valB: dB.litigationDirect?.total },
+               { label: '行政诉讼(复议后)', valA: dA.litigationPostReview?.total, valB: dB.litigationPostReview?.total },
+             ]}
+           />
+         );
+      }
 
-    // If no sections, show raw JSON
-    if (sections.length === 0) {
-      return (
-        <pre className="text-content json-content">
-          {JSON.stringify(content, null, 2)}
-        </pre>
-      );
-    }
+      // 3. Table 3 Diff
+      if (row.newSec?.type === 'table_3' && row.newSec.tableData && row.oldSec?.tableData) {
+          const rowsA = getTable3Rows(row.oldSec.tableData);
+          const rowsB = getTable3Rows(row.newSec.tableData);
+          const diffRows = rowsA.map((r, i) => ({
+             label: r.label,
+             valA: r.val,
+             valB: rowsB[i] ? rowsB[i].val : 0
+          }));
+          return (
+             <SimpleDiffTable 
+             title="依申请公开情况 - 详细指标差异分析"
+             headers={["指标", `${data.year_a}年`, `${data.year_b}年`]}
+             rows={diffRows}
+           />
+          );
+      }
 
-    return <div className="parsed-content">{sections}</div>;
+      return null;
   };
 
-  // Handle print/export to PDF (Browser Print)
   const handlePrint = () => {
     window.print();
   };
 
-  if (loading) {
-    return (
-      <div className="comparison-detail-view">
-        <div className="loading-container">
-          <div className="spinner"></div>
-          <p>加载中...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="comparison-detail-view">
-        <div className="error-container">
-          <p className="error-text">{error}</p>
-          <button onClick={fetchData} className="retry-btn">重新加载</button>
-        </div>
-      </div>
-    );
-  }
-
-  if (!data) {
-    return (
-      <div className="comparison-detail-view">
-        <div className="error-container">
-          <p>无数据</p>
-        </div>
-      </div>
-    );
-  }
-
-  const similarity = calculateSimilarity(data.left_content, data.right_content);
-  const summaryItems = generateSummaryItems(data.left_content, data.right_content);
-
-  // Align sections for comparison
-  const getPairedSections = (leftContent, rightContent) => {
-    const pairs = [];
-    const leftSections = leftContent?.sections || [];
-    const rightSections = rightContent?.sections || [];
-
-    // Create a map of right sections by title for easy lookup
-    const rightMap = new Map();
-    rightSections.forEach(s => {
-      if (s.title) rightMap.set(s.title, s);
-    });
-
-    // Match left sections with right
-    leftSections.forEach(leftSec => {
-      const rightSec = rightMap.get(leftSec.title);
-      // Remove matched from map to find unmatched later
-      if (rightSec) rightMap.delete(leftSec.title);
-
-      pairs.push({
-        title: leftSec.title,
-        left: leftSec,
-        right: rightSec,
-        type: leftSec.type
-      });
-    });
-
-    // Add remaining unmatched right sections
-    rightMap.forEach((rightSec) => {
-      pairs.push({
-        title: rightSec.title,
-        left: null,
-        right: rightSec,
-        type: rightSec.type
-      });
-    });
-
-    // Sort by standard order if possible, or keep as is
-    return pairs;
-  };
-
-  const renderComparisonProp = (pair, idx) => {
-    const { title, left, right, type } = pair;
-
-    return (
-      <div key={idx} className="comparison-section-row mb-8 border-b border-gray-200 pb-8">
-        <h3 className="text-xl font-bold mb-4 text-gray-800">{title || '未知章节'}</h3>
-
-        <div className="comparison-grid grid grid-cols-2 gap-8">
-          {/* Left Side */}
-          <div className="comparison-cell left-cell">
-            {left ? (
-              <>
-                {type === 'text' && (
-                  <DiffText
-                    oldText={left.content || left.text || ''}
-                    newText={left.content || left.text || ''}
-                    highlightIdentical={false}
-                    highlightDiff={false}
-                  />
-                )}
-                {type === 'table_2' && <Table2View data={left.activeDisclosureData} />}
-                {type === 'table_3' && <Table3View data={left.tableData} compact={true} />}
-                {type === 'table_4' && <Table4View data={left.reviewLitigationData} />}
-                {/* Fallback */}
-                {(!['text', 'table_2', 'table_3', 'table_4'].includes(type)) && (
-                  <div className="text-content white-space-pre-wrap break-words">
-                    {left.content || JSON.stringify(left)}
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="text-gray-400 italic">本报告无此章节</div>
-            )}
-          </div>
-
-          {/* Right Side */}
-          <div className="comparison-cell right-cell">
-            {right ? (
-              <>
-                {/* For text, we show DIFF relative to left */}
-                {type === 'text' && (
-                  <DiffText
-                    oldText={left?.content || left?.text || ''}
-                    newText={right.content || right.text || ''}
-                    highlightIdentical={highlightIdentical}
-                    highlightDiff={highlightDiff}
-                  />
-                )}
-                {type === 'table_2' && <Table2View data={right.activeDisclosureData} />}
-                {type === 'table_3' && <Table3View data={right.tableData} compact={true} />}
-                {type === 'table_4' && <Table4View data={right.reviewLitigationData} />}
-                {/* Fallback */}
-                {(!['text', 'table_2', 'table_3', 'table_4'].includes(type)) && (
-                  <div className="text-content white-space-pre-wrap break-words">
-                    {right.content || JSON.stringify(right)}
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="text-gray-400 italic">本报告无此章节</div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const pairs = data ? getPairedSections(data.left_content, data.right_content) : [];
+  if (loading) return <div className="p-8 text-center text-gray-500">加载中...</div>;
+  if (error) return <div className="p-8 text-center text-red-500">{error}</div>;
+  if (!data) return <div className="p-8 text-center">无数据</div>;
 
   return (
-    <div className="comparison-detail-view font-sans">
-      {/* Back Button */}
-      <div className="back-nav mb-4">
-        <button onClick={onBack} className="flex items-center text-blue-600 hover:text-blue-800">
-          <span className="mr-1">←</span> 返回列表
-        </button>
-      </div>
+    <div className="space-y-4 pb-20 comparison-container bg-gray-50 min-h-screen p-4">
+        {/* Back Button */}
+       <div className="back-nav mb-4 no-print block">
+         <button onClick={onBack} className="flex items-center text-blue-600 hover:text-blue-800">
+           <span className="mr-1">←</span> 返回列表
+         </button>
+       </div>
 
-      {/* Summary Header */}
-      <div className="summary-card">
-        <h2 className="summary-title">
-          {data?.region_name || '未知地区'} 年报比对
-        </h2>
+       <div id="comparison-content" className="max-w-[1600px] mx-auto">
+          {/* Summary Card */}
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 mb-8 shadow-sm break-inside-avoid">
+            <h2 className="text-2xl font-bold text-gray-900 mb-4 font-serif-sc">
+              {data.region_name} 年报比对
+            </h2>
+            <div className="flex space-x-8 text-sm text-gray-700 mb-4 font-mono">
+              <div>
+                <span className="text-gray-500">年份:</span> <span className="font-bold">{data.year_a} vs {data.year_b}</span>
+              </div>
+              <div>
+                 <span className="font-bold ml-1">{summary.textRepetition ?? '-'}%</span>
+              </div>
+              <div>
+                 <span className="text-gray-500">表格重复率:</span> 
+                 <span className="font-bold ml-1">{summary.tableRepetition ?? '-'}%</span>
+              </div>
+              <div>
+                 <span className="text-gray-500">总体重复率:</span> 
+                 <span className="font-bold ml-1">{summary.overallRepetition ?? '-'}%</span>
+              </div>
+            </div>
 
-        <div className="flex space-x-8 text-sm text-gray-700 mb-4 font-mono">
-          <div>
-            <span className="text-gray-500">年份:</span> <span className="font-bold">{data?.year_a} vs {data?.year_b}</span>
+            <div className="bg-white border border-gray-200 rounded p-4">
+              <h3 className="font-bold text-gray-900 mb-2">差异摘要</h3>
+              <ul className="list-disc list-inside space-y-1 text-sm text-gray-700 font-serif-sc">
+                {summary.items && summary.items.length > 0 ? (
+                  summary.items.map((item, idx) => <li key={idx}>{item}</li>)
+                ) : (
+                  <li>未检测到显著差异。</li>
+                )}
+              </ul>
+            </div>
           </div>
-          <div>
-            <span className="text-gray-500">文字重复率:</span>
-            <span className="font-bold mx-1">
-              {data?.diff_json?.summary?.textRepetition !== undefined ? data.diff_json.summary.textRepetition : similarity}%
-            </span>
-            <span className="text-xs text-gray-400">(忽略标点)</span>
-          </div>
-          <div>
-            <span className="text-gray-500">表格重复率:</span>
-            <span className="font-bold mx-1">
-              {data?.diff_json?.summary?.tableRepetition !== undefined ? data.diff_json.summary.tableRepetition : '-'}%
-            </span>
-          </div>
-          <div>
-            <span className="text-gray-500">总体重复率:</span>
-            <span className="font-bold mx-1">
-              {data?.diff_json?.summary?.overallRepetition !== undefined ? data.diff_json.summary.overallRepetition : similarity}%
-            </span>
-          </div>
-        </div>
 
-        {(summaryItems.length > 0 || (data?.diff_json?.summary?.items && data.diff_json.summary.items.length > 0)) && (
-          <div className="bg-gray-50 rounded p-4 border border-gray-100">
-            <h3 className="font-bold text-gray-900 mb-2 text-sm">差异摘要</h3>
-            <ul className="list-disc list-inside text-sm text-gray-600 space-y-1">
-              {/* Prefer backend summary items if available */}
-              {data?.diff_json?.summary?.items && data.diff_json.summary.items.length > 0
-                ? data.diff_json.summary.items.map((item, idx) => <li key={idx}>{item}</li>)
-                : summaryItems.map((item, idx) => <li key={idx}>{item}</li>)
-              }
-            </ul>
-          </div>
-        )}
-      </div>
+           {/* View Settings Controls */}
+           <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex flex-wrap justify-between items-center mb-6 no-print">
+             <div className="flex flex-wrap gap-6 items-center">
+                <div className="font-bold text-gray-700 flex items-center">
+                  高亮设置
+                </div>
+                <label className="flex items-center space-x-2 cursor-pointer select-none hover:bg-gray-50 px-2 py-1 rounded">
+                  <input 
+                    type="checkbox" 
+                    checked={highlightIdentical} 
+                    onChange={e => setHighlightIdentical(e.target.checked)} 
+                    className="w-4 h-4 text-yellow-500 border-gray-300 rounded focus:ring-yellow-500" 
+                  />
+                  <span className="text-sm text-gray-700">相同部分 (黄色)</span>
+                  <span className="inline-block w-4 h-4 bg-yellow-200 border border-yellow-300 ml-1 rounded-sm"></span>
+                </label>
+                <label className="flex items-center space-x-2 cursor-pointer select-none hover:bg-gray-50 px-2 py-1 rounded">
+                  <input 
+                    type="checkbox" 
+                    checked={highlightDiff} 
+                    onChange={e => setHighlightDiff(e.target.checked)} 
+                    className="w-4 h-4 text-red-500 border-gray-300 rounded focus:ring-red-500" 
+                  />
+                  <span className="text-sm text-gray-700">差异部分 (红色)</span>
+                  <span className="inline-block w-4 h-4 bg-red-200 border border-red-300 ml-1 rounded-sm"></span>
+                </label>
+             </div>
 
-      {/* Highlight Settings */}
-      <div className="flex justify-between items-center mb-6 bg-white p-3 rounded-lg border border-gray-200 shadow-sm sticky top-0 z-10 w-full setting-bar-container">
-        <div className="flex items-center space-x-6">
-          <span className="text-sm font-bold text-gray-700">👁 视图设置</span>
-          <label className="flex items-center space-x-2 text-sm cursor-pointer select-none">
-            <input
-              type="checkbox"
-              className="rounded text-blue-600 focus:ring-blue-500"
-              checked={highlightIdentical}
-              onChange={e => setHighlightIdentical(e.target.checked)}
-            />
-            <span className="bg-yellow-200 px-1 rounded text-gray-900">相同部分 (黄色)</span>
-          </label>
-          <label className="flex items-center space-x-2 text-sm cursor-pointer select-none">
-            <input
-              type="checkbox"
-              className="rounded text-blue-600 focus:ring-blue-500"
-              checked={highlightDiff}
-              onChange={e => setHighlightDiff(e.target.checked)}
-            />
-            <span className="bg-red-200 px-1 rounded text-red-900">差异部分 (红色)</span>
-          </label>
-        </div>
-        <button onClick={handlePrint} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm font-medium flex items-center shadow-sm">
-          🖨 打印/另存为PDF
-        </button>
-      </div>
+             <div className="flex gap-3">
+                 <button
+                   onClick={handlePrint}
+                   className="flex items-center px-4 py-2 text-white rounded-md shadow-sm transition-colors bg-gray-800 hover:bg-gray-900"
+                 >
+                   打印/另存为PDF
+                 </button>
+            </div>
+           </div>
 
-      {/* Comparison Content */}
-      <div className="bg-white rounded-lg shadow border border-gray-200 p-8 min-h-screen">
-        {/* Header Row */}
-        <div className="grid grid-cols-2 gap-8 mb-8 border-b border-gray-200 pb-4">
-          <div className="bg-yellow-50 p-3 rounded border border-yellow-100 text-center font-bold text-gray-800">
-            {data?.year_a} 年报告 (基准)
-          </div>
-          <div className="bg-green-50 p-3 rounded border border-green-100 text-center font-bold text-gray-800">
-            {data?.year_b} 年报告 (对比)
-          </div>
-        </div>
+           {/* Header Row */}
+           <div className="comparison-grid sticky-header grid grid-cols-2 gap-4 sticky top-0 z-30 bg-gray-100 pt-4 pb-2 border-b border-gray-300 break-inside-avoid shadow-sm">
+              <div className="text-center font-bold text-lg text-gray-700 bg-white p-2 shadow-sm border-l-4 border-gray-400">
+                 {data.year_a} 年度 (旧)
+              </div>
+              <div className="text-center font-bold text-lg text-blue-900 bg-white p-2 shadow-sm border-l-4 border-blue-500">
+                 {data.year_b} 年度 (新)
+              </div>
+           </div>
 
-        {/* Sections */}
-        {pairs.map((pair, idx) => renderComparisonProp(pair, idx))}
+           {alignedSections.map((row, idx) => (
+             <div key={idx} className="bg-white rounded-lg shadow-sm p-1 mb-2">
+               {/* Section Title */}
+               <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 mb-2">
+                 <h3 className="text-lg font-bold font-serif-sc text-gray-800">{row.title}</h3>
+               </div>
 
-        {pairs.length === 0 && (
-          <div className="text-center py-20 text-gray-400">
-            暂无内容可比对
-          </div>
-        )}
-      </div>
+               {/* Side by Side Content */}
+               <div className="comparison-grid grid grid-cols-2 gap-2 px-2">
+                  {/* Left Column */}
+                  <div className="border-r border-dashed border-gray-300 pr-2">
+                     {row.oldSec ? (
+                        <>
+                          {row.oldSec.type === 'text' && <div className="text-sm font-serif-sc whitespace-pre-line text-gray-600 leading-relaxed break-words">{row.oldSec.content}</div>}
+                          {/* Compact tables for view */}
+                          {row.oldSec.type === 'table_2' && row.oldSec.activeDisclosureData && <Table2View data={row.oldSec.activeDisclosureData} />}
+                          {row.oldSec.type === 'table_3' && row.oldSec.tableData && <Table3View data={row.oldSec.tableData} compact={true} />}
+                          {row.oldSec.type === 'table_4' && row.oldSec.reviewLitigationData && <Table4View data={row.oldSec.reviewLitigationData} />}
+                        </>
+                     ) : <span className="text-gray-400 italic">无内容</span>}
+                  </div>
+
+                  {/* Right Column */}
+                  <div className="pl-2">
+                     {row.newSec ? (
+                        <>
+                          {row.newSec.type === 'text' && (
+                              <DiffText 
+                                oldText={row.oldSec?.content || ''} 
+                                newText={row.newSec.content || ''} 
+                                highlightIdentical={highlightIdentical}
+                                highlightDiff={highlightDiff}
+                              />
+                          )}
+                          
+                          {/* Compact tables for view */}
+                          {row.newSec.type === 'table_2' && row.newSec.activeDisclosureData && <Table2View data={row.newSec.activeDisclosureData} />}
+                          {row.newSec.type === 'table_3' && row.newSec.tableData && <Table3View data={row.newSec.tableData} compact={true} />}
+                          {row.newSec.type === 'table_4' && row.newSec.reviewLitigationData && <Table4View data={row.newSec.reviewLitigationData} />}
+                        </>
+                     ) : <span className="text-gray-400 italic">无内容</span>}
+                  </div>
+               </div>
+
+               {/* Bottom Diff Table */}
+               <div className="px-2 pb-2">
+                  {renderSectionDiff(row) || <div className="text-xs text-gray-300 px-4 py-2 opacity-50">无数据差异 ({row.newSec?.type})</div>}
+               </div>
+             </div>
+           ))}
+       </div>
     </div>
   );
 }

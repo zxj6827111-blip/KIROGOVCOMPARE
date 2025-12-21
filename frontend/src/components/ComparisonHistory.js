@@ -14,11 +14,21 @@ function ComparisonHistory() {
   const [watermarkText, setWatermarkText] = useState('');
   const [selectedComparisonId, setSelectedComparisonId] = useState(null);
 
+  const [regionFilter, setRegionFilter] = useState('');
+  const [yearFilter, setYearFilter] = useState('');
+
   const fetchComparisons = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const resp = await apiClient.get(`/comparisons/history?page=${page}&pageSize=20`);
+      const params = new URLSearchParams({
+        page: page,
+        pageSize: 20,
+      });
+      if (regionFilter) params.append('region_name', regionFilter);
+      if (yearFilter) params.append('year', yearFilter);
+
+      const resp = await apiClient.get(`/comparisons/history?${params.toString()}`);
       setComparisons(resp.data?.data || []);
       setTotalPages(resp.data?.totalPages || 1);
     } catch (err) {
@@ -27,7 +37,7 @@ function ComparisonHistory() {
     } finally {
       setLoading(false);
     }
-  }, [page]);
+  }, [page, regionFilter, yearFilter]);
 
   useEffect(() => {
     fetchComparisons();
@@ -37,11 +47,17 @@ function ComparisonHistory() {
     if (!window.confirm('确定要删除这条比对记录吗？')) return;
     try {
       await apiClient.delete(`/comparisons/${id}`);
+      // Refresh list
       fetchComparisons();
     } catch (err) {
       const message = err.response?.data?.error || err.message || '删除失败';
       alert(`删除失败：${message}`);
     }
+  };
+
+  const handleSearch = () => {
+    setPage(1);
+    fetchComparisons();
   };
 
   const handleViewDetail = (comparison) => {
@@ -52,30 +68,10 @@ function ComparisonHistory() {
     setSelectedComparisonId(null);
   };
 
-  const handleExportPdf = async (id) => {
-    setExporting(id);
-    setShowWatermarkModal(null);
-    try {
-      const response = await apiClient.post(`/comparisons/${id}/export/pdf`, {
-        watermark_text: watermarkText || undefined,
-        watermark_opacity: 0.1,
-      }, { responseType: 'blob' });
-
-      const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `comparison_${id}.docx`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (err) {
-      alert('导出失败');
-    } finally {
-      setExporting(null);
-      setWatermarkText('');
-    }
+  const handleExportPdf = (id) => {
+    // Strategy Change: Instead of backend generation, open the detail view 
+    // in a new tab with autoPrint flag to use the browser's print engine.
+    window.open(`/comparison/${id}?autoPrint=true`, '_blank');
   };
 
   const formatDate = (dateStr) => {
@@ -101,6 +97,31 @@ function ComparisonHistory() {
     <div className="comparison-history">
       <div className="history-header">
         <h2>📋 比对结果汇总</h2>
+        
+        <div className="filter-bar" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <input
+            type="text"
+            placeholder="📍 按地区筛选"
+            value={regionFilter}
+            onChange={e => setRegionFilter(e.target.value)}
+            style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}
+          />
+          <input
+            type="text"
+            placeholder="📅 按年份筛选"
+            value={yearFilter}
+            onChange={e => setYearFilter(e.target.value)}
+            style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '120px' }}
+          />
+          <button 
+            onClick={handleSearch}
+            className="refresh-btn" 
+            style={{ background: '#3b82f6', color: 'white', border: 'none' }}
+          >
+            🔍 查询
+          </button>
+        </div>
+
         <button onClick={fetchComparisons} disabled={loading} className="refresh-btn">
           {loading ? '刷新中...' : '刷新'}
         </button>
@@ -145,14 +166,14 @@ function ComparisonHistory() {
                     </button>
                     <button
                       className="action-btn export-btn"
-                      onClick={() => setShowWatermarkModal(c.id)}
-                      disabled={exporting === c.id}
+                      onClick={() => handleExportPdf(c.id)}
                     >
-                      {exporting === c.id ? '导出中...' : '📥 导出PDF'}
+                      🖨️ 打印/导出PDF
                     </button>
                     <button
-                      className="action-btn delete-btn"
+                      className="action-btn remove-btn-force"
                       onClick={() => handleDelete(c.id)}
+                      title="删除记录"
                     >
                       🗑️ 删除
                     </button>

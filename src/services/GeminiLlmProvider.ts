@@ -148,7 +148,7 @@ async function loadUserText(absolutePath: string, request: LlmParseRequest): Pro
     return `PDF parse failed. File metadata: ${JSON.stringify(request)}`;
   }
 
-  if (lower.endsWith('.txt') || lower.endsWith('.md') || lower.endsWith('.json')) {
+  if (lower.endsWith('.txt') || lower.endsWith('.md') || lower.endsWith('.json') || lower.endsWith('.html') || lower.endsWith('.htm')) {
     try {
       return fs.readFileSync(absolutePath, 'utf-8');
     } catch (error) {
@@ -172,11 +172,18 @@ export class GeminiLlmProvider implements LlmProvider {
     const fileStats = await fs.promises.stat(absolutePath);
     const fileHash = request.fileHash || (await calculateFileHash(absolutePath));
 
-    const systemInstructionText = buildSystemInstruction();
-    let userText = await loadUserText(absolutePath, request);
+    const systemInstructionText = buildSystemInstruction() + 
+      '\nIMPORTANT: For "text" sections (Section 1, 5, 6), you MUST extract the FULL text content from the original document. Do NOT summarize. Do NOT use placeholders like "..." or "Wait for user content". If the text is present in the document, return it verbatim.';
 
-    const maxChars = Number(process.env.GEMINI_INPUT_MAX_CHARS || 120000);
+    let userText = await loadUserText(absolutePath, request);
+    console.log(`[Gemini] Reading file: ${absolutePath}, Size: ${fileStats.size}, Extracted Text Length: ${userText.length}`);
+    if (userText.length < 500) {
+        console.log(`[Gemini] DEBUG Content Preview: ${userText}`);
+    }
+
+    const maxChars = Number(process.env.GEMINI_INPUT_MAX_CHARS || 1000000);
     if (Number.isFinite(maxChars) && maxChars > 1000 && userText.length > maxChars) {
+      console.log(`[Gemini] Truncating input from ${userText.length} to ${maxChars}`);
       userText = userText.slice(0, maxChars);
     }
 
@@ -202,14 +209,16 @@ export class GeminiLlmProvider implements LlmProvider {
         {
           params: { key: this.apiKey },
           headers: { 'Content-Type': 'application/json' },
-          timeout: 60000,
+          timeout: 300000,
         }
       );
 
       const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
       if (!text) {
+        console.error('[Gemini] Response missing content:', JSON.stringify(response.data));
         throw new LlmProviderError('Gemini response missing content', 'gemini_empty_response');
       }
+      console.log('[Gemini] Raw Response (Preview):', text.slice(0, 500));
 
       let parsed: any;
       try {

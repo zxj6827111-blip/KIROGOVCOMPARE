@@ -6,6 +6,7 @@ import ReportDetail from './components/ReportDetail';
 import CityIndex from './components/CityIndex';
 import RegionsManager from './components/RegionsManager';
 import ComparisonHistory from './components/ComparisonHistory';
+import ComparisonDetailView from './components/ComparisonDetailView';
 import { apiClient, API_BASE_URL, isAuthenticated, getCurrentUser, logout } from './apiClient';
 
 function App() {
@@ -80,6 +81,14 @@ function App() {
       return <ReportDetail reportId={reportId} onBack={() => navigate('/catalog/reports')} />;
     }
     if (pathname === '/history') return <ComparisonHistory />;
+    if (pathname.startsWith('/comparison/')) {
+       // Extract ID from /comparison/:id
+       const parts = pathname.split('/');
+       const id = parts[parts.length - 1]; // or parts[2]
+       // Check for autoPrint query param
+       const autoPrint = new URLSearchParams(window.location.search).get('autoPrint') === 'true';
+       return <ComparisonDetailView comparisonId={id} onBack={() => navigate('/history')} autoPrint={autoPrint} />;
+    }
     return <CityIndex onSelectReport={(reportId) => navigate(`/catalog/reports/${reportId}`)} />;
   };
 
