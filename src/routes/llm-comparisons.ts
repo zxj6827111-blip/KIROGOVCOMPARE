@@ -372,9 +372,11 @@ router.get('/comparisons/:id/export', async (req, res) => {
     ensureSqliteMigrations();
 
     const comparison = querySqlite(`
-      SELECT id, region_id, year_a, year_b, left_report_id, right_report_id
-      FROM comparisons
-      WHERE id = ${sqlValue(comparisonId)}
+      SELECT c.id, c.region_id, c.year_a, c.year_b, c.left_report_id, c.right_report_id,
+             r.name as region_name
+      FROM comparisons c
+      LEFT JOIN regions r ON r.id = c.region_id
+      WHERE c.id = ${sqlValue(comparisonId)}
       LIMIT 1;
     `)[0];
 
@@ -382,35 +384,176 @@ router.get('/comparisons/:id/export', async (req, res) => {
       return res.status(404).json({ error: 'comparison 不存在' });
     }
 
-    const resultRow = querySqlite(`
-      SELECT diff_json FROM comparison_results WHERE comparison_id = ${sqlValue(comparisonId)} LIMIT 1;
-    `)[0];
+    // Fetch parsed content from both reports
+    const leftVersion = fetchParsedVersion(comparison.left_report_id);
+    const rightVersion = fetchParsedVersion(comparison.right_report_id);
 
-    if (!resultRow?.diff_json) {
-      return res.status(404).json({ error: 'comparison_result 不存在或尚未生成' });
-    }
+    const leftParsed = leftVersion?.parsed_json || {};
+    const rightParsed = rightVersion?.parsed_json || {};
 
-    const parsedDiff = parseJsonSafe(resultRow.diff_json);
-    const diffJson = parsedDiff || { added: [], removed: [], changed: [] };
+    // Get unit name from parsed data or reports
+    const leftReport = querySqlite(`SELECT unit_name FROM reports WHERE id = ${sqlValue(comparison.left_report_id)} LIMIT 1;`)[0];
+    const rightReport = querySqlite(`SELECT unit_name FROM reports WHERE id = ${sqlValue(comparison.right_report_id)} LIMIT 1;`)[0];
+    const unitName = leftReport?.unit_name || rightReport?.unit_name || comparison.region_name || '未知单位';
 
-    const paragraphs: Paragraph[] = [
+    const paragraphs: Paragraph[] = [];
+
+    // Title
+    paragraphs.push(
       new Paragraph({
-        text: '年度报告比对导出',
+        text: `${unitName} 政府信息公开年度报告比对分析`,
         heading: HeadingLevel.TITLE,
         spacing: { after: 300 },
-      }),
+      })
+    );
+
+    // Basic info
+    paragraphs.push(
       new Paragraph({
-        text: `比对ID：${comparison.id}`,
-      }),
-      new Paragraph({
-        text: `地区：${comparison.region_id}，年份：${comparison.year_a} vs ${comparison.year_b}`,
+        children: [
+          new TextRun({ text: `比对年份：${comparison.year_a} 年 vs ${comparison.year_b} 年`, bold: true }),
+        ],
         spacing: { after: 200 },
-      }),
+      })
+    );
+
+    paragraphs.push(
+      new Paragraph({
+        text: `生成时间：${new Date().toLocaleString('zh-CN')}`,
+        spacing: { after: 300 },
+      })
+    );
+
+    // Summary section
+    paragraphs.push(
+      new Paragraph({
+        text: '一、比对摘要',
+        heading: HeadingLevel.HEADING_1,
+        spacing: { before: 200, after: 200 },
+      })
+    );
+
+    // Extract sections from both reports
+    const leftSections = Array.isArray(leftParsed.sections) ? leftParsed.sections : [];
+    const rightSections = Array.isArray(rightParsed.sections) ? rightParsed.sections : [];
+
+    const sectionTitles = [
+      '一、总体情况',
+      '二、主动公开政府信息情况',
+      '三、收到和处理政府信息公开申请情况',
+      '四、政府信息公开行政复议、行政诉讼情况',
+      '五、存在的主要问题及改进情况',
+      '六、其他需要报告的事项',
     ];
 
-    paragraphs.push(...buildDiffSection('新增', diffJson.added || [], '新增'));
-    paragraphs.push(...buildDiffSection('删除', diffJson.removed || [], '删除'));
-    paragraphs.push(...buildDiffSection('变更', diffJson.changed || [], '变更'));
+    // Count sections
+    const leftCount = leftSections.length;
+    const rightCount = rightSections.length;
+
+    paragraphs.push(
+      new Paragraph({
+        text: `本次比对分析了 ${comparison.year_a} 年和 ${comparison.year_b} 年两份年度报告，${comparison.year_a} 年报告包含 ${leftCount} 个章节，${comparison.year_b} 年报告包含 ${rightCount} 个章节。`,
+        spacing: { after: 200 },
+      })
+    );
+
+    // Section-by-section comparison
+    paragraphs.push(
+      new Paragraph({
+        text: '二、章节内容对比',
+        heading: HeadingLevel.HEADING_1,
+        spacing: { before: 300, after: 200 },
+      })
+    );
+
+    for (const title of sectionTitles) {
+      const leftSec = leftSections.find((s: any) => s.title?.includes(title.substring(0, 6)) || s.title === title);
+      const rightSec = rightSections.find((s: any) => s.title?.includes(title.substring(0, 6)) || s.title === title);
+
+      paragraphs.push(
+        new Paragraph({
+          text: title,
+          heading: HeadingLevel.HEADING_2,
+          spacing: { before: 200, after: 150 },
+        })
+      );
+
+      // Left year content
+      paragraphs.push(
+        new Paragraph({
+          children: [
+            new TextRun({ text: `【${comparison.year_a} 年】`, bold: true }),
+          ],
+          spacing: { after: 100 },
+        })
+      );
+
+      if (leftSec?.content) {
+        const content = String(leftSec.content).substring(0, 500);
+        paragraphs.push(
+          new Paragraph({
+            text: content + (leftSec.content.length > 500 ? '...(内容已截断)' : ''),
+            spacing: { after: 150 },
+          })
+        );
+      } else if (leftSec?.type === 'table_2' || leftSec?.type === 'table_3' || leftSec?.type === 'table_4') {
+        paragraphs.push(
+          new Paragraph({
+            text: '（此章节为表格数据，详见原报告）',
+            spacing: { after: 150 },
+          })
+        );
+      } else {
+        paragraphs.push(
+          new Paragraph({
+            text: '（无此章节内容）',
+            spacing: { after: 150 },
+          })
+        );
+      }
+
+      // Right year content
+      paragraphs.push(
+        new Paragraph({
+          children: [
+            new TextRun({ text: `【${comparison.year_b} 年】`, bold: true }),
+          ],
+          spacing: { after: 100 },
+        })
+      );
+
+      if (rightSec?.content) {
+        const content = String(rightSec.content).substring(0, 500);
+        paragraphs.push(
+          new Paragraph({
+            text: content + (rightSec.content.length > 500 ? '...(内容已截断)' : ''),
+            spacing: { after: 200 },
+          })
+        );
+      } else if (rightSec?.type === 'table_2' || rightSec?.type === 'table_3' || rightSec?.type === 'table_4') {
+        paragraphs.push(
+          new Paragraph({
+            text: '（此章节为表格数据，详见原报告）',
+            spacing: { after: 200 },
+          })
+        );
+      } else {
+        paragraphs.push(
+          new Paragraph({
+            text: '（无此章节内容）',
+            spacing: { after: 200 },
+          })
+        );
+      }
+    }
+
+    // Footer
+    paragraphs.push(
+      new Paragraph({
+        text: '--- 报告结束 ---',
+        spacing: { before: 400 },
+      })
+    );
 
     const doc = new Document({
       sections: [
@@ -421,8 +564,9 @@ router.get('/comparisons/:id/export', async (req, res) => {
     });
 
     const buffer = await Packer.toBuffer(doc);
+    const filename = `comparison_${unitName}_${comparison.year_a}_vs_${comparison.year_b}.docx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    res.setHeader('Content-Disposition', `attachment; filename="comparison_${comparison.id}.docx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
     return res.send(buffer);
   } catch (error) {
     console.error('Error exporting comparison docx:', error);

@@ -1,0 +1,258 @@
+<% // Helper to safely get data const getData=(key)=> {
+    if (key === 'naturalPerson') return data.naturalPerson;
+    if (key === 'total') return data.total;
+    return data.legalPerson[key];
+    };
+
+    const renderCell = (val) => {
+    return `<td
+        class="py-1 px-0.5 text-[10px] text-gray-700 border-b border-r border-gray-300 text-center font-mono align-middle">
+        ${val}</td>`;
+    };
+    %>
+
+    <div class="overflow-x-auto border border-gray-300 mb-2 bg-white">
+        <div class="min-w-0">
+            <table class="w-full border-collapse bg-white table-fixed text-[10px]">
+                <!-- 10 Columns -->
+                <colgroup>
+                    <col class="w-6" /> <!-- I/II/III -->
+                    <col class="w-12" /> <!-- Label -->
+                    <col class="w-16" /> <!-- Label 2 -->
+
+                    <col class="w-10" /> <!-- Natural -->
+                    <col class="w-10" /> <!-- Comm -->
+                    <col class="w-10" /> <!-- Research -->
+                    <col class="w-10" /> <!-- Social -->
+                    <col class="w-10" /> <!-- Legal -->
+                    <col class="w-10" /> <!-- Other -->
+                    <col class="w-10" /> <!-- Total -->
+                </colgroup>
+
+                <thead>
+                    <tr class="bg-white text-gray-900 border-b border-gray-300">
+                        <th rowspan="3" colspan="3"
+                            class="border-r border-gray-300 font-normal text-left align-top leading-tight bg-gray-50 text-[10px] p-1">
+                            (勾稽关系说明: 第一项+第二项 = 第三项+第四项)
+                        </th>
+                        <th colspan="7" class="py-1 border-b border-r border-gray-300 text-center bg-gray-50 font-bold">
+                            申请人情况</th>
+                    </tr>
+                    <tr class="bg-white text-gray-800 border-b border-gray-300">
+                        <th rowspan="2" class="border-r border-gray-300 bg-gray-50 font-bold text-[10px] px-1">自然人</th>
+                        <th colspan="5" class="border-b border-r border-gray-300 text-center bg-gray-50 font-bold px-1">
+                            法人或其他组织</th>
+                        <th rowspan="2" class="bg-gray-50 font-bold px-1">总计</th>
+                    </tr>
+                    <tr class="bg-white text-gray-800 border-b border-gray-300">
+                        <th class="border-r border-gray-300 font-normal bg-gray-50 px-1">商业</th>
+                        <th class="border-r border-gray-300 font-normal bg-gray-50 px-1">科研</th>
+                        <th class="border-r border-gray-300 font-normal bg-gray-50 px-1">公益</th>
+                        <th class="border-r border-gray-300 font-normal bg-gray-50 px-1">法律</th>
+                        <th class="border-r border-gray-300 font-normal bg-gray-50 px-1">其他</th>
+                    </tr>
+                </thead>
+
+                <tbody>
+                    <!-- Row 1: New Received -->
+                    <tr class="border-b border-gray-300">
+                        <td class="font-bold border-r border-gray-300 py-1" colspan="3">一、本年新收</td>
+                        <%- renderCell(getData('naturalPerson').newReceived) %>
+                            <%- renderCell(getData('commercial').newReceived) %>
+                                <%- renderCell(getData('research').newReceived) %>
+                                    <%- renderCell(getData('social').newReceived) %>
+                                        <%- renderCell(getData('legal').newReceived) %>
+                                            <%- renderCell(getData('other').newReceived) %>
+                                                <%- renderCell(getData('total').newReceived) %>
+                    </tr>
+
+                    <!-- Row 2: Carried Over -->
+                    <tr class="border-b border-gray-300">
+                        <td class="font-bold border-r border-gray-300 py-1" colspan="3">二、上年结转</td>
+                        <%- renderCell(getData('naturalPerson').carriedOver) %>
+                            <%- renderCell(getData('commercial').carriedOver) %>
+                                <%- renderCell(getData('research').carriedOver) %>
+                                    <%- renderCell(getData('social').carriedOver) %>
+                                        <%- renderCell(getData('legal').carriedOver) %>
+                                            <%- renderCell(getData('other').carriedOver) %>
+                                                <%- renderCell(getData('total').carriedOver) %>
+                    </tr>
+
+                    <!-- III. Results -->
+                    <!-- Granted -->
+                    <tr class="border-b border-gray-300">
+                        <td rowspan="22" class="border-r border-gray-300 font-bold text-center py-2 bg-gray-50">三、结果
+                        </td>
+                        <td colspan="2" class="border-r border-gray-300 py-1">（一）予以公开</td>
+                        <%- renderCell(getData('naturalPerson').results.granted) %>
+                            <%- renderCell(getData('commercial').results.granted) %>
+                                <%- renderCell(getData('research').results.granted) %>
+                                    <%- renderCell(getData('social').results.granted) %>
+                                        <%- renderCell(getData('legal').results.granted) %>
+                                            <%- renderCell(getData('other').results.granted) %>
+                                                <%- renderCell(getData('total').results.granted) %>
+                    </tr>
+
+                    <!-- Partial -->
+                    <tr class="border-b border-gray-300">
+                        <td colspan="2" class="border-r border-gray-300 py-1">（二）部分公开</td>
+                        <%- renderCell(getData('naturalPerson').results.partialGrant) %>
+                            <%- renderCell(getData('commercial').results.partialGrant) %>
+                                <%- renderCell(getData('research').results.partialGrant) %>
+                                    <%- renderCell(getData('social').results.partialGrant) %>
+                                        <%- renderCell(getData('legal').results.partialGrant) %>
+                                            <%- renderCell(getData('other').results.partialGrant) %>
+                                                <%- renderCell(getData('total').results.partialGrant) %>
+                    </tr>
+
+                    <!-- Denied Items -->
+                    <% const deniedMap=[ {k: 'stateSecret' , l: '1.国家秘密' }, {k: 'lawForbidden' , l: '2.法律禁止' },
+                        {k: 'safetyStability' , l: '3.三安一稳' }, {k: 'thirdPartyRights' , l: '4.第三方权益' },
+                        {k: 'internalAffairs' , l: '5.内部事务' }, {k: 'processInfo' , l: '6.过程信息' }, {k: 'enforcementCase'
+                        , l: '7.执法案卷' }, {k: 'adminQuery' , l: '8.查询事项' } ]; deniedMap.forEach((item, i)=> { %>
+                        <tr class="border-b border-gray-300">
+                            <% if(i===0) { %>
+                                <td rowspan="8" class="border-r border-gray-300 text-center bg-gray-50">（三）不予公开</td>
+                                <% } %>
+                                    <td class="border-r border-gray-300 py-1">
+                                        <%= item.l %>
+                                    </td>
+                                    <%- renderCell(getData('naturalPerson').results.denied[item.k]) %>
+                                        <%- renderCell(getData('commercial').results.denied[item.k]) %>
+                                            <%- renderCell(getData('research').results.denied[item.k]) %>
+                                                <%- renderCell(getData('social').results.denied[item.k]) %>
+                                                    <%- renderCell(getData('legal').results.denied[item.k]) %>
+                                                        <%- renderCell(getData('other').results.denied[item.k]) %>
+                                                            <%- renderCell(getData('total').results.denied[item.k]) %>
+                        </tr>
+                        <% }); %>
+
+                            <!-- Unable Items -->
+                            <% const unableMap=[ {k: 'noInfo' , l: '1.本机关不掌握' }, {k: 'needCreation' , l: '2.需另行制作' },
+                                {k: 'unclear' , l: '3.补正不明确' } ]; unableMap.forEach((item, i)=> { %>
+                                <tr class="border-b border-gray-300">
+                                    <% if(i===0) { %>
+                                        <td rowspan="3" class="border-r border-gray-300 text-center bg-gray-50">（四）无法提供
+                                        </td>
+                                        <% } %>
+                                            <td class="border-r border-gray-300 py-1">
+                                                <%= item.l %>
+                                            </td>
+                                            <%- renderCell(getData('naturalPerson').results.unableToProvide[item.k]) %>
+                                                <%- renderCell(getData('commercial').results.unableToProvide[item.k]) %>
+                                                    <%- renderCell(getData('research').results.unableToProvide[item.k])
+                                                        %>
+                                                        <%- renderCell(getData('social').results.unableToProvide[item.k])
+                                                            %>
+                                                            <%- renderCell(getData('legal').results.unableToProvide[item.k])
+                                                                %>
+                                                                <%- renderCell(getData('other').results.unableToProvide[item.k])
+                                                                    %>
+                                                                    <%- renderCell(getData('total').results.unableToProvide[item.k])
+                                                                        %>
+                                </tr>
+                                <% }); %>
+
+                                    <!-- Not Processed Items -->
+                                    <% const npMap=[ {k: 'complaint' , l: '1.信访举报' }, {k: 'repeat' , l: '2.重复申请' },
+                                        {k: 'publication' , l: '3.公开出版物' }, {k: 'massiveRequests' , l: '4.无理由大量' },
+                                        {k: 'confirmInfo' , l: '5.要求确认' } ]; npMap.forEach((item, i)=> { %>
+                                        <tr class="border-b border-gray-300">
+                                            <% if(i===0) { %>
+                                                <td rowspan="5" class="border-r border-gray-300 text-center bg-gray-50">
+                                                    （五）不予处理</td>
+                                                <% } %>
+                                                    <td class="border-r border-gray-300 py-1">
+                                                        <%= item.l %>
+                                                    </td>
+                                                    <%- renderCell(getData('naturalPerson').results.notProcessed[item.k])
+                                                        %>
+                                                        <%- renderCell(getData('commercial').results.notProcessed[item.k])
+                                                            %>
+                                                            <%- renderCell(getData('research').results.notProcessed[item.k])
+                                                                %>
+                                                                <%- renderCell(getData('social').results.notProcessed[item.k])
+                                                                    %>
+                                                                    <%- renderCell(getData('legal').results.notProcessed[item.k])
+                                                                        %>
+                                                                        <%- renderCell(getData('other').results.notProcessed[item.k])
+                                                                            %>
+                                                                            <%- renderCell(getData('total').results.notProcessed[item.k])
+                                                                                %>
+                                        </tr>
+                                        <% }); %>
+
+                                            <!-- Other Items -->
+                                            <% const otherMap=[ {k: 'overdueCorrection' , l: '1.逾期不补正' },
+                                                {k: 'overdueFee' , l: '2.逾期不缴费' }, {k: 'otherReasons' , l: '3.其他' } ];
+                                                otherMap.forEach((item, i)=> { %>
+                                                <tr class="border-b border-gray-300">
+                                                    <% if(i===0) { %>
+                                                        <td rowspan="3"
+                                                            class="border-r border-gray-300 text-center bg-gray-50">
+                                                            （六）其他处理</td>
+                                                        <% } %>
+                                                            <td class="border-r border-gray-300 py-1">
+                                                                <%= item.l %>
+                                                            </td>
+                                                            <%- renderCell(getData('naturalPerson').results.other[item.k])
+                                                                %>
+                                                                <%- renderCell(getData('commercial').results.other[item.k])
+                                                                    %>
+                                                                    <%- renderCell(getData('research').results.other[item.k])
+                                                                        %>
+                                                                        <%- renderCell(getData('social').results.other[item.k])
+                                                                            %>
+                                                                            <%- renderCell(getData('legal').results.other[item.k])
+                                                                                %>
+                                                                                <%- renderCell(getData('other').results.other[item.k])
+                                                                                    %>
+                                                                                    <%- renderCell(getData('total').results.other[item.k])
+                                                                                        %>
+                                                </tr>
+                                                <% }); %>
+
+                                                    <!-- Total Processed -->
+                                                    <tr class="border-b border-gray-300 bg-gray-50">
+                                                        <td class="font-bold border-r border-gray-300 py-1" colspan="2">
+                                                            （七）总计</td>
+                                                        <%- renderCell(getData('naturalPerson').results.totalProcessed)
+                                                            %>
+                                                            <%- renderCell(getData('commercial').results.totalProcessed)
+                                                                %>
+                                                                <%- renderCell(getData('research').results.totalProcessed)
+                                                                    %>
+                                                                    <%- renderCell(getData('social').results.totalProcessed)
+                                                                        %>
+                                                                        <%- renderCell(getData('legal').results.totalProcessed)
+                                                                            %>
+                                                                            <%- renderCell(getData('other').results.totalProcessed)
+                                                                                %>
+                                                                                <%- renderCell(getData('total').results.totalProcessed)
+                                                                                    %>
+                                                    </tr>
+
+                                                    <!-- Carried Forward -->
+                                                    <tr class="border-b border-gray-300">
+                                                        <td class="font-bold border-r border-gray-300 py-1" colspan="3">
+                                                            四、结转下年度</td>
+                                                        <%- renderCell(getData('naturalPerson').results.carriedForward)
+                                                            %>
+                                                            <%- renderCell(getData('commercial').results.carriedForward)
+                                                                %>
+                                                                <%- renderCell(getData('research').results.carriedForward)
+                                                                    %>
+                                                                    <%- renderCell(getData('social').results.carriedForward)
+                                                                        %>
+                                                                        <%- renderCell(getData('legal').results.carriedForward)
+                                                                            %>
+                                                                            <%- renderCell(getData('other').results.carriedForward)
+                                                                                %>
+                                                                                <%- renderCell(getData('total').results.carriedForward)
+                                                                                    %>
+                                                    </tr>
+
+                </tbody>
+            </table>
+        </div>
+    </div>

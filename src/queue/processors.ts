@@ -3,7 +3,7 @@ import TaskService from '../services/TaskService';
 import AssetService from '../services/AssetService';
 import DiffService from '../services/DiffService';
 import SummaryService from '../services/SummaryService';
-import DocxExportService from '../services/DocxExportService';
+
 import ExportJobService from '../services/ExportJobService';
 // Legacy services - commented out as they no longer exist
 // import PdfParseService from '../services/PdfParseService';

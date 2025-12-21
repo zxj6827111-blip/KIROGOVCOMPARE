@@ -1,0 +1,87 @@
+<div class="overflow-x-auto border border-gray-300 mb-2 font-serif-sc">
+    <table class="w-full border-collapse border border-gray-300 text-center text-xs">
+        <thead>
+            <tr class="bg-blue-50 border-b border-gray-300 font-bold">
+                <th colspan="5" class="border-r border-gray-300 py-1.5">行政复议</th>
+                <th colspan="10" class="py-1.5">行政诉讼</th>
+            </tr>
+            <tr class="bg-white border-b border-gray-300 text-[10px]">
+                <th rowspan="2" class="border-r border-gray-300 w-12 px-1">结果维持</th>
+                <th rowspan="2" class="border-r border-gray-300 w-12 px-1">结果纠正</th>
+                <th rowspan="2" class="border-r border-gray-300 w-12 px-1">其他结果</th>
+                <th rowspan="2" class="border-r border-gray-300 w-12 px-1">尚未审结</th>
+                <th rowspan="2" class="border-r border-gray-300 w-12 px-1 font-bold">总计</th>
+                <th colspan="5" class="border-r border-gray-300 border-b py-1">未经复议直接起诉</th>
+                <th colspan="5" class="border-b py-1">复议后起诉</th>
+            </tr>
+            <tr class="bg-white border-b border-gray-300 text-[10px]">
+                <!-- Litigation Direct -->
+                <th class="border-r border-gray-300 w-10 px-0.5">维持</th>
+                <th class="border-r border-gray-300 w-10 px-0.5">纠正</th>
+                <th class="border-r border-gray-300 w-10 px-0.5">其他</th>
+                <th class="border-r border-gray-300 w-10 px-0.5">未结</th>
+                <th class="border-r border-gray-300 w-10 px-0.5 font-bold">总计</th>
+                <!-- Litigation Post Review -->
+                <th class="border-r border-gray-300 w-10 px-0.5">维持</th>
+                <th class="border-r border-gray-300 w-10 px-0.5">纠正</th>
+                <th class="border-r border-gray-300 w-10 px-0.5">其他</th>
+                <th class="border-r border-gray-300 w-10 px-0.5">未结</th>
+                <th class="w-10 px-0.5 font-bold">总计</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <!-- Review -->
+                <td class="border-r border-gray-300 py-2">
+                    <%= data.review.maintain %>
+                </td>
+                <td class="border-r border-gray-300 py-2">
+                    <%= data.review.correct %>
+                </td>
+                <td class="border-r border-gray-300 py-2">
+                    <%= data.review.other %>
+                </td>
+                <td class="border-r border-gray-300 py-2">
+                    <%= data.review.unfinished %>
+                </td>
+                <td class="border-r border-gray-300 py-2 font-bold">
+                    <%= data.review.total %>
+                </td>
+
+                <!-- Litigation Direct -->
+                <td class="border-r border-gray-300 py-2">
+                    <%= data.litigationDirect.maintain %>
+                </td>
+                <td class="border-r border-gray-300 py-2">
+                    <%= data.litigationDirect.correct %>
+                </td>
+                <td class="border-r border-gray-300 py-2">
+                    <%= data.litigationDirect.other %>
+                </td>
+                <td class="border-r border-gray-300 py-2">
+                    <%= data.litigationDirect.unfinished %>
+                </td>
+                <td class="border-r border-gray-300 py-2 font-bold">
+                    <%= data.litigationDirect.total %>
+                </td>
+
+                <!-- Litigation Post Review -->
+                <td class="border-r border-gray-300 py-2">
+                    <%= data.litigationPostReview.maintain %>
+                </td>
+                <td class="border-r border-gray-300 py-2">
+                    <%= data.litigationPostReview.correct %>
+                </td>
+                <td class="border-r border-gray-300 py-2">
+                    <%= data.litigationPostReview.other %>
+                </td>
+                <td class="border-r border-gray-300 py-2">
+                    <%= data.litigationPostReview.unfinished %>
+                </td>
+                <td class="py-2 font-bold">
+                    <%= data.litigationPostReview.total %>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>

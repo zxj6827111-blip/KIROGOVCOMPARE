@@ -4,9 +4,12 @@ import { dbType } from './config/database-llm';
 import { runLLMMigrations } from './db/migrations-llm';
 import llmHealthRouter from './routes/llm-health';
 import llmRegionsRouter from './routes/llm-regions';
+import regionsImportRouter from './routes/regions-import';
 import llmJobsRouter from './routes/llm-jobs';
 import reportsRouter from './routes/reports';
 import llmComparisonsRouter from './routes/llm-comparisons';
+import comparisonHistoryRouter from './routes/comparison-history';
+import authRouter from './routes/auth';
 import { llmJobRunner } from './services/LlmJobRunner';
 
 dotenv.config();
@@ -37,10 +40,15 @@ app.get('/', (_req, res) => {
 });
 
 // API 路由
+// IMPORTANT: regionsImportRouter has /template and /export routes, must come BEFORE llmRegionsRouter
+app.use('/api/regions', regionsImportRouter);
 app.use('/api/regions', llmRegionsRouter);
 app.use('/api/jobs', llmJobsRouter);
+// IMPORTANT: Mount comparison-history BEFORE llm-comparisons to avoid route conflicts
+app.use('/api/comparisons', comparisonHistoryRouter);
 app.use('/api', llmComparisonsRouter);
 app.use('/api', reportsRouter);
+app.use('/api/auth', authRouter);
 
 // 错误处理
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

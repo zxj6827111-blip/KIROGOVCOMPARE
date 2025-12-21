@@ -1,0 +1,93 @@
+<% // Table 2 Helper %>
+    <div class="overflow-hidden border border-gray-300 mb-2 font-serif-sc text-xs">
+        <table class="w-full border-collapse border border-gray-300 text-center">
+            <!-- ColGroup for consistent widths if needed, but Tailwind w-classes usually suffice -->
+            <tbody class="text-xs">
+                <!-- Section 1 -->
+                <tr class="bg-blue-50 font-bold border-b border-gray-300">
+                    <td colspan="4" class="py-1 text-left px-2">第二十条第（一）项</td>
+                </tr>
+                <tr class="border-b border-gray-300 font-bold bg-white text-gray-700">
+                    <td class="w-1/4 border-r border-gray-300 py-1">信息内容</td>
+                    <td class="w-1/4 border-r border-gray-300 py-1">本年制发</td>
+                    <td class="w-1/4 border-r border-gray-300 py-1">本年废止</td>
+                    <td class="w-1/4 py-1">现行有效</td>
+                </tr>
+                <tr class="border-b border-gray-300">
+                    <td class="border-r border-gray-300 py-1 bg-gray-50">规章</td>
+                    <td class="border-r border-gray-300 py-1">
+                        <%= data.regulations.made %>
+                    </td>
+                    <td class="border-r border-gray-300 py-1">
+                        <%= data.regulations.repealed %>
+                    </td>
+                    <td class="py-1">
+                        <%= data.regulations.valid %>
+                    </td>
+                </tr>
+                <tr class="border-b border-gray-300">
+                    <td class="border-r border-gray-300 py-1 bg-gray-50">规范性文件</td>
+                    <td class="border-r border-gray-300 py-1">
+                        <%= data.normativeDocuments.made %>
+                    </td>
+                    <td class="border-r border-gray-300 py-1">
+                        <%= data.normativeDocuments.repealed %>
+                    </td>
+                    <td class="py-1">
+                        <%= data.normativeDocuments.valid %>
+                    </td>
+                </tr>
+
+                <!-- Section 2 -->
+                <tr class="bg-blue-50 font-bold border-b border-gray-300">
+                    <td colspan="4" class="py-1 text-left px-2">第二十条第（五）项</td>
+                </tr>
+                <tr class="border-b border-gray-300 font-bold bg-white text-gray-700">
+                    <td class="border-r border-gray-300 py-1">信息内容</td>
+                    <td colspan="3" class="py-1">本年处理决定数量</td>
+                </tr>
+                <tr class="border-b border-gray-300">
+                    <td class="border-r border-gray-300 py-1 bg-gray-50">行政许可</td>
+                    <td colspan="3" class="py-1">
+                        <%= data.licensing.processed %>
+                    </td>
+                </tr>
+
+                <!-- Section 3 -->
+                <tr class="bg-blue-50 font-bold border-b border-gray-300">
+                    <td colspan="4" class="py-1 text-left px-2">第二十条第（六）项</td>
+                </tr>
+                <tr class="border-b border-gray-300 font-bold bg-white text-gray-700">
+                    <td class="border-r border-gray-300 py-1">信息内容</td>
+                    <td colspan="3" class="py-1">本年处理决定数量</td>
+                </tr>
+                <tr class="border-b border-gray-300">
+                    <td class="border-r border-gray-300 py-1 bg-gray-50">行政处罚</td>
+                    <td colspan="3" class="py-1">
+                        <%= data.punishment.processed %>
+                    </td>
+                </tr>
+                <tr class="border-b border-gray-300">
+                    <td class="border-r border-gray-300 py-1 bg-gray-50">行政强制</td>
+                    <td colspan="3" class="py-1">
+                        <%= data.coercion.processed %>
+                    </td>
+                </tr>
+
+                <!-- Section 4 -->
+                <tr class="bg-blue-50 font-bold border-b border-gray-300">
+                    <td colspan="4" class="py-1 text-left px-2">第二十条第（八）项</td>
+                </tr>
+                <tr class="border-b border-gray-300 font-bold bg-white text-gray-700">
+                    <td class="border-r border-gray-300 py-1">信息内容</td>
+                    <td colspan="3" class="py-1">本年收费金额（单位：万元）</td>
+                </tr>
+                <tr>
+                    <td class="border-r border-gray-300 py-1 bg-gray-50">行政事业性收费</td>
+                    <td colspan="3" class="py-1">
+                        <%= data.fees.amount %>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>

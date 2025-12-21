@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import './RegionsManager.css';
-import { apiClient } from '../apiClient';
+import { apiClient, buildDownloadUrl } from '../apiClient';
 
 function RegionsManager() {
   const [regions, setRegions] = useState([]);
@@ -9,6 +9,9 @@ function RegionsManager() {
   const [newName, setNewName] = useState('');
   const [selectedId, setSelectedId] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const fileInputRef = useRef(null);
 
   const fetchRegions = async () => {
     setLoading(true);
@@ -53,6 +56,20 @@ function RegionsManager() {
     return '区域';
   };
 
+  const handleDelete = async (e, regionId, regionName) => {
+    e.stopPropagation();
+    if (!window.confirm(`确定要删除"${regionName}"吗？如果有子区域将一并删除。`)) {
+      return;
+    }
+    try {
+      await apiClient.delete(`/regions/${regionId}`);
+      await fetchRegions();
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || '删除失败';
+      setError(`删除失败：${message}`);
+    }
+  };
+
   const renderTree = (parentId = null, depth = 0) => {
     const nodes = childrenOf(parentId);
     if (!nodes.length) return null;
@@ -67,6 +84,13 @@ function RegionsManager() {
             >
               <span className="node-name">{node.name}</span>
               <span className="node-level">{levelLabel(node.level)}</span>
+              <button
+                className="delete-btn"
+                onClick={(e) => handleDelete(e, node.id, node.name)}
+                title="删除"
+              >
+                ×
+              </button>
             </div>
             {renderTree(node.id, depth + 1)}
           </li>
@@ -106,6 +130,50 @@ function RegionsManager() {
     }
   };
 
+  // Download template
+  const handleDownloadTemplate = () => {
+    window.open(buildDownloadUrl('/regions/template'), '_blank');
+  };
+
+  // Export all regions
+  const handleExport = () => {
+    window.open(buildDownloadUrl('/regions/export'), '_blank');
+  };
+
+  // Import Excel file
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImporting(true);
+    setImportResult(null);
+    setError('');
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const resp = await apiClient.post('/regions/import', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setImportResult(resp.data);
+      await fetchRegions();
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || '导入失败';
+      setError(`导入失败：${message}`);
+    } finally {
+      setImporting(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
   return (
     <div className="regions-page">
       <div className="manager-card">
@@ -118,6 +186,40 @@ function RegionsManager() {
             {loading ? '加载中…' : '刷新'}
           </button>
         </div>
+
+        {/* Excel Import/Export Toolbar */}
+        <div className="import-export-toolbar">
+          <button className="tool-btn template-btn" onClick={handleDownloadTemplate}>
+            📥 下载模板
+          </button>
+          <button className="tool-btn import-btn" onClick={handleImportClick} disabled={importing}>
+            {importing ? '⏳ 导入中...' : '📤 导入Excel'}
+          </button>
+          <button className="tool-btn export-btn" onClick={handleExport}>
+            📊 导出全部
+          </button>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            accept=".xlsx,.xls,.csv"
+            style={{ display: 'none' }}
+          />
+        </div>
+
+        {/* Import Result */}
+        {importResult && (
+          <div className="alert success">
+            ✅ {importResult.message}
+            {importResult.errors && importResult.errors.length > 0 && (
+              <ul className="import-errors">
+                {importResult.errors.map((err, i) => (
+                  <li key={i}>{err}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         {error && <div className="alert error">{error}</div>}
 
