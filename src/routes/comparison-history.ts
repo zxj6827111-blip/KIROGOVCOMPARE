@@ -20,6 +20,8 @@ router.get('/history', optionalAuthMiddleware, (req: AuthRequest, res: Response)
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize as string) || 20));
     const regionId = req.query.region_id;
+    const regionName = req.query.region_name as string;
+    const year = req.query.year;
     const offset = (page - 1) * pageSize;
 
     // Build conditions
@@ -27,12 +29,28 @@ router.get('/history', optionalAuthMiddleware, (req: AuthRequest, res: Response)
     if (regionId) {
       conditions.push(`c.region_id = ${sqlValue(Number(regionId))}`);
     }
+    if (regionName) {
+      // Filter by region name (partial match)
+      // Note: Since we are using raw SQL helper, we need to be careful. 
+      // sqlValue usually quotes strings. We can't easily do LIKE with sqlValue unless we manually construct.
+      // Assuming sqlValue handles string escaping correctly:
+      conditions.push(`r.name LIKE '%${String(regionName).replace(/'/g, "''")}%'`);
+    }
+    if (year) {
+      const y = Number(year);
+      if (!isNaN(y)) {
+        conditions.push(`(c.year_a = ${y} OR c.year_b = ${y})`);
+      }
+    }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     // Get total count
     const countResult = querySqlite(`
-      SELECT COUNT(*) as total FROM comparisons c ${whereClause}
+      SELECT COUNT(*) as total 
+      FROM comparisons c 
+      LEFT JOIN regions r ON c.region_id = r.id
+      ${whereClause}
     `);
     const total = countResult?.[0]?.total || 0;
 

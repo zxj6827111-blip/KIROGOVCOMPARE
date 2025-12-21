@@ -9,26 +9,10 @@ const DiffText = ({ oldText, newText, highlightIdentical, highlightDiff }) => {
 
   useEffect(() => {
     setDiffs(null);
-    setShouldCompute(false);
-
-    const el = containerRef.current;
-    if (!el || typeof window === 'undefined') {
-      setShouldCompute(true);
-      return;
-    }
-
-    // Compute only when the block is near viewport to prevent CPU spikes.
-    const observer = new IntersectionObserver(
-      entries => {
-        if (entries.some(e => e.isIntersecting)) {
-          setShouldCompute(true);
-        }
-      },
-      { root: null, rootMargin: '800px 0px', threshold: 0 }
-    );
-
-    observer.observe(el);
-    return () => observer.disconnect();
+    // Force computation immediately to ensure it's ready for print/export
+    // The previous IntersectionObserver logic caused off-screen diffs (like sections 5/6) 
+    // to arguably not render in time for window.print() if not scrolled into view.
+    setShouldCompute(true);
   }, [oldText, newText]);
 
   useEffect(() => {

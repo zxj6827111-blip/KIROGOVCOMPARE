@@ -99,12 +99,12 @@
     background: #bfdbfe;
 }
 
-.action-btn.delete-btn {
+.action-btn.remove-btn-force {
     background: #fee2e2;
     color: #dc2626;
 }
 
-.action-btn.delete-btn:hover {
+.action-btn.remove-btn-force:hover {
     background: #fecaca;
 }
 
