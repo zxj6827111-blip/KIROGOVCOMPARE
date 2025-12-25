@@ -1,0 +1,371 @@
+﻿{
+    "report_id":  33,
+    "region_id":  23,
+    "unit_name":  "?????????",
+    "year":  2023,
+    "active_version":  {
+                           "version_id":  25,
+                           "file_hash":  "06feaf5a42ead639665820e8454f3b5b19214bdb6439df2552728bba911bbf17",
+                           "storage_path":  "data\\uploads\\23\\2023\\06feaf5a42ead639665820e8454f3b5b19214bdb6439df2552728bba911bbf17.pdf",
+                           "parsed_json":  {
+                                               "report_id":  33,
+                                               "version_id":  25,
+                                               "storage_path":  "data\\uploads\\23\\2023\\06feaf5a42ead639665820e8454f3b5b19214bdb6439df2552728bba911bbf17.pdf",
+                                               "file_hash":  "06feaf5a42ead639665820e8454f3b5b19214bdb6439df2552728bba911bbf17",
+                                               "file_size":  251566,
+                                               "generated_at":  "2025-12-25T13:29:21.754Z",
+                                               "sections":  [
+                                                                {
+                                                                    "title":  "??????????????????",
+                                                                    "type":  "text",
+                                                                    "content":  "2023 ???????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n?????????????????????\n??????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n?????????????????????????????????????????????????????????????????????????????????\n2023 ?????????????????????????????????????????????????????????????????????????????????\n?????????????????????????????????????????????????????????????????? 9945 ??????\n??????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n??????????????????????????????????????????????????????????????????2023 ????????????\n????????????????????????????????? 143 ???????????????????????? 143 ??????\n- 1 -\n\n??????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????\n??????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n??????????????????????????????\n??????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n???????????????????????????????????????"
+                                                                },
+                                                                {
+                                                                    "title":  "????????????????????????????????????",
+                                                                    "type":  "table_2",
+                                                                    "activeDisclosureData":  {
+                                                                                                 "regulations":  {
+                                                                                                                     "made":  0,
+                                                                                                                     "repealed":  0,
+                                                                                                                     "valid":  0
+                                                                                                                 },
+                                                                                                 "normativeDocuments":  {
+                                                                                                                            "made":  3,
+                                                                                                                            "repealed":  6,
+                                                                                                                            "valid":  14
+                                                                                                                        },
+                                                                                                 "licensing":  {
+                                                                                                                   "processed":  54408
+                                                                                                               },
+                                                                                                 "punishment":  {
+                                                                                                                    "processed":  2086
+                                                                                                                },
+                                                                                                 "coercion":  {
+                                                                                                                  "processed":  1272
+                                                                                                              },
+                                                                                                 "fees":  {
+                                                                                                              "amount":  14722.49
+                                                                                                          }
+                                                                                             }
+                                                                },
+                                                                {
+                                                                    "title":  "???????????????????????????????????????????????????",
+                                                                    "type":  "table_3",
+                                                                    "tableData":  {
+                                                                                      "naturalPerson":  {
+                                                                                                            "newReceived":  140,
+                                                                                                            "carriedOver":  0,
+                                                                                                            "results":  {
+                                                                                                                            "granted":  61,
+                                                                                                                            "partialGrant":  4,
+                                                                                                                            "denied":  {
+                                                                                                                                           "stateSecret":  0,
+                                                                                                                                           "lawForbidden":  0,
+                                                                                                                                           "safetyStability":  0,
+                                                                                                                                           "thirdPartyRights":  2,
+                                                                                                                                           "internalAffairs":  2,
+                                                                                                                                           "processInfo":  1,
+                                                                                                                                           "enforcementCase":  0,
+                                                                                                                                           "adminQuery":  0
+                                                                                                                                       },
+                                                                                                                            "unableToProvide":  {
+                                                                                                                                                    "noInfo":  44,
+                                                                                                                                                    "needCreation":  0,
+                                                                                                                                                    "unclear":  2
+                                                                                                                                                },
+                                                                                                                            "notProcessed":  {
+                                                                                                                                                 "complaint":  1,
+                                                                                                                                                 "repeat":  2,
+                                                                                                                                                 "publication":  0,
+                                                                                                                                                 "massiveRequests":  0,
+                                                                                                                                                 "confirmInfo":  2
+                                                                                                                                             },
+                                                                                                                            "other":  {
+                                                                                                                                          "overdueCorrection":  17,
+                                                                                                                                          "overdueFee":  0,
+                                                                                                                                          "otherReasons":  2
+                                                                                                                                      },
+                                                                                                                            "totalProcessed":  140,
+                                                                                                                            "carriedForward":  0
+                                                                                                                        }
+                                                                                                        },
+                                                                                      "legalPerson":  {
+                                                                                                          "commercial":  {
+                                                                                                                             "newReceived":  1,
+                                                                                                                             "carriedOver":  0,
+                                                                                                                             "results":  {
+                                                                                                                                             "granted":  1,
+                                                                                                                                             "partialGrant":  0,
+                                                                                                                                             "denied":  {
+                                                                                                                                                            "stateSecret":  0,
+                                                                                                                                                            "lawForbidden":  0,
+                                                                                                                                                            "safetyStability":  0,
+                                                                                                                                                            "thirdPartyRights":  0,
+                                                                                                                                                            "internalAffairs":  0,
+                                                                                                                                                            "processInfo":  0,
+                                                                                                                                                            "enforcementCase":  0,
+                                                                                                                                                            "adminQuery":  0
+                                                                                                                                                        },
+                                                                                                                                             "unableToProvide":  {
+                                                                                                                                                                     "noInfo":  0,
+                                                                                                                                                                     "needCreation":  0,
+                                                                                                                                                                     "unclear":  0
+                                                                                                                                                                 },
+                                                                                                                                             "notProcessed":  {
+                                                                                                                                                                  "complaint":  0,
+                                                                                                                                                                  "repeat":  0,
+                                                                                                                                                                  "publication":  0,
+                                                                                                                                                                  "massiveRequests":  0,
+                                                                                                                                                                  "confirmInfo":  0
+                                                                                                                                                              },
+                                                                                                                                             "other":  {
+                                                                                                                                                           "overdueCorrection":  0,
+                                                                                                                                                           "overdueFee":  0,
+                                                                                                                                                           "otherReasons":  0
+                                                                                                                                                       },
+                                                                                                                                             "totalProcessed":  1,
+                                                                                                                                             "carriedForward":  0
+                                                                                                                                         }
+                                                                                                                         },
+                                                                                                          "research":  {
+                                                                                                                           "newReceived":  0,
+                                                                                                                           "carriedOver":  0,
+                                                                                                                           "results":  {
+                                                                                                                                           "granted":  0,
+                                                                                                                                           "partialGrant":  0,
+                                                                                                                                           "denied":  {
+                                                                                                                                                          "stateSecret":  0,
+                                                                                                                                                          "lawForbidden":  0,
+                                                                                                                                                          "safetyStability":  0,
+                                                                                                                                                          "thirdPartyRights":  0,
+                                                                                                                                                          "internalAffairs":  0,
+                                                                                                                                                          "processInfo":  0,
+                                                                                                                                                          "enforcementCase":  0,
+                                                                                                                                                          "adminQuery":  0
+                                                                                                                                                      },
+                                                                                                                                           "unableToProvide":  {
+                                                                                                                                                                   "noInfo":  0,
+                                                                                                                                                                   "needCreation":  0,
+                                                                                                                                                                   "unclear":  0
+                                                                                                                                                               },
+                                                                                                                                           "notProcessed":  {
+                                                                                                                                                                "complaint":  0,
+                                                                                                                                                                "repeat":  0,
+                                                                                                                                                                "publication":  0,
+                                                                                                                                                                "massiveRequests":  0,
+                                                                                                                                                                "confirmInfo":  0
+                                                                                                                                                            },
+                                                                                                                                           "other":  {
+                                                                                                                                                         "overdueCorrection":  0,
+                                                                                                                                                         "overdueFee":  0,
+                                                                                                                                                         "otherReasons":  0
+                                                                                                                                                     },
+                                                                                                                                           "totalProcessed":  0,
+                                                                                                                                           "carriedForward":  0
+                                                                                                                                       }
+                                                                                                                       },
+                                                                                                          "social":  {
+                                                                                                                         "newReceived":  0,
+                                                                                                                         "carriedOver":  0,
+                                                                                                                         "results":  {
+                                                                                                                                         "granted":  0,
+                                                                                                                                         "partialGrant":  0,
+                                                                                                                                         "denied":  {
+                                                                                                                                                        "stateSecret":  0,
+                                                                                                                                                        "lawForbidden":  0,
+                                                                                                                                                        "safetyStability":  0,
+                                                                                                                                                        "thirdPartyRights":  0,
+                                                                                                                                                        "internalAffairs":  0,
+                                                                                                                                                        "processInfo":  0,
+                                                                                                                                                        "enforcementCase":  0,
+                                                                                                                                                        "adminQuery":  0
+                                                                                                                                                    },
+                                                                                                                                         "unableToProvide":  {
+                                                                                                                                                                 "noInfo":  0,
+                                                                                                                                                                 "needCreation":  0,
+                                                                                                                                                                 "unclear":  0
+                                                                                                                                                             },
+                                                                                                                                         "notProcessed":  {
+                                                                                                                                                              "complaint":  0,
+                                                                                                                                                              "repeat":  0,
+                                                                                                                                                              "publication":  0,
+                                                                                                                                                              "massiveRequests":  0,
+                                                                                                                                                              "confirmInfo":  0
+                                                                                                                                                          },
+                                                                                                                                         "other":  {
+                                                                                                                                                       "overdueCorrection":  0,
+                                                                                                                                                       "overdueFee":  0,
+                                                                                                                                                       "otherReasons":  0
+                                                                                                                                                   },
+                                                                                                                                         "totalProcessed":  0,
+                                                                                                                                         "carriedForward":  0
+                                                                                                                                     }
+                                                                                                                     },
+                                                                                                          "legal":  {
+                                                                                                                        "newReceived":  0,
+                                                                                                                        "carriedOver":  0,
+                                                                                                                        "results":  {
+                                                                                                                                        "granted":  0,
+                                                                                                                                        "partialGrant":  0,
+                                                                                                                                        "denied":  {
+                                                                                                                                                       "stateSecret":  0,
+                                                                                                                                                       "lawForbidden":  0,
+                                                                                                                                                       "safetyStability":  0,
+                                                                                                                                                       "thirdPartyRights":  0,
+                                                                                                                                                       "internalAffairs":  0,
+                                                                                                                                                       "processInfo":  0,
+                                                                                                                                                       "enforcementCase":  0,
+                                                                                                                                                       "adminQuery":  0
+                                                                                                                                                   },
+                                                                                                                                        "unableToProvide":  {
+                                                                                                                                                                "noInfo":  0,
+                                                                                                                                                                "needCreation":  0,
+                                                                                                                                                                "unclear":  0
+                                                                                                                                                            },
+                                                                                                                                        "notProcessed":  {
+                                                                                                                                                             "complaint":  0,
+                                                                                                                                                             "repeat":  0,
+                                                                                                                                                             "publication":  0,
+                                                                                                                                                             "massiveRequests":  0,
+                                                                                                                                                             "confirmInfo":  0
+                                                                                                                                                         },
+                                                                                                                                        "other":  {
+                                                                                                                                                      "overdueCorrection":  0,
+                                                                                                                                                      "overdueFee":  0,
+                                                                                                                                                      "otherReasons":  0
+                                                                                                                                                  },
+                                                                                                                                        "totalProcessed":  0,
+                                                                                                                                        "carriedForward":  0
+                                                                                                                                    }
+                                                                                                                    },
+                                                                                                          "other":  {
+                                                                                                                        "newReceived":  2,
+                                                                                                                        "carriedOver":  0,
+                                                                                                                        "results":  {
+                                                                                                                                        "granted":  0,
+                                                                                                                                        "partialGrant":  0,
+                                                                                                                                        "denied":  {
+                                                                                                                                                       "stateSecret":  0,
+                                                                                                                                                       "lawForbidden":  0,
+                                                                                                                                                       "safetyStability":  0,
+                                                                                                                                                       "thirdPartyRights":  0,
+                                                                                                                                                       "internalAffairs":  0,
+                                                                                                                                                       "processInfo":  0,
+                                                                                                                                                       "enforcementCase":  0,
+                                                                                                                                                       "adminQuery":  0
+                                                                                                                                                   },
+                                                                                                                                        "unableToProvide":  {
+                                                                                                                                                                "noInfo":  2,
+                                                                                                                                                                "needCreation":  0,
+                                                                                                                                                                "unclear":  0
+                                                                                                                                                            },
+                                                                                                                                        "notProcessed":  {
+                                                                                                                                                             "complaint":  0,
+                                                                                                                                                             "repeat":  0,
+                                                                                                                                                             "publication":  0,
+                                                                                                                                                             "massiveRequests":  0,
+                                                                                                                                                             "confirmInfo":  0
+                                                                                                                                                         },
+                                                                                                                                        "other":  {
+                                                                                                                                                      "overdueCorrection":  0,
+                                                                                                                                                      "overdueFee":  0,
+                                                                                                                                                      "otherReasons":  0
+                                                                                                                                                  },
+                                                                                                                                        "totalProcessed":  2,
+                                                                                                                                        "carriedForward":  0
+                                                                                                                                    }
+                                                                                                                    }
+                                                                                                      },
+                                                                                      "total":  {
+                                                                                                    "newReceived":  143,
+                                                                                                    "carriedOver":  0,
+                                                                                                    "results":  {
+                                                                                                                    "granted":  62,
+                                                                                                                    "partialGrant":  4,
+                                                                                                                    "denied":  {
+                                                                                                                                   "stateSecret":  0,
+                                                                                                                                   "lawForbidden":  0,
+                                                                                                                                   "safetyStability":  0,
+                                                                                                                                   "thirdPartyRights":  2,
+                                                                                                                                   "internalAffairs":  2,
+                                                                                                                                   "processInfo":  1,
+                                                                                                                                   "enforcementCase":  0,
+                                                                                                                                   "adminQuery":  0
+                                                                                                                               },
+                                                                                                                    "unableToProvide":  {
+                                                                                                                                            "noInfo":  46,
+                                                                                                                                            "needCreation":  0,
+                                                                                                                                            "unclear":  2
+                                                                                                                                        },
+                                                                                                                    "notProcessed":  {
+                                                                                                                                         "complaint":  1,
+                                                                                                                                         "repeat":  2,
+                                                                                                                                         "publication":  0,
+                                                                                                                                         "massiveRequests":  0,
+                                                                                                                                         "confirmInfo":  2
+                                                                                                                                     },
+                                                                                                                    "other":  {
+                                                                                                                                  "overdueCorrection":  17,
+                                                                                                                                  "overdueFee":  0,
+                                                                                                                                  "otherReasons":  2
+                                                                                                                              },
+                                                                                                                    "totalProcessed":  143,
+                                                                                                                    "carriedForward":  0
+                                                                                                                }
+                                                                                                }
+                                                                                  }
+                                                                },
+                                                                {
+                                                                    "title":  "?????????????????????????????????????????????????????????",
+                                                                    "type":  "table_4",
+                                                                    "reviewLitigationData":  {
+                                                                                                 "review":  {
+                                                                                                                "maintain":  1,
+                                                                                                                "correct":  0,
+                                                                                                                "other":  6,
+                                                                                                                "unfinished":  0,
+                                                                                                                "total":  7
+                                                                                                            },
+                                                                                                 "litigationDirect":  {
+                                                                                                                          "maintain":  2,
+                                                                                                                          "correct":  0,
+                                                                                                                          "other":  1,
+                                                                                                                          "unfinished":  0,
+                                                                                                                          "total":  0
+                                                                                                                      },
+                                                                                                 "litigationPostReview":  {
+                                                                                                                              "maintain":  0,
+                                                                                                                              "correct":  0,
+                                                                                                                              "other":  1,
+                                                                                                                              "unfinished":  0,
+                                                                                                                              "total":  1
+                                                                                                                          }
+                                                                                             }
+                                                                },
+                                                                {
+                                                                    "title":  "??????????????????????????????????????????",
+                                                                    "type":  "text",
+                                                                    "content":  "2023 ????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n?????????????????????????????????????????????\n2024 ????????????????????????????????????????????????????????????????????????\n???????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n???????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n???????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n????????????????????????????????????????????????????????????????????????????????????\n???????????????"
+                                                                },
+                                                                {
+                                                                    "title":  "?????????????????????????????????",
+                                                                    "type":  "text",
+                                                                    "content":  "2023 ????????????????????????????????????????????????????????????????????????\n?????????????????????"
+                                                                }
+                                                            ]
+                                           },
+                           "provider":  "gemini",
+                           "model":  "gemini-2.5-flash",
+                           "prompt_version":  "v1",
+                           "schema_version":  "v1",
+                           "text_path":  null,
+                           "created_at":  "2025-12-25 13:28:25"
+                       },
+    "latest_job":  {
+                       "job_id":  71,
+                       "status":  "succeeded",
+                       "progress":  100,
+                       "error_code":  null,
+                       "error_message":  null
+                   }
+}

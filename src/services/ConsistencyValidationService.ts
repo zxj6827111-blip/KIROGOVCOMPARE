@@ -56,6 +56,39 @@ interface EntityData {
 export class ConsistencyValidationService {
 
     /**
+     * Validate an entire parsed report for consistency
+     */
+    public validateReport(parsedData: any): ValidationResult {
+        const allIssues: ValidationIssue[] = [];
+        
+        // Extract sections and validate Table 3 data if available
+        const sections = parsedData?.sections || [];
+        
+        // Find Table 3 section
+        const table3Section = sections.find((s: any) => s.type === 'table_3');
+        
+        if (table3Section?.tableData) {
+            // Validate current year data
+            const currentYearResult = this.validateTable3(table3Section.tableData, '当前年度');
+            allIssues.push(...currentYearResult.issues);
+        }
+        
+        // Find Table 4 section
+        const table4Section = sections.find((s: any) => s.type === 'table_4');
+        
+        if (table4Section?.reviewLitigationData) {
+            // Validate table 4 data
+            const table4Result = this.validateTable4(table4Section.reviewLitigationData, '当前年度');
+            allIssues.push(...table4Result.issues);
+        }
+        
+        return {
+            issues: allIssues,
+            score: Math.max(0, 100 - allIssues.length * 10)
+        };
+    }
+
+    /**
      * Validate a single year's Table 3 data for internal consistency
      */
     public validateTable3(data: any, yearLabel: string): ValidationResult {
@@ -219,6 +252,52 @@ export class ConsistencyValidationService {
                 });
             }
         });
+    }
+
+    /**
+     * Validate Table 4 (行政复议、行政诉讼情况)
+     */
+    public validateTable4(data: any, yearLabel: string): ValidationResult {
+        const issues: ValidationIssue[] = [];
+        if (!data) return { issues, score: 100 };
+
+        // 检查三个类别：行政复议、直接行政诉讼、复议后行政诉讼
+        const categories = [
+            { key: 'review', name: '行政复议' },
+            { key: 'litigationDirect', name: '直接行政诉讼' },
+            { key: 'litigationPostReview', name: '复议后行政诉讼' }
+        ];
+
+        categories.forEach(cat => {
+            const categoryData = data[cat.key];
+            if (!categoryData) return;
+
+            const maintain = categoryData.maintain || 0;
+            const correct = categoryData.correct || 0;
+            const other = categoryData.other || 0;
+            const unfinished = categoryData.unfinished || 0;
+            const total = categoryData.total || 0;
+
+            const calculatedTotal = maintain + correct + other + unfinished;
+
+            if (calculatedTotal !== total) {
+                issues.push({
+                    severity: 'error',
+                    code: 'TABLE4_TOTAL_MISMATCH',
+                    message: `${yearLabel} - ${cat.name}总计错误: 维持(${maintain}) + 纠正(${correct}) + 其他(${other}) + 尚未审结(${unfinished}) = ${calculatedTotal} ≠ 总计(${total})`,
+                    location: `Table 4 - ${cat.name}`,
+                    relatedValues: {
+                        expected: calculatedTotal,
+                        actual: total
+                    }
+                });
+            }
+        });
+
+        return {
+            issues,
+            score: Math.max(0, 100 - issues.length * 10)
+        };
     }
 }
 

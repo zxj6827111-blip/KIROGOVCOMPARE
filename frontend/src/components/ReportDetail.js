@@ -3,6 +3,7 @@ import './ReportDetail.css';
 import { apiClient } from '../apiClient';
 import { Table2View, Table3View, Table4View } from './TableViews';
 import ParsedDataEditor from './ParsedDataEditor';
+import ConsistencyCheckView from './ConsistencyCheckView';
 
 function ReportDetail({ reportId: propReportId, onBack }) {
   const reportId = propReportId || window.location.pathname.split('/').pop();
@@ -12,6 +13,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const [showParsed, setShowParsed] = useState(true); // 默认展开
   const [showMetadata, setShowMetadata] = useState(false); // 元数据默认隐藏
   const [editingData, setEditingData] = useState(null); // 编辑模式
+  const [activeTab, setActiveTab] = useState('content'); // 'content' | 'checks'
 
   const handleBack = () => {
     if (onBack) return onBack();
@@ -379,10 +381,41 @@ function ReportDetail({ reportId: propReportId, onBack }) {
               </>
             )}
 
-            <section className="section">
-              <h3>解析摘要</h3>
-              {renderParsedContent(report.active_version?.parsed_json)}
-            </section>
+            {/* Tab 切换 */}
+            <div className="tabs-container">
+              <div className="tabs">
+                <button 
+                  className={`tab ${activeTab === 'content' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('content')}
+                >
+                  📄 年报内容
+                </button>
+                <button 
+                  className={`tab ${activeTab === 'checks' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('checks')}
+                >
+                  ✅ 勾稽关系校验
+                </button>
+              </div>
+            </div>
+
+            {/* Tab 内容 */}
+            {activeTab === 'content' && (
+              <section className="section">
+                <h3>解析摘要</h3>
+                {renderParsedContent(report.active_version?.parsed_json)}
+              </section>
+            )}
+
+            {activeTab === 'checks' && (
+              <section className="section">
+                <h3>一致性校验</h3>
+                <ConsistencyCheckView 
+                  reportId={reportId} 
+                  onEdit={() => setEditingData(report.active_version?.parsed_json)}
+                />
+              </section>
+            )}
           </>
         )}
       </div>
