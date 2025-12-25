@@ -8,7 +8,6 @@ function CityIndex({ onSelectReport }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [path, setPath] = useState([]); // 保存层级路径的 region_id
-  const [tab, setTab] = useState('children'); // children | current
   const [selectedForCompare, setSelectedForCompare] = useState([]); // 选中用于比对的报告
   const [comparing, setComparing] = useState(false);
 
@@ -79,19 +78,16 @@ function CityIndex({ onSelectReport }) {
 
   const handleEnter = (regionId) => {
     setPath((prev) => [...prev, regionId]);
-    setTab('children');
     setSelectedForCompare([]);
   };
 
   const handleBack = () => {
     setPath((prev) => prev.slice(0, -1));
-    setTab('children');
     setSelectedForCompare([]);
   };
 
   const handleReset = () => {
     setPath([]);
-    setTab('children');
     setSelectedForCompare([]);
   };
 
@@ -187,62 +183,22 @@ function CityIndex({ onSelectReport }) {
       {error && <div className="alert error">{error}</div>}
       {loading && <div className="alert">加载中…</div>}
 
-      <div className="tab-row">
-        <button
-          className={`tab-btn ${tab === 'children' ? 'active' : ''}`}
-          onClick={() => setTab('children')}
-        >
-          查看下级城市年报
-        </button>
-        <button
-          className={`tab-btn ${tab === 'current' ? 'active' : ''}`}
-          onClick={() => setTab('current')}
-          disabled={!currentParentId}
-        >
-          查看本级城市年报
-        </button>
-      </div>
-
-      {tab === 'children' && (
-        <>
-          {!loading && cards.length === 0 && <div className="empty">暂无下级区域</div>}
-          <div className="card-grid">
-            {cards.map((region) => {
-              const total = countWithDescendants(region.id);
-              return (
-                <div key={region.id} className="city-card" onClick={() => handleEnter(region.id)}>
-                  <div className="city-meta">
-                    <div className="city-country">{region.province || '中国'}</div>
-                    <div className="city-level">{levelLabel(region.level)}</div>
-                  </div>
-                  <h3 className="city-name">{region.name}</h3>
-                  <div className="city-count">
-                    <span className="count-number">{total}</span>
-                    <span className="count-label">份报告</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-
-      {tab === 'current' && currentParentId && (
-        <div className="report-list-panel">
-          <div className="report-list-header">
-            <div>
-              <h3>{currentRegion?.name || '当前城市'}的年报</h3>
-              <p className="subtitle">共 {currentReports.length} 份</p>
+      {/* 如果有本级年报，显示本级年报区域 */}
+      {currentParentId && currentReports.length > 0 && (
+        <div className="current-reports-section">
+          <div className="section-header">
+            <h3>{currentRegion?.name || '当前城市'}的年报</h3>
+            <div className="section-actions">
+              {selectedForCompare.length === 2 && (
+                <button 
+                  className="compare-btn"
+                  onClick={handleCompare}
+                  disabled={comparing}
+                >
+                  {comparing ? '比对中...' : '🔀 开始比对'}
+                </button>
+              )}
             </div>
-            {selectedForCompare.length === 2 && (
-              <button 
-                className="compare-btn"
-                onClick={handleCompare}
-                disabled={comparing}
-              >
-                {comparing ? '比对中...' : '🔀 开始比对'}
-              </button>
-            )}
           </div>
           
           {selectedForCompare.length > 0 && (
@@ -253,45 +209,80 @@ function CityIndex({ onSelectReport }) {
             </div>
           )}
           
-          {currentReports.length === 0 && <div className="empty">暂无本级年报</div>}
           <div className="report-grid">
-            {currentReports.map((r) => (
-              <div 
-                key={r.report_id} 
-                className={`report-card ${selectedForCompare.includes(r.report_id) ? 'selected' : ''}`}
-              >
-                <div className="report-card-header">
-                  <input
-                    type="checkbox"
-                    checked={selectedForCompare.includes(r.report_id)}
-                    onChange={(e) => toggleReportSelection(e, r.report_id)}
-                    onClick={(e) => e.stopPropagation()}
-                  />
-                  <span className="report-title" onClick={() => onSelectReport?.(r.report_id)}>
-                    报告 #{r.report_id}
-                  </span>
+            {currentReports.map((r) => {
+              const region = regions.find(reg => reg.id === r.region_id);
+              const regionName = region?.name || '未知区域';
+              const reportTitle = `${r.year}年${regionName}政务公开年报`;
+              
+              return (
+                <div 
+                  key={r.report_id} 
+                  className={`report-card ${selectedForCompare.includes(r.report_id) ? 'selected' : ''}`}
+                >
+                  <div className="report-card-header">
+                    <input
+                      type="checkbox"
+                      checked={selectedForCompare.includes(r.report_id)}
+                      onChange={(e) => toggleReportSelection(e, r.report_id)}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <span className="report-title" onClick={() => onSelectReport?.(r.report_id)}>
+                      {reportTitle}
+                    </span>
+                  </div>
+                  <div className="report-actions">
+                    <button 
+                      className="view-btn"
+                      onClick={() => onSelectReport?.(r.report_id)}
+                    >
+                      查看
+                    </button>
+                    <button 
+                      className="delete-report-btn"
+                      onClick={(e) => handleDeleteReport(e, r.report_id)}
+                    >
+                      删除
+                    </button>
+                  </div>
                 </div>
-                <div className="report-meta">年份：{r.year}</div>
-                <div className="report-meta">active_version: {r.active_version_id || '暂无'}</div>
-                <div className="report-meta">最新任务：{r.latest_job?.status || '无'}</div>
-                <div className="report-actions">
-                  <button 
-                    className="view-btn"
-                    onClick={() => onSelectReport?.(r.report_id)}
-                  >
-                    查看
-                  </button>
-                  <button 
-                    className="delete-report-btn"
-                    onClick={(e) => handleDeleteReport(e, r.report_id)}
-                  >
-                    删除
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
+      )}
+
+      {/* 下级城市区域 */}
+      {cards.length > 0 && (
+        <div className="children-section">
+          <h3>下级城市</h3>
+          <div className="card-grid">
+            {cards.map((region) => {
+              const total = countWithDescendants(region.id);
+              const directReports = reportCountMap.get(region.id) || 0;
+              return (
+                <div key={region.id} className="city-card" onClick={() => handleEnter(region.id)}>
+                  <div className="city-meta">
+                    <div className="city-country">{region.province || '中国'}</div>
+                    <div className="city-level">{levelLabel(region.level)}</div>
+                  </div>
+                  <h3 className="city-name">{region.name}</h3>
+                  <div className="city-count">
+                    <span className="count-number">{total}</span>
+                    <span className="count-label">份报告（含下级）</span>
+                  </div>
+                  {directReports > 0 && (
+                    <div className="direct-count">本级 {directReports} 份</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {!loading && cards.length === 0 && currentReports.length === 0 && (
+        <div className="empty">暂无年报和下级区域</div>
       )}
     </div>
   );

@@ -1,34 +1,58 @@
 .city-index {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 24px;
 }
 
-.tab-row {
+/* 本级年报区域 */
+.current-reports-section {
+  background: #f0f9ff;
+  border: 2px solid #3b82f6;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.current-reports-section .section-header {
   display: flex;
-  gap: 8px;
-  margin-top: 4px;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
 }
 
-.tab-btn {
-  border: 1px solid #d1d5db;
-  background: #f9fafb;
-  color: #374151;
-  border-radius: 10px;
-  padding: 10px 14px;
-  cursor: pointer;
+.current-reports-section h3 {
+  margin: 0;
+  color: #1e40af;
+  font-size: 18px;
   font-weight: 700;
 }
 
-.tab-btn.active {
-  border-color: #2563eb;
-  background: #e0f2fe;
-  color: #1d4ed8;
+.section-actions {
+  display: flex;
+  gap: 8px;
 }
 
-.tab-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+/* 下级城市区域 */
+.children-section {
+  margin-top: 20px;
+}
+
+.children-section h3 {
+  margin: 0 0 16px 0;
+  color: #374151;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.direct-count {
+  margin-top: 8px;
+  padding: 4px 8px;
+  background: #dbeafe;
+  color: #1e40af;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
 }
 
 .header-row {
