@@ -95,6 +95,59 @@ CREATE TABLE IF NOT EXISTS report_version_parses (
   output_json TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS report_consistency_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  report_version_id INTEGER NOT NULL REFERENCES report_versions(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'running',
+  engine_version TEXT NOT NULL DEFAULT 'v1',
+  summary_json TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  finished_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_consistency_runs_version 
+  ON report_consistency_runs(report_version_id);
+
+CREATE INDEX IF NOT EXISTS idx_consistency_runs_status 
+  ON report_consistency_runs(status);
+
+CREATE TABLE IF NOT EXISTS report_consistency_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id INTEGER NOT NULL REFERENCES report_consistency_runs(id) ON DELETE CASCADE,
+  report_version_id INTEGER NOT NULL REFERENCES report_versions(id) ON DELETE CASCADE,
+  group_key TEXT NOT NULL,
+  check_key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  expr TEXT NOT NULL,
+  left_value REAL,
+  right_value REAL,
+  delta REAL,
+  tolerance REAL NOT NULL DEFAULT 0,
+  auto_status TEXT NOT NULL,
+  evidence_json TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  human_status TEXT NOT NULL DEFAULT 'pending',
+  human_comment TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(report_version_id, fingerprint)
+);
+
+CREATE INDEX IF NOT EXISTS idx_consistency_items_run 
+  ON report_consistency_items(run_id);
+
+CREATE INDEX IF NOT EXISTS idx_consistency_items_version 
+  ON report_consistency_items(report_version_id);
+
+CREATE INDEX IF NOT EXISTS idx_consistency_items_group 
+  ON report_consistency_items(group_key);
+
+CREATE INDEX IF NOT EXISTS idx_consistency_items_auto_status 
+  ON report_consistency_items(auto_status);
+
+CREATE INDEX IF NOT EXISTS idx_consistency_items_human_status 
+  ON report_consistency_items(human_status);
 `;
 
 const postgresSchema = `
@@ -190,6 +243,61 @@ CREATE TABLE IF NOT EXISTS report_version_parses (
   output_json JSONB NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS report_consistency_runs (
+  id BIGSERIAL PRIMARY KEY,
+  report_version_id BIGINT NOT NULL REFERENCES report_versions(id) ON DELETE CASCADE,
+  status VARCHAR(30) NOT NULL DEFAULT 'running',
+  engine_version VARCHAR(50) NOT NULL DEFAULT 'v1',
+  summary_json JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  finished_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_consistency_runs_version 
+  ON report_consistency_runs(report_version_id);
+
+CREATE INDEX IF NOT EXISTS idx_consistency_runs_status 
+  ON report_consistency_runs(status);
+
+CREATE TABLE IF NOT EXISTS report_consistency_items (
+  id BIGSERIAL PRIMARY KEY,
+  run_id BIGINT NOT NULL REFERENCES report_consistency_runs(id) ON DELETE CASCADE,
+  report_version_id BIGINT NOT NULL REFERENCES report_versions(id) ON DELETE CASCADE,
+  group_key VARCHAR(50) NOT NULL,
+  check_key VARCHAR(100) NOT NULL,
+  title TEXT NOT NULL,
+  expr TEXT NOT NULL,
+  left_value DOUBLE PRECISION,
+  right_value DOUBLE PRECISION,
+  delta DOUBLE PRECISION,
+  tolerance DOUBLE PRECISION NOT NULL DEFAULT 0,
+  auto_status VARCHAR(30) NOT NULL,
+  evidence_json JSONB NOT NULL,
+  fingerprint VARCHAR(64) NOT NULL,
+  human_status VARCHAR(30) NOT NULL DEFAULT 'pending',
+  human_comment TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_consistency_items_version_fingerprint
+  ON report_consistency_items(report_version_id, fingerprint);
+
+CREATE INDEX IF NOT EXISTS idx_consistency_items_run 
+  ON report_consistency_items(run_id);
+
+CREATE INDEX IF NOT EXISTS idx_consistency_items_version 
+  ON report_consistency_items(report_version_id);
+
+CREATE INDEX IF NOT EXISTS idx_consistency_items_group 
+  ON report_consistency_items(group_key);
+
+CREATE INDEX IF NOT EXISTS idx_consistency_items_auto_status 
+  ON report_consistency_items(auto_status);
+
+CREATE INDEX IF NOT EXISTS idx_consistency_items_human_status 
+  ON report_consistency_items(human_status);
 `;
 
 export async function runLLMMigrations(): Promise<void> {

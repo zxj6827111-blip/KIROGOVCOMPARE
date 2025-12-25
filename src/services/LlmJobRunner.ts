@@ -2,6 +2,8 @@ import { ensureSqliteMigrations, querySqlite, sqlValue } from '../config/sqlite'
 import { LlmParseResult, LlmProvider, LlmProviderError } from './LlmProvider';
 import { createLlmProvider } from './LlmProviderFactory';
 import { summarizeDiff } from '../utils/jsonDiff';
+import consistencyValidationService from './ConsistencyValidationService';
+import consistencyCheckService from './ConsistencyCheckService';
 
 interface QueuedJob {
   id: number;
@@ -75,7 +77,7 @@ export class LlmJobRunner {
         SELECT id
         FROM jobs
         WHERE status = 'queued'
-        ORDER BY (CASE WHEN kind = 'compare' THEN 0 ELSE 1 END) ASC, created_at ASC
+        ORDER BY (CASE kind WHEN 'parse' THEN 0 WHEN 'checks' THEN 1 WHEN 'compare' THEN 2 ELSE 9 END) ASC, created_at ASC
         LIMIT 1
       )
       RETURNING id, report_id, version_id, kind, comparison_id;
@@ -118,6 +120,8 @@ export class LlmJobRunner {
     try {
       if (job.kind === 'compare') {
         await this.processCompareJob(job);
+      } else if (job.kind === 'checks') {
+        await this.processChecksJob(job);
       } else {
         await this.processParseJob(job);
       }
@@ -164,6 +168,46 @@ export class LlmJobRunner {
     querySqlite(
       `UPDATE jobs SET status = 'succeeded', progress = 100, finished_at = datetime('now') WHERE id = ${sqlValue(job.id)};`
     );
+
+    // 自动触发 checks job（避免重复）
+    this.enqueueChecksJob(job.report_id, job.version_id);
+  }
+
+  private async processChecksJob(job: QueuedJob): Promise<void> {
+    if (!job.version_id) {
+      throw new Error('Checks job missing version_id');
+    }
+
+    await consistencyCheckService.runChecks(job.version_id);
+
+    querySqlite(
+      `UPDATE jobs SET status = 'succeeded', progress = 100, finished_at = datetime('now') WHERE id = ${sqlValue(job.id)};`
+    );
+  }
+
+  private enqueueChecksJob(reportId: number | null, versionId: number | null): void {
+    if (!reportId || !versionId) return;
+
+    // 检查是否已存在 queued/running 的 checks job
+    const existing = querySqlite(`
+      SELECT id FROM jobs
+      WHERE report_id = ${sqlValue(reportId)}
+        AND version_id = ${sqlValue(versionId)}
+        AND kind = 'checks'
+        AND status IN ('queued', 'running')
+      LIMIT 1;
+    `);
+
+    if (existing.length > 0) {
+      return; // 已存在，不重复入队
+    }
+
+    querySqlite(`
+      INSERT INTO jobs (report_id, version_id, kind, status, created_at)
+      VALUES (${sqlValue(reportId)}, ${sqlValue(versionId)}, 'checks', 'queued', datetime('now'));
+    `);
+
+    console.log(`Enqueued checks job for report ${reportId}, version ${versionId}`);
   }
 
   private async processCompareJob(job: QueuedJob): Promise<void> {
@@ -172,7 +216,7 @@ export class LlmJobRunner {
     }
 
     const comparison = querySqlite(`
-      SELECT id, left_report_id, right_report_id
+      SELECT id, left_report_id, right_report_id, year_a, year_b
       FROM comparisons
       WHERE id = ${sqlValue(job.comparison_id)}
       LIMIT 1;
@@ -214,6 +258,61 @@ export class LlmJobRunner {
     }
 
     const diffResult = summarizeDiff(leftParsed, rightParsed);
+
+    // --- Consistency Validation ---
+    try {
+      const extractTable3 = (parsed: any) => {
+        if (!parsed || !Array.isArray(parsed.sections)) return null;
+        const sec = parsed.sections.find((s: any) => s.type === 'table_3');
+        return sec ? sec.tableData : null;
+      };
+
+      const leftTable3 = extractTable3(leftParsed);
+      const rightTable3 = extractTable3(rightParsed);
+      const yearA = comparison.year_a;
+      const yearB = comparison.year_b;
+
+      // Ensure we know which is previous and which is current
+      // Usually users compare Prev vs Curr, but they might swap.
+      // Logic: Smaller year is "Previous".
+      const [prevData, currData, prevYear, currYear] = (yearA < yearB)
+        ? [leftTable3, rightTable3, yearA, yearB]
+        : [rightTable3, leftTable3, yearB, yearA];
+
+      const issues: any[] = [];
+
+      // 1. Internal Checks
+      if (leftTable3) {
+        const resA = consistencyValidationService.validateTable3(leftTable3, `${yearA}年`);
+        issues.push(...resA.issues);
+      }
+      if (rightTable3) {
+        const resB = consistencyValidationService.validateTable3(rightTable3, `${yearB}年`);
+        issues.push(...resB.issues);
+      }
+
+      // 2. Cross-Year Checks
+      if (prevData && currData) {
+        const crossIssues = consistencyValidationService.validateCrossYear(prevData, currData, prevYear, currYear);
+        issues.push(...crossIssues);
+      }
+
+      // 3. Attach to DiffResult
+      if (issues.length > 0) {
+        (diffResult as any).validation = {
+          issues,
+          score: Math.max(0, 100 - issues.length * 5) // Simple scoring
+        };
+      } else {
+        (diffResult as any).validation = { issues: [], score: 100 };
+      }
+
+    } catch (e) {
+      console.error('Validation failed during comparison job:', e);
+      // We don't fail the whole job if validation fails, just log it.
+    }
+    // -----------------------------
+
     const diffJson = JSON.stringify(diffResult);
 
     querySqlite(`

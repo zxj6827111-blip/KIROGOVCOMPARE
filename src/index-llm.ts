@@ -10,6 +10,7 @@ import reportsRouter from './routes/reports';
 import llmComparisonsRouter from './routes/llm-comparisons';
 import comparisonHistoryRouter from './routes/comparison-history';
 import authRouter from './routes/auth';
+import reportChecksRouter from './routes/report-checks';
 import { llmJobRunner } from './services/LlmJobRunner';
 
 dotenv.config();
@@ -47,6 +48,7 @@ app.use('/api/jobs', llmJobsRouter);
 // IMPORTANT: Mount comparison-history BEFORE llm-comparisons to avoid route conflicts
 app.use('/api/comparisons', comparisonHistoryRouter);
 app.use('/api', llmComparisonsRouter);
+app.use('/api/reports', reportChecksRouter);
 app.use('/api', reportsRouter);
 app.use('/api/auth', authRouter);
 
