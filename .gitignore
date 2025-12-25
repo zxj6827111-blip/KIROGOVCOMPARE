@@ -22,3 +22,8 @@ uploads/
 fixtures/_template/*.docx
 fixtures/**/*.pdf
 fixtures/manifest.csv
+
+# Temporary test files with encoding issues
+temp-*.json
+test-report*.json
+frontend/temp-*.json

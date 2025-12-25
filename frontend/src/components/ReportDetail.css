@@ -50,6 +50,43 @@
   margin-top: 4px;
 }
 
+/* Tab 切换样式 */
+.tabs-container {
+  margin: 20px 0;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: -2px;
+}
+
+.tab {
+  padding: 12px 24px;
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 500;
+  color: #6b7280;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.tab:hover {
+  color: #374151;
+  background: #f9fafb;
+}
+
+.tab.active {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+  background: transparent;
+}
+
+
 .value.error-text {
   color: #b91c1c;
 }
