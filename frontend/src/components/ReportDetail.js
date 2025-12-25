@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import './ReportDetail.css';
 import { apiClient } from '../apiClient';
+import { Table2View, Table3View, Table4View } from './TableViews';
 
 function ReportDetail({ reportId: propReportId, onBack }) {
   const reportId = propReportId || window.location.pathname.split('/').pop();
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [showParsed, setShowParsed] = useState(false);
+  const [showParsed, setShowParsed] = useState(true); // 默认展开
+  const [showMetadata, setShowMetadata] = useState(false); // 元数据默认隐藏
   const handleBack = () => {
     if (onBack) return onBack();
     window.history.back();
@@ -102,6 +104,13 @@ function ReportDetail({ reportId: propReportId, onBack }) {
 
   const renderParsedContent = (parsed) => {
     if (!parsed) return <p className="meta">暂无解析内容</p>;
+    
+    // 如果是对象且包含sections，则渲染结构化内容
+    if (parsed && typeof parsed === 'object' && parsed.sections && Array.isArray(parsed.sections)) {
+      return renderStructuredContent(parsed);
+    }
+    
+    // 否则显示原始JSON
     const text = typeof parsed === 'string' ? parsed : JSON.stringify(parsed, null, 2);
     const preview = text.length > 600 ? `${text.slice(0, 600)}...` : text;
 
@@ -111,6 +120,66 @@ function ReportDetail({ reportId: propReportId, onBack }) {
           {showParsed ? '折叠解析' : '展开解析'}
         </button>
         {showParsed && <pre className="parsed-json">{preview}</pre>}
+      </div>
+    );
+  };
+
+  const renderStructuredContent = (parsed) => {
+    if (!parsed || !parsed.sections) return null;
+
+    // 对sections进行排序，将标题放在最前面
+    const sections = [...parsed.sections];
+    sections.sort((a, b) => {
+      const isATi = a.title === '标题' || a.title?.includes('年度报告');
+      const isBTi = b.title === '标题' || b.title?.includes('年度报告');
+      if (isATi && !isBTi) return -1;
+      if (!isATi && isBTi) return 1;
+      
+      // 按照 一、二、三 等中文数字排序
+      const numerals = ['一', '二', '三', '四', '五', '六', '七', '八'];
+      const idxA = numerals.findIndex(n => a.title?.includes(n));
+      const idxB = numerals.findIndex(n => b.title?.includes(n));
+      return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB);
+    });
+
+    return (
+      <div className="structured-content">
+        <div className="content-header">
+          <h3>年报内容</h3>
+          <button className="secondary-btn" onClick={() => setShowParsed((prev) => !prev)}>
+            {showParsed ? '折叠内容' : '展开内容'}
+          </button>
+        </div>
+        
+        {showParsed && (
+          <div className="sections-container">
+            {sections.map((section, idx) => (
+              <div key={idx} className="section-item">
+                <h4 className="section-title">{section.title}</h4>
+                <div className="section-content">
+                  {section.type === 'text' && (
+                    <div className="text-content">{section.content}</div>
+                  )}
+                  {section.type === 'table_2' && section.activeDisclosureData && (
+                    <Table2View data={section.activeDisclosureData} />
+                  )}
+                  {section.type === 'table_3' && section.tableData && (
+                    <Table3View data={section.tableData} compact={true} />
+                  )}
+                  {section.type === 'table_4' && section.reviewLitigationData && (
+                    <Table4View data={section.reviewLitigationData} />
+                  )}
+                  {!['text', 'table_2', 'table_3', 'table_4'].includes(section.type) && (
+                    <div className="unknown-type">
+                      <p className="meta">未知类型: {section.type}</p>
+                      <pre>{JSON.stringify(section, null, 2)}</pre>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
@@ -170,74 +239,86 @@ function ReportDetail({ reportId: propReportId, onBack }) {
 
         {!loading && !error && report && (
           <>
-            <section className="section">
-              <h3>报告信息</h3>
-              <div className="grid">
-                <div>
-                  <p className="label">报告 ID</p>
-                  <p className="value">{report.report_id}</p>
-                </div>
-                <div>
-                  <p className="label">region_id</p>
-                  <p className="value">{report.region_id}</p>
-                </div>
-                <div>
-                  <p className="label">年份</p>
-                  <p className="value">{report.year}</p>
-                </div>
-              </div>
-            </section>
+            {/* 元数据折叠按钮 */}
+            <div className="metadata-toggle">
+              <button className="secondary-btn" onClick={() => setShowMetadata(!showMetadata)}>
+                {showMetadata ? '隐藏技术信息' : '显示技术信息（报告信息、任务、版本等）'}
+              </button>
+            </div>
 
-            <section className="section">
-              <h3>最新任务</h3>
-              {renderJobDetail(report.latest_job)}
-            </section>
+            {/* 可折叠的元数据部分 */}
+            {showMetadata && (
+              <>
+                <section className="section">
+                  <h3>报告信息</h3>
+                  <div className="grid">
+                    <div>
+                      <p className="label">报告 ID</p>
+                      <p className="value">{report.report_id}</p>
+                    </div>
+                    <div>
+                      <p className="label">region_id</p>
+                      <p className="value">{report.region_id}</p>
+                    </div>
+                    <div>
+                      <p className="label">年份</p>
+                      <p className="value">{report.year}</p>
+                    </div>
+                  </div>
+                </section>
 
-            <section className="section">
-              <h3>生效版本</h3>
-              {report.active_version ? (
-                <div className="grid">
-                  <div>
-                    <p className="label">版本 ID</p>
-                    <p className="value">{report.active_version.version_id}</p>
-                  </div>
-                  <div>
-                    <p className="label">模型</p>
-                    <p className="value">{report.active_version.model || '—'}</p>
-                  </div>
-                  <div>
-                    <p className="label">Provider</p>
-                    <p className="value">{report.active_version.provider || '—'}</p>
-                  </div>
-                  <div>
-                    <p className="label">Prompt 版本</p>
-                    <p className="value">{report.active_version.prompt_version || '—'}</p>
-                  </div>
-                  <div>
-                    <p className="label">Schema 版本</p>
-                    <p className="value">{report.active_version.schema_version || '—'}</p>
-                  </div>
-                  <div>
-                    <p className="label">创建时间</p>
-                    <p className="value">{report.active_version.created_at || '—'}</p>
-                  </div>
-                  <div className="full-row">
-                    <p className="label">文件路径</p>
-                    <p className="value">{report.active_version.storage_path || '—'}</p>
-                  </div>
-                  <div className="full-row">
-                    <p className="label">文本路径</p>
-                    <p className="value">{report.active_version.text_path || '—'}</p>
-                  </div>
-                  <div className="full-row">
-                    <p className="label">文件哈希</p>
-                    <p className="value">{report.active_version.file_hash || '—'}</p>
-                  </div>
-                </div>
-              ) : (
-                <p className="meta">暂无生效版本</p>
-              )}
-            </section>
+                <section className="section">
+                  <h3>最新任务</h3>
+                  {renderJobDetail(report.latest_job)}
+                </section>
+
+                <section className="section">
+                  <h3>生效版本</h3>
+                  {report.active_version ? (
+                    <div className="grid">
+                      <div>
+                        <p className="label">版本 ID</p>
+                        <p className="value">{report.active_version.version_id}</p>
+                      </div>
+                      <div>
+                        <p className="label">模型</p>
+                        <p className="value">{report.active_version.model || '—'}</p>
+                      </div>
+                      <div>
+                        <p className="label">Provider</p>
+                        <p className="value">{report.active_version.provider || '—'}</p>
+                      </div>
+                      <div>
+                        <p className="label">Prompt 版本</p>
+                        <p className="value">{report.active_version.prompt_version || '—'}</p>
+                      </div>
+                      <div>
+                        <p className="label">Schema 版本</p>
+                        <p className="value">{report.active_version.schema_version || '—'}</p>
+                      </div>
+                      <div>
+                        <p className="label">创建时间</p>
+                        <p className="value">{report.active_version.created_at || '—'}</p>
+                      </div>
+                      <div className="full-row">
+                        <p className="label">文件路径</p>
+                        <p className="value">{report.active_version.storage_path || '—'}</p>
+                      </div>
+                      <div className="full-row">
+                        <p className="label">文本路径</p>
+                        <p className="value">{report.active_version.text_path || '—'}</p>
+                      </div>
+                      <div className="full-row">
+                        <p className="label">文件哈希</p>
+                        <p className="value">{report.active_version.file_hash || '—'}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="meta">暂无生效版本</p>
+                  )}
+                </section>
+              </>
+            )}
 
             <section className="section">
               <h3>解析摘要</h3>

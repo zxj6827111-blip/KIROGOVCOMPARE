@@ -123,3 +123,92 @@ td {
     grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   }
 }
+
+/* 结构化内容样式 */
+.structured-content {
+  margin-top: 16px;
+}
+
+/* 元数据折叠按钮 */
+.metadata-toggle {
+  margin: 16px 0;
+  text-align: center;
+  padding: 12px;
+  background: #f9fafb;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.metadata-toggle .secondary-btn {
+  width: auto;
+  min-width: 200px;
+}
+
+.content-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.content-header h3 {
+  margin: 0;
+  color: #111827;
+  font-weight: 700;
+}
+
+.sections-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-top: 16px;
+}
+
+.section-item {
+  background: #f9fafb;
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+}
+
+.section-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0 0 12px 0;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #3b82f6;
+}
+
+.section-content {
+  margin-top: 12px;
+}
+
+.text-content {
+  color: #374151;
+  line-height: 1.8;
+  white-space: pre-line;
+  font-size: 14px;
+}
+
+.unknown-type {
+  background: #fef3c7;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid #fbbf24;
+}
+
+.unknown-type .meta {
+  font-weight: 600;
+  color: #92400e;
+  margin-bottom: 8px;
+}
+
+.unknown-type pre {
+  background: #ffffff;
+  padding: 8px;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+
