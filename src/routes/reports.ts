@@ -433,4 +433,59 @@ router.delete('/reports/:id', async (req, res) => {
   }
 });
 
+/**
+ * PATCH /api/reports/:id/parsed-data
+ * 更新报告的 parsed_json（手动修正解析错误）
+ */
+router.patch('/reports/:id/parsed-data', async (req, res) => {
+  try {
+    ensureSqliteMigrations();
+
+    const reportId = parseInt(req.params.id, 10);
+    const { parsed_json } = req.body;
+
+    if (!parsed_json) {
+      return res.status(400).json({ error: 'parsed_json is required' });
+    }
+
+    // 验证 parsed_json 是有效的 JSON
+    let parsedData: any;
+    try {
+      parsedData = typeof parsed_json === 'string' ? JSON.parse(parsed_json) : parsed_json;
+    } catch (e) {
+      return res.status(400).json({ error: 'parsed_json must be valid JSON' });
+    }
+
+    // 获取 active version
+    const version = querySqlite(`
+      SELECT id as version_id FROM report_versions
+      WHERE report_id = ${sqlValue(reportId)} AND is_active = 1
+      LIMIT 1;
+    `)[0];
+
+    if (!version) {
+      return res.status(404).json({ error: 'no_active_version' });
+    }
+
+    const versionId = version.version_id;
+
+    // 更新 parsed_json
+    const jsonString = JSON.stringify(parsedData);
+    querySqlite(`
+      UPDATE report_versions
+      SET parsed_json = ${sqlValue(jsonString)}
+      WHERE id = ${sqlValue(versionId)};
+    `);
+
+    return res.json({
+      message: 'parsed_json updated successfully',
+      report_id: reportId,
+      version_id: versionId,
+    });
+  } catch (error: any) {
+    console.error('Error updating parsed_json:', error);
+    return res.status(500).json({ error: 'internal_server_error', message: error.message });
+  }
+});
+
 export default router;

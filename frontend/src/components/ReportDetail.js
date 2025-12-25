@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import './ReportDetail.css';
 import { apiClient } from '../apiClient';
 import { Table2View, Table3View, Table4View } from './TableViews';
+import ParsedDataEditor from './ParsedDataEditor';
 
 function ReportDetail({ reportId: propReportId, onBack }) {
   const reportId = propReportId || window.location.pathname.split('/').pop();
@@ -10,6 +11,8 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const [error, setError] = useState('');
   const [showParsed, setShowParsed] = useState(true); // 默认展开
   const [showMetadata, setShowMetadata] = useState(false); // 元数据默认隐藏
+  const [editingData, setEditingData] = useState(null); // 编辑模式
+
   const handleBack = () => {
     if (onBack) return onBack();
     window.history.back();
@@ -142,13 +145,38 @@ function ReportDetail({ reportId: propReportId, onBack }) {
       return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB);
     });
 
+    const handleEditClick = () => {
+      setEditingData(parsed);
+    };
+
+    const handleSaveEdit = (newData) => {
+      setReport({
+        ...report,
+        active_version: {
+          ...report.active_version,
+          parsed_json: newData
+        }
+      });
+      setEditingData(null);
+      alert('数据已更新到本地，请刷新页面确认');
+    };
+
+    const handleCancelEdit = () => {
+      setEditingData(null);
+    };
+
     return (
       <div className="structured-content">
         <div className="content-header">
           <h3>年报内容</h3>
-          <button className="secondary-btn" onClick={() => setShowParsed((prev) => !prev)}>
-            {showParsed ? '折叠内容' : '展开内容'}
-          </button>
+          <div>
+            <button className="btn-edit" onClick={handleEditClick} style={{ marginRight: '10px' }}>
+              ✏️ 编辑全部
+            </button>
+            <button className="secondary-btn" onClick={() => setShowParsed((prev) => !prev)}>
+              {showParsed ? '折叠内容' : '展开内容'}
+            </button>
+          </div>
         </div>
         
         {showParsed && (
@@ -178,6 +206,37 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* 编辑器覆盖层 */}
+        {editingData && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.5)',
+            zIndex: 1000,
+            overflow: 'auto',
+            padding: '20px'
+          }}>
+            <div style={{
+              maxWidth: '1400px',
+              margin: '0 auto',
+              background: 'white',
+              borderRadius: '8px',
+              padding: '0'
+            }}>
+              <ParsedDataEditor
+                reportId={reportId}
+                versionId={report.active_version?.version_id}
+                parsedJson={editingData}
+                onSave={handleSaveEdit}
+                onCancel={handleCancelEdit}
+              />
+            </div>
           </div>
         )}
       </div>
