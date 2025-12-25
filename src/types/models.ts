@@ -280,3 +280,21 @@ export interface DocumentMetadata {
   extractedAt: Date;
   parseVersion: string;
 }
+
+// 一致性校验相关类型定义
+export interface ValidationResult {
+  issues: ValidationIssue[];
+  score: number; // 0-100, 100表示完全一致
+}
+
+export interface ValidationIssue {
+  severity: 'error' | 'warning' | 'info';
+  code: string;
+  message: string;
+  location?: string; // 例如: "表3 - 第1行"
+  relatedValues?: {
+    expected: string | number;
+    actual: string | number;
+    details?: string;
+  };
+}
