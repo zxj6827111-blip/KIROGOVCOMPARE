@@ -24,7 +24,7 @@ const upload = multer({
   fileFilter: (_req, file, cb) => {
     const isPdf = file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf');
     const isHtml = file.mimetype === 'text/html' || file.originalname.toLowerCase().endsWith('.html') || file.originalname.toLowerCase().endsWith('.htm');
-    
+
     if (isPdf || isHtml) {
       cb(null, true);
     } else {
@@ -217,12 +217,12 @@ router.get('/reports', (req, res) => {
         active_version_id: row.active_version_id || null,
         latest_job: row.job_id
           ? {
-              job_id: row.job_id,
-              status: row.job_status,
-              progress: row.job_progress,
-              error_code: row.job_error_code,
-              error_message: row.job_error_message,
-            }
+            job_id: row.job_id,
+            status: row.job_status,
+            progress: row.job_progress,
+            error_code: row.job_error_code,
+            error_message: row.job_error_message,
+          }
           : null,
       })),
     });
@@ -291,26 +291,26 @@ router.get('/reports/:id', (req, res) => {
       year: report.year,
       active_version: report.version_id
         ? {
-            version_id: report.version_id,
-            file_hash: report.file_hash,
-            storage_path: report.storage_path,
-            parsed_json: parsedJson,
-            provider: report.provider,
-            model: report.model,
-            prompt_version: report.prompt_version,
-            schema_version: report.schema_version,
-            text_path: report.text_path,
-            created_at: report.created_at,
-          }
+          version_id: report.version_id,
+          file_hash: report.file_hash,
+          storage_path: report.storage_path,
+          parsed_json: parsedJson,
+          provider: report.provider,
+          model: report.model,
+          prompt_version: report.prompt_version,
+          schema_version: report.schema_version,
+          text_path: report.text_path,
+          created_at: report.created_at,
+        }
         : null,
       latest_job: job
         ? {
-            job_id: job.id,
-            status: job.status,
-            progress: job.progress,
-            error_code: job.error_code,
-            error_message: job.error_message,
-          }
+          job_id: job.id,
+          status: job.status,
+          progress: job.progress,
+          error_code: job.error_code,
+          error_message: job.error_message,
+        }
         : null,
     });
   } catch (error) {
@@ -489,7 +489,7 @@ router.patch('/reports/:id/parsed-data', async (req, res) => {
   }
 });
 
-// 获取报告的一致性校验结果
+// 获取报告的一致性校验结果 (从数据库读取)
 router.get('/reports/:id/checks', async (req, res) => {
   try {
     const reportId = Number(req.params.id);
@@ -497,80 +497,139 @@ router.get('/reports/:id/checks', async (req, res) => {
       return res.status(400).json({ error: 'invalid_report_id' });
     }
 
-    // 获取报告的生效版本
-    const rows = querySqlite(`
-      SELECT rv.parsed_json
-      FROM report_versions rv
-      WHERE rv.report_id = ${sqlValue(reportId)}
-        AND rv.is_active = 1
-      LIMIT 1;
-    `);
+    const includeDismissed = req.query.include_dismissed === '1';
 
-    if (!rows || rows.length === 0) {
+    ensureSqliteMigrations();
+
+    // Get the active version
+    const version = querySqlite(`
+      SELECT id as version_id FROM report_versions
+      WHERE report_id = ${sqlValue(reportId)} AND is_active = 1
+      LIMIT 1;
+    `)[0] as { version_id?: number } | undefined;
+
+    if (!version?.version_id) {
       return res.status(404).json({ error: 'report_not_found' });
     }
 
-    const parsedJsonStr = rows[0].parsed_json;
-    if (!parsedJsonStr) {
-      return res.json({
-        latest_run: null,
-        groups: [],
-        summary: { errors: 0, warnings: 0, info: 0, total: 0 }
-      });
+    const versionId = version.version_id;
+
+    // Get latest run
+    const latestRun = querySqlite(`
+      SELECT id as run_id, status, engine_version, summary_json, created_at, finished_at
+      FROM report_consistency_runs
+      WHERE report_version_id = ${sqlValue(versionId)}
+      ORDER BY id DESC
+      LIMIT 1;
+    `)[0] as { run_id?: number; status?: string; engine_version?: string; summary_json?: string; created_at?: string; finished_at?: string } | undefined;
+
+    // Build filter for items
+    let itemFilter = `auto_status IN ('FAIL', 'UNCERTAIN', 'NOT_ASSESSABLE')`;
+    if (!includeDismissed) {
+      itemFilter += ` AND human_status != 'dismissed'`;
     }
 
-    let parsedData: any;
-    try {
-      parsedData = JSON.parse(parsedJsonStr);
-    } catch (e) {
-      return res.status(500).json({ error: 'invalid_parsed_json' });
+    // Get items grouped by group_key
+    const items = querySqlite(`
+      SELECT id, group_key, check_key, fingerprint, title, expr,
+             left_value, right_value, delta, tolerance, auto_status,
+             evidence_json, human_status, human_comment, created_at, updated_at
+      FROM report_consistency_items
+      WHERE report_version_id = ${sqlValue(versionId)} AND ${itemFilter}
+      ORDER BY group_key, id;
+    `) as Array<any>;
+
+    // Parse summary from run
+    let runSummary = null;
+    if (latestRun?.summary_json) {
+      try {
+        runSummary = JSON.parse(latestRun.summary_json);
+      } catch { /* ignore */ }
     }
 
-    // 动态导入 ConsistencyValidationService
-    const { ConsistencyValidationService } = await import('../services/ConsistencyValidationService');
-    const validationService = new ConsistencyValidationService();
-    const validationResult = validationService.validateReport(parsedData);
+    // Count human statuses
+    const humanCounts = querySqlite(`
+      SELECT human_status, COUNT(*) as cnt
+      FROM report_consistency_items
+      WHERE report_version_id = ${sqlValue(versionId)}
+      GROUP BY human_status;
+    `) as Array<{ human_status: string; cnt: number }>;
 
-    // 按严重性分组
-    const groups = [
-      {
-        severity: 'error',
-        label: '错误',
-        items: validationResult.issues.filter((i: ValidationIssue) => i.severity === 'error')
-      },
-      {
-        severity: 'warning', 
-        label: '警告',
-        items: validationResult.issues.filter((i: ValidationIssue) => i.severity === 'warning')
-      },
-      {
-        severity: 'info',
-        label: '信息',
-        items: validationResult.issues.filter((i: ValidationIssue) => i.severity === 'info')
-      }
-    ].filter(g => g.items.length > 0);
+    const humanStatusMap: Record<string, number> = {};
+    for (const row of humanCounts) {
+      humanStatusMap[row.human_status] = row.cnt;
+    }
 
-    const summary = {
-      errors: validationResult.issues.filter((i: ValidationIssue) => i.severity === 'error').length,
-      warnings: validationResult.issues.filter((i: ValidationIssue) => i.severity === 'warning').length,
-      info: validationResult.issues.filter((i: ValidationIssue) => i.severity === 'info').length,
-      total: validationResult.issues.length,
-      score: validationResult.score
+    // Group items by group_key
+    const groupNames: Record<string, string> = {
+      'table2': '表二',
+      'table3': '表三',
+      'table4': '表四',
+      'text': '正文一致性',
     };
 
+    const groupedItems: Record<string, any[]> = {
+      'table2': [],
+      'table3': [],
+      'table4': [],
+      'text': [],
+    };
+
+    for (const item of items) {
+      let evidence = item.evidence_json;
+      if (typeof evidence === 'string') {
+        try { evidence = JSON.parse(evidence); } catch { /* keep as string */ }
+      }
+
+      const formattedItem = {
+        id: item.id,
+        check_key: item.check_key,
+        fingerprint: item.fingerprint,
+        title: item.title,
+        expr: item.expr,
+        left_value: item.left_value,
+        right_value: item.right_value,
+        delta: item.delta,
+        tolerance: item.tolerance,
+        auto_status: item.auto_status,
+        evidence: evidence,
+        human_status: item.human_status,
+        human_comment: item.human_comment,
+        created_at: item.created_at,
+        updated_at: item.updated_at,
+      };
+
+      if (groupedItems[item.group_key]) {
+        groupedItems[item.group_key].push(formattedItem);
+      }
+    }
+
+    const groups = Object.entries(groupNames).map(([key, name]) => ({
+      group_key: key,
+      group_name: name,
+      items: groupedItems[key] || [],
+    }));
+
     return res.json({
-      latest_run: {
-        timestamp: new Date().toISOString(),
-        summary: {
-          fail: summary.errors,
-          uncertain: summary.warnings,
-          pending: summary.total,
-          confirmed: 0,
-          dismissed: 0
-        }
-      },
+      report_id: reportId,
+      version_id: versionId,
+      latest_run: latestRun ? {
+        run_id: latestRun.run_id,
+        status: latestRun.status,
+        engine_version: latestRun.engine_version,
+        created_at: latestRun.created_at,
+        finished_at: latestRun.finished_at,
+        summary: runSummary ? {
+          fail: runSummary.fail || 0,
+          uncertain: runSummary.uncertain || 0,
+          pass: runSummary.pass || 0,
+          notAssessable: runSummary.notAssessable || 0,
+          pending: humanStatusMap['pending'] || 0,
+          confirmed: humanStatusMap['confirmed'] || 0,
+          dismissed: humanStatusMap['dismissed'] || 0,
+        } : null,
+      } : null,
       groups,
-      summary
     });
   } catch (error: any) {
     console.error('Error getting checks:', error);
@@ -578,7 +637,7 @@ router.get('/reports/:id/checks', async (req, res) => {
   }
 });
 
-// 运行一致性校验
+// 运行一致性校验 (入队 checks job)
 router.post('/reports/:id/checks/run', async (req, res) => {
   try {
     const reportId = Number(req.params.id);
@@ -586,35 +645,101 @@ router.post('/reports/:id/checks/run', async (req, res) => {
       return res.status(400).json({ error: 'invalid_report_id' });
     }
 
-    // 直接返回成功，实际校验在GET请求时进行
-    return res.json({ 
-      message: 'check_triggered',
-      report_id: reportId 
-    });
+    ensureSqliteMigrations();
+
+    // Get the active version
+    const version = querySqlite(`
+      SELECT id as version_id FROM report_versions
+      WHERE report_id = ${sqlValue(reportId)} AND is_active = 1
+      LIMIT 1;
+    `)[0] as { version_id?: number } | undefined;
+
+    if (!version?.version_id) {
+      return res.status(404).json({ error: 'report_version_not_found' });
+    }
+
+    const versionId = version.version_id;
+
+    // Check for existing queued/running checks job
+    const existingJob = querySqlite(`
+      SELECT id FROM jobs
+      WHERE report_id = ${sqlValue(reportId)} AND version_id = ${sqlValue(versionId)} AND kind = 'checks' AND status IN ('queued', 'running')
+      LIMIT 1;
+    `)[0] as { id?: number } | undefined;
+
+    if (existingJob?.id) {
+      return res.json({ job_id: existingJob.id, reused: true });
+    }
+
+    // Create new checks job
+    const newJob = querySqlite(`
+      INSERT INTO jobs (report_id, version_id, kind, status, progress)
+      VALUES (${sqlValue(reportId)}, ${sqlValue(versionId)}, 'checks', 'queued', 0)
+      RETURNING id;
+    `)[0] as { id?: number } | undefined;
+
+    return res.status(201).json({ job_id: newJob?.id || null, reused: false });
   } catch (error: any) {
     console.error('Error running checks:', error);
     return res.status(500).json({ error: 'internal_server_error', message: error.message });
   }
 });
 
-// 标记校验项为已解决
+// 更新校验项的人工状态
 router.patch('/reports/:id/checks/items/:itemId', async (req, res) => {
   try {
     const reportId = Number(req.params.id);
-    const itemId = req.params.itemId;
-    
+    const itemId = Number(req.params.itemId);
+
     if (!reportId || isNaN(reportId)) {
       return res.status(400).json({ error: 'invalid_report_id' });
     }
 
-    // 这里简单返回成功，实际项目中应该持久化到数据库
-    return res.json({ 
-      message: 'item_resolved',
-      report_id: reportId,
-      item_id: itemId
+    if (!itemId || isNaN(itemId)) {
+      return res.status(400).json({ error: 'invalid_item_id' });
+    }
+
+    const { human_status, human_comment } = req.body;
+
+    if (!human_status || !['pending', 'confirmed', 'dismissed'].includes(human_status)) {
+      return res.status(400).json({ error: 'invalid_human_status', message: 'human_status must be one of: pending, confirmed, dismissed' });
+    }
+
+    ensureSqliteMigrations();
+
+    // Verify item exists and belongs to this report
+    const item = querySqlite(`
+      SELECT ci.id, rv.report_id
+      FROM report_consistency_items ci
+      JOIN report_versions rv ON rv.id = ci.report_version_id
+      WHERE ci.id = ${sqlValue(itemId)}
+      LIMIT 1;
+    `)[0] as { id?: number; report_id?: number } | undefined;
+
+    if (!item?.id) {
+      return res.status(404).json({ error: 'item_not_found' });
+    }
+
+    if (item.report_id !== reportId) {
+      return res.status(403).json({ error: 'item_not_belongs_to_report' });
+    }
+
+    // Update the item
+    const commentClause = human_comment !== undefined ? `, human_comment = ${sqlValue(human_comment)}` : '';
+    querySqlite(`
+      UPDATE report_consistency_items
+      SET human_status = ${sqlValue(human_status)}${commentClause}, updated_at = datetime('now')
+      WHERE id = ${sqlValue(itemId)};
+    `);
+
+    return res.json({
+      message: 'item_updated',
+      item_id: itemId,
+      human_status,
+      human_comment: human_comment ?? null,
     });
   } catch (error: any) {
-    console.error('Error resolving check item:', error);
+    console.error('Error updating check item:', error);
     return res.status(500).json({ error: 'internal_server_error', message: error.message });
   }
 });

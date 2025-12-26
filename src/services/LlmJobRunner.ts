@@ -2,6 +2,7 @@ import { ensureSqliteMigrations, querySqlite, sqlValue } from '../config/sqlite'
 import { LlmParseResult, LlmProvider, LlmProviderError } from './LlmProvider';
 import { createLlmProvider } from './LlmProviderFactory';
 import { summarizeDiff } from '../utils/jsonDiff';
+import { consistencyCheckService } from './ConsistencyCheckService';
 
 interface QueuedJob {
   id: number;
@@ -75,7 +76,7 @@ export class LlmJobRunner {
         SELECT id
         FROM jobs
         WHERE status = 'queued'
-        ORDER BY (CASE WHEN kind = 'compare' THEN 0 ELSE 1 END) ASC, created_at ASC
+        ORDER BY (CASE kind WHEN 'parse' THEN 0 WHEN 'checks' THEN 1 WHEN 'compare' THEN 2 ELSE 9 END) ASC, created_at ASC
         LIMIT 1
       )
       RETURNING id, report_id, version_id, kind, comparison_id;
@@ -118,6 +119,8 @@ export class LlmJobRunner {
     try {
       if (job.kind === 'compare') {
         await this.processCompareJob(job);
+      } else if (job.kind === 'checks') {
+        await this.processChecksJob(job);
       } else {
         await this.processParseJob(job);
       }
@@ -159,6 +162,52 @@ export class LlmJobRunner {
              prompt_version = 'v1'
          WHERE id = ${sqlValue(job.version_id)};`
       );
+    }
+
+    querySqlite(
+      `UPDATE jobs SET status = 'succeeded', progress = 100, finished_at = datetime('now') WHERE id = ${sqlValue(job.id)};`
+    );
+
+    // Enqueue checks job if not already queued/running
+    if (job.version_id && job.report_id) {
+      const existingChecksJob = querySqlite(
+        `SELECT id FROM jobs WHERE report_id = ${sqlValue(job.report_id)} AND version_id = ${sqlValue(job.version_id)} AND kind = 'checks' AND status IN ('queued', 'running') LIMIT 1;`
+      )[0] as { id?: number } | undefined;
+
+      if (!existingChecksJob?.id) {
+        querySqlite(
+          `INSERT INTO jobs (report_id, version_id, kind, status, progress) VALUES (${sqlValue(job.report_id)}, ${sqlValue(job.version_id)}, 'checks', 'queued', 0);`
+        );
+        console.log(`Enqueued checks job for report ${job.report_id} version ${job.version_id}`);
+      }
+    }
+  }
+
+  private async processChecksJob(job: QueuedJob): Promise<void> {
+    if (!job.version_id) {
+      throw new Error('Checks job missing version_id');
+    }
+
+    // Get parsed_json from report_versions
+    const version = querySqlite(`
+      SELECT id, parsed_json FROM report_versions WHERE id = ${sqlValue(job.version_id)} LIMIT 1;
+    `)[0] as { id?: number; parsed_json?: string } | undefined;
+
+    if (!version?.id) {
+      throw new Error('Version not found');
+    }
+
+    if (!version.parsed_json) {
+      throw new LlmProviderError('parsed_json is empty, cannot run checks', 'PARSED_JSON_EMPTY');
+    }
+
+    // Run consistency checks
+    try {
+      const { runId, items } = consistencyCheckService.runAndPersist(job.version_id, version.parsed_json);
+      console.log(`Consistency checks completed: runId=${runId}, items=${items.length}`);
+    } catch (error) {
+      console.error('Consistency check failed:', error);
+      throw error;
     }
 
     querySqlite(
