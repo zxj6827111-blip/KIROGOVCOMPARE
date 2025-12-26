@@ -4,6 +4,7 @@ import { apiClient, buildDownloadUrl } from '../apiClient';
 
 function RegionsManager() {
   const [regions, setRegions] = useState([]);
+  const [reports, setReports] = useState([]); // 报告列表，用于显示关联数量
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [newName, setNewName] = useState('');
@@ -11,25 +12,36 @@ function RegionsManager() {
   const [submitting, setSubmitting] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [expandedNodes, setExpandedNodes] = useState(new Set()); // 展开的节点
   const fileInputRef = useRef(null);
 
-  const fetchRegions = async () => {
+  const fetchData = async () => {
     setLoading(true);
     setError('');
     try {
-      const resp = await apiClient.get('/regions');
-      const rows = resp.data?.data ?? resp.data?.regions ?? resp.data ?? [];
-      setRegions(Array.isArray(rows) ? rows : []);
+      const [regionsResp, reportsResp] = await Promise.all([
+        apiClient.get('/regions'),
+        apiClient.get('/reports'),
+      ]);
+      const regionRows = regionsResp.data?.data ?? regionsResp.data?.regions ?? regionsResp.data ?? [];
+      const reportRows = reportsResp.data?.data ?? reportsResp.data ?? [];
+      setRegions(Array.isArray(regionRows) ? regionRows : []);
+      setReports(Array.isArray(reportRows) ? reportRows : []);
+
+      // 默认展开第一级
+      const topLevelIds = regionRows.filter(r => !r.parent_id).map(r => r.id);
+      setExpandedNodes(new Set(topLevelIds));
     } catch (err) {
       const message = err.response?.data?.error || err.message || '请求失败';
-      setError(`加载城市/区域失败：${message}`);
+      setError(`加载数据失败：${message}`);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchRegions();
+    fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -44,7 +56,33 @@ function RegionsManager() {
     return byParent;
   }, [regions]);
 
+  // 计算每个区域的报告数量
+  const reportCountMap = useMemo(() => {
+    const map = new Map();
+    reports.forEach((r) => {
+      const key = String(r.region_id);
+      map.set(key, (map.get(key) || 0) + 1);
+    });
+    return map;
+  }, [reports]);
+
   const childrenOf = (id) => treeByParent.get(id ?? null) || [];
+
+  const hasChildren = (id) => {
+    return (treeByParent.get(id) || []).length > 0;
+  };
+
+  const toggleExpand = (id) => {
+    setExpandedNodes(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
 
   const toggleSelect = (id) => {
     setSelectedId((prev) => (prev === id ? null : id));
@@ -53,49 +91,169 @@ function RegionsManager() {
   const levelLabel = (level) => {
     if (level === 1) return '省/直辖市';
     if (level === 2) return '市/区';
+    if (level === 3) return '区/县';
     return '区域';
   };
 
   const handleDelete = async (e, regionId, regionName) => {
     e.stopPropagation();
-    if (!window.confirm(`确定要删除"${regionName}"吗？如果有子区域将一并删除。`)) {
+    const reportCount = reportCountMap.get(String(regionId)) || 0;
+    const childCount = (treeByParent.get(regionId) || []).length;
+
+    let confirmMsg = `确定要删除"${regionName}"吗？`;
+    if (childCount > 0) {
+      confirmMsg += `\n⚠️ 这将同时删除 ${childCount} 个子区域！`;
+    }
+    if (reportCount > 0) {
+      confirmMsg += `\n⚠️ 该区域有 ${reportCount} 份关联报告，删除区域后报告将无法关联！`;
+    }
+
+    if (!window.confirm(confirmMsg)) {
       return;
     }
+
     try {
       await apiClient.delete(`/regions/${regionId}`);
-      await fetchRegions();
+      await fetchData();
+      setError(''); // 清除之前的错误
     } catch (err) {
       const message = err.response?.data?.error || err.message || '删除失败';
-      setError(`删除失败：${message}`);
+      setError(`删除"${regionName}"失败：${message}`);
     }
   };
+
+  // 展开所有
+  const expandAll = () => {
+    const allIds = new Set(regions.map(r => r.id));
+    setExpandedNodes(allIds);
+  };
+
+  // 折叠所有
+  const collapseAll = () => {
+    setExpandedNodes(new Set());
+  };
+
+  // 过滤后的区域（搜索功能）
+  const filteredRegions = useMemo(() => {
+    if (!searchTerm.trim()) return null; // 返回 null 表示不过滤，使用树形显示
+    const term = searchTerm.toLowerCase();
+    return regions.filter(r => r.name.toLowerCase().includes(term));
+  }, [regions, searchTerm]);
 
   const renderTree = (parentId = null, depth = 0) => {
     const nodes = childrenOf(parentId);
     if (!nodes.length) return null;
+
     return (
-      <ul className="tree-level">
-        {nodes.map((node) => (
-          <li key={node.id}>
-            <div
-              className={`tree-node ${selectedId === node.id ? 'selected' : ''}`}
-              style={{ paddingLeft: `${depth * 16}px` }}
-              onClick={() => toggleSelect(node.id)}
-            >
-              <span className="node-name">{node.name}</span>
-              <span className="node-level">{levelLabel(node.level)}</span>
-              <button
-                className="delete-btn"
-                onClick={(e) => handleDelete(e, node.id, node.name)}
-                title="删除"
+      <div className="tree-level">
+        {nodes.map((node) => {
+          const isExpanded = expandedNodes.has(node.id);
+          const isSelected = selectedId === node.id;
+          const hasKids = hasChildren(node.id);
+          const reportCount = reportCountMap.get(String(node.id)) || 0;
+
+          return (
+            <div key={node.id} className="tree-node-container">
+              <div
+                className={`tree-node ${isSelected ? 'selected' : ''}`}
+                style={{ paddingLeft: `${depth * 20 + 12}px` }}
               >
-                ×
-              </button>
+                {/* 展开/折叠按钮 */}
+                <span
+                  className={`expand-btn ${hasKids ? 'has-children' : 'no-children'}`}
+                  onClick={(e) => { e.stopPropagation(); if (hasKids) toggleExpand(node.id); }}
+                >
+                  {hasKids ? (isExpanded ? '▼' : '▶') : '•'}
+                </span>
+
+                {/* 节点名称 */}
+                <span className="node-name" onClick={() => toggleSelect(node.id)}>
+                  {node.name}
+                </span>
+
+                {/* 级别标签 */}
+                <span className="node-level">{levelLabel(node.level)}</span>
+
+                {/* 报告数量 */}
+                {reportCount > 0 && (
+                  <span className="report-count">{reportCount}份报告</span>
+                )}
+
+                {/* 操作按钮 */}
+                <div className="node-actions">
+                  <button
+                    className="action-btn add-btn"
+                    onClick={(e) => { e.stopPropagation(); toggleSelect(node.id); setNewName(''); }}
+                    title="添加子区域"
+                  >
+                    +
+                  </button>
+                  <button
+                    className="action-btn delete-btn"
+                    onClick={(e) => handleDelete(e, node.id, node.name)}
+                    title="删除"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+
+              {/* 子节点 */}
+              {isExpanded && renderTree(node.id, depth + 1)}
             </div>
-            {renderTree(node.id, depth + 1)}
-          </li>
-        ))}
-      </ul>
+          );
+        })}
+      </div>
+    );
+  };
+
+  // 渲染搜索结果（扁平列表）
+  const renderSearchResults = () => {
+    if (!filteredRegions) return null;
+
+    if (filteredRegions.length === 0) {
+      return <div className="no-results">没有找到匹配的区域</div>;
+    }
+
+    return (
+      <div className="search-results">
+        {filteredRegions.map((node) => {
+          const reportCount = reportCountMap.get(String(node.id)) || 0;
+          const parentRegion = regions.find(r => r.id === node.parent_id);
+
+          return (
+            <div
+              key={node.id}
+              className={`search-result-item ${selectedId === node.id ? 'selected' : ''}`}
+            >
+              <div className="result-info" onClick={() => toggleSelect(node.id)}>
+                <span className="node-name">{node.name}</span>
+                <span className="node-level">{levelLabel(node.level)}</span>
+                {parentRegion && <span className="parent-path">← {parentRegion.name}</span>}
+                {reportCount > 0 && (
+                  <span className="report-count">{reportCount}份报告</span>
+                )}
+              </div>
+              <div className="node-actions">
+                <button
+                  className="action-btn add-btn"
+                  onClick={(e) => { e.stopPropagation(); toggleSelect(node.id); setNewName(''); }}
+                  title="添加子区域"
+                >
+                  +
+                </button>
+                <button
+                  className="action-btn delete-btn"
+                  onClick={(e) => handleDelete(e, node.id, node.name)}
+                  title="删除"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     );
   };
 
@@ -108,7 +266,6 @@ function RegionsManager() {
       return;
     }
 
-    // 自动生成唯一 code，避免用户填太多字段
     const code = `AUTO-${Date.now()}`;
     const payload = {
       code,
@@ -121,7 +278,11 @@ function RegionsManager() {
     try {
       await apiClient.post('/regions', payload);
       setNewName('');
-      await fetchRegions();
+      await fetchData();
+      // 如果有父级，确保父级展开
+      if (selectedId) {
+        setExpandedNodes(prev => new Set([...prev, selectedId]));
+      }
     } catch (err) {
       const message = err.response?.data?.error || err.message || '请求失败';
       setError(`创建失败：${message}`);
@@ -130,17 +291,14 @@ function RegionsManager() {
     }
   };
 
-  // Download template
   const handleDownloadTemplate = () => {
     window.open(buildDownloadUrl('/regions/template'), '_blank');
   };
 
-  // Export all regions
   const handleExport = () => {
     window.open(buildDownloadUrl('/regions/export'), '_blank');
   };
 
-  // Import Excel file
   const handleImportClick = () => {
     fileInputRef.current?.click();
   };
@@ -161,18 +319,19 @@ function RegionsManager() {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setImportResult(resp.data);
-      await fetchRegions();
+      await fetchData();
     } catch (err) {
       const message = err.response?.data?.error || err.message || '导入失败';
       setError(`导入失败：${message}`);
     } finally {
       setImporting(false);
-      // Reset file input
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
     }
   };
+
+  const selectedRegion = selectedId ? regions.find(r => r.id === selectedId) : null;
 
   return (
     <div className="regions-page">
@@ -180,9 +339,9 @@ function RegionsManager() {
         <div className="manager-header">
           <div>
             <h2>城市/区域管理</h2>
-            <p className="hint">提示：点击节点选中作为父级，添加新区域。再点击取消选中以添加顶级区域（省/直辖市）。</p>
+            <p className="hint">点击区域名称选中作为父级，然后在下方添加子区域。点击 + 快速添加子区域，× 删除区域。</p>
           </div>
-          <button className="ghost-btn" onClick={fetchRegions} disabled={loading}>
+          <button className="ghost-btn" onClick={fetchData} disabled={loading}>
             {loading ? '加载中…' : '刷新'}
           </button>
         </div>
@@ -207,6 +366,27 @@ function RegionsManager() {
           />
         </div>
 
+        {/* Search and Tree Controls */}
+        <div className="search-controls">
+          <div className="search-box">
+            <input
+              type="text"
+              placeholder="🔍 搜索区域名称..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+            {searchTerm && (
+              <button className="clear-search" onClick={() => setSearchTerm('')}>×</button>
+            )}
+          </div>
+          {!searchTerm && (
+            <div className="tree-controls">
+              <button className="control-btn" onClick={expandAll}>全部展开</button>
+              <button className="control-btn" onClick={collapseAll}>全部折叠</button>
+            </div>
+          )}
+        </div>
+
         {/* Import Result */}
         {importResult && (
           <div className="alert success">
@@ -223,14 +403,29 @@ function RegionsManager() {
 
         {error && <div className="alert error">{error}</div>}
 
-        <div className="tree-container">{renderTree()}</div>
+        {/* Tree or Search Results */}
+        <div className="tree-container">
+          {searchTerm ? renderSearchResults() : renderTree()}
+        </div>
 
+        {/* Add Form */}
         <form className="add-form" onSubmit={handleCreate}>
-          <label className="add-label">添加顶级区域（省/直辖市）：</label>
+          <div className="add-form-header">
+            <label className="add-label">
+              {selectedRegion
+                ? `在「${selectedRegion.name}」下添加子区域：`
+                : '添加顶级区域（省/直辖市）：'}
+            </label>
+            {selectedId && (
+              <button type="button" className="clear-select-btn" onClick={() => setSelectedId(null)}>
+                取消选中
+              </button>
+            )}
+          </div>
           <div className="add-row">
             <input
               type="text"
-              placeholder="输入名称..."
+              placeholder="输入区域名称..."
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               disabled={submitting}
@@ -239,7 +434,6 @@ function RegionsManager() {
               {submitting ? '添加中…' : '添加'}
             </button>
           </div>
-          {selectedId && <p className="selected-tip">当前将添加到父级 ID #{selectedId}</p>}
         </form>
       </div>
     </div>

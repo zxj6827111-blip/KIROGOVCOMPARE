@@ -275,12 +275,31 @@ describe('ConsistencyCheckService', () => {
         });
 
         it('should generate text items when text content matches table values', () => {
-            const items = service.runChecks(minimalFixture);
+            // Add litigation text to fixture
+            const fixtureWithLitigation = {
+                ...minimalFixture,
+                sections: [
+                    ...minimalFixture.sections,
+                    {
+                        type: 'text',
+                        content: '全年发生行政诉讼案件7件。' // 6 (direct) + 1 (postReview) = 7
+                    }
+                ]
+            };
+
+            const items = service.runChecks(fixtureWithLitigation);
             const textItems = items.filter(i => i.groupKey === 'text');
 
             // Our fixture has text: "本年度共新收政府信息公开申请170件，上年结转15件。"
             // This should match newReceived=170 and carriedOver=15
             expect(textItems.length).toBeGreaterThan(0);
+
+            // Verify Litigation check
+            const litigationItem = textItems.find(i => i.checkKey.includes('litigationTotal'));
+            expect(litigationItem).toBeDefined();
+            expect(litigationItem?.leftValue).toBe(7);
+            expect(litigationItem?.rightValue).toBe(7); // 6 + 1
+            expect(litigationItem?.autoStatus).toBe('PASS');
         });
     });
 

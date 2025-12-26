@@ -427,7 +427,7 @@ export class ConsistencyCheckService {
 
         const categories = [
             { key: 'review', name: '行政复议' },
-            { key: 'litigationDirect', name: '行政诉讼-未经复议' },
+            { key: 'litigationDirect', name: '未经复议直接起诉' },
             { key: 'litigationPostReview', name: '行政诉讼-复议后起诉' },
         ];
 
@@ -473,9 +473,20 @@ export class ConsistencyCheckService {
     /**
      * Generate Text consistency check items by matching numbers in text to table values
      */
-    private generateTextItems(texts: string, tableData: Table3Data | undefined, table4Data: Table4Data | undefined): ConsistencyItem[] {
+    private generateTextItems(sections: any[], tableData: Table3Data | undefined, table4Data: Table4Data | undefined): ConsistencyItem[] {
         const items: ConsistencyItem[] = [];
-        if (!texts || texts.trim().length === 0) {
+
+        // Get text sections with their titles and indices
+        const textSections = sections
+            .map((s: any, index: number) => ({
+                content: s.type === 'text' && typeof s.content === 'string' ? s.content : null,
+                title: s.title || s.header || s.heading || `第${this.getChineseNumber(index + 1)}部分`,
+                sectionIndex: index,
+                type: s.type,
+            }))
+            .filter(s => s.content !== null);
+
+        if (textSections.length === 0) {
             return [];
         }
 
@@ -505,7 +516,8 @@ export class ConsistencyCheckService {
                     name: '上年结转',
                 },
                 {
-                    regex: /(?:办理结果总计|办结|办理).*?(\d+)\s*件/,
+                    // 增强: 支持"回复"、"答复"、"办结"
+                    regex: /(?:办理结果|办结|办理|答复|回复).*?(\d+)\s*件/,
                     field: 'totalProcessed',
                     table: 'table3',
                     path: 'tableData.total.results.totalProcessed',
@@ -521,6 +533,7 @@ export class ConsistencyCheckService {
                     name: '结转下年度',
                 },
                 {
+                    // 增强: 增加"行政复议"的容错
                     regex: /行政复议.*?(\d+)\s*件/,
                     field: 'reviewTotal',
                     table: 'table4',
@@ -528,33 +541,77 @@ export class ConsistencyCheckService {
                     getValue: () => this.parseNumber(table4Data?.review?.total),
                     name: '行政复议总计',
                 },
+                {
+                    // 新增: 行政诉讼总计 = 未经复议 + 复议后起诉
+                    regex: /行政诉讼.*?(\d+)\s*件/,
+                    field: 'litigationTotal',
+                    table: 'table4',
+                    path: 'table4.litigationDirect.total + table4.litigationPostReview.total',
+                    getValue: () => {
+                        const direct = this.parseNumber(table4Data?.litigationDirect?.total);
+                        const postReview = this.parseNumber(table4Data?.litigationPostReview?.total);
+                        if (direct === null && postReview === null) return null;
+                        return (direct || 0) + (postReview || 0);
+                    },
+                    name: '行政诉讼总计',
+                },
             ];
 
+        // Search in each text section separately to track position
         for (const pattern of patterns) {
-            const match = texts.match(pattern.regex);
-            if (match) {
-                const textValue = parseInt(match[1], 10);
-                const tableValue = pattern.getValue();
+            for (const section of textSections) {
+                const match = section.content.match(pattern.regex);
+                if (match) {
+                    const textValue = parseInt(match[1], 10);
+                    const tableValue = pattern.getValue();
 
-                items.push(this.createItem(
-                    'text',
-                    `text_vs_${pattern.table}_${pattern.field}`,
-                    `正文一致性：正文提及"${pattern.name}"与${pattern.table === 'table3' ? '表三' : '表四'}数据对照`,
-                    `text("${pattern.name}") = ${pattern.path}`,
-                    textValue,
-                    tableValue,
-                    0,
-                    [pattern.path, 'text.content'],
-                    {
+                    // Find the position of the match in the section
+                    const matchStart = section.content.indexOf(match[0]);
+                    const contextStart = Math.max(0, matchStart - 20);
+                    const contextEnd = Math.min(section.content.length, matchStart + match[0].length + 20);
+                    const context = section.content.substring(contextStart, contextEnd);
+
+                    items.push(this.createItem(
+                        'text',
+                        `text_vs_${pattern.table}_${pattern.field}`,
+                        `正文一致性：正文提及"${pattern.name}"与${pattern.table === 'table3' ? '表三' : '表四'}数据对照`,
+                        `text("${pattern.name}") = ${pattern.path}`,
                         textValue,
                         tableValue,
-                        matchedText: match[0],
-                    }
-                ));
+                        0,
+                        [pattern.path, `sections[${section.sectionIndex}].content`],
+                        {
+                            textValue,
+                            tableValue,
+                            matchedText: match[0],
+                            context: `...${context}...`,
+                            sectionTitle: section.title,
+                            sectionIndex: section.sectionIndex + 1, // 1-indexed for display
+                        }
+                    ));
+
+                    // Only match once per pattern (first occurrence)
+                    break;
+                }
             }
         }
 
         return items;
+    }
+
+    /**
+     * Convert number to Chinese ordinal (1 -> 一, 2 -> 二, etc.)
+     */
+    private getChineseNumber(num: number): string {
+        const chars = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+        if (num <= 10) return chars[num];
+        if (num < 20) return '十' + (num === 10 ? '' : chars[num - 10]);
+        if (num < 100) {
+            const tens = Math.floor(num / 10);
+            const ones = num % 10;
+            return chars[tens] + '十' + (ones === 0 ? '' : chars[ones]);
+        }
+        return num.toString();
     }
 
     /**
@@ -597,13 +654,12 @@ export class ConsistencyCheckService {
         const table4Data: Table4Data | undefined = table4Section?.reviewLitigationData;
 
         // Collect text content
-        const textSections = sections.filter((s: any) => s.type === 'text' && typeof s.content === 'string');
-        const texts = textSections.map((s: any) => s.content).join('\n');
+        // Note: generateTextItems now takes sections directly to preserve section titles
 
         // Generate items for each group
         items.push(...this.generateTable3Items(tableData));
         items.push(...this.generateTable4Items(table4Data));
-        items.push(...this.generateTextItems(texts, tableData, table4Data));
+        items.push(...this.generateTextItems(sections, tableData, table4Data));
 
         // Table2 placeholder (no rules yet, but group must exist)
         // We add an info item if table2 section exists but has no checks

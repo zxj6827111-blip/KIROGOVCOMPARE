@@ -245,6 +245,7 @@ router.get('/reports/:id', (req, res) => {
       SELECT
         r.id AS report_id,
         r.region_id,
+        reg.name AS region_name,
         r.year,
         r.unit_name,
         rv.id AS version_id,
@@ -258,6 +259,7 @@ router.get('/reports/:id', (req, res) => {
         rv.text_path,
         rv.created_at
       FROM reports r
+      LEFT JOIN regions reg ON reg.id = r.region_id
       LEFT JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = 1
       WHERE r.id = ${sqlValue(reportId)}
       LIMIT 1;
@@ -287,6 +289,7 @@ router.get('/reports/:id', (req, res) => {
     return res.json({
       report_id: report.report_id,
       region_id: report.region_id,
+      region_name: report.region_name,
       unit_name: report.unit_name,
       year: report.year,
       active_version: report.version_id
@@ -524,7 +527,19 @@ router.get('/reports/:id/checks', async (req, res) => {
     `)[0] as { run_id?: number; status?: string; engine_version?: string; summary_json?: string; created_at?: string; finished_at?: string } | undefined;
 
     // Build filter for items
-    let itemFilter = `auto_status IN ('FAIL', 'UNCERTAIN', 'NOT_ASSESSABLE')`;
+    // By default: show items that need attention (FAIL/UNCERTAIN/NOT_ASSESSABLE) OR pending for review
+    // include_all=1: show all items including PASS
+    const includeAll = req.query.include_all === '1';
+    let itemFilter = '';
+
+    if (includeAll) {
+      // Show all items
+      itemFilter = '1=1';
+    } else {
+      // Show items that need attention OR are pending for human review
+      itemFilter = `(auto_status IN ('FAIL', 'UNCERTAIN', 'NOT_ASSESSABLE') OR human_status = 'pending')`;
+    }
+
     if (!includeDismissed) {
       itemFilter += ` AND human_status != 'dismissed'`;
     }
@@ -559,6 +574,16 @@ router.get('/reports/:id/checks', async (req, res) => {
     for (const row of humanCounts) {
       humanStatusMap[row.human_status] = row.cnt;
     }
+
+    // Count pending items with FAIL status (active problems)
+    const pendingFailCount = querySqlite(`
+      SELECT COUNT(*) as cnt
+      FROM report_consistency_items
+      WHERE report_version_id = ${sqlValue(versionId)}
+        AND auto_status = 'FAIL'
+        AND human_status = 'pending';
+    `) as Array<{ cnt: number }>;
+    const activeProblemCount = pendingFailCount[0]?.cnt || 0;
 
     // Group items by group_key
     const groupNames: Record<string, string> = {
@@ -620,7 +645,7 @@ router.get('/reports/:id/checks', async (req, res) => {
         created_at: latestRun.created_at,
         finished_at: latestRun.finished_at,
         summary: runSummary ? {
-          fail: runSummary.fail || 0,
+          fail: activeProblemCount,
           uncertain: runSummary.uncertain || 0,
           pass: runSummary.pass || 0,
           notAssessable: runSummary.notAssessable || 0,

@@ -97,7 +97,7 @@ function ComparisonHistory() {
     <div className="comparison-history">
       <div className="history-header">
         <h2>📋 比对结果汇总</h2>
-        
+
         <div className="filter-bar" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <input
             type="text"
@@ -113,9 +113,9 @@ function ComparisonHistory() {
             onChange={e => setYearFilter(e.target.value)}
             style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '120px' }}
           />
-          <button 
+          <button
             onClick={handleSearch}
-            className="refresh-btn" 
+            className="refresh-btn"
             style={{ background: '#3b82f6', color: 'white', border: 'none' }}
           >
             🔍 查询
@@ -157,26 +157,43 @@ function ComparisonHistory() {
                   <td>{c.yearA}</td>
                   <td>{c.yearB}</td>
                   <td>{formatDate(c.createdAt)}</td>
-                  <td className="actions">
-                    <button
-                      className="action-btn view-btn"
-                      onClick={() => handleViewDetail(c)}
-                    >
-                      👁️ 查看
-                    </button>
-                    <button
-                      className="action-btn export-btn"
-                      onClick={() => handleExportPdf(c.id)}
-                    >
-                      🖨️ 打印/导出PDF
-                    </button>
-                    <button
-                      className="action-btn remove-btn-force"
-                      onClick={() => handleDelete(c.id)}
-                      title="删除记录"
-                    >
-                      🗑️ 删除
-                    </button>
+                  <td>
+                    <div className="actions">
+                      <button
+                        className="icon-btn view"
+                        onClick={() => handleViewDetail(c)}
+                        title="查看详情"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                          <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                        <span>查看</span>
+                      </button>
+                      <button
+                        className="icon-btn print"
+                        onClick={() => handleExportPdf(c.id)}
+                        title="打印导出"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polyline points="6 9 6 2 18 2 18 9"></polyline>
+                          <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
+                          <rect x="6" y="14" width="12" height="8"></rect>
+                        </svg>
+                        <span>打印</span>
+                      </button>
+                      <button
+                        className="icon-btn delete"
+                        onClick={() => handleDelete(c.id)}
+                        title="删除记录"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polyline points="3 6 5 6 21 6"></polyline>
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                        <span>删除</span>
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
