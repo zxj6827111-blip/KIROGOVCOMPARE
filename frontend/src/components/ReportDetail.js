@@ -107,14 +107,30 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     }
   };
 
+  const handleSaveEdit = (newData) => {
+    setReport({
+      ...report,
+      active_version: {
+        ...report.active_version,
+        parsed_json: newData
+      }
+    });
+    setEditingData(null);
+    alert('数据已更新到本地，请刷新页面确认');
+  };
+
+  const handleCancelEdit = () => {
+    setEditingData(null);
+  };
+
   const renderParsedContent = (parsed) => {
     if (!parsed) return <p className="meta">暂无解析内容</p>;
-    
+
     // 如果是对象且包含sections，则渲染结构化内容
     if (parsed && typeof parsed === 'object' && parsed.sections && Array.isArray(parsed.sections)) {
       return renderStructuredContent(parsed);
     }
-    
+
     // 否则显示原始JSON
     const text = typeof parsed === 'string' ? parsed : JSON.stringify(parsed, null, 2);
     const preview = text.length > 600 ? `${text.slice(0, 600)}...` : text;
@@ -139,7 +155,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
       const isBTi = b.title === '标题' || b.title?.includes('年度报告');
       if (isATi && !isBTi) return -1;
       if (!isATi && isBTi) return 1;
-      
+
       // 按照 一、二、三 等中文数字排序
       const numerals = ['一', '二', '三', '四', '五', '六', '七', '八'];
       const idxA = numerals.findIndex(n => a.title?.includes(n));
@@ -148,23 +164,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     });
 
     const handleEditClick = () => {
-      setEditingData(parsed);
-    };
-
-    const handleSaveEdit = (newData) => {
-      setReport({
-        ...report,
-        active_version: {
-          ...report.active_version,
-          parsed_json: newData
-        }
-      });
-      setEditingData(null);
-      alert('数据已更新到本地，请刷新页面确认');
-    };
-
-    const handleCancelEdit = () => {
-      setEditingData(null);
+      setEditingData({ data: parsed, highlightPaths: [] });
     };
 
     return (
@@ -180,7 +180,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
             </button>
           </div>
         </div>
-        
+
         {showParsed && (
           <div className="sections-container">
             {sections.map((section, idx) => (
@@ -208,37 +208,6 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                 </div>
               </div>
             ))}
-          </div>
-        )}
-
-        {/* 编辑器覆盖层 */}
-        {editingData && (
-          <div style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0,0,0,0.5)',
-            zIndex: 1000,
-            overflow: 'auto',
-            padding: '20px'
-          }}>
-            <div style={{
-              maxWidth: '1400px',
-              margin: '0 auto',
-              background: 'white',
-              borderRadius: '8px',
-              padding: '0'
-            }}>
-              <ParsedDataEditor
-                reportId={reportId}
-                versionId={report.active_version?.version_id}
-                parsedJson={editingData}
-                onSave={handleSaveEdit}
-                onCancel={handleCancelEdit}
-              />
-            </div>
           </div>
         )}
       </div>
@@ -290,7 +259,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
               删除报告
             </button>
             <button className="secondary-btn" onClick={handleBack}>
-              返回列表
+              ← 返回上一层
             </button>
           </div>
         </div>
@@ -384,13 +353,13 @@ function ReportDetail({ reportId: propReportId, onBack }) {
             {/* Tab 切换 */}
             <div className="tabs-container">
               <div className="tabs">
-                <button 
+                <button
                   className={`tab ${activeTab === 'content' ? 'active' : ''}`}
                   onClick={() => setActiveTab('content')}
                 >
                   📄 年报内容
                 </button>
-                <button 
+                <button
                   className={`tab ${activeTab === 'checks' ? 'active' : ''}`}
                   onClick={() => setActiveTab('checks')}
                 >
@@ -402,7 +371,9 @@ function ReportDetail({ reportId: propReportId, onBack }) {
             {/* Tab 内容 */}
             {activeTab === 'content' && (
               <section className="section">
-                <h3>解析摘要</h3>
+                <div className="report-title-banner">
+                  <h2>{report?.year || ''}年{report?.region_name || report?.region?.name || ''}政务公开年报</h2>
+                </div>
                 {renderParsedContent(report.active_version?.parsed_json)}
               </section>
             )}
@@ -410,15 +381,55 @@ function ReportDetail({ reportId: propReportId, onBack }) {
             {activeTab === 'checks' && (
               <section className="section">
                 <h3>一致性校验</h3>
-                <ConsistencyCheckView 
-                  reportId={reportId} 
-                  onEdit={() => setEditingData(report.active_version?.parsed_json)}
+                <ConsistencyCheckView
+                  reportId={reportId}
+                  onEdit={(paths) => {
+                    console.log('ReportDetail onEdit called, parsed_json:', report.active_version?.parsed_json);
+                    const editData = {
+                      data: report.active_version?.parsed_json,
+                      highlightPaths: paths || []
+                    };
+                    console.log('Setting editingData:', editData);
+                    setEditingData(editData);
+                  }}
                 />
               </section>
             )}
           </>
         )}
       </div>
+
+      {/* 编辑器覆盖层 - 放在最外层以确保任何标签页下都能显示 */}
+      {editingData && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          zIndex: 1000,
+          overflow: 'auto',
+          padding: '20px'
+        }}>
+          <div style={{
+            maxWidth: '1400px',
+            margin: '0 auto',
+            background: 'white',
+            borderRadius: '8px',
+            padding: '0'
+          }}>
+            <ParsedDataEditor
+              reportId={reportId}
+              versionId={report.active_version?.version_id}
+              parsedJson={editingData.data || editingData}
+              highlightPaths={editingData.highlightPaths}
+              onSave={handleSaveEdit}
+              onCancel={handleCancelEdit}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

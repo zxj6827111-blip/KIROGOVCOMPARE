@@ -34,10 +34,10 @@ function UploadReport() {
   // Auto-match region based on unit name
   const autoMatchRegion = useCallback((name) => {
     if (!name || !regions.length) return;
-    
+
     let matchedId = null;
     let maxLevel = 0;
-    
+
     regions.forEach(r => {
       if (name.includes(r.name)) {
         if (r.level > maxLevel) {
@@ -46,7 +46,7 @@ function UploadReport() {
         }
       }
     });
-    
+
     if (matchedId) {
       setRegionId(String(matchedId));
     }
@@ -69,20 +69,20 @@ function UploadReport() {
     // 1. Try "标题：" format
     const titleMatch = text.match(/标题：(.+)/);
     if (titleMatch && titleMatch[1]) {
-        const title = titleMatch[1].trim();
-        // Try to extract year from title
-        const yearMatch = title.match(/(\d{4})年/);
-        if (yearMatch) {
-            setYear(parseInt(yearMatch[1], 10));
-        }
-        // Try to extract unit name from title suffix "宿迁市2024年...报告-宿迁市人民政府"
-        if (title.includes('-')) {
-            const parts = title.split('-');
-            return parts[parts.length - 1].trim();
-        }
-        // Or prefix: "宿迁市人民政府2024年..."
-        const prefixMatch = title.match(/^(.+?)(\d{4}年)?政府信息公开/);
-        if (prefixMatch) return prefixMatch[1].trim();
+      const title = titleMatch[1].trim();
+      // Try to extract year from title
+      const yearMatch = title.match(/(\d{4})年/);
+      if (yearMatch) {
+        setYear(parseInt(yearMatch[1], 10));
+      }
+      // Try to extract unit name from title suffix "宿迁市2024年...报告-宿迁市人民政府"
+      if (title.includes('-')) {
+        const parts = title.split('-');
+        return parts[parts.length - 1].trim();
+      }
+      // Or prefix: "宿迁市人民政府2024年..."
+      const prefixMatch = title.match(/^(.+?)(\d{4}年)?政府信息公开/);
+      if (prefixMatch) return prefixMatch[1].trim();
     }
 
     // 2. Try standard patterns
@@ -91,7 +91,7 @@ function UploadReport() {
       /^(.{2,30})政府信息公开年度报告/m,
       /关于(.{2,20})政府信息公开/,
     ];
-    
+
     for (const pattern of patterns) {
       const match = text.match(pattern);
       if (match && match[1]) {
@@ -101,42 +101,79 @@ function UploadReport() {
     return '';
   };
 
+  // Extract region name from filename
+  const extractRegionFromFilename = (filename) => {
+    // Remove extension
+    const name = filename.replace(/\.(pdf|html|htm)$/i, '');
+
+    // Common patterns:
+    // "黄浦区2023年政务公开年报"
+    // "2023年黄浦区政府信息公开年度报告"
+    // "黄浦区人民政府2023年"
+    // "2023黄浦区年报"
+    const patterns = [
+      // 区域名 + 年份
+      /^(.{2,10}(?:市|区|县|省|镇|乡))(?:\d{4})?/,
+      // 年份 + 区域名
+      /\d{4}年?(.{2,10}(?:市|区|县|省|镇|乡))/,
+      // 区域名人民政府
+      /^(.{2,10}(?:市|区|县|省))人民政府/,
+      // 通用提取
+      /(.{2,8}(?:市|区|县))/,
+    ];
+
+    for (const pattern of patterns) {
+      const match = name.match(pattern);
+      if (match && match[1]) {
+        // 移除可能的年份数字
+        const regionName = match[1].replace(/\d+/g, '').trim();
+        if (regionName.length >= 2) {
+          return regionName;
+        }
+      }
+    }
+    return null;
+  };
+
   // Process file (PDF or HTML)
   const processFile = async (file) => {
     setFile(file);
     setMessage('');
-    
+
     const filename = file.name || '';
+
+    // Extract year from filename
     const extractedYear = extractYearFromFilename(filename);
     if (extractedYear) {
       setYear(extractedYear);
+    }
+
+    // Extract region from filename (works for both PDF and HTML)
+    const extractedRegion = extractRegionFromFilename(filename);
+    if (extractedRegion) {
+      setUnitName(extractedRegion);
+      autoMatchRegion(extractedRegion);
     }
 
     try {
       if (file.type === 'application/pdf' || filename.toLowerCase().endsWith('.pdf')) {
         // For PDF files, we'll just show a placeholder message
         setTextContent('[ PDF 文件已选择，将由后端进行解析 ]');
-        // Try to extract unit name from filename
-        const unitMatch = filename.match(/(.+?)(?:年度)?(?:政府)?(?:信息公开)?(?:年报|报告)/);
-        if (unitMatch && unitMatch[1]) {
-          const cleanName = unitMatch[1].replace(/[\d_-]/g, '').trim();
-          if (cleanName.length >= 2) {
-            setUnitName(cleanName);
-            autoMatchRegion(cleanName);
-          }
-        }
+
       } else if (file.type === 'text/html' || filename.toLowerCase().endsWith('.html')) {
         // Read HTML file content
         const text = await file.text();
         const doc = new DOMParser().parseFromString(text, 'text/html');
         const bodyText = doc.body?.textContent || '';
         setTextContent(bodyText.slice(0, 5000));
-        
-        // Extract unit name
-        const extractedName = extractUnitNameFromText(bodyText);
-        if (extractedName) {
-          setUnitName(extractedName);
-          autoMatchRegion(extractedName);
+
+        // If no region from filename, try to extract from content
+        if (!extractedRegion) {
+          const extractedName = extractUnitNameFromText(bodyText);
+          if (extractedName) {
+            setUnitName(extractedName);
+            autoMatchRegion(extractedName);
+          }
         }
       } else {
         setTextContent('不支持的文件类型，请上传 PDF 或 HTML 文件');
@@ -241,38 +278,38 @@ function UploadReport() {
         // Handle 409 but check if we can poll the explanation
         const payload = error.response?.data || {};
         const existingJobId = extractField(payload, 'job_id') || extractField(payload, 'jobId');
-        
+
         if (autoParse && existingJobId) {
-             setMessage('⚠️ 该报告已存在，正在查询已有任务状态...');
-             try {
-                const job = await pollJob(existingJobId);
-                 if ((job.status || '').toLowerCase() === 'succeeded') {
-                  setMessage('✅ 报告已存在且解析成功 (直接复用)');
-                } else if ((job.status || '').toLowerCase() === 'failed') {
-                   // If failed, maybe we should trigger reparse? 
-                   // But for now, just show failed.
-                  setMessage(`❌ 报告已存在，但之前的解析失败：${job.error_message || '未知错误'}`);
-                } else {
-                   setMessage(`⏳ 报告已存在，任务状态：${job.status}`);
-                }
-                // Set Result so user can see IDs
-                setResult({
-                    reportId: extractField(payload, 'report_id'),
-                    versionId: extractField(payload, 'version_id'),
-                    jobId: existingJobId,
-                });
-             } catch (pollErr) {
-                 setMessage('⚠️ 该报告已存在 (查询任务状态失败)');
-             }
-        } else {
-            setMessage('⚠️ 该报告已存在');
-            if (existingJobId) {
-                 setResult({
-                    reportId: extractField(payload, 'report_id'),
-                    versionId: extractField(payload, 'version_id'),
-                    jobId: existingJobId,
-                });
+          setMessage('⚠️ 该报告已存在，正在查询已有任务状态...');
+          try {
+            const job = await pollJob(existingJobId);
+            if ((job.status || '').toLowerCase() === 'succeeded') {
+              setMessage('✅ 报告已存在且解析成功 (直接复用)');
+            } else if ((job.status || '').toLowerCase() === 'failed') {
+              // If failed, maybe we should trigger reparse? 
+              // But for now, just show failed.
+              setMessage(`❌ 报告已存在，但之前的解析失败：${job.error_message || '未知错误'}`);
+            } else {
+              setMessage(`⏳ 报告已存在，任务状态：${job.status}`);
             }
+            // Set Result so user can see IDs
+            setResult({
+              reportId: extractField(payload, 'report_id'),
+              versionId: extractField(payload, 'version_id'),
+              jobId: existingJobId,
+            });
+          } catch (pollErr) {
+            setMessage('⚠️ 该报告已存在 (查询任务状态失败)');
+          }
+        } else {
+          setMessage('⚠️ 该报告已存在');
+          if (existingJobId) {
+            setResult({
+              reportId: extractField(payload, 'report_id'),
+              versionId: extractField(payload, 'version_id'),
+              jobId: existingJobId,
+            });
+          }
         }
       } else {
         setMessage(`❌ ${error.response?.data?.error || error.message || '上传失败'}`);
@@ -327,7 +364,7 @@ function UploadReport() {
   const getRegionPath = (regionId) => {
     const region = regions.find(r => String(r.id) === String(regionId));
     if (!region) return '';
-    
+
     const path = [region.name];
     let current = region;
     while (current.parent_id) {
@@ -379,17 +416,6 @@ function UploadReport() {
           </div>
         </div>
 
-        {/* Text Content */}
-        <div className="form-section">
-          <label>识别的文本内容 <span className="label-hint">(可手动修正)</span></label>
-          <textarea
-            value={textContent}
-            onChange={(e) => setTextContent(e.target.value)}
-            placeholder="此处显示识别出的文本，或者您可以直接粘贴文本内容..."
-            rows={8}
-          />
-        </div>
-
         {/* Metadata */}
         <div className="form-row-grid">
           <div className="form-section">
@@ -436,21 +462,13 @@ function UploadReport() {
           </div>
         )}
 
-        {result && (
-          <div className="result-info">
-            <p>报告 ID: <strong>{result.reportId || '—'}</strong></p>
-            <p>版本 ID: <strong>{result.versionId || '—'}</strong></p>
-            {result.jobId && <p>任务 ID: <strong>{result.jobId}</strong></p>}
-          </div>
-        )}
-
         {/* Actions */}
         <div className="form-actions">
           {message.startsWith('✅') ? (
             // Success state - show confirm button that resets form
-            <button 
-              type="button" 
-              className="btn-primary" 
+            <button
+              type="button"
+              className="btn-primary"
               onClick={handleCancel}
             >
               确定
@@ -461,17 +479,9 @@ function UploadReport() {
               <button type="button" className="btn-cancel" onClick={handleCancel} disabled={loading}>
                 取消
               </button>
-              <button 
-                type="button" 
-                className="btn-secondary" 
-                onClick={handleSaveText}
-                disabled={loading || !textContent.trim()}
-              >
-                仅保存文本
-              </button>
-              <button 
-                type="button" 
-                className="btn-primary" 
+              <button
+                type="button"
+                className="btn-primary"
                 onClick={() => handleUpload(true)}
                 disabled={loading || !file}
               >
@@ -481,7 +491,7 @@ function UploadReport() {
           )}
         </div>
       </div>
-    </div>
+    </div >
   );
 }
 

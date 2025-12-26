@@ -78,16 +78,16 @@ function App() {
     }
     if (pathname.startsWith('/catalog/reports/')) {
       const reportId = pathname.split('/').pop();
-      return <ReportDetail reportId={reportId} onBack={() => navigate('/catalog/reports')} />;
+      return <ReportDetail reportId={reportId} onBack={() => window.history.back()} />;
     }
     if (pathname === '/history') return <ComparisonHistory />;
     if (pathname.startsWith('/comparison/')) {
-       // Extract ID from /comparison/:id
-       const parts = pathname.split('/');
-       const id = parts[parts.length - 1]; // or parts[2]
-       // Check for autoPrint query param
-       const autoPrint = new URLSearchParams(window.location.search).get('autoPrint') === 'true';
-       return <ComparisonDetailView comparisonId={id} onBack={() => navigate('/history')} autoPrint={autoPrint} />;
+      // Extract ID from /comparison/:id
+      const parts = pathname.split('/');
+      const id = parts[parts.length - 1]; // or parts[2]
+      // Check for autoPrint query param
+      const autoPrint = new URLSearchParams(window.location.search).get('autoPrint') === 'true';
+      return <ComparisonDetailView comparisonId={id} onBack={() => navigate('/history')} autoPrint={autoPrint} />;
     }
     return <CityIndex onSelectReport={(reportId) => navigate(`/catalog/reports/${reportId}`)} />;
   };

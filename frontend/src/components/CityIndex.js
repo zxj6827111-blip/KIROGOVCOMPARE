@@ -7,9 +7,32 @@ function CityIndex({ onSelectReport }) {
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [path, setPath] = useState([]); // 保存层级路径的 region_id
+
+  // 从 URL 参数读取初始路径
+  const getInitialPath = () => {
+    const params = new URLSearchParams(window.location.search);
+    const regionParam = params.get('region');
+    if (regionParam) {
+      return regionParam.split(',').filter(Boolean);
+    }
+    return [];
+  };
+
+  const [path, setPath] = useState(getInitialPath); // 保存层级路径的 region_id
   const [selectedForCompare, setSelectedForCompare] = useState([]); // 选中用于比对的报告
   const [comparing, setComparing] = useState(false);
+
+  // 当 path 变化时，更新 URL 参数
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (path.length > 0) {
+      params.set('region', path.join(','));
+    } else {
+      params.delete('region');
+    }
+    const newUrl = `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`;
+    window.history.replaceState({}, '', newUrl);
+  }, [path]);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -38,7 +61,7 @@ function CityIndex({ onSelectReport }) {
   const regionTree = useMemo(() => {
     const byParent = new Map();
     regions.forEach((r) => {
-      const pid = r.parent_id ?? null;
+      const pid = r.parent_id != null ? String(r.parent_id) : null;
       if (!byParent.has(pid)) byParent.set(pid, []);
       byParent.get(pid).push(r);
     });
@@ -55,7 +78,7 @@ function CityIndex({ onSelectReport }) {
     return map;
   }, [reports]);
 
-  const childrenOf = (regionId) => regionTree.get(regionId ?? null) || [];
+  const childrenOf = (regionId) => regionTree.get(regionId != null ? String(regionId) : null) || [];
 
   // 递归计算包含子节点的报告总数
   const countWithDescendants = (regionId) => {
@@ -66,7 +89,7 @@ function CityIndex({ onSelectReport }) {
   };
 
   const currentParentId = path.length ? path[path.length - 1] : null;
-  const breadcrumb = path.map((id) => regions.find((r) => r.id === id)).filter(Boolean);
+  const breadcrumb = path.map((id) => regions.find((r) => String(r.id) === String(id))).filter(Boolean);
   const currentRegion = breadcrumb[breadcrumb.length - 1] || null;
 
   const levelLabel = (level) => {
@@ -121,17 +144,17 @@ function CityIndex({ onSelectReport }) {
       alert('请选择两份报告进行比对');
       return;
     }
-    
+
     setComparing(true);
     try {
       // Find the reports to get their years
       const report1 = reports.find(r => r.report_id === selectedForCompare[0]);
       const report2 = reports.find(r => r.report_id === selectedForCompare[1]);
-      
+
       if (!report1 || !report2) {
         throw new Error('未找到选中的报告');
       }
-      
+
       // Create comparison via API
       await apiClient.post('/comparisons/create', {
         region_id: currentParentId,
@@ -140,7 +163,7 @@ function CityIndex({ onSelectReport }) {
         left_report_id: report1.report_id,
         right_report_id: report2.report_id,
       });
-      
+
       alert('比对任务已创建！请在"比对结果汇总"页面查看。');
       setSelectedForCompare([]);
     } catch (err) {
@@ -152,7 +175,7 @@ function CityIndex({ onSelectReport }) {
   };
 
   const cards = childrenOf(currentParentId);
-  const currentReports = currentParentId ? reports.filter((r) => r.region_id === currentParentId) : [];
+  const currentReports = currentParentId ? reports.filter((r) => String(r.region_id) === String(currentParentId)) : [];
 
   return (
     <div className="city-index">
@@ -190,7 +213,7 @@ function CityIndex({ onSelectReport }) {
             <h3>{currentRegion?.name || '当前城市'}的年报</h3>
             <div className="section-actions">
               {selectedForCompare.length === 2 && (
-                <button 
+                <button
                   className="compare-btn"
                   onClick={handleCompare}
                   disabled={comparing}
@@ -200,7 +223,7 @@ function CityIndex({ onSelectReport }) {
               )}
             </div>
           </div>
-          
+
           {selectedForCompare.length > 0 && (
             <div className="selection-hint">
               已选择 {selectedForCompare.length} 份报告
@@ -208,16 +231,16 @@ function CityIndex({ onSelectReport }) {
               <button className="clear-btn" onClick={() => setSelectedForCompare([])}>清除选择</button>
             </div>
           )}
-          
+
           <div className="report-grid">
             {currentReports.map((r) => {
               const region = regions.find(reg => reg.id === r.region_id);
               const regionName = region?.name || '未知区域';
               const reportTitle = `${r.year}年${regionName}政务公开年报`;
-              
+
               return (
-                <div 
-                  key={r.report_id} 
+                <div
+                  key={r.report_id}
                   className={`report-card ${selectedForCompare.includes(r.report_id) ? 'selected' : ''}`}
                 >
                   <div className="report-card-header">
@@ -232,13 +255,13 @@ function CityIndex({ onSelectReport }) {
                     </span>
                   </div>
                   <div className="report-actions">
-                    <button 
+                    <button
                       className="view-btn"
                       onClick={() => onSelectReport?.(r.report_id)}
                     >
                       查看
                     </button>
-                    <button 
+                    <button
                       className="delete-report-btn"
                       onClick={(e) => handleDeleteReport(e, r.report_id)}
                     >

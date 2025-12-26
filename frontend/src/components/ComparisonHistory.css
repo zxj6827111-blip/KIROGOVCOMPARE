@@ -79,33 +79,63 @@
 .actions {
     display: flex;
     gap: 8px;
+    align-items: center;
 }
 
-.action-btn {
-    padding: 6px 12px;
+/* Icon Button Style */
+.icon-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 10px;
     border-radius: 6px;
     border: none;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 12px;
+    font-weight: 500;
     transition: all 0.2s;
+    background: transparent;
 }
 
-.action-btn.export-btn {
+.icon-btn svg {
+    flex-shrink: 0;
+}
+
+.icon-btn span {
+    white-space: nowrap;
+}
+
+/* View Button - Blue */
+.icon-btn.view {
+    color: #2563eb;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+}
+
+.icon-btn.view:hover {
     background: #dbeafe;
-    color: #1d4ed8;
 }
 
-.action-btn.export-btn:hover:not(:disabled) {
-    background: #bfdbfe;
+/* Print Button - Gray/Blue */
+.icon-btn.print {
+    color: #4b5563;
+    background: #f3f4f6;
+    border: 1px solid #d1d5db;
 }
 
-.action-btn.remove-btn-force {
-    background: #fee2e2;
+.icon-btn.print:hover {
+    background: #e5e7eb;
+}
+
+/* Delete Button - Red */
+.icon-btn.delete {
     color: #dc2626;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
 }
 
-.action-btn.remove-btn-force:hover {
-    background: #fecaca;
+.icon-btn.delete:hover {
+    background: #fee2e2;
 }
 
 .pagination {
