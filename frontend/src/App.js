@@ -74,7 +74,10 @@ function App() {
     if (pathname === '/regions') return <RegionsManager />;
     if (pathname === '/upload') return <UploadReport />;
     if (pathname === '/catalog' || pathname === '/catalog/reports') {
-      return <CityIndex onSelectReport={(reportId) => navigate(`/catalog/reports/${reportId}`)} />;
+      return <CityIndex
+        onSelectReport={(reportId) => navigate(`/catalog/reports/${reportId}`)}
+        onViewComparison={(comparisonId) => navigate(`/comparison/${comparisonId}`)}
+      />;
     }
     if (pathname.startsWith('/catalog/reports/')) {
       const reportId = pathname.split('/').pop();

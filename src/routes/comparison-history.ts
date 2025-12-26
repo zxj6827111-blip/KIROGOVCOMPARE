@@ -5,6 +5,7 @@ import pdfExportService from '../services/PdfExportService';
 import path from 'path';
 import fs from 'fs';
 import { calculateDiffs, renderDiffHtml } from '../utils/diffRenderer';
+import { calculateReportMetrics } from '../utils/reportAnalysis';
 import { ComparisonReportData } from '../services/PdfExportService';
 
 const router = express.Router();
@@ -63,6 +64,8 @@ router.get('/history', optionalAuthMiddleware, (req: AuthRequest, res: Response)
         c.year_b,
         c.left_report_id,
         c.right_report_id,
+        c.similarity,
+        c.check_status,
         c.created_at,
         r.name as region_name
       FROM comparisons c
@@ -81,6 +84,8 @@ router.get('/history', optionalAuthMiddleware, (req: AuthRequest, res: Response)
         yearB: c.year_b,
         leftReportId: c.left_report_id,
         rightReportId: c.right_report_id,
+        similarity: c.similarity,
+        checkStatus: c.check_status,
         createdAt: c.created_at,
       })),
       total,
@@ -127,10 +132,27 @@ router.post('/create', authMiddleware, (req: AuthRequest, res: Response) => {
       });
     }
 
+    // Calculate Metrics
+    let similarity = 0;
+    let checkStatus: string | null = null;
+    try {
+      const leftRes = querySqlite(`SELECT parsed_json FROM report_versions WHERE report_id=${sqlValue(left_report_id)} AND is_active=1`);
+      const rightRes = querySqlite(`SELECT parsed_json FROM report_versions WHERE report_id=${sqlValue(right_report_id)} AND is_active=1`);
+
+      const leftJson = leftRes?.[0]?.parsed_json ? JSON.parse(leftRes[0].parsed_json) : { sections: [] };
+      const rightJson = rightRes?.[0]?.parsed_json ? JSON.parse(rightRes[0].parsed_json) : { sections: [] };
+
+      const metrics = calculateReportMetrics(leftJson, rightJson);
+      similarity = metrics.similarity;
+      checkStatus = metrics.checkStatus;
+    } catch (e) {
+      console.error('Error calculating metrics during creation:', e);
+    }
+
     // Create comparison record
     querySqlite(`
-      INSERT INTO comparisons (region_id, year_a, year_b, left_report_id, right_report_id, created_at)
-      VALUES (${sqlValue(region_id)}, ${sqlValue(year_a)}, ${sqlValue(year_b)}, ${sqlValue(left_report_id)}, ${sqlValue(right_report_id)}, datetime('now'))
+      INSERT INTO comparisons (region_id, year_a, year_b, left_report_id, right_report_id, similarity, check_status, created_at)
+      VALUES (${sqlValue(region_id)}, ${sqlValue(year_a)}, ${sqlValue(year_b)}, ${sqlValue(left_report_id)}, ${sqlValue(right_report_id)}, ${similarity}, ${checkStatus ? sqlValue(checkStatus) : 'NULL'}, datetime('now'))
     `);
 
     // Get the created comparison
@@ -232,6 +254,8 @@ router.get('/:id/result', optionalAuthMiddleware, (req: AuthRequest, res: Respon
       left_content: leftContent,
       right_content: rightContent,
       diff_json: diffJson,
+      similarity: comparison.similarity,
+      check_status: comparison.check_status,
       created_at: comparison.created_at,
     });
   } catch (error) {

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import './CityIndex.css';
 import { apiClient } from '../apiClient';
 
-function CityIndex({ onSelectReport }) {
+function CityIndex({ onSelectReport, onViewComparison }) {
   const [regions, setRegions] = useState([]);
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -155,16 +155,35 @@ function CityIndex({ onSelectReport }) {
         throw new Error('未找到选中的报告');
       }
 
+      // Sort by year (Oldest = Year A / Left, Newest = Year B / Right)
+      let reportA = report1;
+      let reportB = report2;
+      const year1 = parseInt(report1.year, 10) || 0;
+      const year2 = parseInt(report2.year, 10) || 0;
+
+      if (year1 > year2) {
+        [reportA, reportB] = [report2, report1];
+      }
+
       // Create comparison via API
-      await apiClient.post('/comparisons/create', {
+      const response = await apiClient.post('/comparisons/create', {
         region_id: currentParentId,
-        year_a: report1.year,
-        year_b: report2.year,
-        left_report_id: report1.report_id,
-        right_report_id: report2.report_id,
+        year_a: reportA.year,
+        year_b: reportB.year,
+        left_report_id: reportA.report_id,
+        right_report_id: reportB.report_id,
       });
 
-      alert('比对任务已创建！请在"比对结果汇总"页面查看。');
+      if (response.data && response.data.comparisonId) {
+        if (onViewComparison) {
+          onViewComparison(response.data.comparisonId);
+        } else {
+          alert('比对任务已创建！请在"比对结果汇总"页面查看。');
+        }
+      } else {
+        alert('比对任务已创建！请在"比对结果汇总"页面查看。');
+      }
+
       setSelectedForCompare([]);
     } catch (err) {
       const message = err.response?.data?.error || err.message || '创建比对失败';
