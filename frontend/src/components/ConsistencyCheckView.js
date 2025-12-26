@@ -123,13 +123,16 @@ const getLocationInfo = (item) => {
   if (values.sectionTitle) {
     const sectionNum = values.sectionIndex ? `第${values.sectionIndex}部分` : '';
     result.textSource = `${sectionNum}「${values.sectionTitle}」`;
+  } else if (values.matchedText || paths.some(p => p.includes('content'))) {
+    // 回退显示的 Text Source
+    result.textSource = '正文相关内容';
+  }
 
-    // 在上下文中高亮数字
-    if (values.context) {
-      result.context = highlightNumber(values.context, values.textValue);
-    } else if (values.matchedText) {
-      result.context = highlightNumber(values.matchedText, values.textValue);
-    }
+  // 在上下文中高亮数字 - 独立于 sectionTitle 判断
+  if (values.context) {
+    result.context = highlightNumber(values.context, values.textValue);
+  } else if (values.matchedText) {
+    result.context = highlightNumber(values.matchedText, values.textValue);
   }
 
   return result;

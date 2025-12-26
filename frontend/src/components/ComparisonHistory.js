@@ -146,7 +146,9 @@ function ComparisonHistory() {
                 <th>年份A</th>
                 <th>年份B</th>
                 <th>创建时间</th>
-                <th>操作</th>
+                <th>文字重复率</th>
+                <th>年度勾稽关系</th>
+                <th style={{ minWidth: '220px' }}>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -157,6 +159,14 @@ function ComparisonHistory() {
                   <td>{c.yearA}</td>
                   <td>{c.yearB}</td>
                   <td>{formatDate(c.createdAt)}</td>
+                  <td>
+                    {c.similarity != null ? <span className="font-bold">{c.similarity}%</span> : <span className="text-gray-400">-</span>}
+                  </td>
+                  <td>
+                    {c.checkStatus?.startsWith('异常') ? <span className="text-red-600 font-bold">{c.checkStatus}</span> :
+                      c.checkStatus === '正常' ? <span className="text-green-600">正常</span> :
+                        <span className="text-gray-400">-</span>}
+                  </td>
                   <td>
                     <div className="actions">
                       <button

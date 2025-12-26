@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import * as Diff from 'diff';
-import { tokenizeText } from './DiffUtils';
+import { tokenizeText, isPunctuation } from './DiffUtils';
 
 const DiffText = ({ oldText, newText, highlightIdentical, highlightDiff }) => {
   const containerRef = useRef(null);
@@ -9,9 +9,6 @@ const DiffText = ({ oldText, newText, highlightIdentical, highlightDiff }) => {
 
   useEffect(() => {
     setDiffs(null);
-    // Force computation immediately to ensure it's ready for print/export
-    // The previous IntersectionObserver logic caused off-screen diffs (like sections 5/6) 
-    // to arguably not render in time for window.print() if not scrolled into view.
     setShouldCompute(true);
   }, [oldText, newText]);
 
@@ -24,6 +21,7 @@ const DiffText = ({ oldText, newText, highlightIdentical, highlightDiff }) => {
       try {
         const tokensA = tokenizeText(oldText || '');
         const tokensB = tokenizeText(newText || '');
+        // 使用 diffArrays 对 token 数组进行比对
         const nextDiffs = Diff.diffArrays(tokensA, tokensB);
         if (!cancelled) setDiffs(nextDiffs);
       } catch (err) {
@@ -50,7 +48,6 @@ const DiffText = ({ oldText, newText, highlightIdentical, highlightDiff }) => {
   }, [oldText, newText, shouldCompute]);
 
   if (!diffs) {
-    // Show content immediately; upgrade to highlighted diff when ready.
     return (
       <div
         ref={containerRef}
@@ -63,33 +60,66 @@ const DiffText = ({ oldText, newText, highlightIdentical, highlightDiff }) => {
 
   return (
     <div ref={containerRef} className="font-serif-sc text-sm leading-relaxed whitespace-pre-wrap break-words">
-      {diffs.map((part, index) => {
-        if (part.removed) return null; 
-        if (part.added) {
-           const text = part.value.join('');
-           return (
-             <span 
-               key={index} 
-               className={highlightDiff ? "bg-red-200 text-red-900 decoration-red-400 underline decoration-dotted" : ""} 
-               title="差异内容"
-             >
-               {text}
-             </span>
-           );
-        } else {
-           const text = part.value.join('');
-           return (
-             <span 
-               key={index} 
-               className={highlightIdentical ? "bg-yellow-200 text-gray-900" : "text-gray-500"}
-             >
-               {text}
-             </span>
-           );
-        }
+      {diffs.map((part, partIndex) => {
+        if (part.removed) return null;
+
+        const isAdded = part.added;
+        const isIdentical = !part.added && !part.removed;
+
+        // Optimization: Merge continuous tokens with same style
+        const renderedSpans = [];
+        let currentBuffer = "";
+        let currentClass = null;
+
+        const flush = () => {
+          if (currentBuffer) {
+            renderedSpans.push(
+              <span key={`${partIndex}-${renderedSpans.length}`} className={currentClass}>
+                {currentBuffer}
+              </span>
+            );
+          }
+          currentBuffer = "";
+          currentClass = null;
+        };
+
+        part.value.forEach((token) => {
+          let tokenClass = "text-gray-500";
+
+          if (!isPunctuation(token)) {
+            if (isAdded && highlightDiff) {
+              tokenClass = "bg-red-200 text-red-900 border-b border-red-400 border-dotted";
+            } else if (isIdentical && highlightIdentical) {
+              tokenClass = "bg-yellow-200 text-gray-900";
+            }
+          }
+
+          // Initial
+          if (currentClass === null) {
+            currentClass = tokenClass;
+            currentBuffer = token;
+          }
+          // Same class -> append
+          else if (currentClass === tokenClass) {
+            currentBuffer += token;
+          }
+          // Different class -> flush and start new
+          else {
+            flush();
+            currentClass = tokenClass;
+            currentBuffer = token;
+          }
+        });
+        flush();
+
+        return (
+          <React.Fragment key={partIndex}>
+            {renderedSpans}
+          </React.Fragment>
+        );
       })}
     </div>
   );
 };
 
-export default DiffText;
+export default React.memo(DiffText);

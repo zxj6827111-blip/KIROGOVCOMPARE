@@ -7,7 +7,7 @@ export const tokenizeText = (text) => {
   // - group digits and latin words
   // - group contiguous CJK characters (instead of per-char)
   // - keep punctuation/others as single tokens
-  const regex = /(\d+)|([a-zA-Z]+)|([\u4e00-\u9fff]+)|([\s\S])/g;
+  const regex = /(\d+)|([a-zA-Z]+)|([\u4e00-\u9fff])|([\s\S])/g;
   const tokens = [];
   let match;
   while ((match = regex.exec(text)) !== null) {
@@ -17,20 +17,20 @@ export const tokenizeText = (text) => {
 };
 
 export const isPunctuation = (str) => {
-  return /[，。、；：？！“”‘’（）《》【】—…\.,;:\?!'"\(\)\[\]\-\s]/.test(str);
+  return /[，。、；：？！“”‘’（）《》【】—….,;:?!'"()[\]\-\s]/.test(str);
 };
 
 export function calculateTextSimilarity(text1, text2) {
   if (!text1 && !text2) return 100;
   if (!text1 || !text2) return 0;
-  
+
   // Clean text if it comes in as object/array
   const s1 = typeof text1 === 'string' ? text1 : JSON.stringify(text1);
   const s2 = typeof text2 === 'string' ? text2 : JSON.stringify(text2);
-  
+
   const t1 = tokenizeText(s1).filter(t => !isPunctuation(t));
   const t2 = tokenizeText(s2).filter(t => !isPunctuation(t));
-  
+
   if (t1.length === 0 && t2.length === 0) return 100;
   if (t1.length === 0 || t2.length === 0) return 0;
 
@@ -52,3 +52,11 @@ export function calculateTextSimilarity(text1, text2) {
   // Calculate similarity based on common length ratio
   return Math.round((2.0 * commonLen) / (len1 + len2) * 100);
 }
+
+export const highlightNumber = (text, number) => {
+  if (!text || number === undefined || number === null) return text;
+  const numStr = String(number);
+  const regex = new RegExp(`(?<!\\d)(${numStr.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')})(?!\\d)`, 'g');
+  // const regex = new RegExp(`(?<!\\d)(${escapedNum})(?!\\d)`, 'g'); // Inline for clarity or use var
+  return text.replace(regex, '<span class="highlight-number">$1</span>');
+};

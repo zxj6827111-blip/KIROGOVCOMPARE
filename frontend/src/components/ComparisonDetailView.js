@@ -4,6 +4,7 @@ import './ComparisonDetailView.css';
 import { apiClient } from '../apiClient';
 import { Table2View, Table3View, Table4View, SimpleDiffTable } from './TableViews';
 import DiffText from './DiffText';
+import CrossYearCheckView from './CrossYearCheckView';
 
 // ---- Tokenization & Similarity Algorithm (Ported) ----
 const tokenizeText = (text) => {
@@ -24,10 +25,10 @@ const isPunctuation = (str) => {
 function calculateTextSimilarity(text1, text2) {
   if (!text1 && !text2) return 100;
   if (!text1 || !text2) return 0;
-  
+
   const t1 = tokenizeText(text1).filter(t => !isPunctuation(t));
   const t2 = tokenizeText(text2).filter(t => !isPunctuation(t));
-  
+
   if (t1.length === 0 && t2.length === 0) return 100;
   if (t1.length === 0 || t2.length === 0) return 0;
 
@@ -38,7 +39,7 @@ function calculateTextSimilarity(text1, text2) {
   const set2 = new Set(t2);
   let intersection = 0;
   t1.forEach(t => { if (set2.has(t)) intersection++; });
-  const union = t1.length + t2.length; 
+  const union = t1.length + t2.length;
   return Math.round((2 * intersection / union) * 100);
 }
 
@@ -72,7 +73,7 @@ const getTable3Rows = (data) => {
     { label: '其他处理-申请人逾期未按收费通知...', val: r.other.overdueFee },
     { label: '其他处理-其他', val: r.other.otherReasons },
     { label: '总计', val: r.totalProcessed },
-    { label: '结转下年度继续办理', val: r.carriedForward }, 
+    { label: '结转下年度继续办理', val: r.carriedForward },
   ];
 };
 
@@ -85,19 +86,19 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
   // Auto-print effect
   useEffect(() => {
     if (autoPrint && data && !loading && !error) {
-       // Wait a brief moment for DOM info (DiffText) to paint
-       const timer = setTimeout(() => {
-          setPrinting(true);
-          window.print();
-          setPrinting(false);
-       }, 800);
-       return () => clearTimeout(timer);
+      // Wait a brief moment for DOM info (DiffText) to paint
+      const timer = setTimeout(() => {
+        setPrinting(true);
+        window.print();
+        setPrinting(false);
+      }, 800);
+      return () => clearTimeout(timer);
     }
   }, [autoPrint, data, loading, error]);
-  
+
   // Highlight States
-  const [highlightIdentical, setHighlightIdentical] = useState(false);
-  const [highlightDiff, setHighlightDiff] = useState(true);
+  const [highlightIdentical, setHighlightIdentical] = useState(true);
+  const [highlightDiff, setHighlightDiff] = useState(false);
 
   // Fetch Data
   const fetchData = useCallback(async () => {
@@ -131,7 +132,7 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
     if (!data) return { alignedSections: [], summary: {} };
 
     const sections = [];
-    
+
     // Process Left (Old)
     const leftSections = data.left_content?.sections || [];
     leftSections.forEach(s => sections.push({ title: s.title, oldSec: s }));
@@ -147,13 +148,13 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
     // Sort Logic
     const numerals = ['一', '二', '三', '四', '五', '六', '七', '八'];
     sections.sort((a, b) => {
-       const isTitleA = a.title === '标题' || a.title?.includes('年度报告');
-       const isTitleB = b.title === '标题' || b.title?.includes('年度报告');
-       if (isTitleA && !isTitleB) return -1;
-       if (!isTitleA && isTitleB) return 1;
-       const idxA = numerals.findIndex(n => a.title?.includes(n));
-       const idxB = numerals.findIndex(n => b.title?.includes(n));
-       return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB);
+      const isTitleA = a.title === '标题' || a.title?.includes('年度报告');
+      const isTitleB = b.title === '标题' || b.title?.includes('年度报告');
+      if (isTitleA && !isTitleB) return -1;
+      if (!isTitleA && isTitleB) return 1;
+      const idxA = numerals.findIndex(n => a.title?.includes(n));
+      const idxB = numerals.findIndex(n => b.title?.includes(n));
+      return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB);
     });
 
     // Calculate Summary Stats (Locally)
@@ -172,11 +173,11 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
         const sim = calculateTextSimilarity(sec.oldSec.content || '', sec.newSec.content || '');
         totalTextSim += sim;
         textSectionsCount++;
-        
+
         if (sim < 60) {
           summaryItems.push(`${sec.title.split('、')[1] || sec.title}章节的文字变化较大，重复率约 ${Math.round(sim)}% （低于 60% 阈值）`);
         }
-      } 
+      }
       // Table Comparison
       else if (['table_2', 'table_3', 'table_4'].includes(sec.newSec?.type || '')) {
         let identical = false;
@@ -189,84 +190,84 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
           totalTableSim += 100;
           tableSectionsCount++;
         } else {
-           summaryItems.push(`${sec.title.split('、')[1] || sec.title}的表格重复率约 0%，存在明显数据差异`);
+          summaryItems.push(`${sec.title.split('、')[1] || sec.title}的表格重复率约 0%，存在明显数据差异`);
         }
       }
     });
 
-    const avgTextRep = textSectionsCount > 0 ? Math.round(totalTextSim / textSectionsCount) : 0;
+    const avgTextRep = (data.similarity != null) ? data.similarity : (textSectionsCount > 0 ? Math.round(totalTextSim / textSectionsCount) : 0);
     const avgTableRep = tableSectionsCount > 0 ? Math.round(totalTableSim / tableSectionsCount) : 0;
     const overallRep = Math.round((avgTextRep + avgTableRep) / 2);
 
-    return { 
-      alignedSections: sections, 
-      summary: (data.diff_json?.summary && data.diff_json.summary.items && data.diff_json.summary.items.length > 0) 
-        ? data.diff_json.summary 
+    return {
+      alignedSections: sections,
+      summary: (data.diff_json?.summary && data.diff_json.summary.items && data.diff_json.summary.items.length > 0)
+        ? data.diff_json.summary
         : {
-            textRepetition: avgTextRep,
-            tableRepetition: avgTableRep,
-            overallRepetition: overallRep,
-            items: summaryItems
-          }
+          textRepetition: avgTextRep,
+          tableRepetition: avgTableRep,
+          overallRepetition: overallRep,
+          items: summaryItems
+        }
     };
   }, [data]);
 
   const renderSectionDiff = (row) => {
-      // 1. Active Disclosure Diff (Table 2)
-      if (row.newSec?.type === 'table_2' && row.newSec.activeDisclosureData && row.oldSec?.activeDisclosureData) {
-        const dA = row.oldSec.activeDisclosureData;
-        const dB = row.newSec.activeDisclosureData;
-        return (
-          <SimpleDiffTable 
-            title="主动公开数据差异"
-            headers={["指标", `${data.year_a}年`, `${data.year_b}年`]}
-            rows={[
-              { label: '规章-制发', valA: dA.regulations?.made, valB: dB.regulations?.made },
-              { label: '规范性文件-制发', valA: dA.normativeDocuments?.made, valB: dB.normativeDocuments?.made },
-              { label: '行政许可-处理', valA: dA.licensing?.processed, valB: dB.licensing?.processed },
-              { label: '行政处罚-处理', valA: dA.punishment?.processed, valB: dB.punishment?.processed },
-              { label: '行政事业性收费(万元)', valA: dA.fees?.amount, valB: dB.fees?.amount },
-            ]}
-          />
-        );
-      }
-      
-      // 2. Review Litigation Diff (Table 4)
-      if (row.newSec?.type === 'table_4' && row.newSec.reviewLitigationData && row.oldSec?.reviewLitigationData) {
-         const dA = row.oldSec.reviewLitigationData;
-         const dB = row.newSec.reviewLitigationData;
-         return (
-           <SimpleDiffTable 
-             title="复议诉讼数据差异"
-             headers={["类型", `${data.year_a}总计`, `${data.year_b}总计`]}
-             rows={[
-               { label: '行政复议', valA: dA.review?.total, valB: dB.review?.total },
-               { label: '行政诉讼(直接)', valA: dA.litigationDirect?.total, valB: dB.litigationDirect?.total },
-               { label: '行政诉讼(复议后)', valA: dA.litigationPostReview?.total, valB: dB.litigationPostReview?.total },
-             ]}
-           />
-         );
-      }
+    // 1. Active Disclosure Diff (Table 2)
+    if (row.newSec?.type === 'table_2' && row.newSec.activeDisclosureData && row.oldSec?.activeDisclosureData) {
+      const dA = row.oldSec.activeDisclosureData;
+      const dB = row.newSec.activeDisclosureData;
+      return (
+        <SimpleDiffTable
+          title="主动公开数据差异"
+          headers={["指标", `${data.year_a}年`, `${data.year_b}年`]}
+          rows={[
+            { label: '规章-制发', valA: dA.regulations?.made, valB: dB.regulations?.made },
+            { label: '规范性文件-制发', valA: dA.normativeDocuments?.made, valB: dB.normativeDocuments?.made },
+            { label: '行政许可-处理', valA: dA.licensing?.processed, valB: dB.licensing?.processed },
+            { label: '行政处罚-处理', valA: dA.punishment?.processed, valB: dB.punishment?.processed },
+            { label: '行政事业性收费(万元)', valA: dA.fees?.amount, valB: dB.fees?.amount },
+          ]}
+        />
+      );
+    }
 
-      // 3. Table 3 Diff
-      if (row.newSec?.type === 'table_3' && row.newSec.tableData && row.oldSec?.tableData) {
-          const rowsA = getTable3Rows(row.oldSec.tableData);
-          const rowsB = getTable3Rows(row.newSec.tableData);
-          const diffRows = rowsA.map((r, i) => ({
-             label: r.label,
-             valA: r.val,
-             valB: rowsB[i] ? rowsB[i].val : 0
-          }));
-          return (
-             <SimpleDiffTable 
-             title="依申请公开情况 - 详细指标差异分析"
-             headers={["指标", `${data.year_a}年`, `${data.year_b}年`]}
-             rows={diffRows}
-           />
-          );
-      }
+    // 2. Review Litigation Diff (Table 4)
+    if (row.newSec?.type === 'table_4' && row.newSec.reviewLitigationData && row.oldSec?.reviewLitigationData) {
+      const dA = row.oldSec.reviewLitigationData;
+      const dB = row.newSec.reviewLitigationData;
+      return (
+        <SimpleDiffTable
+          title="复议诉讼数据差异"
+          headers={["类型", `${data.year_a}总计`, `${data.year_b}总计`]}
+          rows={[
+            { label: '行政复议', valA: dA.review?.total, valB: dB.review?.total },
+            { label: '行政诉讼(直接)', valA: dA.litigationDirect?.total, valB: dB.litigationDirect?.total },
+            { label: '行政诉讼(复议后)', valA: dA.litigationPostReview?.total, valB: dB.litigationPostReview?.total },
+          ]}
+        />
+      );
+    }
 
-      return null;
+    // 3. Table 3 Diff
+    if (row.newSec?.type === 'table_3' && row.newSec.tableData && row.oldSec?.tableData) {
+      const rowsA = getTable3Rows(row.oldSec.tableData);
+      const rowsB = getTable3Rows(row.newSec.tableData);
+      const diffRows = rowsA.map((r, i) => ({
+        label: r.label,
+        valA: r.val,
+        valB: rowsB[i] ? rowsB[i].val : 0
+      }));
+      return (
+        <SimpleDiffTable
+          title="依申请公开情况 - 详细指标差异分析"
+          headers={["指标", `${data.year_a}年`, `${data.year_b}年`]}
+          rows={diffRows}
+        />
+      );
+    }
+
+    return null;
   };
 
   const handlePrint = () => {
@@ -279,147 +280,165 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
 
   return (
     <div className="space-y-4 pb-20 comparison-container bg-gray-50 min-h-screen p-4">
-        {/* Back Button */}
-       <div className="back-nav mb-4 no-print block">
-         <button onClick={onBack} className="flex items-center text-blue-600 hover:text-blue-800">
-           <span className="mr-1">←</span> 返回列表
-         </button>
-       </div>
+      {/* Back Button */}
+      <div className="back-nav mb-4 no-print block">
+        <button onClick={onBack} className="flex items-center text-blue-600 hover:text-blue-800">
+          <span className="mr-1">←</span> 返回列表
+        </button>
+      </div>
 
-       <div id="comparison-content" className="max-w-[1600px] mx-auto">
-          {/* Summary Card */}
-          <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 mb-8 shadow-sm break-inside-avoid">
-            <h2 className="text-2xl font-bold text-gray-900 mb-4 font-serif-sc">
-              {data.region_name} 年报比对
-            </h2>
-            <div className="flex space-x-8 text-sm text-gray-700 mb-4 font-mono">
-              <div>
-                <span className="text-gray-500">年份:</span> <span className="font-bold">{data.year_a} vs {data.year_b}</span>
-              </div>
-              <div>
-                 <span className="font-bold ml-1">{summary.textRepetition ?? '-'}%</span>
-              </div>
-              <div>
-                 <span className="text-gray-500">表格重复率:</span> 
-                 <span className="font-bold ml-1">{summary.tableRepetition ?? '-'}%</span>
-              </div>
-              <div>
-                 <span className="text-gray-500">总体重复率:</span> 
-                 <span className="font-bold ml-1">{summary.overallRepetition ?? '-'}%</span>
-              </div>
+      <div id="comparison-content" className="max-w-[1600px] mx-auto">
+        {/* Summary Card */}
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 mb-8 shadow-sm break-inside-avoid">
+          <h2 className="text-2xl font-bold text-gray-900 mb-4 font-serif-sc">
+            {data.region_name} 政务公开年报比对
+          </h2>
+          <div className="flex space-x-8 text-sm text-gray-700 mb-4 font-mono">
+            <div>
+              <span className="text-gray-500">年份:</span> <span className="font-bold">{data.year_a} vs {data.year_b}</span>
             </div>
-
-            <div className="bg-white border border-gray-200 rounded p-4">
-              <h3 className="font-bold text-gray-900 mb-2">差异摘要</h3>
-              <ul className="list-disc list-inside space-y-1 text-sm text-gray-700 font-serif-sc">
-                {summary.items && summary.items.length > 0 ? (
-                  summary.items.map((item, idx) => <li key={idx}>{item}</li>)
-                ) : (
-                  <li>未检测到显著差异。</li>
-                )}
-              </ul>
+            <div>
+              <span className="text-gray-500">文字重复率:</span>
+              <span className="font-bold ml-1">{summary.textRepetition ?? '-'}%</span>
+            </div>
+            <div>
+              <span className="text-gray-500">表格重复率:</span>
+              <span className="font-bold ml-1">{summary.tableRepetition ?? '-'}%</span>
+            </div>
+            <div>
+              <span className="text-gray-500">总体重复率:</span>
+              <span className="font-bold ml-1">{summary.overallRepetition ?? '-'}%</span>
             </div>
           </div>
 
-           {/* View Settings Controls */}
-           <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex flex-wrap justify-between items-center mb-6 no-print">
-             <div className="flex flex-wrap gap-6 items-center">
-                <div className="font-bold text-gray-700 flex items-center">
-                  高亮设置
-                </div>
-                <label className="flex items-center space-x-2 cursor-pointer select-none hover:bg-gray-50 px-2 py-1 rounded">
-                  <input 
-                    type="checkbox" 
-                    checked={highlightIdentical} 
-                    onChange={e => setHighlightIdentical(e.target.checked)} 
-                    className="w-4 h-4 text-yellow-500 border-gray-300 rounded focus:ring-yellow-500" 
-                  />
-                  <span className="text-sm text-gray-700">相同部分 (黄色)</span>
-                  <span className="inline-block w-4 h-4 bg-yellow-200 border border-yellow-300 ml-1 rounded-sm"></span>
-                </label>
-                <label className="flex items-center space-x-2 cursor-pointer select-none hover:bg-gray-50 px-2 py-1 rounded">
-                  <input 
-                    type="checkbox" 
-                    checked={highlightDiff} 
-                    onChange={e => setHighlightDiff(e.target.checked)} 
-                    className="w-4 h-4 text-red-500 border-gray-300 rounded focus:ring-red-500" 
-                  />
-                  <span className="text-sm text-gray-700">差异部分 (红色)</span>
-                  <span className="inline-block w-4 h-4 bg-red-200 border border-red-300 ml-1 rounded-sm"></span>
-                </label>
-             </div>
+          <div className="bg-white border border-gray-200 rounded p-4">
+            <h3 className="font-bold text-gray-900 mb-2">差异摘要</h3>
+            <ul className="list-disc list-inside space-y-1 text-sm text-gray-700 font-serif-sc">
+              {summary.items && summary.items.length > 0 ? (
+                summary.items.map((item, idx) => <li key={idx}>{item}</li>)
+              ) : (
+                <li>未检测到显著差异。</li>
+              )}
+            </ul>
+          </div>
+        </div>
 
-             <div className="flex gap-3">
-                 <button
-                   onClick={handlePrint}
-                   className="flex items-center px-4 py-2 text-white rounded-md shadow-sm transition-colors bg-gray-800 hover:bg-gray-900"
-                 >
-                   打印/另存为PDF
-                 </button>
+        {/* View Settings Controls */}
+        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex flex-wrap justify-between items-center mb-6 no-print">
+          <div className="flex flex-wrap gap-6 items-center">
+            <div className="font-bold text-gray-700 flex items-center">
+              高亮设置
             </div>
-           </div>
+            <label className="flex items-center space-x-2 cursor-pointer select-none hover:bg-gray-50 px-2 py-1 rounded">
+              <input
+                type="checkbox"
+                checked={highlightIdentical}
+                onChange={e => setHighlightIdentical(e.target.checked)}
+                className="w-4 h-4 text-yellow-500 border-gray-300 rounded focus:ring-yellow-500"
+              />
+              <span className="text-sm text-gray-700">相同部分 (黄色)</span>
+              <span className="inline-block w-4 h-4 bg-yellow-200 border border-yellow-300 ml-1 rounded-sm"></span>
+            </label>
+            <label className="flex items-center space-x-2 cursor-pointer select-none hover:bg-gray-50 px-2 py-1 rounded">
+              <input
+                type="checkbox"
+                checked={highlightDiff}
+                onChange={e => setHighlightDiff(e.target.checked)}
+                className="w-4 h-4 text-red-500 border-gray-300 rounded focus:ring-red-500"
+              />
+              <span className="text-sm text-gray-700">差异部分 (红色)</span>
+              <span className="inline-block w-4 h-4 bg-red-200 border border-red-300 ml-1 rounded-sm"></span>
+            </label>
+          </div>
 
-           {/* Header Row */}
-           <div className="comparison-grid sticky-header grid grid-cols-2 gap-4 sticky top-0 z-30 bg-gray-100 pt-4 pb-2 border-b border-gray-300 break-inside-avoid shadow-sm">
-              <div className="text-center font-bold text-lg text-gray-700 bg-white p-2 shadow-sm border-l-4 border-gray-400">
-                 {data.year_a} 年度 (旧)
+          <div className="flex gap-3">
+            <button
+              onClick={handlePrint}
+              className="flex items-center px-4 py-2 text-white rounded-md shadow-sm transition-colors bg-gray-800 hover:bg-gray-900"
+            >
+              打印/另存为PDF
+            </button>
+          </div>
+        </div>
+
+        {/* Header Row */}
+        <div className="comparison-grid sticky-header grid grid-cols-2 gap-4 sticky top-0 z-30 bg-gray-100 pt-4 pb-2 border-b border-gray-300 break-inside-avoid shadow-sm">
+          <div className="text-center font-bold text-lg text-gray-700 bg-white p-2 shadow-sm border-l-4 border-gray-400">
+            {data.year_a} 年度 (旧)
+          </div>
+          <div className="text-center font-bold text-lg text-blue-900 bg-white p-2 shadow-sm border-l-4 border-blue-500">
+            {data.year_b} 年度 (新)
+          </div>
+        </div>
+
+        {alignedSections.map((row, idx) => (
+          <div key={idx} className="bg-white rounded-lg shadow-sm p-1 mb-2">
+            {/* Section Title */}
+            <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 mb-2">
+              <h3 className="text-lg font-bold font-serif-sc text-gray-800">{row.title}</h3>
+            </div>
+
+            {/* Side by Side Content */}
+            <div className="comparison-grid grid grid-cols-2 gap-2 px-2">
+              {/* Left Column */}
+              <div className="border-r border-dashed border-gray-300 pr-2">
+                {row.oldSec ? (
+                  <>
+                    {row.oldSec.type === 'text' && (
+                      <DiffText
+                        oldText={row.newSec?.content || ''}
+                        newText={row.oldSec.content || ''}
+                        highlightIdentical={highlightIdentical}
+                        highlightDiff={highlightDiff}
+                      />
+                    )}
+                    {/* Compact tables for view */}
+                    {row.oldSec.type === 'table_2' && row.oldSec.activeDisclosureData && <Table2View data={row.oldSec.activeDisclosureData} />}
+                    {row.oldSec.type === 'table_3' && row.oldSec.tableData && <Table3View data={row.oldSec.tableData} compact={true} />}
+                    {row.oldSec.type === 'table_4' && row.oldSec.reviewLitigationData && <Table4View data={row.oldSec.reviewLitigationData} />}
+                  </>
+                ) : <span className="text-gray-400 italic">无内容</span>}
               </div>
-              <div className="text-center font-bold text-lg text-blue-900 bg-white p-2 shadow-sm border-l-4 border-blue-500">
-                 {data.year_b} 年度 (新)
+
+              {/* Right Column */}
+              <div className="pl-2">
+                {row.newSec ? (
+                  <>
+                    {row.newSec.type === 'text' && (
+                      <DiffText
+                        oldText={row.oldSec?.content || ''}
+                        newText={row.newSec.content || ''}
+                        highlightIdentical={highlightIdentical}
+                        highlightDiff={highlightDiff}
+                      />
+                    )}
+
+                    {/* Compact tables for view */}
+                    {row.newSec.type === 'table_2' && row.newSec.activeDisclosureData && <Table2View data={row.newSec.activeDisclosureData} />}
+                    {row.newSec.type === 'table_3' && row.newSec.tableData && <Table3View data={row.newSec.tableData} compact={true} />}
+                    {row.newSec.type === 'table_4' && row.newSec.reviewLitigationData && <Table4View data={row.newSec.reviewLitigationData} />}
+                  </>
+                ) : <span className="text-gray-400 italic">无内容</span>}
               </div>
-           </div>
+            </div>
 
-           {alignedSections.map((row, idx) => (
-             <div key={idx} className="bg-white rounded-lg shadow-sm p-1 mb-2">
-               {/* Section Title */}
-               <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 mb-2">
-                 <h3 className="text-lg font-bold font-serif-sc text-gray-800">{row.title}</h3>
-               </div>
+            {/* Bottom Diff Table */}
+            <div className="px-2 pb-2">
+              {renderSectionDiff(row) || <div className="text-xs text-gray-300 px-4 py-2 opacity-50">无数据差异 ({row.newSec?.type})</div>}
+            </div>
+          </div>
+        ))}
+      </div>
 
-               {/* Side by Side Content */}
-               <div className="comparison-grid grid grid-cols-2 gap-2 px-2">
-                  {/* Left Column */}
-                  <div className="border-r border-dashed border-gray-300 pr-2">
-                     {row.oldSec ? (
-                        <>
-                          {row.oldSec.type === 'text' && <div className="text-sm font-serif-sc whitespace-pre-line text-gray-600 leading-relaxed break-words">{row.oldSec.content}</div>}
-                          {/* Compact tables for view */}
-                          {row.oldSec.type === 'table_2' && row.oldSec.activeDisclosureData && <Table2View data={row.oldSec.activeDisclosureData} />}
-                          {row.oldSec.type === 'table_3' && row.oldSec.tableData && <Table3View data={row.oldSec.tableData} compact={true} />}
-                          {row.oldSec.type === 'table_4' && row.oldSec.reviewLitigationData && <Table4View data={row.oldSec.reviewLitigationData} />}
-                        </>
-                     ) : <span className="text-gray-400 italic">无内容</span>}
-                  </div>
-
-                  {/* Right Column */}
-                  <div className="pl-2">
-                     {row.newSec ? (
-                        <>
-                          {row.newSec.type === 'text' && (
-                              <DiffText 
-                                oldText={row.oldSec?.content || ''} 
-                                newText={row.newSec.content || ''} 
-                                highlightIdentical={highlightIdentical}
-                                highlightDiff={highlightDiff}
-                              />
-                          )}
-                          
-                          {/* Compact tables for view */}
-                          {row.newSec.type === 'table_2' && row.newSec.activeDisclosureData && <Table2View data={row.newSec.activeDisclosureData} />}
-                          {row.newSec.type === 'table_3' && row.newSec.tableData && <Table3View data={row.newSec.tableData} compact={true} />}
-                          {row.newSec.type === 'table_4' && row.newSec.reviewLitigationData && <Table4View data={row.newSec.reviewLitigationData} />}
-                        </>
-                     ) : <span className="text-gray-400 italic">无内容</span>}
-                  </div>
-               </div>
-
-               {/* Bottom Diff Table */}
-               <div className="px-2 pb-2">
-                  {renderSectionDiff(row) || <div className="text-xs text-gray-300 px-4 py-2 opacity-50">无数据差异 ({row.newSec?.type})</div>}
-               </div>
-             </div>
-           ))}
-       </div>
+      {/* 数据勾稽问题清单 */}
+      <CrossYearCheckView
+        leftReportId={data.left_report_id}
+        rightReportId={data.right_report_id}
+        leftContent={data.left_content}
+        rightContent={data.right_content}
+        yearA={data.year_a}
+        yearB={data.year_b}
+      />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 // @ts-ignore
 import { diff_match_patch } from 'diff-match-patch';
+import * as Diff from 'diff';
 
 export interface DiffPart {
     value: string;
@@ -19,7 +20,7 @@ const dmp = new diff_match_patch();
  */
 const tokenizeText = (text: string): string[] => {
     if (!text) return [];
-    const regex = /(\d+)|([a-zA-Z]+)|([\u4e00-\u9fff]+)|([\s\S])/g;
+    const regex = /(\d+)|([a-zA-Z]+)|([\u4e00-\u9fff])|([\s\S])/g;
     const tokens: string[] = [];
     let match;
     while ((match = regex.exec(text)) !== null) {
@@ -109,3 +110,33 @@ export const renderDiffHtml = (diffs: DiffPart[], highlightIdentical: boolean = 
         }
     }).join('');
 }
+
+export const isPunctuation = (str: string): boolean => {
+    return /[，。、；：？！“”‘’（）《》【】—….,;:?!'"()[\]\-\s]/.test(str);
+};
+
+export const calculateTextSimilarity = (text1: string, text2: string): number => {
+    if (!text1 && !text2) return 100;
+    if (!text1 || !text2) return 0;
+
+    const t1 = tokenizeText(text1).filter(t => !isPunctuation(t));
+    const t2 = tokenizeText(text2).filter(t => !isPunctuation(t));
+
+    if (t1.length === 0 && t2.length === 0) return 100;
+    if (t1.length === 0 || t2.length === 0) return 0;
+
+    const diffs = Diff.diffArrays(t1, t2);
+    let commonLen = 0;
+
+    diffs.forEach(part => {
+        if (!part.added && !part.removed) {
+            part.value.forEach(token => commonLen += token.length);
+        }
+    });
+
+    const len1 = t1.reduce((acc, cur) => acc + cur.length, 0);
+    const len2 = t2.reduce((acc, cur) => acc + cur.length, 0);
+
+    if (len1 + len2 === 0) return 100;
+    return Math.round((2.0 * commonLen) / (len1 + len2) * 100);
+};
