@@ -14,6 +14,8 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const [showMetadata, setShowMetadata] = useState(false); // 元数据默认隐藏
   const [editingData, setEditingData] = useState(null); // 编辑模式
   const [activeTab, setActiveTab] = useState('content'); // 'content' | 'checks'
+  const [highlightCells, setHighlightCells] = useState([]); // 勾稽问题单元格路径
+  const [highlightTexts, setHighlightTexts] = useState([]); // 勾稽问题文本
 
   const handleBack = () => {
     if (onBack) return onBack();
@@ -39,6 +41,59 @@ function ReportDetail({ reportId: propReportId, onBack }) {
 
     fetchDetail();
   }, [reportId]);
+
+  // 获取勾稽校验问题数据用于高亮
+  const fetchHighlights = async () => {
+    if (!reportId) return;
+    try {
+      const response = await apiClient.get(`/reports/${reportId}/checks`);
+      const data = response.data?.data || response.data;
+      const groups = data?.groups || [];
+
+      console.log('[DEBUG ReportDetail] Fetched checks data:', data);
+
+      // 提取未确认的问题路径
+      const cellPaths = [];
+      const textInfos = [];
+
+      groups.forEach(group => {
+        (group.items || []).forEach(item => {
+          // 只高亮未确认、未忽略的问题
+          if (item.human_status !== 'confirmed' && item.human_status !== 'dismissed' &&
+            (item.auto_status === 'FAIL' || item.auto_status === 'UNCERTAIN')) {
+            const paths = item.evidence?.paths || [];
+            console.log('[DEBUG ReportDetail] Item:', item.title, 'paths:', paths);
+            paths.forEach(p => {
+              if (p.includes('tableData') || p.includes('reviewLitigationData')) {
+                cellPaths.push(p);
+              } else if (p.includes('text') || p.includes('content')) {
+                // 提取文本问题信息
+                const textValue = item.evidence?.values?.textValue;
+                if (textValue) {
+                  textInfos.push({ value: textValue, context: item.evidence?.values?.context });
+                }
+              }
+            });
+          }
+        });
+      });
+
+      console.log('[DEBUG ReportDetail] Final cellPaths:', cellPaths);
+      console.log('[DEBUG ReportDetail] Final textInfos:', textInfos);
+      setHighlightCells(cellPaths);
+      setHighlightTexts(textInfos);
+    } catch (err) {
+      console.error('Failed to fetch highlights:', err);
+    }
+  };
+
+  // 加载报告时同时获取高亮数据
+  useEffect(() => {
+    if (reportId) {
+      fetchHighlights();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportId, activeTab]); // activeTab 变化时也刷新
 
   const refresh = async () => {
     if (!reportId) return;
@@ -123,6 +178,22 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     setEditingData(null);
   };
 
+  // 对文本中的问题数字进行高亮
+  const highlightTextIssues = (text, highlights) => {
+    if (!highlights || highlights.length === 0 || !text) return text;
+
+    let result = text;
+    highlights.forEach(({ value }) => {
+      if (value !== null && value !== undefined) {
+        const numStr = String(value);
+        const regex = new RegExp(`(${numStr})`, 'g');
+        result = result.replace(regex, '<mark class="text-warning">$1</mark>');
+      }
+    });
+
+    return <span dangerouslySetInnerHTML={{ __html: result }} />;
+  };
+
   const renderParsedContent = (parsed) => {
     if (!parsed) return <p className="meta">暂无解析内容</p>;
 
@@ -188,16 +259,16 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                 <h4 className="section-title">{section.title}</h4>
                 <div className="section-content">
                   {section.type === 'text' && (
-                    <div className="text-content">{section.content}</div>
+                    <div className="text-content">{highlightTextIssues(section.content, highlightTexts)}</div>
                   )}
                   {section.type === 'table_2' && section.activeDisclosureData && (
                     <Table2View data={section.activeDisclosureData} />
                   )}
                   {section.type === 'table_3' && section.tableData && (
-                    <Table3View data={section.tableData} compact={true} />
+                    <Table3View data={section.tableData} compact={true} highlightCells={highlightCells} />
                   )}
                   {section.type === 'table_4' && section.reviewLitigationData && (
-                    <Table4View data={section.reviewLitigationData} />
+                    <Table4View data={section.reviewLitigationData} highlightCells={highlightCells} />
                   )}
                   {!['text', 'table_2', 'table_3', 'table_4'].includes(section.type) && (
                     <div className="unknown-type">

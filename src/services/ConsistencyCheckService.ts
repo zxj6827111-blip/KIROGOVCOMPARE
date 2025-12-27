@@ -271,13 +271,33 @@ export class ConsistencyCheckService {
                     ? components.reduce((sum, c) => sum! + c!, 0)
                     : null;
 
+                // Expand wildcards to explicit paths for frontend highlighting
                 const paths = [
                     `${basePath}.results.granted`,
                     `${basePath}.results.partialGrant`,
-                    `${basePath}.results.denied.*`,
-                    `${basePath}.results.unableToProvide.*`,
-                    `${basePath}.results.notProcessed.*`,
-                    `${basePath}.results.other.*`,
+                    // Denied (8 items)
+                    `${basePath}.results.denied.stateSecret`,
+                    `${basePath}.results.denied.lawForbidden`,
+                    `${basePath}.results.denied.safetyStability`,
+                    `${basePath}.results.denied.thirdPartyRights`,
+                    `${basePath}.results.denied.internalAffairs`,
+                    `${basePath}.results.denied.processInfo`,
+                    `${basePath}.results.denied.enforcementCase`,
+                    `${basePath}.results.denied.adminQuery`,
+                    // UnableToProvide (3 items)
+                    `${basePath}.results.unableToProvide.noInfo`,
+                    `${basePath}.results.unableToProvide.needCreation`,
+                    `${basePath}.results.unableToProvide.unclear`,
+                    // NotProcessed (5 items)
+                    `${basePath}.results.notProcessed.complaint`,
+                    `${basePath}.results.notProcessed.repeat`,
+                    `${basePath}.results.notProcessed.publication`,
+                    `${basePath}.results.notProcessed.massiveRequests`,
+                    `${basePath}.results.notProcessed.confirmInfo`,
+                    // Other (3 items)
+                    `${basePath}.results.other.overdueCorrection`,
+                    `${basePath}.results.other.overdueFee`,
+                    `${basePath}.results.other.otherReasons`,
                     `${basePath}.results.totalProcessed`,
                 ];
 
@@ -336,14 +356,56 @@ export class ConsistencyCheckService {
         }
 
         // 3. 总计列 = 各列求和 (for newReceived, carriedOver, totalProcessed, carriedForward)
+        // 3. 总计列 = 各列求和 (for ALL rows in Table 3)
+        // Rule: Sum(Natural + Legal.Commercial + ... + Legal.Other) = Total
         const fieldsToCheck = [
-            { field: 'newReceived', name: '本年新收' },
-            { field: 'carriedOver', name: '上年结转' },
-            { field: 'totalProcessed', isResult: true, name: '办理结果总计' },
-            { field: 'carriedForward', isResult: true, name: '结转下年度' },
+            // Top level
+            { path: 'newReceived', name: '本年新收' },
+            { path: 'carriedOver', name: '上年结转' },
+            // Results - Main
+            { path: 'results.granted', name: '予以公开' },
+            { path: 'results.partialGrant', name: '部分公开' },
+            // Results - Denied
+            { path: 'results.denied.stateSecret', name: '属于国家秘密' },
+            { path: 'results.denied.lawForbidden', name: '其他法律行政法规禁止公开' },
+            { path: 'results.denied.safetyStability', name: '危及“三安全一稳定”' },
+            { path: 'results.denied.thirdPartyRights', name: '保护第三方合法权益' },
+            { path: 'results.denied.internalAffairs', name: '属于三类内部事务信息' },
+            { path: 'results.denied.processInfo', name: '属于四类过程性信息' },
+            { path: 'results.denied.enforcementCase', name: '属于行政执法案卷' },
+            { path: 'results.denied.adminQuery', name: '属于行政查询事项' },
+            // Results - Unable
+            { path: 'results.unableToProvide.noInfo', name: '本机关不掌握相关政府信息' },
+            { path: 'results.unableToProvide.needCreation', name: '没有现成信息需要另行制作' },
+            { path: 'results.unableToProvide.unclear', name: '补正后申请内容仍不明确' },
+            // Results - Not Processed
+            { path: 'results.notProcessed.complaint', name: '信访举报投诉类申请' },
+            { path: 'results.notProcessed.repeat', name: '重复申请' },
+            { path: 'results.notProcessed.publication', name: '要求提供公开出版物' },
+            { path: 'results.notProcessed.massiveRequests', name: '无正当理由大量反复申请' },
+            { path: 'results.notProcessed.confirmInfo', name: '要求行政机关确认或重新出具' },
+            // Results - Other
+            { path: 'results.other.overdueCorrection', name: '申请人无正当理由逾期不补正' },
+            { path: 'results.other.overdueFee', name: '申请人逾期未按收费通知要求缴纳费用' },
+            { path: 'results.other.otherReasons', name: '其他' },
+            // Results - Totals
+            { path: 'results.totalProcessed', name: '办理结果总计' },
+            { path: 'results.carriedForward', name: '结转下年度' },
         ];
 
-        for (const { field, isResult, name } of fieldsToCheck) {
+        // Helper to safely get nested value
+        const getNestedVal = (obj: any, path: string): number | null => {
+            if (!obj) return null;
+            const parts = path.split('.');
+            let current = obj;
+            for (const part of parts) {
+                if (current === null || current === undefined) return null;
+                current = current[part];
+            }
+            return this.parseNumber(current);
+        };
+
+        for (const { path, name } of fieldsToCheck) {
             const entityKeysForSum = [
                 'naturalPerson',
                 'legalPerson.commercial',
@@ -353,22 +415,17 @@ export class ConsistencyCheckService {
                 'legalPerson.other',
             ];
 
-            const paths: string[] = [];
+            const evidencePaths: string[] = [];
             const values: Record<string, any> = {};
             let hasAll = true;
             let sum = 0;
 
             for (const ek of entityKeysForSum) {
                 const entity = this.getEntityData(tableData, ek);
-                const val = isResult
-                    ? this.parseNumber((entity?.results as any)?.[field])
-                    : this.parseNumber((entity as any)?.[field]);
+                const val = getNestedVal(entity, path);
+                const fullPath = `tableData.${ek}.${path}`;
 
-                const path = isResult
-                    ? `tableData.${ek}.results.${field}`
-                    : `tableData.${ek}.${field}`;
-
-                paths.push(path);
+                evidencePaths.push(fullPath);
                 values[ek] = val;
 
                 if (val === null) {
@@ -379,22 +436,20 @@ export class ConsistencyCheckService {
             }
 
             const totalEntity = tableData.total;
-            const totalVal = isResult
-                ? this.parseNumber((totalEntity?.results as any)?.[field])
-                : this.parseNumber((totalEntity as any)?.[field]);
+            const totalVal = getNestedVal(totalEntity, path);
 
-            paths.push(`tableData.total${isResult ? '.results' : ''}.${field}`);
+            evidencePaths.push(`tableData.total.${path}`);
             values['total'] = totalVal;
 
             items.push(this.createItem(
                 'table3',
-                `t3_col_sum_${field}`,
-                `表三：自然人+商业企业+科研机构+社会公益组织+法律服务机构+其他=总计（${name}，合计校验）`,
-                `sum(all_entities.${field}) = total.${field}`,
+                `t3_col_sum_${path.replace(/\./g, '_')}`,
+                `表三：各列求和=总计（${name}）`,
+                `sum(all_entities.${path}) = total.${path}`,
                 hasAll ? sum : null,
                 totalVal,
                 0,
-                paths,
+                evidencePaths,
                 values
             ));
         }
@@ -516,13 +571,18 @@ export class ConsistencyCheckService {
                     name: '上年结转',
                 },
                 {
-                    // 增强: 支持"回复"、"答复"、"办结"
-                    regex: /(?:办理结果|办结|办理|答复|回复).*?(\d+)\s*件/,
-                    field: 'totalProcessed',
+                    // 正文中"收到政务公开申请"数量 = (七)总计 + 四、结转下年度
+                    regex: /(?:共计?|合计)?收到.*?(?:政府信息公开|政务公开)?申请.*?(\d+)\s*件/,
+                    field: 'totalApplications',
                     table: 'table3',
-                    path: 'tableData.total.results.totalProcessed',
-                    getValue: () => this.parseNumber(tableData?.total?.results?.totalProcessed),
-                    name: '办理结果总计',
+                    path: 'tableData.total.results.totalProcessed + tableData.total.results.carriedForward',
+                    getValue: () => {
+                        const totalProcessed = this.parseNumber(tableData?.total?.results?.totalProcessed);
+                        const carriedForward = this.parseNumber(tableData?.total?.results?.carriedForward);
+                        if (totalProcessed === null && carriedForward === null) return null;
+                        return (totalProcessed || 0) + (carriedForward || 0);
+                    },
+                    name: '收到申请总量',
                 },
                 {
                     regex: /结转下年度(?:继续办理)?.*?(\d+)\s*件/,
@@ -533,8 +593,8 @@ export class ConsistencyCheckService {
                     name: '结转下年度',
                 },
                 {
-                    // 增强: 增加"行政复议"的容错
-                    regex: /行政复议.*?(\d+)\s*件/,
+                    // 增强: 增加"行政复议"的容错，限制中间字符避免跨越匹配
+                    regex: /行政复议[^，。、；]*?(\d+)\s*件/,
                     field: 'reviewTotal',
                     table: 'table4',
                     path: 'reviewLitigationData.review.total',
@@ -543,10 +603,11 @@ export class ConsistencyCheckService {
                 },
                 {
                     // 新增: 行政诉讼总计 = 未经复议 + 复议后起诉
-                    regex: /行政诉讼.*?(\d+)\s*件/,
+                    // 限制中间只能有少量文字（类、案件等），避免跨越"行政复议...134件，行政诉讼...57件"
+                    regex: /行政诉讼[类案件]{0,10}?(\d+)\s*件/,
                     field: 'litigationTotal',
                     table: 'table4',
-                    path: 'table4.litigationDirect.total + table4.litigationPostReview.total',
+                    path: 'reviewLitigationData.litigationDirect.total + reviewLitigationData.litigationPostReview.total',
                     getValue: () => {
                         const direct = this.parseNumber(table4Data?.litigationDirect?.total);
                         const postReview = this.parseNumber(table4Data?.litigationPostReview?.total);
@@ -728,9 +789,19 @@ export class ConsistencyCheckService {
           tolerance = excluded.tolerance,
           auto_status = excluded.auto_status,
           evidence_json = excluded.evidence_json,
+          human_status = 'pending',
+          human_comment = NULL,
           updated_at = datetime('now');
       `);
         }
+
+        // Delete stale items that were not updated in this run
+        // This handles the case where a rule was removed
+        querySqlite(`
+          DELETE FROM report_consistency_items
+          WHERE report_version_id = ${sqlValue(reportVersionId)}
+            AND run_id != ${sqlValue(runId)};
+        `);
 
         // Update run with summary
         const summary = {

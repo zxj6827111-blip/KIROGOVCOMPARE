@@ -7,6 +7,7 @@ function CityIndex({ onSelectReport, onViewComparison }) {
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [checkStatusMap, setCheckStatusMap] = useState(new Map()); // 报告ID => 勾稽问题数量
 
   // 从 URL 参数读取初始路径
   const getInitialPath = () => {
@@ -46,12 +47,58 @@ function CityIndex({ onSelectReport, onViewComparison }) {
       const reportRows = reportsResp.data?.data ?? reportsResp.data ?? [];
       setRegions(Array.isArray(regionRows) ? regionRows : []);
       setReports(Array.isArray(reportRows) ? reportRows : []);
+
+      // Fetch consistency check status for all reports
+      if (Array.isArray(reportRows) && reportRows.length > 0) {
+        fetchCheckStatusForReports(reportRows);
+      }
     } catch (err) {
       const message = err.response?.data?.error || err.message || '请求失败';
       setError(`加载城市或报告失败：${message}`);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Fetch consistency check counts for reports (optimized with parallel requests)
+  const fetchCheckStatusForReports = async (reportList) => {
+    const statusMap = new Map();
+
+    // Fetch all checks in parallel instead of one-by-one for speed
+    const fetchPromises = reportList.map(async (report) => {
+      try {
+        const resp = await apiClient.get(`/reports/${report.report_id}/checks`);
+        const data = resp.data?.data || resp.data;
+        const groups = data?.groups || [];
+
+        // Count FAIL items that are not dismissed
+        let failCount = 0;
+        groups.forEach(group => {
+          (group.items || []).forEach(item => {
+            if (item.auto_status === 'FAIL' && item.human_status !== 'dismissed') {
+              failCount++;
+            }
+          });
+        });
+
+        return { reportId: report.report_id, count: failCount };
+      } catch (err) {
+        console.error(`Failed to fetch checks for report ${report.report_id}:`, err);
+        return null; // Skip failed requests
+      }
+    });
+
+    // Wait for all requests to complete simultaneously
+    const results = await Promise.all(fetchPromises);
+
+    // Build the status map from results
+    results.forEach(result => {
+      if (result) {
+        statusMap.set(result.reportId, result.count);
+      }
+    });
+
+    setCheckStatusMap(statusMap);
   };
 
   useEffect(() => {
@@ -274,6 +321,17 @@ function CityIndex({ onSelectReport, onViewComparison }) {
                     </span>
                   </div>
                   <div className="report-actions">
+                    {/* Consistency Check Status Badge */}
+                    {(() => {
+                      const checkCount = checkStatusMap.get(r.report_id);
+                      if (checkCount === undefined) {
+                        return null; // Still loading or failed to fetch
+                      }
+                      if (checkCount === 0) {
+                        return <span className="check-status-badge ok">✓ 无问题</span>;
+                      }
+                      return <span className="check-status-badge error">⚠ {checkCount}个问题</span>;
+                    })()}
                     <button
                       className="view-btn"
                       onClick={() => onSelectReport?.(r.report_id)}

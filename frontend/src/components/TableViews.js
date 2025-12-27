@@ -80,13 +80,25 @@ const Table2View = ({ data }) => {
 };
 
 // Table 3 View
-const Table3View = ({ data, compact = false }) => {
+const Table3View = ({ data, compact = false, highlightCells = [] }) => {
   if (!data) return null;
 
   const getData = (key) => {
     if (key === 'naturalPerson') return data.naturalPerson;
     if (key === 'total') return data.total;
     return data.legalPerson?.[key];
+  };
+
+  // Check if a cell should be highlighted based on its path
+  const shouldHighlight = (category, fieldPath) => {
+    if (!highlightCells || highlightCells.length === 0) return false;
+    // Build full path: tableData.{category}.{fieldPath}
+    const fullPath = `tableData.${category}.${fieldPath}`;
+    return highlightCells.some(p =>
+      p === fullPath ||
+      p.includes(fullPath) ||
+      fullPath.includes(p)
+    );
   };
 
   // Safe access helper
@@ -129,11 +141,16 @@ const Table3View = ({ data, compact = false }) => {
   const py = compact ? 'py-1' : 'py-1.5';
   const px = compact ? 'px-1' : 'px-1';
 
-  const renderCell = (v) => (
-    <td className={`${px} ${py} ${textSize} text-gray-700 border-b border-r border-gray-400 text-center font-mono align-middle`}>
-      {v}
-    </td>
-  );
+  // Render cell with optional highlighting
+  const renderCell = (v, category = null, fieldPath = null) => {
+    const highlight = category && fieldPath ? shouldHighlight(category, fieldPath) : false;
+    const highlightClass = highlight ? 'cell-warning' : '';
+    return (
+      <td className={`${px} ${py} ${textSize} text-gray-700 border-b border-r border-gray-400 text-center font-mono align-middle ${highlightClass}`}>
+        {v}
+      </td>
+    );
+  };
 
   return (
     <div className={`overflow-x-auto border border-gray-400 mb-6 bg-white ${compact ? 'shadow-none' : ''}`}>
@@ -183,47 +200,47 @@ const Table3View = ({ data, compact = false }) => {
           <tbody>
             <tr className="border-b border-gray-400">
               <td className={`${px} ${py} ${textSize} font-serif-sc border-r border-gray-400 font-bold`} colSpan={3}>一、本年新收政府信息公开申请数量</td>
-              {renderCell(val('naturalPerson', 'newReceived'))}
-              {renderCell(val('commercial', 'newReceived'))}
-              {renderCell(val('research', 'newReceived'))}
-              {renderCell(val('social', 'newReceived'))}
-              {renderCell(val('legal', 'newReceived'))}
-              {renderCell(val('other', 'newReceived'))}
-              {renderCell(val('total', 'newReceived'))}
+              {renderCell(val('naturalPerson', 'newReceived'), 'naturalPerson', 'newReceived')}
+              {renderCell(val('commercial', 'newReceived'), 'legalPerson.commercial', 'newReceived')}
+              {renderCell(val('research', 'newReceived'), 'legalPerson.research', 'newReceived')}
+              {renderCell(val('social', 'newReceived'), 'legalPerson.social', 'newReceived')}
+              {renderCell(val('legal', 'newReceived'), 'legalPerson.legal', 'newReceived')}
+              {renderCell(val('other', 'newReceived'), 'legalPerson.other', 'newReceived')}
+              {renderCell(val('total', 'newReceived'), 'total', 'newReceived')}
             </tr>
 
             <tr className="border-b border-gray-400">
               <td className={`${px} ${py} ${textSize} font-serif-sc border-r border-gray-400 font-bold`} colSpan={3}>二、上年结转政府信息公开申请数量</td>
-              {renderCell(val('naturalPerson', 'carriedOver'))}
-              {renderCell(val('commercial', 'carriedOver'))}
-              {renderCell(val('research', 'carriedOver'))}
-              {renderCell(val('social', 'carriedOver'))}
-              {renderCell(val('legal', 'carriedOver'))}
-              {renderCell(val('other', 'carriedOver'))}
-              {renderCell(val('total', 'carriedOver'))}
+              {renderCell(val('naturalPerson', 'carriedOver'), 'naturalPerson', 'carriedOver')}
+              {renderCell(val('commercial', 'carriedOver'), 'legalPerson.commercial', 'carriedOver')}
+              {renderCell(val('research', 'carriedOver'), 'legalPerson.research', 'carriedOver')}
+              {renderCell(val('social', 'carriedOver'), 'legalPerson.social', 'carriedOver')}
+              {renderCell(val('legal', 'carriedOver'), 'legalPerson.legal', 'carriedOver')}
+              {renderCell(val('other', 'carriedOver'), 'legalPerson.other', 'carriedOver')}
+              {renderCell(val('total', 'carriedOver'), 'total', 'carriedOver')}
             </tr>
 
             <tr className="border-b border-gray-400">
               <td rowSpan={22} className={`${px} ${py} ${textSize} font-serif-sc border-r border-gray-400 align-top pt-4 font-bold text-center`}>三<br />、<br />本<br />年<br />度<br />办<br />理<br />结<br />果</td>
               <td colSpan={2} className={`${px} ${py} ${textSize} font-serif-sc border-r border-gray-400`}>（一）予以公开</td>
-              {renderCell(val('naturalPerson', 'results.granted'))}
-              {renderCell(val('commercial', 'results.granted'))}
-              {renderCell(val('research', 'results.granted'))}
-              {renderCell(val('social', 'results.granted'))}
-              {renderCell(val('legal', 'results.granted'))}
-              {renderCell(val('other', 'results.granted'))}
-              {renderCell(val('total', 'results.granted'))}
+              {renderCell(val('naturalPerson', 'results.granted'), 'naturalPerson', 'results.granted')}
+              {renderCell(val('commercial', 'results.granted'), 'legalPerson.commercial', 'results.granted')}
+              {renderCell(val('research', 'results.granted'), 'legalPerson.research', 'results.granted')}
+              {renderCell(val('social', 'results.granted'), 'legalPerson.social', 'results.granted')}
+              {renderCell(val('legal', 'results.granted'), 'legalPerson.legal', 'results.granted')}
+              {renderCell(val('other', 'results.granted'), 'legalPerson.other', 'results.granted')}
+              {renderCell(val('total', 'results.granted'), 'total', 'results.granted')}
             </tr>
 
             <tr className="border-b border-gray-400">
               <td colSpan={2} className={`${px} ${py} ${textSize} font-serif-sc border-r border-gray-400`}>（二）部分公开</td>
-              {renderCell(val('naturalPerson', 'results.partialGrant'))}
-              {renderCell(val('commercial', 'results.partialGrant'))}
-              {renderCell(val('research', 'results.partialGrant'))}
-              {renderCell(val('social', 'results.partialGrant'))}
-              {renderCell(val('legal', 'results.partialGrant'))}
-              {renderCell(val('other', 'results.partialGrant'))}
-              {renderCell(val('total', 'results.partialGrant'))}
+              {renderCell(val('naturalPerson', 'results.partialGrant'), 'naturalPerson', 'results.partialGrant')}
+              {renderCell(val('commercial', 'results.partialGrant'), 'legalPerson.commercial', 'results.partialGrant')}
+              {renderCell(val('research', 'results.partialGrant'), 'legalPerson.research', 'results.partialGrant')}
+              {renderCell(val('social', 'results.partialGrant'), 'legalPerson.social', 'results.partialGrant')}
+              {renderCell(val('legal', 'results.partialGrant'), 'legalPerson.legal', 'results.partialGrant')}
+              {renderCell(val('other', 'results.partialGrant'), 'legalPerson.other', 'results.partialGrant')}
+              {renderCell(val('total', 'results.partialGrant'), 'total', 'results.partialGrant')}
             </tr>
 
             {[
@@ -239,13 +256,13 @@ const Table3View = ({ data, compact = false }) => {
               <tr key={item.k} className="border-b border-gray-400">
                 {i === 0 && <td rowSpan={8} className={`${px} ${py} ${textSize} font-serif-sc border-r border-gray-400 text-center`}>（三）<br />不予<br />公开</td>}
                 <td className={`${px} ${py} ${textSize} font-serif-sc border-r border-gray-400`}>{item.label}</td>
-                {renderCell(deniedVal('naturalPerson', item.k))}
-                {renderCell(deniedVal('commercial', item.k))}
-                {renderCell(deniedVal('research', item.k))}
-                {renderCell(deniedVal('social', item.k))}
-                {renderCell(deniedVal('legal', item.k))}
-                {renderCell(deniedVal('other', item.k))}
-                {renderCell(deniedVal('total', item.k))}
+                {renderCell(deniedVal('naturalPerson', item.k), 'naturalPerson', `results.denied.${item.k}`)}
+                {renderCell(deniedVal('commercial', item.k), 'legalPerson.commercial', `results.denied.${item.k}`)}
+                {renderCell(deniedVal('research', item.k), 'legalPerson.research', `results.denied.${item.k}`)}
+                {renderCell(deniedVal('social', item.k), 'legalPerson.social', `results.denied.${item.k}`)}
+                {renderCell(deniedVal('legal', item.k), 'legalPerson.legal', `results.denied.${item.k}`)}
+                {renderCell(deniedVal('other', item.k), 'legalPerson.other', `results.denied.${item.k}`)}
+                {renderCell(deniedVal('total', item.k), 'total', `results.denied.${item.k}`)}
               </tr>
             ))}
 
@@ -257,13 +274,13 @@ const Table3View = ({ data, compact = false }) => {
               <tr key={item.k} className="border-b border-gray-400">
                 {i === 0 && <td rowSpan={3} className={`${px} ${py} ${textSize} font-serif-sc border-r border-gray-400 text-center`}>（四）<br />无法<br />提供</td>}
                 <td className={`${px} ${py} ${textSize} font-serif-sc border-r border-gray-400`}>{item.label}</td>
-                {renderCell(unableVal('naturalPerson', item.k))}
-                {renderCell(unableVal('commercial', item.k))}
-                {renderCell(unableVal('research', item.k))}
-                {renderCell(unableVal('social', item.k))}
-                {renderCell(unableVal('legal', item.k))}
-                {renderCell(unableVal('other', item.k))}
-                {renderCell(unableVal('total', item.k))}
+                {renderCell(unableVal('naturalPerson', item.k), 'naturalPerson', `results.unableToProvide.${item.k}`)}
+                {renderCell(unableVal('commercial', item.k), 'legalPerson.commercial', `results.unableToProvide.${item.k}`)}
+                {renderCell(unableVal('research', item.k), 'legalPerson.research', `results.unableToProvide.${item.k}`)}
+                {renderCell(unableVal('social', item.k), 'legalPerson.social', `results.unableToProvide.${item.k}`)}
+                {renderCell(unableVal('legal', item.k), 'legalPerson.legal', `results.unableToProvide.${item.k}`)}
+                {renderCell(unableVal('other', item.k), 'legalPerson.other', `results.unableToProvide.${item.k}`)}
+                {renderCell(unableVal('total', item.k), 'total', `results.unableToProvide.${item.k}`)}
               </tr>
             ))}
 
@@ -277,13 +294,13 @@ const Table3View = ({ data, compact = false }) => {
               <tr key={item.k} className="border-b border-gray-400">
                 {i === 0 && <td rowSpan={5} className={`${px} ${py} ${textSize} font-serif-sc border-r border-gray-400 text-center`}>（五）<br />不予<br />处理</td>}
                 <td className={`${px} ${py} ${textSize} font-serif-sc border-r border-gray-400`}>{item.label}</td>
-                {renderCell(notProcessedVal('naturalPerson', item.k))}
-                {renderCell(notProcessedVal('commercial', item.k))}
-                {renderCell(notProcessedVal('research', item.k))}
-                {renderCell(notProcessedVal('social', item.k))}
-                {renderCell(notProcessedVal('legal', item.k))}
-                {renderCell(notProcessedVal('other', item.k))}
-                {renderCell(notProcessedVal('total', item.k))}
+                {renderCell(notProcessedVal('naturalPerson', item.k), 'naturalPerson', `results.notProcessed.${item.k}`)}
+                {renderCell(notProcessedVal('commercial', item.k), 'legalPerson.commercial', `results.notProcessed.${item.k}`)}
+                {renderCell(notProcessedVal('research', item.k), 'legalPerson.research', `results.notProcessed.${item.k}`)}
+                {renderCell(notProcessedVal('social', item.k), 'legalPerson.social', `results.notProcessed.${item.k}`)}
+                {renderCell(notProcessedVal('legal', item.k), 'legalPerson.legal', `results.notProcessed.${item.k}`)}
+                {renderCell(notProcessedVal('other', item.k), 'legalPerson.other', `results.notProcessed.${item.k}`)}
+                {renderCell(notProcessedVal('total', item.k), 'total', `results.notProcessed.${item.k}`)}
               </tr>
             ))}
 
@@ -295,36 +312,36 @@ const Table3View = ({ data, compact = false }) => {
               <tr key={item.k} className="border-b border-gray-400">
                 {i === 0 && <td rowSpan={3} className={`${px} ${py} ${textSize} font-serif-sc border-r border-gray-400 text-center`}>（六）<br />其他<br />处理</td>}
                 <td className={`${px} ${py} ${textSize} font-serif-sc border-r border-gray-400`}>{item.label}</td>
-                {renderCell(otherVal('naturalPerson', item.k))}
-                {renderCell(otherVal('commercial', item.k))}
-                {renderCell(otherVal('research', item.k))}
-                {renderCell(otherVal('social', item.k))}
-                {renderCell(otherVal('legal', item.k))}
-                {renderCell(otherVal('other', item.k))}
-                {renderCell(otherVal('total', item.k))}
+                {renderCell(otherVal('naturalPerson', item.k), 'naturalPerson', `results.other.${item.k}`)}
+                {renderCell(otherVal('commercial', item.k), 'legalPerson.commercial', `results.other.${item.k}`)}
+                {renderCell(otherVal('research', item.k), 'legalPerson.research', `results.other.${item.k}`)}
+                {renderCell(otherVal('social', item.k), 'legalPerson.social', `results.other.${item.k}`)}
+                {renderCell(otherVal('legal', item.k), 'legalPerson.legal', `results.other.${item.k}`)}
+                {renderCell(otherVal('other', item.k), 'legalPerson.other', `results.other.${item.k}`)}
+                {renderCell(otherVal('total', item.k), 'total', `results.other.${item.k}`)}
               </tr>
             ))}
 
             <tr className="border-b border-gray-400 bg-gray-50">
               <td className={`${px} ${py} ${textSize} font-serif-sc border-r border-gray-400 font-bold`} colSpan={2}>（七）总计</td>
-              {renderCell(val('naturalPerson', 'results.totalProcessed'))}
-              {renderCell(val('commercial', 'results.totalProcessed'))}
-              {renderCell(val('research', 'results.totalProcessed'))}
-              {renderCell(val('social', 'results.totalProcessed'))}
-              {renderCell(val('legal', 'results.totalProcessed'))}
-              {renderCell(val('other', 'results.totalProcessed'))}
-              {renderCell(val('total', 'results.totalProcessed'))}
+              {renderCell(val('naturalPerson', 'results.totalProcessed'), 'naturalPerson', 'results.totalProcessed')}
+              {renderCell(val('commercial', 'results.totalProcessed'), 'legalPerson.commercial', 'results.totalProcessed')}
+              {renderCell(val('research', 'results.totalProcessed'), 'legalPerson.research', 'results.totalProcessed')}
+              {renderCell(val('social', 'results.totalProcessed'), 'legalPerson.social', 'results.totalProcessed')}
+              {renderCell(val('legal', 'results.totalProcessed'), 'legalPerson.legal', 'results.totalProcessed')}
+              {renderCell(val('other', 'results.totalProcessed'), 'legalPerson.other', 'results.totalProcessed')}
+              {renderCell(val('total', 'results.totalProcessed'), 'total', 'results.totalProcessed')}
             </tr>
 
             <tr className="border-b border-gray-400">
               <td className={`${px} ${py} ${textSize} font-serif-sc border-r border-gray-400 font-bold`} colSpan={3}>四、结转下年度继续办理</td>
-              {renderCell(val('naturalPerson', 'results.carriedForward'))}
-              {renderCell(val('commercial', 'results.carriedForward'))}
-              {renderCell(val('research', 'results.carriedForward'))}
-              {renderCell(val('social', 'results.carriedForward'))}
-              {renderCell(val('legal', 'results.carriedForward'))}
-              {renderCell(val('other', 'results.carriedForward'))}
-              {renderCell(val('total', 'results.carriedForward'))}
+              {renderCell(val('naturalPerson', 'results.carriedForward'), 'naturalPerson', 'results.carriedForward')}
+              {renderCell(val('commercial', 'results.carriedForward'), 'legalPerson.commercial', 'results.carriedForward')}
+              {renderCell(val('research', 'results.carriedForward'), 'legalPerson.research', 'results.carriedForward')}
+              {renderCell(val('social', 'results.carriedForward'), 'legalPerson.social', 'results.carriedForward')}
+              {renderCell(val('legal', 'results.carriedForward'), 'legalPerson.legal', 'results.carriedForward')}
+              {renderCell(val('other', 'results.carriedForward'), 'legalPerson.other', 'results.carriedForward')}
+              {renderCell(val('total', 'results.carriedForward'), 'total', 'results.carriedForward')}
             </tr>
 
           </tbody>
@@ -335,8 +352,37 @@ const Table3View = ({ data, compact = false }) => {
 };
 
 // Table 4: Review Litigation - Matched to PDF format
-const Table4View = ({ data }) => {
+const Table4View = ({ data, highlightCells = [] }) => {
   if (!data) return null;
+
+  console.log('[DEBUG Table4View] highlightCells:', highlightCells);
+
+  // Helper to check if a cell should be highlighted
+  const shouldHighlight = (category, field) => {
+    if (!highlightCells || highlightCells.length === 0) return false;
+    const fullPath = `reviewLitigationData.${category}.${field}`;
+    const result = highlightCells.some(p =>
+      p === fullPath ||
+      p.includes(fullPath) ||
+      fullPath.includes(p)
+    );
+    if (result) {
+      console.log('[DEBUG Table4View] Highlighting:', fullPath);
+    }
+    return result;
+  };
+
+  // Helper to render cell with highlighting
+  const renderCell = (value, category, field, extraClass = '') => {
+    const highlight = shouldHighlight(category, field);
+    const highlightClass = highlight ? 'cell-warning' : '';
+    return (
+      <td className={`border-r border-gray-400 py-2 ${extraClass} ${highlightClass}`}>
+        {value}
+      </td>
+    );
+  };
+
   return (
     <div className="overflow-x-auto border border-gray-400 mb-6 font-serif-sc">
       <table className="min-w-full border-collapse border border-gray-400 text-center text-sm">
@@ -372,22 +418,22 @@ const Table4View = ({ data }) => {
         <tbody>
           <tr>
             {/* Review Data */}
-            <td className="border-r border-gray-400 py-2">{data.review?.maintain}</td>
-            <td className="border-r border-gray-400 py-2">{data.review?.correct}</td>
-            <td className="border-r border-gray-400 py-2">{data.review?.other}</td>
-            <td className="border-r border-gray-400 py-2">{data.review?.unfinished}</td>
-            <td className="border-r border-gray-400 py-2 font-bold">{data.review?.total}</td>
+            {renderCell(data.review?.maintain, 'review', 'maintain')}
+            {renderCell(data.review?.correct, 'review', 'correct')}
+            {renderCell(data.review?.other, 'review', 'other')}
+            {renderCell(data.review?.unfinished, 'review', 'unfinished')}
+            {renderCell(data.review?.total, 'review', 'total', 'font-bold')}
             {/* Litigation Direct Data */}
-            <td className="border-r border-gray-400 py-2">{data.litigationDirect?.maintain}</td>
-            <td className="border-r border-gray-400 py-2">{data.litigationDirect?.correct}</td>
-            <td className="border-r border-gray-400 py-2">{data.litigationDirect?.other}</td>
-            <td className="border-r border-gray-400 py-2">{data.litigationDirect?.unfinished}</td>
-            <td className="border-r border-gray-400 py-2 font-bold">{data.litigationDirect?.total}</td>
+            {renderCell(data.litigationDirect?.maintain, 'litigationDirect', 'maintain')}
+            {renderCell(data.litigationDirect?.correct, 'litigationDirect', 'correct')}
+            {renderCell(data.litigationDirect?.other, 'litigationDirect', 'other')}
+            {renderCell(data.litigationDirect?.unfinished, 'litigationDirect', 'unfinished')}
+            {renderCell(data.litigationDirect?.total, 'litigationDirect', 'total', 'font-bold')}
             {/* Litigation Post-Review Data */}
-            <td className="border-r border-gray-400 py-2">{data.litigationPostReview?.maintain}</td>
-            <td className="border-r border-gray-400 py-2">{data.litigationPostReview?.correct}</td>
-            <td className="border-r border-gray-400 py-2">{data.litigationPostReview?.other}</td>
-            <td className="border-r border-gray-400 py-2">{data.litigationPostReview?.unfinished}</td>
+            {renderCell(data.litigationPostReview?.maintain, 'litigationPostReview', 'maintain')}
+            {renderCell(data.litigationPostReview?.correct, 'litigationPostReview', 'correct')}
+            {renderCell(data.litigationPostReview?.other, 'litigationPostReview', 'other')}
+            {renderCell(data.litigationPostReview?.unfinished, 'litigationPostReview', 'unfinished')}
             <td className="py-2 font-bold">{data.litigationPostReview?.total}</td>
           </tr>
         </tbody>
@@ -399,6 +445,15 @@ const Table4View = ({ data }) => {
 // Simple Diff Table for numeric comparisons
 const SimpleDiffTable = ({ title, headers, rows }) => {
   if (!rows || rows.length === 0) return null;
+
+  // Helper to format numbers with reasonable precision
+  const formatNum = (num) => {
+    if (num === null || num === undefined || num === '') return '-';
+    const numVal = typeof num === 'number' ? num : parseFloat(num);
+    if (isNaN(numVal)) return '-';
+    // For integers, show as is; for decimals, show max 2 decimal places
+    return numVal % 1 === 0 ? numVal.toString() : numVal.toFixed(2);
+  };
 
   return (
     <div className="mt-2 border border-yellow-200 bg-yellow-50 rounded-lg p-4 shadow-sm break-inside-avoid mb-6">
@@ -420,15 +475,15 @@ const SimpleDiffTable = ({ title, headers, rows }) => {
               const valA = typeof row.valA === 'number' ? row.valA : parseFloat(row.valA) || 0;
               const valB = typeof row.valB === 'number' ? row.valB : parseFloat(row.valB) || 0;
               const diff = valB - valA;
-              const isDiff = diff !== 0;
+              const isDiff = Math.abs(diff) > 0.001; // Use threshold for float comparison
 
               return (
                 <tr key={idx} className={`border-b border-yellow-100 last:border-0 ${isDiff ? 'bg-yellow-100' : ''}`}>
                   <td className="py-1.5 px-2 text-yellow-900">{row.label}</td>
-                  <td className="py-1.5 px-2 text-right text-gray-500 font-mono">{row.valA}</td>
-                  <td className={`py-1.5 px-2 text-right font-bold font-mono ${isDiff ? 'text-gray-900' : 'text-gray-600'}`}>{row.valB}</td>
+                  <td className="py-1.5 px-2 text-right text-gray-500 font-mono">{formatNum(valA)}</td>
+                  <td className={`py-1.5 px-2 text-right font-bold font-mono ${isDiff ? 'text-gray-900' : 'text-gray-600'}`}>{formatNum(valB)}</td>
                   <td className={`py-1.5 px-2 text-right font-mono font-medium ${diff > 0 ? 'text-green-600' : diff < 0 ? 'text-red-600' : 'text-gray-400'}`}>
-                    {isDiff ? (diff > 0 ? `+${diff}` : diff) : '-'}
+                    {isDiff ? (diff > 0 ? `+${formatNum(diff)}` : formatNum(diff)) : '-'}
                   </td>
                 </tr>
               );

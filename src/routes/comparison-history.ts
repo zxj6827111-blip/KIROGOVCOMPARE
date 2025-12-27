@@ -145,6 +145,38 @@ router.post('/create', authMiddleware, (req: AuthRequest, res: Response) => {
       const metrics = calculateReportMetrics(leftJson, rightJson);
       similarity = metrics.similarity;
       checkStatus = metrics.checkStatus;
+
+      // Additionally, check for individual report consistency issues
+      const leftVersionId = querySqlite(`SELECT id FROM report_versions WHERE report_id=${sqlValue(left_report_id)} AND is_active=1`)?.[0]?.id;
+      const rightVersionId = querySqlite(`SELECT id FROM report_versions WHERE report_id=${sqlValue(right_report_id)} AND is_active=1`)?.[0]?.id;
+
+      const leftIssues = leftVersionId ? querySqlite(`
+        SELECT COUNT(*) as cnt FROM report_consistency_items 
+        WHERE report_version_id=${sqlValue(leftVersionId)} 
+        AND auto_status='FAIL' 
+        AND human_status='pending'
+      `)?.[0]?.cnt || 0 : 0;
+
+      const rightIssues = rightVersionId ? querySqlite(`
+        SELECT COUNT(*) as cnt FROM report_consistency_items 
+        WHERE report_version_id=${sqlValue(rightVersionId)} 
+        AND auto_status='FAIL' 
+        AND human_status='pending'
+      `)?.[0]?.cnt || 0 : 0;
+
+      // Combine cross-year and intra-report checks
+      if (leftIssues > 0 || rightIssues > 0) {
+        const issueDesc = [];
+        if (checkStatus && checkStatus.startsWith('异常')) {
+          issueDesc.push(checkStatus.replace('异常(', '').replace(')', ''));
+        }
+        if (leftIssues > 0) issueDesc.push(`${year_a}年(核验${leftIssues}项)`);
+        if (rightIssues > 0) issueDesc.push(`${year_b}年(核验${rightIssues}项)`);
+        checkStatus = `异常(${issueDesc.join('|')})`;
+      } else if (!checkStatus) {
+        // No cross-year issues and no intra issues found
+        checkStatus = '正常';
+      }
     } catch (e) {
       console.error('Error calculating metrics during creation:', e);
     }

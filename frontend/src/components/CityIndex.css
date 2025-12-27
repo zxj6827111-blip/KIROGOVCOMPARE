@@ -296,6 +296,26 @@
   background: #fecaca;
 }
 
+/* Check Status Badge */
+.check-status-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.check-status-badge.ok {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.check-status-badge.error {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
 /* Compare functionality */
 .compare-btn {
   padding: 10px 20px;

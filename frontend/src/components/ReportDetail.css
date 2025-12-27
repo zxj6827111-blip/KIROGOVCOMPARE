@@ -560,3 +560,40 @@ td {
   letter-spacing: 1px;
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
+
+/* 勾稽关系问题高亮样式 */
+.cell-warning {
+  background-color: #fff3cd !important;
+  border: 2px solid #ffc107 !important;
+  animation: pulse-warning 2s infinite;
+  position: relative;
+}
+
+.cell-warning::after {
+  content: "⚠";
+  position: absolute;
+  top: -2px;
+  right: 2px;
+  font-size: 10px;
+  color: #856404;
+}
+
+.text-warning {
+  background-color: #fff3cd;
+  padding: 2px 4px;
+  border-radius: 3px;
+  border-bottom: 2px solid #ffc107;
+  font-weight: 600;
+}
+
+@keyframes pulse-warning {
+
+  0%,
+  100% {
+    background-color: #fff3cd;
+  }
+
+  50% {
+    background-color: #ffe69c;
+  }
+}
