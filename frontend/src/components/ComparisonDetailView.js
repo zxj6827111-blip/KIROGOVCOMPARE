@@ -106,13 +106,17 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
     setError('');
     try {
       const resp = await apiClient.get(`/comparisons/${comparisonId}/result`);
-      setData(resp.data);
+      const comparisonData = resp.data;
+      setData(comparisonData);
+
     } catch (err) {
       setError(err.response?.data?.error || '加载失败');
     } finally {
       setLoading(false);
     }
   }, [comparisonId]);
+
+
 
   useEffect(() => {
     fetchData();

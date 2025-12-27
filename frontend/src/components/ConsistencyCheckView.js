@@ -323,7 +323,7 @@ const ConsistencyCheckView = ({ reportId, onEdit }) => {
                         </div>
 
                         <div className="item-details">
-                          <div className="formula">
+                          <div className="formula" style={{ display: 'none' }}>
                             <strong>公式:</strong> {item.expr}
                           </div>
                           <div className="values">
@@ -387,7 +387,7 @@ const ConsistencyCheckView = ({ reportId, onEdit }) => {
                           })()}
 
                           {item.evidence && item.evidence.paths && (
-                            <details className="evidence-details">
+                            <details className="evidence-details" style={{ display: 'none' }}>
                               <summary>技术详情（JSON 路径）</summary>
                               <ul className="evidence-paths">
                                 {item.evidence.paths.map((path, idx) => (

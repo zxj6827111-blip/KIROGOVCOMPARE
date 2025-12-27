@@ -297,4 +297,8 @@ export interface ValidationIssue {
     actual: string | number;
     details?: string;
   };
+  evidence?: {
+    paths: string[];
+    values: Record<string, any>;
+  };
 }

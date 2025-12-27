@@ -60,28 +60,36 @@ export class ConsistencyValidationService {
      */
     public validateReport(parsedData: any): ValidationResult {
         const allIssues: ValidationIssue[] = [];
-        
+
         // Extract sections and validate Table 3 data if available
         const sections = parsedData?.sections || [];
-        
+
         // Find Table 3 section
         const table3Section = sections.find((s: any) => s.type === 'table_3');
-        
+
         if (table3Section?.tableData) {
             // Validate current year data
             const currentYearResult = this.validateTable3(table3Section.tableData, '当前年度');
             allIssues.push(...currentYearResult.issues);
         }
-        
+
         // Find Table 4 section
         const table4Section = sections.find((s: any) => s.type === 'table_4');
-        
+
         if (table4Section?.reviewLitigationData) {
             // Validate table 4 data
             const table4Result = this.validateTable4(table4Section.reviewLitigationData, '当前年度');
             allIssues.push(...table4Result.issues);
         }
-        
+
+        // Cross-validate: Text mentions of application totals vs Table 3 data
+        // NOTE: Disabled per user request - do not compare text application counts with table
+        // const textSections = sections.filter((s: any) => s.type === 'text');
+        // if (table3Section?.tableData && textSections.length > 0) {
+        //     const crossCheckResult = this.checkTextVsTable(textSections, table3Section.tableData);
+        //     allIssues.push(...crossCheckResult);
+        // }
+
         return {
             issues: allIssues,
             score: Math.max(0, 100 - allIssues.length * 10)
@@ -298,6 +306,77 @@ export class ConsistencyValidationService {
             issues,
             score: Math.max(0, 100 - issues.length * 10)
         };
+    }
+
+    /**
+     * Cross-validate text mentions of application totals against Table 3 data
+     * Text should mention: totalProcessed + carriedForward = total applications handled this year
+     */
+    private checkTextVsTable(textSections: any[], table3Data: Table3Data): ValidationIssue[] {
+        const issues: ValidationIssue[] = [];
+
+        // Calculate expected total from Table 3: (七)总计 + 四、结转下年度
+        const totalProcessed = table3Data.total?.results?.totalProcessed || 0;
+        const carriedForward = table3Data.total?.results?.carriedForward || 0;
+        const expectedTotal = totalProcessed + carriedForward;
+
+        // Also check: newReceived + carriedOver = expected total (this should already be validated)
+        const newReceived = table3Data.total?.newReceived || 0;
+        const carriedOver = table3Data.total?.carriedOver || 0;
+        const inputTotal = newReceived + carriedOver;
+
+        // Patterns to match application total mentions in text
+        const patterns = [
+            /(?:共|总计|合计)?(?:收到|受理|接收|办理)(?:政府信息公开)?申请[：:共计合]?\s*(\d+)\s*(?:件|份|起|条)?/g,
+            /(?:政府信息公开)?申请(?:数量|总量|总数)[：:为]?\s*(\d+)\s*(?:件|份|起|条)?/g,
+            /(?:本年度|本年|今年)(?:共)?(?:收到|受理|接收|办理).*?(\d+)\s*(?:件|份|起)?(?:申请)?/g,
+        ];
+
+        // Scan all text sections for application total mentions
+        for (const section of textSections) {
+            const content = section.content || '';
+            const sectionTitle = section.title || '';
+
+            for (const pattern of patterns) {
+                pattern.lastIndex = 0; // Reset regex state
+                let match;
+                while ((match = pattern.exec(content)) !== null) {
+                    const textValue = parseInt(match[1], 10);
+
+                    // Check if the text value matches expected total OR input total
+                    // (both should be equal if balance is correct)
+                    if (textValue !== expectedTotal && textValue !== inputTotal) {
+                        // Only report if the difference is significant and the number seems to be an application count
+                        if (textValue > 0 && Math.abs(textValue - expectedTotal) > 0) {
+                            issues.push({
+                                severity: 'warning',
+                                code: 'TEXT_VS_TABLE_MISMATCH',
+                                message: `正文与表格数据不一致: 正文提及申请数"${textValue}"件，但表三计算值为 (七)总计(${totalProcessed}) + 四、结转(${carriedForward}) = ${expectedTotal}`,
+                                location: `正文「${sectionTitle}」 vs 表三`,
+                                relatedValues: {
+                                    expected: expectedTotal,
+                                    actual: textValue
+                                },
+                                evidence: {
+                                    paths: ['text.content', 'tableData.total.results.totalProcessed', 'tableData.total.results.carriedForward'],
+                                    values: {
+                                        textValue,
+                                        tableTotal: expectedTotal,
+                                        totalProcessed,
+                                        carriedForward,
+                                        matchedText: match[0],
+                                        sectionTitle,
+                                        context: content.substring(Math.max(0, match.index - 30), match.index + match[0].length + 30)
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        return issues;
     }
 }
 

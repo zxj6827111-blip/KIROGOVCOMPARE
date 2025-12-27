@@ -282,7 +282,7 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
                                 <div key={item.id} className="issue-card">
                                     <div className="issue-header">
                                         <span className="issue-title">{item.description || item.rule_name}</span>
-                                        <div className="issue-expr-row">{item.expr}</div>
+                                        <div className="issue-expr-row" style={{ display: 'none' }}>{item.expr}</div>
                                         <div className="issue-values">
                                             左值: {item.left_value} | 右值: {item.right_value} | 差值: <span className="font-bold">{item.delta}</span>
                                         </div>
@@ -316,7 +316,7 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
                                     {/* 红色头部 */}
                                     <div className="issue-header">
                                         <span className="issue-title">{item.description || item.rule_name}</span>
-                                        <div className="issue-expr-row">{item.expr}</div>
+                                        <div className="issue-expr-row" style={{ display: 'none' }}>{item.expr}</div>
                                         <div className="issue-values">
                                             左值: {item.left_value} | 右值: {item.right_value} | 差值: <span className="font-bold">{item.delta}</span>
                                         </div>

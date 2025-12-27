@@ -632,3 +632,36 @@ button.bg-gray-800 {
         page-break-inside: auto !important;
     }
 }
+
+/* Highlight style for consistency check failures */
+.cell-warning {
+    background-color: #fef08a !important;
+    /* Yellow-200 */
+    border: 2px solid #ca8a04 !important;
+    /* Yellow-600 */
+    position: relative;
+}
+
+/* Optional: Add an indicator icon */
+.cell-warning::after {
+    content: "!";
+    font-weight: bold;
+    position: absolute;
+    top: 0;
+    right: 0;
+    background-color: #ca8a04;
+    color: white;
+    font-size: 10px;
+    line-height: 1;
+    padding: 1px 3px;
+    border-bottom-left-radius: 4px;
+}
+
+@media print {
+    .cell-warning {
+        background-color: #fef08a !important;
+        border: 2px solid #ca8a04 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+}
