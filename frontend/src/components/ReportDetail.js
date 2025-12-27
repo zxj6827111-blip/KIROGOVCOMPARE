@@ -16,6 +16,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const [activeTab, setActiveTab] = useState('content'); // 'content' | 'checks'
   const [highlightCells, setHighlightCells] = useState([]); // 勾稽问题单元格路径
   const [highlightTexts, setHighlightTexts] = useState([]); // 勾稽问题文本
+  const [qualityIssues, setQualityIssues] = useState({}); // 质量审计问题 { sec5: [...], sec6: [...] }
 
   const handleBack = () => {
     if (onBack) return onBack();
@@ -55,12 +56,25 @@ function ReportDetail({ reportId: propReportId, onBack }) {
       // 提取未确认的问题路径
       const cellPaths = [];
       const textInfos = [];
+      const sec5Issues = [];
+      const sec6Issues = [];
 
       groups.forEach(group => {
         (group.items || []).forEach(item => {
           // 只高亮未确认、未忽略的问题
           if (item.human_status !== 'confirmed' && item.human_status !== 'dismissed' &&
             (item.auto_status === 'FAIL' || item.auto_status === 'UNCERTAIN')) {
+
+            // 提取质量审计问题（Section 5/6）
+            const groupKey = group.groupKey || group.group_key;
+            if (groupKey === 'quality') {
+              if (item.check_key === 'narrative_sec5_gap') {
+                sec5Issues.push({ title: item.title, status: item.auto_status });
+              } else if (item.check_key === 'narrative_sec6_fee_conflict') {
+                sec6Issues.push({ title: item.title, status: item.auto_status });
+              }
+            }
+
             const paths = item.evidence?.paths || [];
             console.log('[DEBUG ReportDetail] Item:', item.title, 'paths:', paths);
             paths.forEach(p => {
@@ -80,8 +94,10 @@ function ReportDetail({ reportId: propReportId, onBack }) {
 
       console.log('[DEBUG ReportDetail] Final cellPaths:', cellPaths);
       console.log('[DEBUG ReportDetail] Final textInfos:', textInfos);
+      console.log('[DEBUG ReportDetail] Quality issues - Sec5:', sec5Issues, 'Sec6:', sec6Issues);
       setHighlightCells(cellPaths);
       setHighlightTexts(textInfos);
+      setQualityIssues({ sec5: sec5Issues, sec6: sec6Issues });
     } catch (err) {
       console.error('Failed to fetch highlights:', err);
     }
@@ -256,8 +272,42 @@ function ReportDetail({ reportId: propReportId, onBack }) {
           <div className="sections-container">
             {sections.map((section, idx) => (
               <div key={idx} className="section-item">
-                <h4 className="section-title">{section.title}</h4>
+                <h4 className="section-title">
+                  {section.title}
+                  {/* 显示第五/六部分的质量问题标记 */}
+                  {section.title?.includes('五') && qualityIssues.sec5 && qualityIssues.sec5.length > 0 && (
+                    <span className="quality-issue-badge" title={qualityIssues.sec5.map(i => i.title).join('\n')} style={{ marginLeft: '10px', padding: '2px 8px', backgroundColor: '#ff4d4f', color: 'white', borderRadius: '4px', fontSize: '12px' }}>
+                      ⚠️ {qualityIssues.sec5.length}个问题
+                    </span>
+                  )}
+                  {section.title?.includes('六') && qualityIssues.sec6 && qualityIssues.sec6.length > 0 && (
+                    <span className="quality-issue-badge" title={qualityIssues.sec6.map(i => i.title).join('\n')} style={{ marginLeft: '10px', padding: '2px 8px', backgroundColor: '#ff4d4f', color: 'white', borderRadius: '4px', fontSize: '12px' }}>
+                      ⚠️ {qualityIssues.sec6.length}个问题
+                    </span>
+                  )}
+                </h4>
                 <div className="section-content">
+                  {/* 显示质量问题详情 */}
+                  {section.title?.includes('五') && qualityIssues.sec5 && qualityIssues.sec5.length > 0 && (
+                    <div className="quality-issues-alert" style={{ marginBottom: '15px', padding: '12px', backgroundColor: '#fff2e8', border: '1px solid #ffbb96', borderRadius: '4px' }}>
+                      {qualityIssues.sec5.map((issue, i) => (
+                        <div key={i} className="issue-item" style={{ marginBottom: '8px', display: 'flex', alignItems: 'center' }}>
+                          <span className="issue-icon" style={{ marginRight: '8px', fontSize: '16px' }}>⚠️</span>
+                          <span className="issue-text" style={{ color: '#d4380d' }}>{issue.title}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {section.title?.includes('六') && qualityIssues.sec6 && qualityIssues.sec6.length > 0 && (
+                    <div className="quality-issues-alert" style={{ marginBottom: '15px', padding: '12px', backgroundColor: '#fff2e8', border: '1px solid #ffbb96', borderRadius: '4px' }}>
+                      {qualityIssues.sec6.map((issue, i) => (
+                        <div key={i} className="issue-item" style={{ marginBottom: '8px', display: 'flex', alignItems: 'center' }}>
+                          <span className="issue-icon" style={{ marginRight: '8px', fontSize: '16px' }}>⚠️</span>
+                          <span className="issue-text" style={{ color: '#d4380d' }}>{issue.title}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {section.type === 'text' && (
                     <div className="text-content">{highlightTextIssues(section.content, highlightTexts)}</div>
                   )}
@@ -434,7 +484,13 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                   className={`tab ${activeTab === 'checks' ? 'active' : ''}`}
                   onClick={() => setActiveTab('checks')}
                 >
-                  ✅ 勾稽关系校验
+                  🧮 勾稽关系校验
+                </button>
+                <button
+                  className={`tab ${activeTab === 'quality' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('quality')}
+                >
+                  🛡️ 数据质量审计
                 </button>
               </div>
             </div>
@@ -451,16 +507,31 @@ function ReportDetail({ reportId: propReportId, onBack }) {
 
             {activeTab === 'checks' && (
               <section className="section">
-                <h3>一致性校验</h3>
+                {/* <h3>一致性校验</h3> Use header inside component */}
                 <ConsistencyCheckView
                   reportId={reportId}
+                  filterGroups={['table2', 'table3', 'table4', 'text']}
                   onEdit={(paths) => {
-                    console.log('ReportDetail onEdit called, parsed_json:', report.active_version?.parsed_json);
                     const editData = {
                       data: report.active_version?.parsed_json,
                       highlightPaths: paths || []
                     };
-                    console.log('Setting editingData:', editData);
+                    setEditingData(editData);
+                  }}
+                />
+              </section>
+            )}
+
+            {activeTab === 'quality' && (
+              <section className="section">
+                <ConsistencyCheckView
+                  reportId={reportId}
+                  filterGroups={['visual', 'structure', 'quality']}
+                  onEdit={(paths) => {
+                    const editData = {
+                      data: report.active_version?.parsed_json,
+                      highlightPaths: paths || []
+                    };
                     setEditingData(editData);
                   }}
                 />

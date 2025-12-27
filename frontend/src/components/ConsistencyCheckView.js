@@ -138,11 +138,13 @@ const getLocationInfo = (item) => {
   return result;
 };
 
-const ConsistencyCheckView = ({ reportId, onEdit }) => {
+const ConsistencyCheckView = ({ reportId, onEdit, filterGroups }) => {
   const [checksData, setChecksData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [expandedGroups, setExpandedGroups] = useState({});
+
+  // ... fetchChecks ...
 
   const fetchChecks = async () => {
     setLoading(true);
@@ -269,24 +271,44 @@ const ConsistencyCheckView = ({ reportId, onEdit }) => {
   if (!checksData) return <div className="no-data">暂无校验数据</div>;
 
   const { latest_run, groups } = checksData;
+  const displayedGroups = filterGroups
+    ? groups.filter(g => filterGroups.includes(g.group_key))
+    : groups;
+
+  // Re-writing the block below with correct logic
+  let displaySummary = latest_run ? { ...latest_run.summary } : { fail: 0, pending: 0, confirmed: 0 };
+
+  if (latest_run && filterGroups) {
+    let fail = 0;
+    let pending = 0;
+    let confirmed = 0;
+    displayedGroups.forEach(g => {
+      (g.items || []).forEach(item => {
+        if (item.auto_status === 'FAIL') fail++;
+        if (item.human_status === 'pending') pending++;
+        if (item.human_status === 'confirmed') confirmed++;
+      });
+    });
+    displaySummary = { fail, pending, confirmed };
+  }
 
   return (
     <div className="consistency-check-view">
       <div className="check-header">
         <div className="check-info">
-          <h3>🧮 勾稽关系校验</h3>
+          <h3>{filterGroups && filterGroups.includes('visual') ? '🛡️ 数据质量审计' : '🧮 勾稽关系校验'}</h3>
           {latest_run ? (
             <div className="summary">
-              <span className="summary-item fail">问题: {latest_run.summary.fail}</span>
-              <span className="summary-item pending">待复核: {latest_run.summary.pending}</span>
-              <span className="summary-item confirmed">已确认: {latest_run.summary.confirmed}</span>
+              <span className="summary-item fail">问题: {displaySummary.fail}</span>
+              <span className="summary-item pending">待复核: {displaySummary.pending}</span>
+              <span className="summary-item confirmed">已确认: {displaySummary.confirmed}</span>
             </div>
           ) : (
             <p className="no-run">尚未运行校验</p>
           )}
         </div>
         <div className="header-actions">
-          {latest_run && latest_run.summary.pending > 0 && (
+          {latest_run && displaySummary.pending > 0 && (
             <button className="btn-bulk-confirm" onClick={handleBulkConfirm} disabled={loading}>
               ✅ 一键确认
             </button>
@@ -299,7 +321,7 @@ const ConsistencyCheckView = ({ reportId, onEdit }) => {
 
       {latest_run && (
         <div className="groups-container">
-          {groups.map(group => (
+          {displayedGroups.map(group => (
             <div key={group.group_key} className="group-card">
               <div className="group-header" onClick={() => toggleGroup(group.group_key)}>
                 <h4>

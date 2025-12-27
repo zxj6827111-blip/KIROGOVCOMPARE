@@ -232,6 +232,79 @@ router.get('/reports', (req, res) => {
   }
 });
 
+// Batch check status endpoint - MUST be before /reports/:id to avoid route conflict
+router.get('/reports/batch-check-status', (req, res) => {
+  try {
+    const reportIdsParam = req.query.report_ids;
+    if (!reportIdsParam || typeof reportIdsParam !== 'string') {
+      return res.status(400).json({ error: 'report_ids query parameter required' });
+    }
+
+    const reportIds = reportIdsParam.split(',').map(id => Number(id.trim())).filter(id => !isNaN(id) && id > 0);
+    if (reportIds.length === 0) {
+      return res.json({});
+    }
+
+    ensureSqliteMigrations();
+
+    // Get active version_ids for these reports
+    const versionRows = querySqlite(`
+      SELECT r.id as report_id, rv.id as version_id
+      FROM reports r
+      JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = 1
+      WHERE r.id IN (${reportIds.join(',')})
+    `) as Array<{ report_id: number; version_id: number }>;
+
+    const versionMap = new Map(versionRows.map(v => [v.report_id, v.version_id]));
+
+    // Batch query for FAIL items by group
+    const versionIds = Array.from(versionMap.values());
+    if (versionIds.length === 0) {
+      return res.json({});
+    }
+
+    const groupCounts = querySqlite(`
+      SELECT report_version_id, group_key, COUNT(*) as cnt
+      FROM report_consistency_items
+      WHERE report_version_id IN (${versionIds.join(',')})
+        AND auto_status = 'FAIL'
+        AND human_status != 'dismissed'
+      GROUP BY report_version_id, group_key
+    `) as Array<{ report_version_id: number; group_key: string; cnt: number }>;
+
+    // Build result map: reportId => { total, visual, structure, quality }
+    const result: Record<string, any> = {};
+
+    // Initialize all reports with zero counts
+    for (const [reportId, versionId] of versionMap) {
+      result[String(reportId)] = { total: 0, visual: 0, structure: 0, quality: 0 };
+    }
+
+    // Fill in actual counts
+    const versionToReport = new Map(Array.from(versionMap.entries()).map(([rid, vid]) => [vid, rid]));
+    for (const gc of groupCounts) {
+      const reportId = versionToReport.get(gc.report_version_id);
+      if (reportId) {
+        const key = String(reportId);
+        result[key].total += gc.cnt;
+        if (gc.group_key === 'visual') {
+          result[key].visual += gc.cnt;
+        } else if (['structure', 'table2', 'table3', 'table4', 'text'].includes(gc.group_key)) {
+          // Merge structure, tables, and text checks into "Structure/Consistency" (勾稽)
+          result[key].structure += gc.cnt;
+        } else if (gc.group_key === 'quality') {
+          result[key].quality += gc.cnt;
+        }
+      }
+    }
+
+    return res.json(result);
+  } catch (error: any) {
+    console.error('Error in batch-check-status:', error);
+    return res.status(500).json({ error: 'internal_server_error', message: error.message });
+  }
+});
+
 router.get('/reports/:id', (req, res) => {
   try {
     const reportId = Number(req.params.id);
@@ -587,10 +660,13 @@ router.get('/reports/:id/checks', async (req, res) => {
 
     // Group items by group_key
     const groupNames: Record<string, string> = {
-      'table2': '表二',
-      'table3': '表三',
-      'table4': '表四',
+      'table2': '表二数据',
+      'table3': '表三数据',
+      'table4': '表四数据',
       'text': '正文一致性',
+      'visual': '表格审计',
+      'structure': '结构审计',
+      'quality': '语义审计',
     };
 
     const groupedItems: Record<string, any[]> = {
@@ -598,6 +674,9 @@ router.get('/reports/:id/checks', async (req, res) => {
       'table3': [],
       'table4': [],
       'text': [],
+      'visual': [],
+      'structure': [],
+      'quality': [],
     };
 
     for (const item of items) {

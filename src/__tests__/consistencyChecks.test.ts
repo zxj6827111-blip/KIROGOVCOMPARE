@@ -303,6 +303,7 @@ describe('ConsistencyCheckService', () => {
         });
     });
 
+    // ... (existing fingerprint stability test) ...
     describe('fingerprint stability', () => {
         it('should produce the same fingerprint for the same groupKey+checkKey+expr', () => {
             // Run twice with the same input
@@ -317,6 +318,100 @@ describe('ConsistencyCheckService', () => {
                 const fp2 = map2.get(key);
                 expect(fp2).toBe(fp1);
             }
+        });
+    });
+
+    // NEW TESTS FOR PREMIUM AUDIT FEATURES
+    describe('Premium Audit Checks', () => {
+
+        it('should FAIL visual audit when borders are missing', () => {
+            const visualFixture = {
+                ...minimalFixture,
+                visual_audit: { border_missing: true }
+            };
+            const items = service.runChecks(visualFixture);
+
+            const visualItem = items.find(i => i.checkKey === 'visual_border_missing');
+            expect(visualItem).toBeDefined();
+            expect(visualItem?.autoStatus).toBe('FAIL');
+            expect(visualItem?.evidenceJson.values.border_missing).toBe(true);
+        });
+
+        it('should FAIL structure audit when Table 3 section exists but table data is missing', () => {
+            const structureFixture = {
+                sections: [
+                    { title: '三、收到和处理政府信息公开申请情况', type: 'table_3', tableData: {} } // Empty data
+                ]
+            };
+            const items = service.runChecks(structureFixture);
+
+            const structItem = items.find(i => i.checkKey === 'struct_table3_missing');
+            expect(structItem).toBeDefined();
+            expect(structItem?.autoStatus).toBe('FAIL');
+        });
+
+        it('should FAIL narrative audit when Section 5 content is "无"', () => {
+            const sec5Fixture = {
+                sections: [
+                    { title: '五、存在的主要问题及改进情况', type: 'text', content: '无' }
+                ]
+            };
+            const items = service.runChecks(sec5Fixture);
+
+            const sec5Item = items.find(i => i.checkKey === 'narrative_sec5_gap');
+            expect(sec5Item).toBeDefined();
+            expect(sec5Item?.autoStatus).toBe('FAIL');
+        });
+
+        it('should FAIL narrative audit when Section 5 content is too short', () => {
+            const sec5Fixture = {
+                sections: [
+                    { title: '五、存在的主要问题及改进情况', type: 'text', content: '暂无问题' } // 4 chars < 10
+                ]
+            };
+            const items = service.runChecks(sec5Fixture);
+
+            const sec5Item = items.find(i => i.checkKey === 'narrative_sec5_gap');
+            expect(sec5Item).toBeDefined();
+            expect(sec5Item?.autoStatus).toBe('FAIL');
+        });
+
+        it('should FAIL narrative audit when Section 6 says "无" but fees exist', () => {
+            const sec6Fixture = {
+                sections: [
+                    {
+                        type: 'table_2',
+                        activeDisclosureData: {
+                            fees: { amount: 100 }
+                        }
+                    },
+                    { title: '六、其他需要报告的事项', type: 'text', content: '无' }
+                ]
+            };
+            const items = service.runChecks(sec6Fixture);
+
+            const sec6Item = items.find(i => i.checkKey === 'narrative_sec6_fee_conflict');
+            expect(sec6Item).toBeDefined();
+            expect(sec6Item?.autoStatus).toBe('FAIL');
+            expect(sec6Item?.leftValue).toBe(100);
+        });
+
+        it('should PASS narrative audit when Section 6 says "无" and NO fees exist', () => {
+            const sec6Fixture = {
+                sections: [
+                    {
+                        type: 'table_2',
+                        activeDisclosureData: {
+                            fees: { amount: 0 }
+                        }
+                    },
+                    { title: '六、其他需要报告的事项', type: 'text', content: '无' }
+                ]
+            };
+            const items = service.runChecks(sec6Fixture);
+
+            const sec6Item = items.find(i => i.checkKey === 'narrative_sec6_fee_conflict');
+            expect(sec6Item).toBeUndefined(); // Should not generate a fail item
         });
     });
 });
