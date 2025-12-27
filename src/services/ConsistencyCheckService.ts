@@ -70,7 +70,7 @@ interface Table4Data {
 
 export type AutoStatus = 'PASS' | 'FAIL' | 'UNCERTAIN' | 'NOT_ASSESSABLE';
 export type HumanStatus = 'pending' | 'confirmed' | 'dismissed';
-export type GroupKey = 'table2' | 'table3' | 'table4' | 'text';
+export type GroupKey = 'table2' | 'table3' | 'table4' | 'text' | 'visual' | 'structure' | 'quality';
 
 export interface ConsistencyItem {
     groupKey: GroupKey;
@@ -527,6 +527,7 @@ export class ConsistencyCheckService {
 
     /**
      * Generate Text consistency check items by matching numbers in text to table values
+     * Updated to include patterns for Section 5 and 6 if they contain numerical summaries.
      */
     private generateTextItems(sections: any[], tableData: Table3Data | undefined, table4Data: Table4Data | undefined): ConsistencyItem[] {
         const items: ConsistencyItem[] = [];
@@ -678,6 +679,245 @@ export class ConsistencyCheckService {
     /**
      * Main entry: Run all consistency checks on parsed JSON
      */
+    /**
+     * Generate Visual Audit items (Layer 1)
+     * Supports both code-detected (border_missing) and AI-detected (table_border_missing) flags
+     */
+    private generateVisualAuditItems(visualAudit: { border_missing?: boolean; table_border_missing?: boolean; notes?: string } | undefined): ConsistencyItem[] {
+        const items: ConsistencyItem[] = [];
+        if (!visualAudit) return items;
+
+        // Check both possible field names (code detection uses border_missing, AI uses table_border_missing)
+        const hasBorderIssue = visualAudit.border_missing === true || visualAudit.table_border_missing === true;
+
+        if (hasBorderIssue) {
+            items.push({
+                groupKey: 'visual',
+                checkKey: 'visual_border_missing',
+                fingerprint: this.generateFingerprint('visual', 'border_missing', 'lines_count'),
+                title: '视觉审计：表格边框缺失',
+                expr: 'table_has_borders == true',
+                leftValue: 0,
+                rightValue: 1,
+                delta: 1,
+                tolerance: 0,
+                autoStatus: 'FAIL',
+                evidenceJson: {
+                    paths: ['visual_audit.table_border_missing', 'visual_audit.border_missing'],
+                    values: {
+                        border_missing: true,
+                        ai_notes: visualAudit.notes || null,
+                        note: '原始文档的表格缺少可见的边框线'
+                    }
+                }
+            });
+        }
+        return items;
+    }
+
+    /**
+     * Generate Structure Audit items (Missing Tables, Empty Cells)
+     */
+    private generateStructureAuditItems(sections: any[]): ConsistencyItem[] {
+        const items: ConsistencyItem[] = [];
+
+        // 1. Check for Missing Table 3
+        const section3 = sections.find((s: any) => s.title && (s.title.includes('三、') || s.title.includes('收到和处理')));
+        const table3Section = sections.find((s: any) => s.type === 'table_3');
+        const hasTable3Data = table3Section && table3Section.tableData && Object.keys(table3Section.tableData).length > 0;
+
+        if (section3 && !hasTable3Data) {
+            items.push({
+                groupKey: 'visual',
+                checkKey: 'visual_table3_missing',
+                fingerprint: this.generateFingerprint('visual', 'table3_missing', 'structure_check'),
+                title: '表格审计：第三部分表格缺失',
+                expr: 'has_table_3_data',
+                leftValue: 0,
+                rightValue: 1,
+                delta: 1,
+                tolerance: 0,
+                autoStatus: 'FAIL',
+                evidenceJson: {
+                    paths: ['sections'],
+                    values: { section_title: section3.title, has_data: false }
+                }
+            });
+        }
+
+        // 2. Check for Empty/Slash cells in Table 3
+        if (hasTable3Data) {
+            const emptySlashCells = this.countEmptyOrSlashCells(table3Section.tableData);
+            if (emptySlashCells.count > 0) {
+                items.push({
+                    groupKey: 'visual',
+                    checkKey: 'visual_table3_empty_cells',
+                    fingerprint: this.generateFingerprint('visual', 'table3_empty_cells', 'empty_check'),
+                    title: `表格审计：表三存在${emptySlashCells.count}个空白或"/"单元格`,
+                    expr: 'empty_or_slash_cells == 0',
+                    leftValue: emptySlashCells.count,
+                    rightValue: 0,
+                    delta: emptySlashCells.count,
+                    tolerance: 0,
+                    autoStatus: emptySlashCells.count > 10 ? 'FAIL' : 'UNCERTAIN',
+                    evidenceJson: {
+                        paths: ['sections[type=table_3].tableData'],
+                        values: {
+                            empty_count: emptySlashCells.count,
+                            examples: emptySlashCells.examples.slice(0, 5),
+                            note: '表格中存在空白或"/"符号，可能表示数据缺失'
+                        }
+                    }
+                });
+            }
+        }
+
+        // 3. Check for Empty/Slash cells in Table 4
+        const table4Section = sections.find((s: any) => s.type === 'table_4');
+        if (table4Section && table4Section.reviewLitigationData) {
+            const emptySlashCells = this.countEmptyOrSlashCells(table4Section.reviewLitigationData);
+            if (emptySlashCells.count > 0) {
+                items.push({
+                    groupKey: 'visual',
+                    checkKey: 'visual_table4_empty_cells',
+                    fingerprint: this.generateFingerprint('visual', 'table4_empty_cells', 'empty_check'),
+                    title: `表格审计：表四存在${emptySlashCells.count}个空白或"/"单元格`,
+                    expr: 'empty_or_slash_cells == 0',
+                    leftValue: emptySlashCells.count,
+                    rightValue: 0,
+                    delta: emptySlashCells.count,
+                    tolerance: 0,
+                    autoStatus: emptySlashCells.count > 5 ? 'FAIL' : 'UNCERTAIN',
+                    evidenceJson: {
+                        paths: ['sections[type=table_4].reviewLitigationData'],
+                        values: {
+                            empty_count: emptySlashCells.count,
+                            examples: emptySlashCells.examples.slice(0, 5),
+                            note: '表格中存在空白或"/"符号，可能表示数据缺失'
+                        }
+                    }
+                });
+            }
+        }
+
+        return items;
+    }
+
+    /**
+     * Helper: Count empty or "/" cells in a nested object (table data)
+     */
+    private countEmptyOrSlashCells(obj: any, path: string = ''): { count: number; examples: string[] } {
+        let count = 0;
+        const examples: string[] = [];
+
+        const isEmptyOrSlash = (val: any): boolean => {
+            if (val === null || val === undefined) return true;
+            if (typeof val === 'string') {
+                const trimmed = val.trim();
+                return trimmed === '' || trimmed === '/' || trimmed === '-' || trimmed === '—';
+            }
+            return false;
+        };
+
+        const traverse = (current: any, currentPath: string) => {
+            if (current === null || current === undefined) return;
+
+            if (typeof current === 'object' && !Array.isArray(current)) {
+                for (const key of Object.keys(current)) {
+                    const value = current[key];
+                    const newPath = currentPath ? `${currentPath}.${key}` : key;
+
+                    if (typeof value === 'object' && value !== null) {
+                        traverse(value, newPath);
+                    } else if (isEmptyOrSlash(value)) {
+                        count++;
+                        if (examples.length < 10) {
+                            examples.push(`${newPath}: "${value ?? 'null'}"`);
+                        }
+                    }
+                }
+            }
+        };
+
+        traverse(obj, path);
+        return { count, examples };
+    }
+
+    /**
+     * Generate Section 5 Gap Analysis
+     */
+    private generateSection5GapItems(sections: any[]): ConsistencyItem[] {
+        const items: ConsistencyItem[] = [];
+        const section5 = sections.find((s: any) => s.type === 'text' && (s.title?.includes('五、') || s.title?.includes('存在的主要问题')));
+
+        if (section5) {
+            const content = (section5.content || '').trim();
+            const isNone = content === '无' || content === '无。' || content === 'None' || content === '';
+            const isTooShort = content.length < 10;
+
+            if (isNone || isTooShort) {
+                items.push({
+                    groupKey: 'quality', // UPDATED from 'text'
+                    checkKey: 'narrative_sec5_gap',
+                    fingerprint: this.generateFingerprint('quality', 'sec5_gap', 'content_length'),
+                    title: '语义审计：第五部分存在问题及改进情况空缺',
+                    expr: 'content_length > 10 && content != "无"',
+                    leftValue: content.length,
+                    rightValue: 10,
+                    delta: content.length,
+                    tolerance: 0,
+                    autoStatus: 'FAIL', // This is a specific user requirement to flag as issue
+                    evidenceJson: {
+                        paths: ['sections[5].content'],
+                        values: { content: content, issue: 'Content is missing or too brief' }
+                    }
+                });
+            }
+        }
+        return items;
+    }
+
+    /**
+     * Generate Section 6 Fee Disclosure Logic Check
+     */
+    private generateSection6LogicItems(sections: any[]): ConsistencyItem[] {
+        const items: ConsistencyItem[] = [];
+
+        // 1. Check if Fees exist (from Table 2)
+        const table2 = sections.find((s: any) => s.type === 'table_2');
+        const feesAmount = this.parseNumber(table2?.activeDisclosureData?.fees?.amount) || 0;
+
+        // 2. Check Section 6 Content
+        const section6 = sections.find((s: any) => s.type === 'text' && (s.title?.includes('六、') || s.title?.includes('其他需要报告')));
+
+        if (feesAmount > 0 && section6) {
+            const content = (section6.content || '').trim();
+            const hasFeeKeywords = content.includes('费') || content.includes('无') === false; // Crude check: if it says "无" it likely misses instructions.
+            // Better logic: if content is "无" or "None"
+            const isNone = content === '无' || content === '无。' || content === 'None' || content.match(/^无[。！]?$/);
+
+            if (isNone) {
+                items.push({
+                    groupKey: 'quality', // UPDATED from 'text'
+                    checkKey: 'narrative_sec6_fee_conflict',
+                    fingerprint: this.generateFingerprint('quality', 'sec6_fee_conflict', 'fee_logic'),
+                    title: '语义审计：存在收费但未在第六部分说明',
+                    expr: 'fees > 0 => section6 != "无"',
+                    leftValue: feesAmount, // Active fees
+                    rightValue: 0,      // Expected 0 if Section 6 says "None"? Or simply a logic fail.
+                    delta: feesAmount,
+                    tolerance: 0,
+                    autoStatus: 'FAIL',
+                    evidenceJson: {
+                        paths: ['sections[table_2].fees.amount', 'sections[6].content'],
+                        values: { fees: feesAmount, section6_content: content }
+                    }
+                });
+            }
+        }
+        return items;
+    }
+
     public runChecks(parsedJson: any): ConsistencyItem[] {
         const items: ConsistencyItem[] = [];
 
@@ -705,6 +945,7 @@ export class ConsistencyCheckService {
         }
 
         const sections = parsed?.sections || [];
+        const visualAudit = parsed?.visual_audit;
 
         // Find Table 3 section
         const table3Section = sections.find((s: any) => s.type === 'table_3');
@@ -714,13 +955,17 @@ export class ConsistencyCheckService {
         const table4Section = sections.find((s: any) => s.type === 'table_4');
         const table4Data: Table4Data | undefined = table4Section?.reviewLitigationData;
 
-        // Collect text content
-        // Note: generateTextItems now takes sections directly to preserve section titles
-
         // Generate items for each group
         items.push(...this.generateTable3Items(tableData));
         items.push(...this.generateTable4Items(table4Data));
-        items.push(...this.generateTextItems(sections, tableData, table4Data));
+        items.push(...this.generateTextItems(sections, tableData, table4Data)); // Keeping original text checks
+
+        // NEW Premium Checks
+        items.push(...this.generateVisualAuditItems(visualAudit));
+        items.push(...this.generateStructureAuditItems(sections));
+        items.push(...this.generateSection5GapItems(sections));
+        items.push(...this.generateSection6LogicItems(sections));
+
 
         // Table2 placeholder (no rules yet, but group must exist)
         // We add an info item if table2 section exists but has no checks
