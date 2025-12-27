@@ -60,45 +60,33 @@ function CityIndex({ onSelectReport, onViewComparison }) {
     }
   };
 
-  // Fetch consistency check counts for reports (optimized with parallel requests)
+  // Fetch consistency check counts for reports (optimized with batch API)
   const fetchCheckStatusForReports = async (reportList) => {
-    const statusMap = new Map();
+    if (reportList.length === 0) {
+      setCheckStatusMap(new Map());
+      return;
+    }
 
-    // Fetch all checks in parallel instead of one-by-one for speed
-    const fetchPromises = reportList.map(async (report) => {
-      try {
-        const resp = await apiClient.get(`/reports/${report.report_id}/checks`);
-        const data = resp.data?.data || resp.data;
-        const groups = data?.groups || [];
-
-        // Count FAIL items that are not dismissed
-        let failCount = 0;
-        groups.forEach(group => {
-          (group.items || []).forEach(item => {
-            if (item.auto_status === 'FAIL' && item.human_status !== 'dismissed') {
-              failCount++;
-            }
-          });
-        });
-
-        return { reportId: report.report_id, count: failCount };
-      } catch (err) {
-        console.error(`Failed to fetch checks for report ${report.report_id}:`, err);
-        return null; // Skip failed requests
+    try {
+      const reportIds = reportList.map(r => r.report_id || r.id).filter(id => id).join(',');
+      if (!reportIds) {
+        setCheckStatusMap(new Map());
+        return;
       }
-    });
+      const resp = await apiClient.get(`/reports/batch-check-status?report_ids=${reportIds}`);
+      const statusData = resp.data || {};
 
-    // Wait for all requests to complete simultaneously
-    const results = await Promise.all(fetchPromises);
+      // Convert to Map - statusData now contains { total, visual, structure, quality }
+      const statusMap = new Map();
+      Object.entries(statusData).forEach(([reportId, counts]) => {
+        statusMap.set(Number(reportId), counts);
+      });
 
-    // Build the status map from results
-    results.forEach(result => {
-      if (result) {
-        statusMap.set(result.reportId, result.count);
-      }
-    });
-
-    setCheckStatusMap(statusMap);
+      setCheckStatusMap(statusMap);
+    } catch (err) {
+      console.error('Failed to fetch batch check status:', err);
+      setCheckStatusMap(new Map()); // Empty map on error
+    }
   };
 
   useEffect(() => {
@@ -321,16 +309,39 @@ function CityIndex({ onSelectReport, onViewComparison }) {
                     </span>
                   </div>
                   <div className="report-actions">
-                    {/* Consistency Check Status Badge */}
+                    {/* Consistency Check Status Badges - 分组显示 */}
                     {(() => {
-                      const checkCount = checkStatusMap.get(r.report_id);
-                      if (checkCount === undefined) {
-                        return null; // Still loading or failed to fetch
+                      const reportId = r.report_id || r.id;
+                      const checkStatus = checkStatusMap.get(reportId);
+                      if (!checkStatus) {
+                        return <span className="check-status-loading">加载中...</span>;
                       }
-                      if (checkCount === 0) {
+
+                      const { total, visual, structure, quality } = checkStatus;
+
+                      if (total === 0) {
                         return <span className="check-status-badge ok">✓ 无问题</span>;
                       }
-                      return <span className="check-status-badge error">⚠ {checkCount}个问题</span>;
+
+                      return (
+                        <div className="check-badges-group">
+                          {visual > 0 && (
+                            <span className="check-badge visual" title="表格审计问题">
+                              表格 {visual}
+                            </span>
+                          )}
+                          {structure > 0 && (
+                            <span className="check-badge structure" title="勾稽关系问题">
+                              勾稽 {structure}
+                            </span>
+                          )}
+                          {quality > 0 && (
+                            <span className="check-badge quality" title="语义审计问题">
+                              语义 {quality}
+                            </span>
+                          )}
+                        </div>
+                      );
                     })()}
                     <button
                       className="view-btn"
