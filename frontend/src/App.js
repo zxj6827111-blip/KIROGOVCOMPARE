@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import './App.css';
 import Login from './components/Login';
 import UploadReport from './components/UploadReport';
+import BatchUpload from './components/BatchUpload';
 import ReportDetail from './components/ReportDetail';
 import CityIndex from './components/CityIndex';
 import RegionsManager from './components/RegionsManager';
@@ -13,6 +14,7 @@ function App() {
   const [currentPath, setCurrentPath] = useState(`${window.location.pathname}${window.location.search}`);
   const [user, setUser] = useState(() => getCurrentUser());
   const [authChecked, setAuthChecked] = useState(false);
+  const [showBatchUpload, setShowBatchUpload] = useState(false);
 
   // Check auth on mount
   useEffect(() => {
