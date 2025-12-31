@@ -45,7 +45,7 @@ upload_and_wait() {
   local upload_response
   upload_response=$(curl -s -w "\n%{http_code}" -F region_id=${REGION_ID} -F year=${year} -F file=@"${file}" "${BASE_URL}/reports")
   local body
-  body=$(echo "${upload_response}" | head -n 1)
+  body=$(echo "${upload_response}" | sed '$d')
   local status
   status=$(echo "${upload_response}" | tail -n 1)
   echo "status=${status} body=${body}"
@@ -88,7 +88,7 @@ PY
     local job_response
     job_response=$(curl -s -w "\n%{http_code}" "${BASE_URL}/jobs/${version_id}")
     local job_body
-    job_body=$(echo "${job_response}" | head -n 1)
+    job_body=$(echo "${job_response}" | sed '$d')
     local job_status_code
     job_status_code=$(echo "${job_response}" | tail -n 1)
 
@@ -140,7 +140,7 @@ fi
 
 echo "[compare] creating comparison for ${YEAR_A} vs ${YEAR_B}" 
 COMPARE_RESPONSE=$(curl -s -w "\n%{http_code}" -H "Content-Type: application/json" -d "{\"region_id\":${REGION_ID},\"year_a\":${YEAR_A},\"year_b\":${YEAR_B}}" "${BASE_URL}/comparisons")
-COMPARE_BODY=$(echo "${COMPARE_RESPONSE}" | head -n 1)
+COMPARE_BODY=$(echo "${COMPARE_RESPONSE}" | sed '$d')
 COMPARE_STATUS=$(echo "${COMPARE_RESPONSE}" | tail -n 1)
 
 echo "status=${COMPARE_STATUS} body=${COMPARE_BODY}" 
@@ -180,7 +180,7 @@ STATUS_VALUE="queued"
 echo "[jobs] polling comparison ${COMPARISON_ID} until succeeded" 
 for attempt in $(seq 1 30); do
   JOB_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/comparisons/${COMPARISON_ID}")
-  JOB_BODY=$(echo "${JOB_RESPONSE}" | head -n 1)
+  JOB_BODY=$(echo "${JOB_RESPONSE}" | sed '$d')
   JOB_STATUS_CODE=$(echo "${JOB_RESPONSE}" | tail -n 1)
 
   if [[ "${JOB_STATUS_CODE}" != "200" ]]; then
@@ -221,7 +221,7 @@ fi
 
 echo "[compare] fetching comparison detail ${COMPARISON_ID}" 
 DETAIL_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/comparisons/${COMPARISON_ID}")
-DETAIL_BODY=$(echo "${DETAIL_RESPONSE}" | head -n 1)
+DETAIL_BODY=$(echo "${DETAIL_RESPONSE}" | sed '$d')
 DETAIL_STATUS=$(echo "${DETAIL_RESPONSE}" | tail -n 1)
 
 echo "detail_status=${DETAIL_STATUS} body=${DETAIL_BODY}" 
