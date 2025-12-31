@@ -86,7 +86,7 @@ PY
   echo "[jobs] Created job $JOB_ID for version $VERSION_ID. Waiting for completion..."
   STATUS="queued"
   for attempt in $(seq 1 45); do
-    JOB_RESPONSE=$(curl -s -w "\n%{http_code}" "$JOB_URL_BASE/$JOB_ID")
+    JOB_RESPONSE=$(curl -s -w "\n%{http_code}" "$JOB_URL_BASE/$VERSION_ID")
     JOB_BODY=$(echo "$JOB_RESPONSE" | sed '$d')
     JOB_STATUS_CODE=$(echo "$JOB_RESPONSE" | tail -n 1)
     export JOB_BODY
