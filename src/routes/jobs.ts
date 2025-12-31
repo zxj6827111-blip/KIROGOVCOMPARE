@@ -145,12 +145,13 @@ router.get('/:version_id', (req, res) => {
         if (vExists.length === 0) {
             // Check if it's a job_id instead
             const jExists = querySqlite(`SELECT version_id FROM jobs WHERE id = ${sqlValue(versionId)} LIMIT 1`);
-            if (jExists.length > 0) {
+            if (jExists.length > 0 && jExists[0].version_id !== null) {
                 versionId = jExists[0].version_id;
             } else {
                 return res.status(404).json({ error: 'Version or Job not found' });
             }
         }
+
 
 
         // Get version details
