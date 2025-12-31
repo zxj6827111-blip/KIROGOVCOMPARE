@@ -1,14 +1,60 @@
+/* 上传报告页面容器 */
+.upload-report-page {
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+/* 标签页切换 */
+.upload-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 24px;
+  background: linear-gradient(135deg, #e0e7ff 0%, #f3e8ff 100%);
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+}
+
+.upload-tab {
+  flex: 1;
+  padding: 16px 32px;
+  border: none;
+  background: transparent;
+  color: #6366f1;
+  font-size: 17px;
+  font-weight: 700;
+  cursor: pointer;
+  border-radius: 10px;
+  transition: all 0.3s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.upload-tab:hover {
+  background: rgba(255, 255, 255, 0.5);
+  color: #4f46e5;
+}
+
+.upload-tab.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+  transform: scale(1.02);
+}
+
 .upload-report-modal {
-  padding: 16px;
+  padding: 0;
 }
 
 .upload-modal-content {
   background: #fff;
   border-radius: 16px;
   padding: 32px;
-  max-width: 900px;
-  margin: 0 auto;
+  width: 100%;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  border: 1px solid #e5e7eb;
 }
 
 .upload-modal-content h2 {
