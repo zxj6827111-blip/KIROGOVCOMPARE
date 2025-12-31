@@ -20,9 +20,10 @@ CREATE TABLE IF NOT EXISTS reports (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   region_id INTEGER NOT NULL REFERENCES regions(id),
   year INTEGER NOT NULL,
+  unit_name TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE(region_id, year)
+  UNIQUE(region_id, year, unit_name)
 );
 
 CREATE INDEX IF NOT EXISTS idx_reports_region_year ON reports(region_id, year);
@@ -73,14 +74,20 @@ CREATE TABLE IF NOT EXISTS jobs (
   kind TEXT NOT NULL DEFAULT 'parse',
   status TEXT NOT NULL DEFAULT 'queued',
   progress INTEGER NOT NULL DEFAULT 0,
+  step_code TEXT DEFAULT 'QUEUED',
+  step_name TEXT DEFAULT '等待处理',
+  attempt INTEGER DEFAULT 1,
+  provider TEXT,
+  model TEXT,
   error_code TEXT,
   error_message TEXT,
   retry_count INTEGER NOT NULL DEFAULT 0,
-  max_retries INTEGER NOT NULL DEFAULT 3,
+  max_retries INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   started_at TEXT,
   finished_at TEXT,
-  comparison_id INTEGER REFERENCES comparisons(id) ON DELETE SET NULL
+  comparison_id INTEGER REFERENCES comparisons(id) ON DELETE SET NULL,
+  created_by INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_report ON jobs(report_id);
@@ -157,6 +164,21 @@ CREATE INDEX IF NOT EXISTS idx_consistency_items_status
 
 CREATE INDEX IF NOT EXISTS idx_consistency_items_fingerprint 
   ON report_consistency_items(fingerprint);
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL DEFAULT 'upload_complete',
+  title TEXT NOT NULL,
+  content_json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  read_at TEXT,
+  related_job_id INTEGER REFERENCES jobs(id),
+  related_version_id INTEGER REFERENCES report_versions(id),
+  created_by INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(read_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
 `;
 
 const postgresSchema = `
@@ -175,9 +197,10 @@ CREATE TABLE IF NOT EXISTS reports (
   id BIGSERIAL PRIMARY KEY,
   region_id BIGINT NOT NULL REFERENCES regions(id),
   year INTEGER NOT NULL,
+  unit_name VARCHAR(255) NOT NULL DEFAULT '',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE(region_id, year)
+  UNIQUE(region_id, year, unit_name)
 );
 
 CREATE INDEX IF NOT EXISTS idx_reports_region_year ON reports(region_id, year);
@@ -230,14 +253,20 @@ CREATE TABLE IF NOT EXISTS jobs (
   kind VARCHAR(30) NOT NULL DEFAULT 'parse',
   status VARCHAR(30) NOT NULL DEFAULT 'queued',
   progress INTEGER NOT NULL DEFAULT 0,
+  step_code VARCHAR(50) DEFAULT 'QUEUED',
+  step_name VARCHAR(255) DEFAULT '等待处理',
+  attempt INTEGER DEFAULT 1,
+  provider VARCHAR(50),
+  model VARCHAR(100),
   error_code VARCHAR(50),
   error_message TEXT,
   retry_count INTEGER NOT NULL DEFAULT 0,
-  max_retries INTEGER NOT NULL DEFAULT 3,
+  max_retries INTEGER NOT NULL DEFAULT 1,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   started_at TIMESTAMPTZ,
   finished_at TIMESTAMPTZ,
-  comparison_id BIGINT REFERENCES comparisons(id) ON DELETE SET NULL
+  comparison_id BIGINT REFERENCES comparisons(id) ON DELETE SET NULL,
+  created_by BIGINT
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_report ON jobs(report_id);
@@ -314,6 +343,21 @@ CREATE INDEX IF NOT EXISTS idx_consistency_items_status
 
 CREATE INDEX IF NOT EXISTS idx_consistency_items_fingerprint 
   ON report_consistency_items(fingerprint);
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id BIGSERIAL PRIMARY KEY,
+  type VARCHAR(50) NOT NULL DEFAULT 'upload_complete',
+  title VARCHAR(255) NOT NULL,
+  content_json JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  read_at TIMESTAMPTZ,
+  related_job_id BIGINT REFERENCES jobs(id),
+  related_version_id BIGINT REFERENCES report_versions(id),
+  created_by BIGINT
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(read_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
 `;
 
 export async function runLLMMigrations(): Promise<void> {

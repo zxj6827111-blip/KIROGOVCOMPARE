@@ -13,7 +13,7 @@ function UploadReport() {
   const [unitName, setUnitName] = useState('');
   const [file, setFile] = useState(null);
   const [textContent, setTextContent] = useState('');
-  const [model, setModel] = useState('gemini/gemini-2.5-flash');
+  const [model, setModel] = useState('qwen3-235b');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [result, setResult] = useState(null);
@@ -345,25 +345,46 @@ function UploadReport() {
     fileInputRef.current?.click();
   };
 
-  // Poll job status
-  const pollJob = async (jobId, { timeoutMs = 120000, intervalMs = 1500 } = {}) => {
-    const start = Date.now();
-    while (Date.now() - start < timeoutMs) {
-      const resp = await apiClient.get(`/jobs/${jobId}`);
-      const status = (resp.data?.status || '').toLowerCase();
-      if (status === 'succeeded' || status === 'failed') {
-        return resp.data;
+  const [duplicate, setDuplicate] = useState(false);
+
+  // Check for duplicate report
+  useEffect(() => {
+    const checkDuplicate = async () => {
+      if (!unitName || !year) {
+        setDuplicate(false);
+        return;
       }
-      await new Promise((r) => setTimeout(r, intervalMs));
-    }
-    throw new Error('等待解析超时');
-  };
+      try {
+        const resp = await apiClient.get('/reports', { params: { unit_name: unitName, year } });
+        // API returns { data: [...] } or { reports: [...] }
+        const list = resp.data?.data || resp.data?.reports || [];
+        if (list.length > 0) {
+          setDuplicate(true);
+        } else {
+          setDuplicate(false);
+        }
+      } catch (error) {
+        // ignore error
+        setDuplicate(false);
+      }
+    };
+
+    // Debounce check
+    const timer = setTimeout(checkDuplicate, 500);
+    return () => clearTimeout(timer);
+  }, [unitName, year]);
 
   // Upload handler
   const handleUpload = async (autoParse = false) => {
     if (!regionId || !file) {
       setMessage('❌ 请选择文件并选择所属区域');
       return;
+    }
+
+    if (duplicate) {
+      if (!window.confirm('该报告已存在，是否继续上传？')) {
+        return;
+      }
     }
 
     setLoading(true);
@@ -393,56 +414,29 @@ function UploadReport() {
       };
       setResult(uploadResult);
 
-      if (autoParse && uploadResult.jobId) {
-        setMessage('⏳ 上传成功，正在解析...');
-        const job = await pollJob(uploadResult.jobId);
-        if ((job.status || '').toLowerCase() === 'succeeded') {
-          setMessage('✅ 上传并解析成功！');
-        } else {
-          setMessage(`❌ 解析失败：${translateJobError(job)}`);
+      // Show toast message
+      setMessage('✅ 任务已创建，正在跳转到任务中心...');
+
+      // Navigate to task center detail page after short delay
+      setTimeout(() => {
+        if (uploadResult.versionId) {
+          window.location.href = `/jobs/${uploadResult.versionId}`;
         }
-      } else {
-        setMessage('✅ 上传成功！');
-      }
+      }, 1000);
+
     } catch (error) {
       const status = error.response?.status;
       if (status === 409) {
-        // Handle 409 but check if we can poll the explanation
         const payload = error.response?.data || {};
-        const existingJobId = extractField(payload, 'job_id') || extractField(payload, 'jobId');
+        const versionId = extractField(payload, 'version_id');
 
-        if (autoParse && existingJobId) {
-          setMessage('⚠️ 该报告已存在，正在查询已有任务状态...');
-          try {
-            const job = await pollJob(existingJobId);
-            if ((job.status || '').toLowerCase() === 'succeeded') {
-              setMessage('✅ 报告已存在且解析成功 (直接复用)');
-            } else if ((job.status || '').toLowerCase() === 'failed') {
-              // If failed, maybe we should trigger reparse? 
-              // But for now, just show failed.
-              setMessage(`❌ 报告已存在，但之前的解析失败：${translateJobError(job)}`);
-            } else {
-              setMessage(`⏳ 报告已存在，任务状态：${job.status}`);
-            }
-            // Set Result so user can see IDs
-            setResult({
-              reportId: extractField(payload, 'report_id'),
-              versionId: extractField(payload, 'version_id'),
-              jobId: existingJobId,
-            });
-          } catch (pollErr) {
-            setMessage('⚠️ 该报告已存在 (查询任务状态失败)');
+        setMessage('⚠️ 该报告已存在，正在跳转到任务详情...');
+
+        setTimeout(() => {
+          if (versionId) {
+            window.location.href = `/jobs/${versionId}`;
           }
-        } else {
-          setMessage('⚠️ 该报告已存在');
-          if (existingJobId) {
-            setResult({
-              reportId: extractField(payload, 'report_id'),
-              versionId: extractField(payload, 'version_id'),
-              jobId: existingJobId,
-            });
-          }
-        }
+        }, 1000);
       } else {
         setMessage(`❌ ${error.response?.data?.error || error.message || '上传失败'}`);
       }
@@ -472,23 +466,23 @@ function UploadReport() {
       });
 
       const payload = response.data || {};
-      setResult({
+      const uploadResult = {
         reportId: extractField(payload, 'report_id'),
         versionId: extractField(payload, 'version_id'),
         jobId: extractField(payload, 'job_id'),
-      });
+      };
+      setResult(uploadResult);
 
-      if (extractField(payload, 'job_id')) {
-        setMessage('⏳ 文本保存成功，正在启动解析...');
-        const job = await pollJob(extractField(payload, 'job_id'));
-        if ((job.status || '').toLowerCase() === 'succeeded') {
-          setMessage('✅ 文本保存并解析成功！');
-        } else {
-          setMessage(`❌ 解析失败：${translateJobError(job)}`);
+      // Show toast message
+      setMessage('✅ 任务已创建，正在跳转到任务中心...');
+
+      // Navigate to task center detail page after short delay
+      setTimeout(() => {
+        if (uploadResult.versionId) {
+          window.location.href = `/jobs/${uploadResult.versionId}`;
         }
-      } else {
-        setMessage('✅ 文本保存成功！');
-      }
+      }, 1000);
+
     } catch (error) {
       setMessage(`❌ ${error.response?.data?.error || error.message || '保存失败'}`);
     } finally {
@@ -556,12 +550,9 @@ function UploadReport() {
                   onChange={(e) => setModel(e.target.value)}
                   style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
                 >
-                  <option value="gemini/gemini-2.5-flash">Gemini 2.5 Flash</option>
                   <option value="qwen3-235b">通义千问 Qwen3-235B (ModelScope)</option>
-                  <option value="qwen3-30b">通义千问 Qwen3-30B (ModelScope)</option>
-                  <option value="deepseek-v3">DeepSeek V3 (ModelScope)</option>
-                  <option value="deepseek-r1-32b">DeepSeek R1 Distill 32B (ModelScope)</option>
-                  <option value="glm-4.7">GLM-4.7 (ModelScope)</option>
+                  <option value="gemini/gemini-2.5-flash">Gemini 2.5 Flash</option>
+                  <option value="deepseek-v3">DeepSeek V3.2 (ModelScope)</option>
                 </select>
               </div>
 
@@ -584,6 +575,19 @@ function UploadReport() {
                   <div className="file-info">
                     <span className="file-icon">📄</span>
                     <span className="file-name">{file.name}</span>
+                    {duplicate && (
+                      <span className="duplicate-badge" style={{
+                        marginLeft: '10px',
+                        color: '#e6a23c',
+                        backgroundColor: '#fdf6ec',
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        fontSize: '12px',
+                        border: '1px solid #faecd8'
+                      }}>
+                        ⚠️ 报告已存在
+                      </span>
+                    )}
                   </div>
                 ) : (
                   <div className="drop-hint">

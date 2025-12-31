@@ -12,7 +12,7 @@ export interface LlmParseResult {
 }
 
 export interface LlmProvider {
-  parse(request: LlmParseRequest): Promise<LlmParseResult>;
+  parse(request: LlmParseRequest, signal?: AbortSignal): Promise<LlmParseResult>;
 }
 
 export class LlmProviderError extends Error {

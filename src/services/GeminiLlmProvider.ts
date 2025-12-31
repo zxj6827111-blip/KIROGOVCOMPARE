@@ -208,7 +208,7 @@ export class GeminiLlmProvider implements LlmProvider {
 
   constructor(private readonly apiKey: string, private readonly model: string) { }
 
-  async parse(request: LlmParseRequest): Promise<LlmParseResult> {
+  async parse(request: LlmParseRequest, signal?: AbortSignal): Promise<LlmParseResult> {
     const absolutePath = path.isAbsolute(request.storagePath)
       ? request.storagePath
       : path.join(process.cwd(), request.storagePath);
@@ -264,6 +264,7 @@ export class GeminiLlmProvider implements LlmProvider {
           params: { key: this.apiKey },
           headers: { 'Content-Type': 'application/json' },
           timeout: 300000,
+          signal: signal,
         }
       );
 

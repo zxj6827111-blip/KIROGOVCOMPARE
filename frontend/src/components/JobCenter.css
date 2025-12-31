@@ -1,0 +1,370 @@
+.job-center {
+    padding: 24px;
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.job-center-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+}
+
+.job-center-header h2 {
+    margin: 0;
+    font-size: 24px;
+    color: #333;
+}
+
+.btn-refresh {
+    padding: 8px 16px;
+    background: #4caf50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.btn-refresh:hover {
+    background: #45a049;
+}
+
+.btn-refresh:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+}
+
+/* Filters */
+.job-filters {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 20px;
+    padding: 16px;
+    background: #f5f5f5;
+    border-radius: 6px;
+    flex-wrap: wrap;
+}
+
+.filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 150px;
+}
+
+.filter-group label {
+    font-size: 13px;
+    color: #666;
+    font-weight: 500;
+}
+
+.filter-group select,
+.filter-group input {
+    padding: 6px 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+/* Jobs Table */
+.jobs-table-container {
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    overflow-x: auto;
+}
+
+.jobs-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.jobs-table thead {
+    background: #f8f9fa;
+}
+
+.jobs-table th {
+    padding: 12px;
+    text-align: center;
+    font-weight: 600;
+    color: #555;
+    border-bottom: 2px solid #ddd;
+    font-size: 14px;
+    white-space: nowrap;
+}
+
+.jobs-table th:nth-child(8) {
+    /* Attempt Count column usually */
+    min-width: 100px;
+}
+
+.jobs-table td {
+    padding: 12px;
+    border-bottom: 1px solid #eee;
+    font-size: 14px;
+    text-align: center;
+}
+
+.jobs-table tbody tr:hover {
+    background: #f9f9f9;
+}
+
+/* Status Badge */
+.status-badge {
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+    display: inline-block;
+}
+
+.status-queued {
+    background: #e3f2fd;
+    color: #1976d2;
+}
+
+.status-processing {
+    background: #fff3e0;
+    color: #f57c00;
+}
+
+.status-success {
+    background: #e8f5e9;
+    color: #388e3c;
+}
+
+.status-failed {
+    background: #ffebee;
+    color: #d32f2f;
+}
+
+/* Progress Bar */
+.progress-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.progress-bar {
+    flex: 1;
+    height: 8px;
+    background: #e0e0e0;
+    border-radius: 4px;
+    overflow: hidden;
+    min-width: 60px;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #4caf50, #81c784);
+    transition: width 0.3s ease;
+}
+
+.progress-text {
+    font-size: 12px;
+    color: #666;
+    min-width: 35px;
+}
+
+/* Action Buttons */
+.btn-view-detail {
+    padding: 6px 12px;
+    background: #2196f3;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.btn-view-detail:hover {
+    background: #1976d2;
+}
+
+/* Header Actions */
+.header-actions {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.btn-batch-delete,
+.btn-delete-all,
+.btn-cancel {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.btn-batch-delete {
+    background: linear-gradient(135deg, #ff5252 0%, #d32f2f 100%);
+    color: white;
+}
+
+.btn-batch-delete:hover {
+    box-shadow: 0 4px 8px rgba(211, 47, 47, 0.3);
+    transform: translateY(-1px);
+}
+
+.btn-delete-all {
+    background: linear-gradient(135deg, #78909c 0%, #546e7a 100%);
+    color: white;
+}
+
+.btn-delete-all:hover {
+    box-shadow: 0 4px 8px rgba(84, 110, 122, 0.3);
+    transform: translateY(-1px);
+}
+
+/* Icon Button (Single Delete/Cancel in row) */
+.btn-icon-delete,
+.btn-icon-cancel {
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 16px;
+}
+
+.btn-icon-delete {
+    background: transparent;
+    color: #ef5350;
+    border: 1px solid transparent;
+}
+
+.btn-icon-delete:hover {
+    background: #ffebee;
+    border-color: #ef5350;
+    transform: translateY(-1px);
+}
+
+.btn-icon-cancel {
+    background: #ffebee;
+    color: #c62828;
+}
+
+.btn-icon-cancel:hover {
+    background: #ffcdd2;
+}
+
+/* Update header button too */
+.btn-refresh {
+    background: linear-gradient(135deg, #66bb6a 0%, #43a047 100%);
+    box-shadow: 0 2px 4px rgba(67, 160, 71, 0.2);
+}
+
+.btn-refresh:hover:not(:disabled) {
+    box-shadow: 0 4px 8px rgba(67, 160, 71, 0.3);
+    transform: translateY(-1px);
+}
+
+/* Custom Confirm Modal */
+.confirm-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    animation: fadeIn 0.2s ease-out;
+}
+
+.confirm-modal {
+    background: white;
+    padding: 24px;
+    border-radius: 12px;
+    width: 400px;
+    max-width: 90%;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+    text-align: center;
+    animation: slideUp 0.2s ease-out;
+}
+
+.confirm-modal h3 {
+    margin-top: 0;
+    color: #333;
+    font-size: 18px;
+    margin-bottom: 12px;
+}
+
+.confirm-modal p {
+    color: #666;
+    margin-bottom: 24px;
+    line-height: 1.5;
+}
+
+.confirm-modal-actions {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+}
+
+.btn-cancel-modal,
+.btn-confirm-modal {
+    padding: 8px 20px;
+    border-radius: 6px;
+    border: none;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-cancel-modal {
+    background: #f5f5f5;
+    color: #666;
+}
+
+.btn-cancel-modal:hover {
+    background: #e0e0e0;
+}
+
+.btn-confirm-modal {
+    background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
+    color: white;
+}
+
+.btn-confirm-modal:hover {
+    box-shadow: 0 4px 8px rgba(25, 118, 210, 0.3);
+    transform: translateY(-1px);
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateY(20px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}

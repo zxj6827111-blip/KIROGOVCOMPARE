@@ -87,7 +87,7 @@ function BatchUpload({ onClose, isEmbedded = false }) {
     const [isProcessing, setIsProcessing] = useState(false);
     const [currentIndex, setCurrentIndex] = useState(-1);
     const [isDragging, setIsDragging] = useState(false);
-    const [model, setModel] = useState('gemini/gemini-2.5-flash');
+    const [model, setModel] = useState('qwen3-235b');
     const [editingId, setEditingId] = useState(null);
     const fileInputRef = useRef(null);
 
@@ -267,6 +267,7 @@ function BatchUpload({ onClose, isEmbedded = false }) {
         });
 
         setFiles(prev => [...prev, ...newFiles]);
+        checkFilesExistence(newFiles);
     }, [files.length, autoMatchRegion]);
 
     // 拖拽处理
@@ -303,6 +304,46 @@ function BatchUpload({ onClose, isEmbedded = false }) {
         setFiles(prev => prev.map(f =>
             f.id === id ? { ...f, ...updates, matchStatus: updates.regionId ? 'manual' : f.matchStatus } : f
         ));
+    };
+
+    // 检查重复报告
+    const checkDuplicate = async (unitName, year) => {
+        if (!unitName || !year) return { exists: false };
+        try {
+            const resp = await apiClient.get('/reports', { params: { unit_name: unitName, year } });
+            // API returns { data: [...] } or { reports: [...] } depending on version, generic access
+            const list = resp.data?.data || resp.data?.reports || [];
+
+            if (list.length > 0) {
+                // Check if the report has content
+                // Since GET /reports now returns 'has_content', use it.
+                // If existing report has NO content, treating it as "not blocking upload" (will be overwritten).
+                // Or better: Indicate it exists but is overwriteable.
+                const existing = list[0];
+                return {
+                    exists: true,
+                    hasContent: existing.has_content ?? true  // Default to true if field missing (backward compat)
+                };
+            }
+            return { exists: false };
+        } catch (error) {
+            console.error('Check duplicate failed:', error);
+            return { exists: false };
+        }
+    };
+
+    // 批量检查文件是否存在
+    const checkFilesExistence = async (fileItems) => {
+        const results = await Promise.all(fileItems.map(async (f) => {
+            if (!f.unitName || !f.year) return { id: f.id, exists: false, hasContent: false };
+            const { exists, hasContent } = await checkDuplicate(f.unitName, f.year);
+            return { id: f.id, exists, hasContent };
+        }));
+
+        setFiles(prev => prev.map(f => {
+            const res = results.find(r => r.id === f.id);
+            return res ? { ...f, duplicate: res.exists, duplicateEmpty: res.exists && !res.hasContent } : f;
+        }));
     };
 
     // Poll job status
@@ -369,25 +410,16 @@ function BatchUpload({ onClose, isEmbedded = false }) {
             try {
                 const uploadResult = await uploadSingleFile(fileItem);
                 const jobId = uploadResult.job_id || uploadResult.jobId;
+                const versionId = uploadResult.version_id || uploadResult.versionId;
 
-                if (jobId) {
-                    // 更新状态为解析中
+                if (jobId && versionId) {
+                    // 更新状态为提交成功/解析中
                     setFiles(prev => prev.map(f =>
-                        f.id === fileItem.id ? { ...f, status: 'parsing', message: '解析中...', reportId: uploadResult.report_id } : f
+                        f.id === fileItem.id ? { ...f, status: 'parsing', message: '已提交，后台解析中...' } : f
                     ));
 
-                    // 等待解析完成
-                    const job = await pollJob(jobId);
-
-                    if ((job.status || '').toLowerCase() === 'succeeded') {
-                        setFiles(prev => prev.map(f =>
-                            f.id === fileItem.id ? { ...f, status: 'success', message: '✅ 完成' } : f
-                        ));
-                    } else {
-                        setFiles(prev => prev.map(f =>
-                            f.id === fileItem.id ? { ...f, status: 'failed', message: translateJobError(job) } : f
-                        ));
-                    }
+                    // 不再等待解析完成，直接处理下一个
+                    // const job = await pollJob(versionId); ...
                 } else {
                     setFiles(prev => prev.map(f =>
                         f.id === fileItem.id ? { ...f, status: 'success', message: '✅ 上传成功' } : f
@@ -415,12 +447,18 @@ function BatchUpload({ onClose, isEmbedded = false }) {
 
         setIsProcessing(false);
         setCurrentIndex(-1);
+
+        // FIX: Redirect to Task Center after batch upload completes
+        setTimeout(() => {
+            window.location.href = '/jobs';
+        }, 1500); // Brief delay to show final statistics
     };
 
     // 计算进度
     const getProgress = () => {
+        // parsing counts as completed for the upload phase (handoff successful)
         const completed = files.filter(f =>
-            ['success', 'failed', 'skipped'].includes(f.status)
+            ['success', 'failed', 'skipped', 'parsing'].includes(f.status)
         ).length;
         return {
             completed,
@@ -433,7 +471,7 @@ function BatchUpload({ onClose, isEmbedded = false }) {
     const getStats = () => {
         return {
             pending: files.filter(f => f.status === 'pending').length,
-            success: files.filter(f => f.status === 'success').length,
+            success: files.filter(f => ['success', 'parsing'].includes(f.status)).length,
             failed: files.filter(f => f.status === 'failed').length,
             skipped: files.filter(f => f.status === 'skipped').length,
             unmatched: files.filter(f => !f.regionId).length,
@@ -481,12 +519,9 @@ function BatchUpload({ onClose, isEmbedded = false }) {
                         onChange={(e) => setModel(e.target.value)}
                         disabled={isProcessing}
                     >
+                        <option value="qwen3-235b">通义千问 Qwen3-235B (ModelScope)</option>
                         <option value="gemini/gemini-2.5-flash">Gemini 2.5 Flash</option>
-                        <option value="qwen3-235b">通义千问 Qwen3-235B</option>
-                        <option value="qwen3-30b">通义千问 Qwen3-30B</option>
-                        <option value="deepseek-v3">DeepSeek V3</option>
-                        <option value="deepseek-r1-32b">DeepSeek R1 Distill 32B</option>
-                        <option value="glm-4.7">GLM-4.7</option>
+                        <option value="deepseek-v3">DeepSeek V3.2 (ModelScope)</option>
                     </select>
                 </div>
 
@@ -537,6 +572,19 @@ function BatchUpload({ onClose, isEmbedded = false }) {
                                                 ? fileItem.filename.substring(0, 30) + '...'
                                                 : fileItem.filename}
                                         </span>
+                                        {fileItem.duplicate && (
+                                            <span className="duplicate-badge" style={{
+                                                marginLeft: '8px',
+                                                color: fileItem.duplicateEmpty ? '#f56c6c' : '#e6a23c',
+                                                backgroundColor: fileItem.duplicateEmpty ? '#fef0f0' : '#fdf6ec',
+                                                padding: '2px 6px',
+                                                borderRadius: '4px',
+                                                fontSize: '12px',
+                                                border: fileItem.duplicateEmpty ? '1px solid #fde2e2' : '1px solid #faecd8'
+                                            }}>
+                                                {fileItem.duplicateEmpty ? "✗ 无内容 (可覆盖)" : "⚠️ 报告已存在"}
+                                            </span>
+                                        )}
                                     </div>
 
                                     {editingId === fileItem.id ? (
@@ -547,7 +595,13 @@ function BatchUpload({ onClose, isEmbedded = false }) {
                                                 <input
                                                     type="number"
                                                     value={fileItem.year}
-                                                    onChange={(e) => updateFile(fileItem.id, { year: parseInt(e.target.value) || new Date().getFullYear() })}
+                                                    onChange={(e) => {
+                                                        const newYear = parseInt(e.target.value) || new Date().getFullYear();
+                                                        updateFile(fileItem.id, { year: newYear });
+                                                        checkDuplicate(fileItem.unitName, newYear).then(res =>
+                                                            updateFile(fileItem.id, { duplicate: res.exists, duplicateEmpty: res.exists && !res.hasContent })
+                                                        );
+                                                    }}
                                                 />
                                             </div>
                                             <div className="edit-row">
@@ -555,7 +609,13 @@ function BatchUpload({ onClose, isEmbedded = false }) {
                                                 <input
                                                     type="text"
                                                     value={fileItem.unitName}
-                                                    onChange={(e) => updateFile(fileItem.id, { unitName: e.target.value })}
+                                                    onChange={(e) => {
+                                                        const newName = e.target.value;
+                                                        updateFile(fileItem.id, { unitName: newName });
+                                                        checkDuplicate(newName, fileItem.year).then(res =>
+                                                            updateFile(fileItem.id, { duplicate: res.exists, duplicateEmpty: res.exists && !res.hasContent })
+                                                        );
+                                                    }}
                                                     placeholder="单位名称"
                                                 />
                                             </div>

@@ -3,29 +3,49 @@ import { LlmParseResult, LlmProvider, LlmProviderError } from './LlmProvider';
 import { createLlmProvider } from './LlmProviderFactory';
 import { summarizeDiff } from '../utils/jsonDiff';
 import { consistencyCheckService } from './ConsistencyCheckService';
+import axios from 'axios';
 
 interface QueuedJob {
   id: number;
   kind: string;
   report_id: number | null;
   version_id: number | null;
+  retry_count: number;
+  max_retries: number;
   storage_path?: string;
   file_hash?: string;
   comparison_id?: number | null;
 }
+
+// 5-step progress tracking (Chinese)
+const STEPS = {
+  RECEIVED: { code: 'RECEIVED', name: '已接收并保存文件', progress: 10 },
+  ENQUEUED: { code: 'ENQUEUED', name: '已入库并创建解析任务', progress: 20 },
+  PARSING: { code: 'PARSING', name: 'AI 解析中', progress: 50 },
+  POSTPROCESS: { code: 'POSTPROCESS', name: '结果校验与入库', progress: 80 },
+  DONE: { code: 'DONE', name: '完成', progress: 100 },
+  QUEUED: { code: 'QUEUED', name: '等待处理', progress: 0 },
+  CANCELLED: { code: 'CANCELLED', name: '已取消', progress: 100 },
+};
 
 const POLL_INTERVAL_MS = 2000;
 
 export class LlmJobRunner {
   private running = false;
   private processing = false;
-  private provider: LlmProvider | null = null;
+  private primaryProvider: LlmProvider | null = null;
+  private fallbackProvider: LlmProvider | null = null;
   private parsedJsonColumnExists: boolean | null = null;
+  private currentAbortController: AbortController | null = null;
+  private currentJobId: number | null = null;
 
   start(): void {
     if (this.running) {
       return;
     }
+
+    // Restart recovery: reset all running jobs to queued
+    this.recoverRunningJobs();
 
     this.running = true;
     this.scheduleNextTick();
@@ -33,6 +53,266 @@ export class LlmJobRunner {
 
   stop(): void {
     this.running = false;
+    if (this.currentAbortController) {
+      this.currentAbortController.abort();
+      this.currentAbortController = null;
+    }
+  }
+
+  private async processJob(job: QueuedJob): Promise<void> {
+    this.currentJobId = job.id;
+    try {
+      if (job.kind === 'compare') {
+        await this.processCompareJob(job);
+      } else if (job.kind === 'checks') {
+        await this.processChecksJob(job);
+      } else {
+        await this.processParseJob(job);
+      }
+    } catch (error: any) {
+      await this.handleJobFailure(job, error);
+    } finally {
+      this.currentJobId = null;
+      this.currentAbortController = null;
+    }
+  }
+
+  /**
+   * Cancel a specific job.
+   * If it's currently running, abort it.
+   * If it's queued/running but not current (race condition?), update DB.
+   */
+  public async cancelJob(jobId: number): Promise<boolean> {
+    // 1. If it's the current running job, abort it
+    if (this.currentJobId === jobId && this.currentAbortController) {
+      console.log(`[Job ${jobId}] Cancellation requested. Aborting current process...`);
+      this.currentAbortController.abort('User cancelled');
+      return true;
+    }
+
+    // 2. If valid but not running in memory (maybe just picked up or just finished), 
+    // or simply queued in DB. Update DB directly.
+    querySqlite(`
+      UPDATE jobs
+      SET status = 'cancelled',
+          step_code = 'CANCELLED',
+          step_name = '已取消',
+          progress = 100,
+          finished_at = datetime('now'),
+          error_message = '用户手动取消'
+      WHERE id = ${sqlValue(jobId)} AND status IN ('queued', 'running');
+    `);
+
+    return true;
+  }
+
+  private async handleJobFailure(job: QueuedJob, error: any): Promise<void> {
+    const { code, message } = this.normalizeError(error);
+
+    // Check for Cancellation
+    if (axios.isCancel(error) || error.name === 'AbortError' || message.includes('User cancelled') || message.includes('canceled')) {
+      console.log(`[Job ${job.id}] Job was cancelled.`);
+      querySqlite(`
+        UPDATE jobs 
+        SET status = 'cancelled',
+            description = '用户手动取消',
+            progress = 100,
+            step_code = 'CANCELLED',
+            step_name = '已取消',
+            finished_at = datetime('now')
+        WHERE id = ${sqlValue(job.id)};
+      `);
+      return;
+    }
+
+    const attempt = job.retry_count + 1;
+
+    console.error(`[Job ${job.id}] Attempt ${attempt} failed:`, error);
+
+    // Check if we can retry
+    if (job.retry_count < job.max_retries) {
+      // Retry: increment retry_count, reset to queued
+      console.log(`[Job ${job.id}] Retrying with attempt ${attempt + 1} (fallback model)...`);
+
+      querySqlite(`
+        UPDATE jobs 
+        SET status = 'queued',
+            retry_count = retry_count + 1,
+            attempt = retry_count + 2,
+            progress = ${STEPS.QUEUED.progress},
+            step_code = ${sqlValue(STEPS.QUEUED.code)},
+            step_name = ${sqlValue(STEPS.QUEUED.name)},
+            error_code = ${sqlValue(code)},
+            error_message = ${sqlValue(`第${attempt}轮失败: ${message}`)}
+        WHERE id = ${sqlValue(job.id)};
+      `);
+    } else {
+      // Final failure: mark as failed
+      const finalMessage = `已更换模型重试仍失败。第1轮失败原因: ${code}; 第2轮失败原因: ${message}`;
+
+      querySqlite(`
+        UPDATE jobs 
+        SET status = 'failed',
+            error_code = ${sqlValue(code)},
+            error_message = ${sqlValue(finalMessage)},
+            finished_at = datetime('now'),
+            progress = 100,
+            step_code = ${sqlValue(STEPS.DONE.code)},
+            step_name = ${sqlValue('失败')}
+        WHERE id = ${sqlValue(job.id)};
+      `);
+
+      console.error(`[Job ${job.id}] Final failure after ${attempt} attempts`);
+
+      // Generate notification for final failure
+      if (job.version_id) {
+        await this.generateNotificationIfNeeded(job.version_id);
+      }
+    }
+  }
+
+  private async processParseJob(job: QueuedJob): Promise<void> {
+    if (!job.version_id || !job.storage_path) {
+      throw new Error('Job missing required version or storage');
+    }
+
+    this.currentAbortController = new AbortController();
+    const signal = this.currentAbortController.signal;
+
+    // Determine which provider to use based on retry count
+    const attempt = job.retry_count + 1;
+    let provider: LlmProvider;
+
+    if (attempt === 1) {
+      // Fetch specific provider/model config for this version
+      const versionConfig = querySqlite(
+        `SELECT provider, model FROM report_versions WHERE id = ${sqlValue(job.version_id)} LIMIT 1;`
+      )[0] as { provider?: string; model?: string } | undefined;
+
+      // If provider is 'upload' (legacy/default) or 'pending', ignore it and use env default.
+      // Otherwise use the stored provider details.
+      const pName =
+        versionConfig?.provider && versionConfig.provider !== 'upload' && versionConfig.provider !== 'pending'
+          ? versionConfig.provider
+          : undefined;
+
+      const mName =
+        versionConfig?.model && versionConfig.model !== 'pending'
+          ? versionConfig.model
+          : undefined;
+
+      if (pName || mName) {
+        console.log(`[Job ${job.id}] Using custom config: Provider=${pName}, Model=${mName}`);
+      }
+
+      // Create a fresh provider instance for this job if customized, or default
+      provider = createLlmProvider(pName, mName);
+    } else if (attempt === 2) {
+      // Retry Strategy: Force DeepSeek V3.2 (ModelScope) on first retry
+      console.log(`[Job ${job.id}] Retry Attempt 2: Switching to fallback model 'deepseek-ai/DeepSeek-V3.2'`);
+      provider = createLlmProvider('modelscope', 'deepseek-ai/DeepSeek-V3.2');
+    } else {
+      // Fallback for subsequent retries (if any)
+      provider = this.getProvider(attempt);
+    }
+
+    console.log(`[Job ${job.id}] Processing parse job (attempt ${attempt})...`);
+
+    const parseResult = await provider.parse({
+      reportId: job.report_id || 0,
+      versionId: job.version_id,
+      storagePath: job.storage_path,
+      fileHash: job.file_hash,
+    }, signal);
+
+    // Update progress: POSTPROCESS
+    querySqlite(`
+      UPDATE jobs 
+      SET step_code = ${sqlValue(STEPS.POSTPROCESS.code)},
+      step_name = ${sqlValue(STEPS.POSTPROCESS.name)},
+      progress = ${STEPS.POSTPROCESS.progress},
+      provider = ${sqlValue(parseResult.provider)},
+      model = ${sqlValue(parseResult.model)}
+      WHERE id = ${sqlValue(job.id)};
+    `);
+
+    const outputJson = this.stringifyOutput(parseResult);
+
+    querySqlite(
+      `INSERT INTO report_version_parses (report_version_id, provider, model, output_json, created_at)
+       VALUES (${sqlValue(job.version_id)}, ${sqlValue(parseResult.provider)}, ${sqlValue(parseResult.model)}, ${sqlValue(outputJson)}, datetime('now'));`
+    );
+
+    if (this.hasParsedJsonColumn()) {
+      querySqlite(
+        `UPDATE report_versions
+         SET parsed_json = ${sqlValue(outputJson)},
+             provider = ${sqlValue(parseResult.provider)},
+             model = ${sqlValue(parseResult.model)},
+             prompt_version = 'v1'
+         WHERE id = ${sqlValue(job.version_id)};`
+      );
+    }
+
+    // Success: mark as DONE
+    querySqlite(`
+      UPDATE jobs 
+      SET status = 'succeeded', 
+          progress = ${STEPS.DONE.progress},
+          step_code = ${sqlValue(STEPS.DONE.code)},
+          step_name = ${sqlValue(STEPS.DONE.name)},
+          finished_at = datetime('now') 
+      WHERE id = ${sqlValue(job.id)};
+    `);
+
+    // Enqueue checks job if not already queued/running
+    if (job.version_id && job.report_id) {
+      const existingChecksJob = querySqlite(
+        `SELECT id FROM jobs WHERE report_id = ${sqlValue(job.report_id)} AND version_id = ${sqlValue(job.version_id)} AND kind = 'checks' AND status IN ('queued', 'running') LIMIT 1;`
+      )[0] as { id?: number } | undefined;
+
+      if (!existingChecksJob?.id) {
+        querySqlite(
+          `INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, max_retries) 
+           VALUES (${sqlValue(job.report_id)}, ${sqlValue(job.version_id)}, 'checks', 'queued', 60, ${sqlValue(STEPS.POSTPROCESS.code)}, ${sqlValue('等待校验')}, 1);`
+        );
+        console.log(`[Job ${job.id}] Enqueued checks job for version ${job.version_id}`);
+      }
+    }
+
+    // Check if we need to generate notification (after all jobs complete)
+    if (job.version_id) {
+      await this.generateNotificationIfNeeded(job.version_id);
+    }
+  }
+
+  /**
+   * Restart recovery: reset all 'running' jobs to 'queued' state
+   * to avoid permanent stall on server restart
+   */
+  private recoverRunningJobs(): void {
+    // ensureSqliteMigrations() is already called in index-llm.ts
+
+    const runningJobs = querySqlite(
+      `SELECT id FROM jobs WHERE status = 'running';`
+    );
+
+    if (runningJobs.length > 0) {
+      console.log(`[Recovery] Found ${runningJobs.length} running jobs, resetting to queued...`);
+
+      querySqlite(`
+        UPDATE jobs 
+        SET status = 'queued',
+            progress = ${STEPS.QUEUED.progress},
+            step_code = ${sqlValue(STEPS.QUEUED.code)},
+            step_name = ${sqlValue(STEPS.QUEUED.name)},
+            error_code = NULL,
+            error_message = NULL
+        WHERE status = 'running';
+      `);
+
+      console.log(`[Recovery] Reset ${runningJobs.length} jobs to queued`);
+    }
   }
 
   private scheduleNextTick(): void {
@@ -71,7 +351,11 @@ export class LlmJobRunner {
 
     const updatedJobs = querySqlite(`
       UPDATE jobs
-      SET status = 'running', started_at = datetime('now')
+      SET status = 'running', 
+          started_at = datetime('now'),
+          step_code = ${sqlValue(STEPS.PARSING.code)},
+          step_name = ${sqlValue(STEPS.PARSING.name)},
+          progress = ${STEPS.PARSING.progress}
       WHERE id = (
         SELECT id
         FROM jobs
@@ -79,7 +363,7 @@ export class LlmJobRunner {
         ORDER BY (CASE kind WHEN 'parse' THEN 0 WHEN 'checks' THEN 1 WHEN 'compare' THEN 2 ELSE 9 END) ASC, created_at ASC
         LIMIT 1
       )
-      RETURNING id, report_id, version_id, kind, comparison_id;
+      RETURNING id, report_id, version_id, kind, comparison_id, retry_count, max_retries;
     `);
 
     if (!updatedJobs.length) {
@@ -92,6 +376,8 @@ export class LlmJobRunner {
       version_id?: number;
       kind?: string;
       comparison_id?: number;
+      retry_count?: number;
+      max_retries?: number;
     };
 
     let storagePath: string | undefined;
@@ -109,78 +395,12 @@ export class LlmJobRunner {
       report_id: jobRow.report_id ?? null,
       version_id: jobRow.version_id ?? null,
       kind: jobRow.kind || 'parse',
+      retry_count: jobRow.retry_count ?? 0,
       storage_path: storagePath,
       file_hash: fileHash,
       comparison_id: jobRow.comparison_id ?? null,
+      max_retries: 1, // FORCE FIX: Ensure max_retries is always 1
     } as QueuedJob;
-  }
-
-  private async processJob(job: QueuedJob): Promise<void> {
-    try {
-      if (job.kind === 'compare') {
-        await this.processCompareJob(job);
-      } else if (job.kind === 'checks') {
-        await this.processChecksJob(job);
-      } else {
-        await this.processParseJob(job);
-      }
-    } catch (error: any) {
-      const { code, message } = this.normalizeError(error);
-      querySqlite(
-        `UPDATE jobs SET status = 'failed', error_code = ${sqlValue(code)}, error_message = ${sqlValue(message)}, finished_at = datetime('now') WHERE id = ${sqlValue(job.id)};`
-      );
-      console.error(`LLM job ${job.id} failed:`, error);
-    }
-  }
-
-  private async processParseJob(job: QueuedJob): Promise<void> {
-    if (!job.version_id || !job.storage_path) {
-      throw new Error('Job missing required version or storage');
-    }
-
-    const provider = this.getProvider();
-    const parseResult = await provider.parse({
-      reportId: job.report_id || 0,
-      versionId: job.version_id,
-      storagePath: job.storage_path,
-      fileHash: job.file_hash,
-    });
-
-    const outputJson = this.stringifyOutput(parseResult);
-
-    querySqlite(
-      `INSERT INTO report_version_parses (report_version_id, provider, model, output_json, created_at)
-       VALUES (${sqlValue(job.version_id)}, ${sqlValue(parseResult.provider)}, ${sqlValue(parseResult.model)}, ${sqlValue(outputJson)}, datetime('now'));`
-    );
-
-    if (this.hasParsedJsonColumn()) {
-      querySqlite(
-        `UPDATE report_versions
-         SET parsed_json = ${sqlValue(outputJson)},
-             provider = ${sqlValue(parseResult.provider)},
-             model = ${sqlValue(parseResult.model)},
-             prompt_version = 'v1'
-         WHERE id = ${sqlValue(job.version_id)};`
-      );
-    }
-
-    querySqlite(
-      `UPDATE jobs SET status = 'succeeded', progress = 100, finished_at = datetime('now') WHERE id = ${sqlValue(job.id)};`
-    );
-
-    // Enqueue checks job if not already queued/running
-    if (job.version_id && job.report_id) {
-      const existingChecksJob = querySqlite(
-        `SELECT id FROM jobs WHERE report_id = ${sqlValue(job.report_id)} AND version_id = ${sqlValue(job.version_id)} AND kind = 'checks' AND status IN ('queued', 'running') LIMIT 1;`
-      )[0] as { id?: number } | undefined;
-
-      if (!existingChecksJob?.id) {
-        querySqlite(
-          `INSERT INTO jobs (report_id, version_id, kind, status, progress) VALUES (${sqlValue(job.report_id)}, ${sqlValue(job.version_id)}, 'checks', 'queued', 0);`
-        );
-        console.log(`Enqueued checks job for report ${job.report_id} version ${job.version_id}`);
-      }
-    }
   }
 
   private async processChecksJob(job: QueuedJob): Promise<void> {
@@ -204,15 +424,26 @@ export class LlmJobRunner {
     // Run consistency checks
     try {
       const { runId, items } = consistencyCheckService.runAndPersist(job.version_id, version.parsed_json);
-      console.log(`Consistency checks completed: runId=${runId}, items=${items.length}`);
+      console.log(`[Job ${job.id}] Consistency checks completed: runId=${runId}, items=${items.length}`);
     } catch (error) {
-      console.error('Consistency check failed:', error);
+      console.error('[Job ${job.id}] Consistency check failed:', error);
       throw error;
     }
 
-    querySqlite(
-      `UPDATE jobs SET status = 'succeeded', progress = 100, finished_at = datetime('now') WHERE id = ${sqlValue(job.id)};`
-    );
+    querySqlite(`
+      UPDATE jobs 
+      SET status = 'succeeded', 
+          progress = ${STEPS.DONE.progress},
+          step_code = ${sqlValue(STEPS.DONE.code)},
+          step_name = ${sqlValue(STEPS.DONE.name)},
+          finished_at = datetime('now') 
+      WHERE id = ${sqlValue(job.id)};
+    `);
+
+    // Check if we need to generate notification (after all jobs complete)
+    if (job.version_id) {
+      await this.generateNotificationIfNeeded(job.version_id);
+    }
   }
 
   private async processCompareJob(job: QueuedJob): Promise<void> {
@@ -271,17 +502,148 @@ export class LlmJobRunner {
       ON CONFLICT(comparison_id) DO UPDATE SET diff_json = excluded.diff_json, created_at = excluded.created_at;
     `);
 
-    querySqlite(
-      `UPDATE jobs SET status = 'succeeded', progress = 100, finished_at = datetime('now') WHERE id = ${sqlValue(job.id)};`
-    );
+    querySqlite(`
+      UPDATE jobs 
+      SET status = 'succeeded', 
+          progress = ${STEPS.DONE.progress},
+          step_code = ${sqlValue(STEPS.DONE.code)},
+          step_name = ${sqlValue(STEPS.DONE.name)},
+          finished_at = datetime('now') 
+      WHERE id = ${sqlValue(job.id)};
+    `);
   }
 
-  private getProvider(): LlmProvider {
-    if (!this.provider) {
-      this.provider = createLlmProvider();
+  /**
+   * Generate notification when all jobs for a version are complete
+   */
+  private async generateNotificationIfNeeded(versionId: number): Promise<void> {
+    // Check if all jobs for this version are complete
+    const versionJobs = querySqlite(`
+      SELECT id, status, kind, error_message
+      FROM jobs
+      WHERE version_id = ${sqlValue(versionId)}
+      ORDER BY created_at ASC;
+    `) as Array<{ id: number; status: string; kind: string; error_message?: string }>;
+
+    if (versionJobs.length === 0) {
+      return;
     }
 
-    return this.provider;
+    // Check if any job is still running or queued
+    const hasIncomplete = versionJobs.some(j => j.status === 'queued' || j.status === 'running');
+    if (hasIncomplete) {
+      return; // Not all jobs complete yet
+    }
+
+    // All jobs complete: determine success/failure
+    const hasFailure = versionJobs.some(j => j.status === 'failed');
+
+    // Get version details
+    const version = querySqlite(`
+      SELECT rv.id, rv.report_id, r.region_id, r.year, r.unit_name
+      FROM report_versions rv
+      JOIN reports r ON rv.report_id = r.id
+      WHERE rv.id = ${sqlValue(versionId)}
+      LIMIT 1;
+    `)[0] as { id: number; report_id: number; region_id: number; year: number; unit_name: string } | undefined;
+
+    if (!version) {
+      return;
+    }
+
+    // Check if notification already exists
+    const existingNotification = querySqlite(`
+      SELECT id FROM notifications WHERE related_version_id = ${sqlValue(versionId)} LIMIT 1;
+    `)[0];
+
+    if (existingNotification) {
+      return; // Already notified
+    }
+
+    // Build notification content
+    const successCount = hasFailure ? 0 : 1;
+    const failList: Array<{ region_id: number; year: number; unit_name: string; reason: string }> = [];
+
+    if (hasFailure) {
+      const failedJob = versionJobs.find(j => j.status === 'failed');
+      failList.push({
+        region_id: version.region_id,
+        year: version.year,
+        unit_name: version.unit_name,
+        reason: failedJob?.error_message || '未知错误',
+      });
+    }
+
+    const contentJson = JSON.stringify({
+      uploaded_count: 1,
+      success_count: successCount,
+      fail_list: failList,
+      task_link: `/jobs/${versionId}`,
+    });
+
+    const title = hasFailure ? '上传任务失败' : '上传任务成功';
+
+    querySqlite(`
+      INSERT INTO notifications (type, title, content_json, related_version_id, created_at)
+      VALUES ('upload_complete', ${sqlValue(title)}, ${sqlValue(contentJson)}, ${sqlValue(versionId)}, datetime('now'));
+    `);
+
+    console.log(`[Notification] Generated for version ${versionId}: ${title}`);
+  }
+
+  /**
+   * Get the appropriate provider based on attempt number
+   * attempt=1: use PRIMARY model
+   * attempt=2: use FALLBACK model
+   */
+  private getProvider(attempt: number): LlmProvider {
+    if (attempt === 1) {
+      if (!this.primaryProvider) {
+        this.primaryProvider = createLlmProvider();
+      }
+      return this.primaryProvider;
+    } else {
+      if (!this.fallbackProvider) {
+        this.fallbackProvider = this.createFallbackProvider();
+      }
+      return this.fallbackProvider;
+    }
+  }
+
+  private createFallbackProvider(): LlmProvider {
+    // Read fallback config from env
+    const fallbackProviderName = process.env.LLM_FALLBACK_PROVIDER?.toLowerCase().trim();
+    // HARDCODE FIX: Override process.env due to persistent loading issue
+    // Valid model IDs: ZhipuAI/GLM-4.7, glm-4-plus, glm-4-flash
+    const fallbackModel = 'ZhipuAI/GLM-4.7'; // process.env.LLM_FALLBACK_MODEL?.trim();
+
+    if (!fallbackProviderName || !fallbackModel) {
+      console.warn('[Warning] LLM_FALLBACK_PROVIDER or LLM_FALLBACK_MODEL not configured, using primary provider as fallback');
+      return createLlmProvider();
+    }
+
+    // Support gemini, modelscope, or stub
+    if (fallbackProviderName === 'gemini') {
+      const GeminiLlmProvider = require('./GeminiLlmProvider').GeminiLlmProvider;
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new LlmProviderError('GEMINI_API_KEY required for fallback provider', 'missing_gemini_key');
+      }
+      return new GeminiLlmProvider(apiKey, fallbackModel);
+    }
+
+    if (fallbackProviderName === 'modelscope') {
+      const ModelScopeLlmProvider = require('./ModelScopeLlmProvider').ModelScopeLlmProvider;
+      const apiKey = process.env.MODELSCOPE_API_KEY;
+      if (!apiKey) {
+        throw new LlmProviderError('MODELSCOPE_API_KEY required for fallback provider', 'missing_modelscope_key');
+      }
+      return new ModelScopeLlmProvider(apiKey, fallbackModel);
+    }
+
+    // Default: use primary provider
+    console.warn(`[Warning] Unsupported fallback provider: ${fallbackProviderName}, using primary provider`);
+    return createLlmProvider();
   }
 
   private stringifyOutput(parseResult: LlmParseResult): string {
