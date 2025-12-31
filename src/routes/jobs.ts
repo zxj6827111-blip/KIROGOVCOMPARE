@@ -135,22 +135,11 @@ router.get('/:version_id', (req, res) => {
     try {
         ensureSqliteMigrations();
 
-        let versionId = Number(req.params.version_id);
+        const versionId = Number(req.params.version_id);
         if (Number.isNaN(versionId)) {
             return res.status(400).json({ error: 'Invalid version_id' });
         }
 
-        // Check if versionId exists as a report_version_id
-        const vExists = querySqlite(`SELECT id FROM report_versions WHERE id = ${sqlValue(versionId)} LIMIT 1`);
-        if (vExists.length === 0) {
-            // Check if it's a job_id instead
-            const jExists = querySqlite(`SELECT version_id FROM jobs WHERE id = ${sqlValue(versionId)} LIMIT 1`);
-            if (jExists.length > 0 && jExists[0].version_id !== null) {
-                versionId = jExists[0].version_id;
-            } else {
-                return res.status(404).json({ error: 'Version or Job not found' });
-            }
-        }
 
 
 
