@@ -37,7 +37,7 @@ fi
 
 echo "[upload] uploading report PDF"
 UPLOAD_RESPONSE=$(curl -s -w "\n%{http_code}" -F region_id=1 -F year=2024 -F file=@"${PDF_PATH}" "${BASE_URL}/reports")
-UPLOAD_BODY=$(echo "${UPLOAD_RESPONSE}" | head -n 1)
+UPLOAD_BODY=$(echo "${UPLOAD_RESPONSE}" | sed '$d')
 UPLOAD_STATUS=$(echo "${UPLOAD_RESPONSE}" | tail -n 1)
 echo "status=${UPLOAD_STATUS} body=${UPLOAD_BODY}"
 
@@ -56,27 +56,27 @@ except Exception:
     print('')
 PY
 )
-JOB_ID=$(UPLOAD_BODY="${UPLOAD_BODY}" ${PYTHON_BIN} - <<'PY'
+VERSION_ID=$(UPLOAD_BODY="${UPLOAD_BODY}" ${PYTHON_BIN} - <<'PY'
 import json, os
 body = os.environ.get('UPLOAD_BODY', '{}')
 try:
     data = json.loads(body)
-    print(data.get('job_id', ''))
+    print(data.get('version_id', ''))
 except Exception:
     print('')
 PY
 )
 
-if [[ -z "${REPORT_ID}" || -z "${JOB_ID}" ]]; then
-  echo "[error] missing report_id or job_id in upload response" >&2
+if [[ -z "${REPORT_ID}" || -z "${VERSION_ID}" ]]; then
+  echo "[error] missing report_id or version_id in upload response" >&2
   exit 1
 fi
 
-echo "[jobs] polling job ${JOB_ID} until succeeded"
+echo "[jobs] polling version ${VERSION_ID} until succeeded"
 STATUS="queued"
 for attempt in $(seq 1 30); do
-  JOB_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/jobs/${JOB_ID}")
-  JOB_BODY=$(echo "${JOB_RESPONSE}" | head -n 1)
+  JOB_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/jobs/${VERSION_ID}")
+  JOB_BODY=$(echo "${JOB_RESPONSE}" | sed '$d')
   JOB_STATUS_CODE=$(echo "${JOB_RESPONSE}" | tail -n 1)
 
   if [[ "${JOB_STATUS_CODE}" != "200" ]]; then
@@ -116,7 +116,7 @@ fi
 
 echo "[reports] fetching list"
 LIST_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/reports?region_id=1&year=2024")
-LIST_BODY=$(echo "${LIST_RESPONSE}" | head -n 1)
+LIST_BODY=$(echo "${LIST_RESPONSE}" | sed '$d')
 LIST_STATUS=$(echo "${LIST_RESPONSE}" | tail -n 1)
 
 echo "list_status=${LIST_STATUS} body=${LIST_BODY}"
@@ -160,7 +160,7 @@ PY
 
 echo "[reports] fetching detail for report ${REPORT_ID}"
 DETAIL_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/reports/${REPORT_ID}")
-DETAIL_BODY=$(echo "${DETAIL_RESPONSE}" | head -n 1)
+DETAIL_BODY=$(echo "${DETAIL_RESPONSE}" | sed '$d')
 DETAIL_STATUS=$(echo "${DETAIL_RESPONSE}" | tail -n 1)
 
 echo "detail_status=${DETAIL_STATUS} body=${DETAIL_BODY}"
