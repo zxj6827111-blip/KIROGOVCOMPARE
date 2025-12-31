@@ -43,7 +43,7 @@ sqlite3 "$DB_PATH" "PRAGMA foreign_keys = ON; INSERT OR IGNORE INTO regions(id, 
 run_upload_and_wait() {
   echo "[upload] uploading sample PDF with provider=$provider_to_use"
   UPLOAD_RESPONSE=$(curl -s -w "\n%{http_code}" -F "region_id=1" -F "year=2024" -F "file=@${PDF_PATH}" "$UPLOAD_URL")
-  UPLOAD_BODY=$(echo "$UPLOAD_RESPONSE" | head -n 1)
+  UPLOAD_BODY=$(echo "$UPLOAD_RESPONSE" | sed '$d')
   UPLOAD_STATUS=$(echo "$UPLOAD_RESPONSE" | tail -n 1)
   export UPLOAD_BODY
 
@@ -57,7 +57,10 @@ import json, os, sys
 raw = os.environ.get('UPLOAD_BODY')
 if not raw:
     sys.exit('missing upload response')
-data = json.loads(raw)
+try:
+    data = json.loads(raw)
+except Exception:
+    sys.exit('invalid json in upload response')
 print(data.get('job_id'))
 PY
 )
@@ -67,7 +70,10 @@ import json, os, sys
 raw = os.environ.get('UPLOAD_BODY')
 if not raw:
     sys.exit('missing upload response')
-data = json.loads(raw)
+try:
+    data = json.loads(raw)
+except Exception:
+    sys.exit('invalid json in upload response')
 print(data.get('version_id'))
 PY
 )
@@ -80,14 +86,25 @@ PY
   echo "[jobs] Created job $JOB_ID for version $VERSION_ID. Waiting for completion..."
   STATUS="queued"
   for attempt in $(seq 1 45); do
-    JOB_RESPONSE=$(curl -s -f "$JOB_URL_BASE/$JOB_ID") || true
-    export JOB_RESPONSE
-    STATUS=$($PYTHON_BIN - <<'PY'
+    JOB_RESPONSE=$(curl -s -w "\n%{http_code}" "$JOB_URL_BASE/$VERSION_ID")
+    JOB_BODY=$(echo "$JOB_RESPONSE" | sed '$d')
+    JOB_STATUS_CODE=$(echo "$JOB_RESPONSE" | tail -n 1)
+    export JOB_BODY
+
+    if [ "$JOB_STATUS_CODE" != "200" ]; then
+      echo "Attempt $attempt: status code $JOB_STATUS_CODE"
+      STATUS="unknown"
+    else
+      STATUS=$($PYTHON_BIN - <<'PY'
 import json, os
-resp = json.loads(os.environ.get('JOB_RESPONSE', '{}'))
-print(resp.get('status', 'unknown'))
+try:
+    resp = json.loads(os.environ.get('JOB_BODY', '{}'))
+    print(resp.get('status', 'unknown'))
+except Exception:
+    print('unknown')
 PY
-)
+      )
+    fi
 
     echo "Attempt $attempt: status=$STATUS"
 

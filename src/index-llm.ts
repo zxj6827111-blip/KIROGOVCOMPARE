@@ -5,7 +5,7 @@ import { runLLMMigrations } from './db/migrations-llm';
 import llmHealthRouter from './routes/llm-health';
 import llmRegionsRouter from './routes/llm-regions';
 import regionsImportRouter from './routes/regions-import';
-import llmJobsRouter from './routes/llm-jobs';
+import llmJobsRouter from './routes/jobs';
 import reportsRouter from './routes/reports';
 import llmComparisonsRouter from './routes/llm-comparisons';
 import comparisonHistoryRouter from './routes/comparison-history';

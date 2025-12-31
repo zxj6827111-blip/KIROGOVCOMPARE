@@ -26,7 +26,7 @@ if ! HEALTH_RESPONSE=$(${CURL_BIN} -s -w "\n%{http_code}" "${HEALTH_URL}"); then
   exit 1
 fi
 
-BODY=$(echo "${HEALTH_RESPONSE}" | head -n 1)
+BODY=$(echo "${HEALTH_RESPONSE}" | sed '$d')
 STATUS_CODE=$(echo "${HEALTH_RESPONSE}" | tail -n 1)
 
 echo "status=${STATUS_CODE} body=${BODY}"

@@ -41,6 +41,7 @@ router.post('/reports', upload.single('file'), async (req, res) => {
     const unitNameRaw = req.body.unit_name ?? req.body.unitName;
     const unitName = typeof unitNameRaw === 'string' && unitNameRaw.trim() ? unitNameRaw.trim() : null;
     const file = req.file;
+    const model = req.body.model;
 
     if (!regionId || Number.isNaN(regionId) || !Number.isInteger(regionId)) {
       return res.status(400).json({ error: 'region_id 无效' });
@@ -61,17 +62,99 @@ router.post('/reports', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: '仅支持 PDF 或 HTML 文件' });
     }
 
+    // Fix for garbled filenames (UTF-8 bytes interpreted as Latin-1)
+    const fixUtf8 = (str: string) => {
+      try {
+        // Check if string contains typical Latin-1 range chars that might be UTF-8 bytes
+        // E.g. "æ" (0xE6), "å" (0xE5), etc.
+        // A simple heuristic: try to decode as Latin-1 then read as UTF-8.
+        // If the result looks like valid UTF-8 (and Chinese), usage is high probability correct.
+        const fixed = Buffer.from(str, 'latin1').toString('utf8');
+        // If the fixed string is significantly shorter (multi-byte chars) 
+        // AND contains Chinese characters or other Unicode, it's likely the fix.
+        if (fixed.length < str.length && /[^\u0000-\u00ff]/.test(fixed)) {
+          return fixed;
+        }
+        return str;
+      } catch (e) {
+        return str;
+      }
+    };
+
+    const originalName = fixUtf8(file.originalname);
+
+    // [New Logic] Check if a report exists and if it is "empty".
+    // If so, delete it before uploading, to act as an overwrite and avoid "Report exists" error.
+    try {
+      const existingReport = querySqlite(
+        `SELECT id FROM reports WHERE region_id = ${regionId} AND year = ${year} AND unit_name = ${sqlValue(unitName)} LIMIT 1`
+      )[0];
+
+      if (existingReport) {
+        // Check active version
+        const activeVersion = querySqlite(
+          `SELECT parsed_json FROM report_versions WHERE report_id = ${existingReport.id} AND is_active = 1 LIMIT 1`
+        )[0];
+
+        let hasContent = false;
+        if (activeVersion && activeVersion.parsed_json && activeVersion.parsed_json !== '{}') {
+          try {
+            const parsed = JSON.parse(activeVersion.parsed_json);
+            if (Array.isArray(parsed.sections) && parsed.sections.length > 0) {
+              hasContent = true;
+            } else if (parsed.tables && typeof parsed.tables === 'object' && Object.keys(parsed.tables).length > 0) {
+              hasContent = true;
+            } else if (parsed.report_type || parsed.basic_info || parsed.year) {
+              hasContent = true;
+            }
+          } catch (e) {
+            hasContent = false;
+          }
+        }
+
+        if (!hasContent) {
+          console.log(`[ReportUpload] Existing report ${existingReport.id} is empty. Deleting to overwrite.`);
+          // Delete duplicate/empty report to allow overwrite
+          // Cascade delete logic (simplified for single report):
+          // 1. Get all versions
+          const versions = querySqlite(`SELECT id FROM report_versions WHERE report_id = ${existingReport.id}`);
+          const versionIds = versions.map((v: any) => v.id);
+
+          if (versionIds.length > 0) {
+            const vIdsStr = versionIds.join(',');
+            // Delete jobs
+            querySqlite(`DELETE FROM jobs WHERE version_id IN (${vIdsStr})`);
+            // Delete parses
+            querySqlite(`DELETE FROM report_version_parses WHERE report_version_id IN (${vIdsStr})`);
+            // Delete consistency items
+            querySqlite(`DELETE FROM report_consistency_items WHERE report_version_id IN (${vIdsStr})`);
+            // Delete versions
+            querySqlite(`DELETE FROM report_versions WHERE report_id = ${existingReport.id}`);
+          }
+          // Delete report
+          querySqlite(`DELETE FROM reports WHERE id = ${existingReport.id}`);
+        }
+      }
+    } catch (e) {
+      console.warn('[ReportUpload] Failed to check/delete existing empty report:', e);
+      // Ignore error and proceed to attempt normal upload
+    }
+
+
     const result = await reportUploadService.processUpload({
       regionId,
       year,
       unitName,
       tempFilePath: file.path,
-      originalName: file.originalname,
+      originalName,
       mimeType: file.mimetype,
       size: file.size,
+      model,
     });
 
-    const statusCode = result.reusedVersion ? 409 : 201;
+    // FIX: Always return 201 for successful upload, even if version is reused
+    // This allows frontend batch upload to continue processing instead of skipping
+    const statusCode = 201;
     return res.status(statusCode).json({
       report_id: result.reportId,
       version_id: result.versionId,
@@ -133,6 +216,7 @@ router.post('/reports/text', express.json({ limit: '10mb' }), async (req, res) =
       year,
       unitName,
       rawText,
+      model: req.body.model,
     });
 
     const statusCode = result.reusedVersion ? 409 : 201;
@@ -163,7 +247,7 @@ router.post('/reports/text', express.json({ limit: '10mb' }), async (req, res) =
 
 router.get('/reports', (req, res) => {
   try {
-    const { region_id, year } = req.query;
+    const { region_id, year, unit_name } = req.query;
 
     if (region_id !== undefined) {
       const regionIdNum = Number(region_id);
@@ -188,6 +272,9 @@ router.get('/reports', (req, res) => {
     if (year !== undefined) {
       conditions.push(`r.year = ${sqlValue(Number(year))}`);
     }
+    if (unit_name !== undefined && String(unit_name).trim() !== '') {
+      conditions.push(`r.unit_name = ${sqlValue(String(unit_name).trim())}`);
+    }
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const rows = querySqlite(`
@@ -197,6 +284,7 @@ router.get('/reports', (req, res) => {
         r.year,
         r.unit_name,
         rv.id AS active_version_id,
+        rv.parsed_json,
         (SELECT j.id FROM jobs j WHERE j.report_id = r.id ORDER BY j.id DESC LIMIT 1) AS job_id,
         (SELECT j.status FROM jobs j WHERE j.report_id = r.id ORDER BY j.id DESC LIMIT 1) AS job_status,
         (SELECT j.progress FROM jobs j WHERE j.report_id = r.id ORDER BY j.id DESC LIMIT 1) AS job_progress,
@@ -209,22 +297,41 @@ router.get('/reports', (req, res) => {
     `);
 
     return res.json({
-      data: rows.map((row) => ({
-        report_id: row.report_id,
-        region_id: row.region_id,
-        unit_name: row.unit_name,
-        year: row.year,
-        active_version_id: row.active_version_id || null,
-        latest_job: row.job_id
-          ? {
-            job_id: row.job_id,
-            status: row.job_status,
-            progress: row.job_progress,
-            error_code: row.job_error_code,
-            error_message: row.job_error_message,
+      data: rows.map((row) => {
+        let hasContent = false;
+        if (row.parsed_json && row.parsed_json.trim() !== '' && row.parsed_json.trim() !== '{}') {
+          try {
+            const parsed = JSON.parse(row.parsed_json);
+            if (Array.isArray(parsed.sections) && parsed.sections.length > 0) {
+              hasContent = true;
+            } else if (parsed.tables && typeof parsed.tables === 'object' && Object.keys(parsed.tables).length > 0) {
+              hasContent = true;
+            } else if (parsed.report_type || parsed.basic_info || parsed.year) {
+              hasContent = true;
+            }
+          } catch (e) {
+            hasContent = false;
           }
-          : null,
-      })),
+        }
+
+        return {
+          report_id: row.report_id,
+          region_id: row.region_id,
+          unit_name: row.unit_name,
+          year: row.year,
+          active_version_id: row.active_version_id || null,
+          has_content: hasContent,
+          latest_job: row.job_id
+            ? {
+              job_id: row.job_id,
+              status: row.job_status,
+              progress: row.job_progress,
+              error_code: row.job_error_code,
+              error_message: row.job_error_message,
+            }
+            : null,
+        };
+      }),
     });
   } catch (error) {
     console.error('Error listing reports:', error);
@@ -247,15 +354,43 @@ router.get('/reports/batch-check-status', (req, res) => {
 
     ensureSqliteMigrations();
 
-    // Get active version_ids for these reports
+    // Get active version_ids for these reports + check parsed_json
     const versionRows = querySqlite(`
-      SELECT r.id as report_id, rv.id as version_id
+      SELECT r.id as report_id, rv.id as version_id, rv.parsed_json
       FROM reports r
       JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = 1
       WHERE r.id IN (${reportIds.join(',')})
-    `) as Array<{ report_id: number; version_id: number }>;
+    `) as Array<{ report_id: number; version_id: number; parsed_json: string | null }>;
 
     const versionMap = new Map(versionRows.map(v => [v.report_id, v.version_id]));
+
+    // Check which versions have actual content
+    const contentMap = new Map<number, boolean>();
+    for (const v of versionRows) {
+      let hasContent = false;
+      if (v.parsed_json && v.parsed_json.trim() !== '' && v.parsed_json.trim() !== '{}') {
+        try {
+          const parsed = JSON.parse(v.parsed_json);
+
+
+          // Check for meaningful content:
+          // - 'sections' array with at least one entry (new format)
+          // - 'tables' object with at least one key (old format)
+          // - or other recognized top-level fields
+          if (Array.isArray(parsed.sections) && parsed.sections.length > 0) {
+            hasContent = true;
+          } else if (parsed.tables && typeof parsed.tables === 'object' && Object.keys(parsed.tables).length > 0) {
+            hasContent = true;
+          } else if (parsed.report_type || parsed.basic_info || parsed.year) {
+            hasContent = true;
+          }
+        } catch (e) {
+
+          hasContent = false;
+        }
+      }
+      contentMap.set(v.report_id, hasContent);
+    }
 
     // Batch query for FAIL items by group
     const versionIds = Array.from(versionMap.values());
@@ -272,12 +407,18 @@ router.get('/reports/batch-check-status', (req, res) => {
       GROUP BY report_version_id, group_key
     `) as Array<{ report_version_id: number; group_key: string; cnt: number }>;
 
-    // Build result map: reportId => { total, visual, structure, quality }
+    // Build result map: reportId => { total, visual, structure, quality, has_content }
     const result: Record<string, any> = {};
 
-    // Initialize all reports with zero counts
+    // Initialize all reports with zero counts and has_content flag
     for (const [reportId, versionId] of versionMap) {
-      result[String(reportId)] = { total: 0, visual: 0, structure: 0, quality: 0 };
+      result[String(reportId)] = {
+        total: 0,
+        visual: 0,
+        structure: 0,
+        quality: 0,
+        has_content: contentMap.get(reportId) ?? false
+      };
     }
 
     // Fill in actual counts
@@ -844,6 +985,64 @@ router.patch('/reports/:id/checks/items/:itemId', async (req, res) => {
     });
   } catch (error: any) {
     console.error('Error updating check item:', error);
+    return res.status(500).json({ error: 'internal_server_error', message: error.message });
+  }
+});
+
+/**
+ * DELETE /api/reports/:id
+ * Delete a report and all related data (versions, jobs, parses, consistency items)
+ */
+router.delete('/reports/:id', (req, res) => {
+  try {
+    ensureSqliteMigrations();
+    const reportId = Number(req.params.id);
+    if (Number.isNaN(reportId) || reportId < 1) {
+      return res.status(400).json({ error: 'invalid_report_id' });
+    }
+
+    // Check if report exists
+    const report = querySqlite(`SELECT id FROM reports WHERE id = ${sqlValue(reportId)} LIMIT 1`)[0];
+    if (!report) {
+      return res.status(404).json({ error: 'report_not_found' });
+    }
+
+    // Get all version IDs for this report
+    const versions = querySqlite(`SELECT id FROM report_versions WHERE report_id = ${sqlValue(reportId)}`) as Array<{ id: number }>;
+    const versionIds = versions.map(v => v.id);
+
+    if (versionIds.length > 0) {
+      const versionIdList = versionIds.join(',');
+
+      // Delete related jobs
+      querySqlite(`DELETE FROM jobs WHERE version_id IN (${versionIdList})`);
+
+      // Delete related parses
+      querySqlite(`DELETE FROM report_version_parses WHERE report_version_id IN (${versionIdList})`);
+
+      // Delete consistency items (if table exists)
+      try {
+        querySqlite(`DELETE FROM report_consistency_items WHERE report_version_id IN (${versionIdList})`);
+      } catch (e) {
+        // Table might not exist, ignore
+      }
+
+      // Delete versions
+      querySqlite(`DELETE FROM report_versions WHERE report_id = ${sqlValue(reportId)}`);
+    }
+
+    // Delete the report itself
+    querySqlite(`DELETE FROM reports WHERE id = ${sqlValue(reportId)}`);
+
+    console.log(`[Delete Report] Deleted report ${reportId} with ${versionIds.length} versions`);
+
+    return res.json({
+      message: 'report_deleted',
+      report_id: reportId,
+      versions_deleted: versionIds.length,
+    });
+  } catch (error: any) {
+    console.error('Error deleting report:', error);
     return res.status(500).json({ error: 'internal_server_error', message: error.message });
   }
 });

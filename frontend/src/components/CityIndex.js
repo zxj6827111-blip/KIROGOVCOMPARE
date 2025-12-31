@@ -9,7 +9,35 @@ function CityIndex({ onSelectReport, onViewComparison }) {
   const [error, setError] = useState('');
   const [checkStatusMap, setCheckStatusMap] = useState(new Map()); // 报告ID => 勾稽问题数量
 
-  // 从 URL 参数读取初始路径
+  // Determine region type based on naming convention
+  const getRegionType = (name) => {
+    if (!name) return 'department';
+
+    // Strict Suffix Check for Level 2 (Districts) and Level 3 (Towns/Streets)
+
+    // Town/Street level: Must END with or contain specific identifiers that denote a region
+    // "街道", "办事处", "镇", "乡" are strong indicators.
+    // User: "只要带镇、区、街道的都归纳到街道/乡镇... 其他都归纳到部门"
+    // CAUTION: "区" is also in "District".
+    // Let's separate based on commonly accepted suffixes.
+
+    // 1. Street/Town (Level 3)
+    // Suffixes: 街道, 街道办事处, 镇, 乡
+    if (name.endsWith('街道') || name.endsWith('办事处') || name.endsWith('镇') || name.endsWith('乡')) {
+      return 'town'; // internal type for granularity, will map to 'district' tab logic if needed or separate
+    }
+
+    // 2. District/County (Level 2)
+    // Suffixes: 区, 县, 市, 新区
+    // MUST END WITH these to avoid "市财政局" (starts with 市) being matched.
+    if (name.endsWith('区') || name.endsWith('县') || name.endsWith('市') || name.endsWith('新区')) {
+      return 'district';
+    }
+
+    // Default: Department
+    return 'department';
+  };
+
   const getInitialPath = () => {
     const params = new URLSearchParams(window.location.search);
     const regionParam = params.get('region');
@@ -22,6 +50,8 @@ function CityIndex({ onSelectReport, onViewComparison }) {
   const [path, setPath] = useState(getInitialPath); // 保存层级路径的 region_id
   const [selectedForCompare, setSelectedForCompare] = useState([]); // 选中用于比对的报告
   const [comparing, setComparing] = useState(false);
+  const [activeTab, setActiveTab] = useState('all'); // 'all', 'district', 'department'
+  const [searchTerm, setSearchTerm] = useState(''); // Search filter
 
   // 当 path 变化时，更新 URL 参数
   useEffect(() => {
@@ -61,9 +91,13 @@ function CityIndex({ onSelectReport, onViewComparison }) {
   };
 
   // Fetch consistency check counts for reports (optimized with batch API)
+  const [checkStatusLoaded, setCheckStatusLoaded] = useState(false);
+
   const fetchCheckStatusForReports = async (reportList) => {
+    setCheckStatusLoaded(false);
     if (reportList.length === 0) {
       setCheckStatusMap(new Map());
+      setCheckStatusLoaded(true);
       return;
     }
 
@@ -71,12 +105,13 @@ function CityIndex({ onSelectReport, onViewComparison }) {
       const reportIds = reportList.map(r => r.report_id || r.id).filter(id => id).join(',');
       if (!reportIds) {
         setCheckStatusMap(new Map());
+        setCheckStatusLoaded(true);
         return;
       }
       const resp = await apiClient.get(`/reports/batch-check-status?report_ids=${reportIds}`);
       const statusData = resp.data || {};
 
-      // Convert to Map - statusData now contains { total, visual, structure, quality }
+      // Convert to Map - statusData now contains {total, visual, structure, quality, has_content}
       const statusMap = new Map();
       Object.entries(statusData).forEach(([reportId, counts]) => {
         statusMap.set(Number(reportId), counts);
@@ -86,6 +121,8 @@ function CityIndex({ onSelectReport, onViewComparison }) {
     } catch (err) {
       console.error('Failed to fetch batch check status:', err);
       setCheckStatusMap(new Map()); // Empty map on error
+    } finally {
+      setCheckStatusLoaded(true);
     }
   };
 
@@ -228,8 +265,51 @@ function CityIndex({ onSelectReport, onViewComparison }) {
     }
   };
 
-  const cards = childrenOf(currentParentId);
+  const getCardLabel = (region) => {
+    const type = getRegionType(region.name);
+    if (type === 'town') {
+      return '街道/乡镇';
+    }
+    if (type === 'district') {
+      return '区县';
+    }
+    return '部门';
+  };
+
+  const allCards = childrenOf(currentParentId);
+
+  const filteredCards = useMemo(() => {
+    return allCards.filter(c => {
+      // Search Filter
+      if (searchTerm && !c.name.includes(searchTerm)) return false;
+
+      // Tab Filter
+      if (activeTab === 'all') return true;
+      const type = getRegionType(c.name);
+
+      // 'district' tab includes 'district' AND 'town' (administrative regions)
+      if (activeTab === 'district') {
+        return type === 'district' || type === 'town';
+      }
+
+      if (activeTab === 'department') return type === 'department';
+      return true;
+    });
+  }, [allCards, searchTerm, activeTab]);
+
   const currentReports = currentParentId ? reports.filter((r) => String(r.region_id) === String(currentParentId)) : [];
+
+  // Count availability for tabs (to show counts or hide empty tabs if desired)
+  const tabCounts = useMemo(() => {
+    let district = 0;
+    let department = 0;
+    allCards.forEach(c => {
+      const type = getRegionType(c.name);
+      if (type === 'district' || type === 'town') district++;
+      else department++;
+    });
+    return { district, department, all: allCards.length };
+  }, [allCards]);
 
   return (
     <div className="city-index">
@@ -314,10 +394,20 @@ function CityIndex({ onSelectReport, onViewComparison }) {
                       const reportId = r.report_id || r.id;
                       const checkStatus = checkStatusMap.get(reportId);
                       if (!checkStatus) {
-                        return <span className="check-status-loading">加载中...</span>;
+                        // If API is still loading, show loading indicator
+                        // If API is done but report not in map, it means no active version (empty content)
+                        if (!checkStatusLoaded) {
+                          return <span className="check-status-loading">加载中...</span>;
+                        }
+                        return <span className="check-status-badge error">✗ 无内容</span>;
                       }
 
-                      const { total, visual, structure, quality } = checkStatus;
+                      const { total, visual, structure, quality, has_content } = checkStatus;
+
+                      // Check if report has no content (empty parsed_json)
+                      if (has_content === false) {
+                        return <span className="check-status-badge error">✗ 无内容</span>;
+                      }
 
                       if (total === 0) {
                         return <span className="check-status-badge ok">✓ 无问题</span>;
@@ -364,35 +454,78 @@ function CityIndex({ onSelectReport, onViewComparison }) {
       )}
 
       {/* 下级城市区域 */}
-      {cards.length > 0 && (
+      {allCards.length > 0 && (
         <div className="children-section">
-          <h3>下级城市</h3>
-          <div className="card-grid">
-            {cards.map((region) => {
-              const total = countWithDescendants(region.id);
-              const directReports = reportCountMap.get(region.id) || 0;
-              return (
-                <div key={region.id} className="city-card" onClick={() => handleEnter(region.id)}>
-                  <div className="city-meta">
-                    <div className="city-country">{region.province || '中国'}</div>
-                    <div className="city-level">{levelLabel(region.level)}</div>
-                  </div>
-                  <h3 className="city-name">{region.name}</h3>
-                  <div className="city-count">
-                    <span className="count-number">{total}</span>
-                    <span className="count-label">份报告（含下级）</span>
-                  </div>
-                  {directReports > 0 && (
-                    <div className="direct-count">本级 {directReports} 份</div>
-                  )}
-                </div>
-              );
-            })}
+          <div className="section-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <h3>下级索引</h3>
+            <div className="filter-controls" style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+              {/* Tabs */}
+              <div className="tabs" style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  className={`tab-btn ${activeTab === 'all' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('all')}
+                >
+                  全部 <span className="badge">{tabCounts.all}</span>
+                </button>
+                <button
+                  className={`tab-btn ${activeTab === 'district' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('district')}
+                >
+                  {currentRegion?.level === 3 ? '街道/乡镇' : '区县'} <span className="badge">{tabCounts.district}</span>
+                </button>
+                <button
+                  className={`tab-btn ${activeTab === 'department' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('department')}
+                >
+                  部门 <span className="badge">{tabCounts.department}</span>
+                </button>
+              </div>
+              {/* Search */}
+              <div className="search-box">
+                <input
+                  type="text"
+                  placeholder="🔍 搜索名称..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  style={{ padding: '6px 10px', borderRadius: '4px', border: '1px solid #ddd', width: '200px' }}
+                />
+              </div>
+            </div>
           </div>
+
+          {filteredCards.length > 0 ? (
+            <div className="card-grid">
+              {filteredCards.map((region) => {
+                const total = countWithDescendants(region.id);
+                const directReports = reportCountMap.get(region.id) || 0;
+                const type = getRegionType(region.name);
+                return (
+                  <div key={region.id} className={`city-card type-${type}`} onClick={() => handleEnter(region.id)}>
+                    <div className="city-meta">
+                      <div className="city-country">{region.province || '中国'}</div>
+                      <div className="city-level">{getCardLabel(region)}</div>
+                    </div>
+                    <h3 className="city-name">{region.name}</h3>
+                    <div className="city-count">
+                      <span className="count-number">{total}</span>
+                      <span className="count-label">份报告（含下级）</span>
+                    </div>
+                    {directReports > 0 && (
+                      <div className="direct-count">本级 {directReports} 份</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="empty-search-state" style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+              未找到 "{searchTerm}" 相关内容
+            </div>
+          )}
         </div>
       )}
 
-      {!loading && cards.length === 0 && currentReports.length === 0 && (
+      {!loading && allCards.length === 0 && currentReports.length === 0 && (
         <div className="empty">暂无年报和下级区域</div>
       )}
     </div>

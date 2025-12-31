@@ -11,6 +11,8 @@ import batchJobsRouter from './routes/batch-jobs';
 import adminRouter from './routes/admin';
 import reportsRouter from './routes/reports';
 import comparisonsRouter from './routes/comparisons';
+import jobsRouter from './routes/jobs';
+import notificationsRouter from './routes/notifications';
 
 dotenv.config();
 
@@ -27,10 +29,12 @@ app.use(express.static(path.join(__dirname, 'public')));
 // 健康检查
 app.use('/api', healthRouter);
 app.use('/api', reportsRouter);
+app.use('/api', jobsRouter);
+app.use('/api', notificationsRouter);
 
 // 根路由
 app.get('/', (_req, res) => {
-  res.json({ 
+  res.json({
     message: '政府信息公开年度报告差异比对系统 API',
     version: '1.0.0',
     endpoints: {

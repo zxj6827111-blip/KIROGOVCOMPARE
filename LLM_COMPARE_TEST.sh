@@ -45,7 +45,7 @@ upload_and_wait() {
   local upload_response
   upload_response=$(curl -s -w "\n%{http_code}" -F region_id=${REGION_ID} -F year=${year} -F file=@"${file}" "${BASE_URL}/reports")
   local body
-  body=$(echo "${upload_response}" | head -n 1)
+  body=$(echo "${upload_response}" | sed '$d')
   local status
   status=$(echo "${upload_response}" | tail -n 1)
   echo "status=${status} body=${body}"
@@ -55,7 +55,7 @@ upload_and_wait() {
     exit 1
   fi
 
-  local report_id job_id
+  local report_id version_id
   report_id=$(UPLOAD_BODY="${body}" ${PYTHON_BIN} - <<'PY'
 import json, os
 body = os.environ.get('UPLOAD_BODY', '{}')
@@ -66,29 +66,29 @@ except Exception:
     print('')
 PY
   )
-  job_id=$(UPLOAD_BODY="${body}" ${PYTHON_BIN} - <<'PY'
+  version_id=$(UPLOAD_BODY="${body}" ${PYTHON_BIN} - <<'PY'
 import json, os
 body = os.environ.get('UPLOAD_BODY', '{}')
 try:
     data = json.loads(body)
-    print(data.get('job_id', ''))
+    print(data.get('version_id', ''))
 except Exception:
     print('')
 PY
   )
 
-  if [[ -z "${report_id}" || -z "${job_id}" ]]; then
-    echo "[error] missing report_id or job_id in upload response" >&2
+  if [[ -z "${report_id}" || -z "${version_id}" ]]; then
+    echo "[error] missing report_id or version_id in upload response" >&2
     exit 1
   fi
 
-  echo "[jobs] polling parse job ${job_id} until succeeded" 
+  echo "[jobs] polling version ${version_id} until succeeded" 
   local status_value="queued"
   for attempt in $(seq 1 30); do
     local job_response
-    job_response=$(curl -s -w "\n%{http_code}" "${BASE_URL}/jobs/${job_id}")
+    job_response=$(curl -s -w "\n%{http_code}" "${BASE_URL}/jobs/${version_id}")
     local job_body
-    job_body=$(echo "${job_response}" | head -n 1)
+    job_body=$(echo "${job_response}" | sed '$d')
     local job_status_code
     job_status_code=$(echo "${job_response}" | tail -n 1)
 
@@ -140,7 +140,7 @@ fi
 
 echo "[compare] creating comparison for ${YEAR_A} vs ${YEAR_B}" 
 COMPARE_RESPONSE=$(curl -s -w "\n%{http_code}" -H "Content-Type: application/json" -d "{\"region_id\":${REGION_ID},\"year_a\":${YEAR_A},\"year_b\":${YEAR_B}}" "${BASE_URL}/comparisons")
-COMPARE_BODY=$(echo "${COMPARE_RESPONSE}" | head -n 1)
+COMPARE_BODY=$(echo "${COMPARE_RESPONSE}" | sed '$d')
 COMPARE_STATUS=$(echo "${COMPARE_RESPONSE}" | tail -n 1)
 
 echo "status=${COMPARE_STATUS} body=${COMPARE_BODY}" 
@@ -177,14 +177,14 @@ if [[ -z "${COMPARISON_ID}" || -z "${COMPARE_JOB_ID}" ]]; then
 fi
 
 STATUS_VALUE="queued"
-echo "[jobs] polling compare job ${COMPARE_JOB_ID} until succeeded" 
+echo "[jobs] polling comparison ${COMPARISON_ID} until succeeded" 
 for attempt in $(seq 1 30); do
-  JOB_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/jobs/${COMPARE_JOB_ID}")
-  JOB_BODY=$(echo "${JOB_RESPONSE}" | head -n 1)
+  JOB_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/comparisons/${COMPARISON_ID}")
+  JOB_BODY=$(echo "${JOB_RESPONSE}" | sed '$d')
   JOB_STATUS_CODE=$(echo "${JOB_RESPONSE}" | tail -n 1)
 
   if [[ "${JOB_STATUS_CODE}" != "200" ]]; then
-    echo "[error] expected job fetch to return 200, got ${JOB_STATUS_CODE}" >&2
+    echo "[error] expected comparison fetch to return 200, got ${JOB_STATUS_CODE}" >&2
     exit 1
   fi
 
@@ -193,7 +193,8 @@ import json, os
 body = os.environ.get('JOB_BODY', '{}')
 try:
     data = json.loads(body)
-    print(data.get('status', ''))
+    latest_job = data.get('latest_job') or {}
+    print(latest_job.get('status', 'queued'))
 except Exception:
     print('')
 PY
@@ -220,7 +221,7 @@ fi
 
 echo "[compare] fetching comparison detail ${COMPARISON_ID}" 
 DETAIL_RESPONSE=$(curl -s -w "\n%{http_code}" "${BASE_URL}/comparisons/${COMPARISON_ID}")
-DETAIL_BODY=$(echo "${DETAIL_RESPONSE}" | head -n 1)
+DETAIL_BODY=$(echo "${DETAIL_RESPONSE}" | sed '$d')
 DETAIL_STATUS=$(echo "${DETAIL_RESPONSE}" | tail -n 1)
 
 echo "detail_status=${DETAIL_STATUS} body=${DETAIL_BODY}" 

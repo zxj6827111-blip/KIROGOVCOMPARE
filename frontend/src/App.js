@@ -8,6 +8,9 @@ import CityIndex from './components/CityIndex';
 import RegionsManager from './components/RegionsManager';
 import ComparisonHistory from './components/ComparisonHistory';
 import ComparisonDetailView from './components/ComparisonDetailView';
+import JobCenter from './components/JobCenter';
+import JobDetail from './components/JobDetail';
+import NotificationCenter from './components/NotificationCenter';
 import { apiClient, API_BASE_URL, isAuthenticated, getCurrentUser, logout } from './apiClient';
 
 function App() {
@@ -75,6 +78,11 @@ function App() {
   const renderContent = () => {
     if (pathname === '/regions') return <RegionsManager />;
     if (pathname === '/upload') return <UploadReport />;
+    if (pathname === '/jobs' || pathname === '/jobs/') return <JobCenter />;
+    if (pathname.startsWith('/jobs/')) {
+      const versionId = pathname.split('/').pop();
+      return <JobDetail versionId={versionId} onBack={() => navigate('/jobs')} />;
+    }
     if (pathname === '/catalog' || pathname === '/catalog/reports') {
       return <CityIndex
         onSelectReport={(reportId) => navigate(`/catalog/reports/${reportId}`)}
@@ -107,6 +115,7 @@ function App() {
           <p>后台管理系统</p>
         </div>
         <div className="header-user">
+          <NotificationCenter />
           <span>👤 {user.displayName || user.username}</span>
           <button onClick={handleLogout} className="logout-btn">退出登录</button>
         </div>
@@ -129,6 +138,13 @@ function App() {
         </button>
         <button
           type="button"
+          className={`nav-btn ${isNavActive('/jobs') ? 'active' : ''}`}
+          onClick={() => navigate('/jobs')}
+        >
+          📋 任务中心
+        </button>
+        <button
+          type="button"
           className={`nav-btn ${isNavActive('/catalog') ? 'active' : ''}`}
           onClick={() => navigate('/catalog')}
         >
@@ -139,7 +155,7 @@ function App() {
           className={`nav-btn ${isNavActive('/history') ? 'active' : ''}`}
           onClick={() => navigate('/history')}
         >
-          📋 比对结果汇总
+          📊 比对结果汇总
         </button>
       </nav>
 

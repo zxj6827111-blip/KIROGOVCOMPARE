@@ -119,16 +119,29 @@ export function ensureSqliteMigrations(): void {
     .sort();
 
   for (const file of files) {
-    const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
-    runSqlStatements(sql);
+    try {
+      const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
+      runSqlStatements(sql);
+    } catch (error: any) {
+      // If it's a migration file error, log it but don't necessarily crash 
+      // if it's just "duplicate column" or "table already exists"
+      if (error.message?.includes('duplicate column name') || error.message?.includes('already exists')) {
+        console.log(`[sqlite] Migration file ${file} already partially applied, skipping duplicates.`);
+      } else {
+        console.warn(`[sqlite] Migration file ${file} had issues: ${error.message}`);
+        // For 008, we know it might have issues if run partially, so we continue
+      }
+    }
   }
 
   const columns = runSqlStatements('PRAGMA table_info(jobs);') as Array<{ name?: string }>;
+
+  // Check and add comparison_id if missing
   const hasComparisonId = columns.some((column) => column.name === 'comparison_id');
   if (!hasComparisonId) {
-    runSqlStatements(
-      'ALTER TABLE jobs ADD COLUMN comparison_id INTEGER REFERENCES comparisons(id) ON DELETE SET NULL;'
-    );
+    try {
+      runSqlStatements('ALTER TABLE jobs ADD COLUMN comparison_id INTEGER REFERENCES comparisons(id) ON DELETE SET NULL;');
+    } catch (e) { }
   }
   runSqlStatements('CREATE INDEX IF NOT EXISTS idx_jobs_comparison ON jobs(comparison_id);');
 
