@@ -115,7 +115,7 @@ export class LlmJobRunner {
       querySqlite(`
         UPDATE jobs 
         SET status = 'cancelled',
-            description = '用户手动取消',
+            error_message = '用户手动取消',
             progress = 100,
             step_code = 'CANCELLED',
             step_name = '已取消',

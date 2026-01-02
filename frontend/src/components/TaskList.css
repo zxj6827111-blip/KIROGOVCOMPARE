@@ -1,186 +1,217 @@
 .task-list-container {
-  background-color: white;
-  border-radius: 8px;
-  padding: 30px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  background-color: var(--bg-surface);
+  border-radius: var(--radius-md);
+  padding: 32px;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-color);
 }
 
 .task-list-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 30px;
+  margin-bottom: 32px;
   flex-wrap: wrap;
   gap: 20px;
 }
 
 .task-list-header h2 {
   font-size: 24px;
-  color: #333;
+  color: var(--text-main);
+  margin: 0;
+  font-weight: 700;
 }
 
 .header-controls {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
 }
 
 .filter-select {
-  padding: 10px 15px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
+  padding: 10px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
   font-size: 14px;
-  background-color: white;
+  background-color: var(--bg-app);
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
+  color: var(--text-main);
 }
 
 .filter-select:focus {
   outline: none;
-  border-color: #667eea;
-  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(138, 180, 248, 0.2);
 }
 
 .refresh-btn {
   padding: 10px 20px;
-  background-color: #667eea;
-  color: white;
+  background-color: var(--primary);
+  color: #000;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 14px;
-  font-weight: 500;
-  transition: all 0.3s ease;
+  font-weight: 600;
+  transition: all 0.2s ease;
 }
 
 .refresh-btn:hover:not(:disabled) {
-  background-color: #5568d3;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  background-color: #9bbcf9;
+  transform: translateY(-1px);
 }
 
 .refresh-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+  background-color: var(--bg-surface-hover);
+  color: var(--text-muted);
 }
 
 .loading {
   text-align: center;
-  padding: 40px;
-  color: #999;
+  padding: 48px;
+  color: var(--text-muted);
   font-size: 16px;
 }
 
 .empty-state {
   text-align: center;
-  padding: 60px 20px;
-  color: #999;
+  padding: 60px 24px;
+  color: var(--text-muted);
 }
 
 .empty-state p {
   font-size: 16px;
-  margin: 10px 0;
+  margin: 12px 0;
 }
 
 .task-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-  gap: 20px;
+  gap: 24px;
 }
 
 .task-card {
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  padding: 20px;
-  background-color: #fafafa;
-  transition: all 0.3s ease;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 24px;
+  background-color: var(--bg-app);
+  transition: all 0.2s ease;
   display: flex;
   flex-direction: column;
 }
 
 .task-card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-sm);
   transform: translateY(-2px);
-  border-color: #667eea;
+  border-color: var(--primary);
+  background: var(--bg-surface-hover);
 }
 
 .task-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 15px;
-  gap: 10px;
+  margin-bottom: 20px;
+  gap: 12px;
 }
 
 .task-header h3 {
   font-size: 16px;
-  color: #333;
+  color: var(--text-main);
   word-break: break-all;
   flex: 1;
+  margin: 0;
+  font-weight: 600;
 }
 
 .status-badge {
   padding: 4px 12px;
   border-radius: 20px;
-  color: white;
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+  letter-spacing: 0.5px;
 }
+
+/* Status colors handled dynamically or assumed global classes, but adding here for safety if specific classes used */
+.status-badge.RUNNING {
+  background: rgba(138, 180, 248, 0.2);
+  color: var(--primary);
+}
+
+.status-badge.COMPLETED {
+  background: rgba(129, 201, 149, 0.2);
+  color: var(--success);
+}
+
+.status-badge.FAILED {
+  background: rgba(242, 139, 130, 0.2);
+  color: var(--danger);
+}
+
+.status-badge.PENDING {
+  background: rgba(253, 214, 99, 0.2);
+  color: var(--warning);
+}
+
 
 .task-info {
   flex: 1;
-  margin-bottom: 15px;
+  margin-bottom: 20px;
 }
 
 .task-info p {
   font-size: 13px;
-  color: #666;
+  color: var(--text-muted);
   margin: 8px 0;
   word-break: break-all;
 }
 
 .task-info strong {
-  color: #333;
+  color: var(--text-main);
+  font-weight: 600;
 }
 
 .task-message {
-  background-color: #e3f2fd;
-  border-left: 4px solid #2196f3;
-  padding: 10px;
-  margin-bottom: 15px;
+  background-color: rgba(138, 180, 248, 0.1);
+  border-left: 4px solid var(--primary);
+  padding: 12px;
+  margin-bottom: 20px;
   border-radius: 4px;
   font-size: 13px;
-  color: #1976d2;
+  color: var(--primary);
 }
 
 .view-btn {
-  padding: 10px 16px;
-  background-color: #667eea;
-  color: white;
-  border: none;
-  border-radius: 6px;
+  padding: 10px 18px;
+  background-color: rgba(138, 180, 248, 0.1);
+  color: var(--primary);
+  border: 1px solid rgba(138, 180, 248, 0.2);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 14px;
-  font-weight: 500;
-  transition: all 0.3s ease;
+  font-weight: 600;
+  transition: all 0.2s ease;
   align-self: flex-start;
 }
 
 .view-btn:hover {
-  background-color: #5568d3;
-  transform: translateX(4px);
+  background-color: rgba(138, 180, 248, 0.2);
+  transform: translateX(2px);
 }
 
 /* 进度条 */
 .progress-section {
-  margin: 12px 0;
+  margin: 16px 0;
 }
 
 .progress-label {
   font-size: 13px;
-  color: #666;
-  margin-bottom: 6px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -188,77 +219,80 @@
 
 .stage-text {
   font-size: 12px;
-  color: #999;
+  color: var(--text-muted);
   font-weight: normal;
+  opacity: 0.8;
 }
 
 .progress-bar {
   width: 100%;
   height: 6px;
-  background-color: #e0e0e0;
+  background-color: var(--bg-surface);
   border-radius: 3px;
   overflow: hidden;
 }
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #667eea, #764ba2);
+  background: linear-gradient(90deg, #81c995, #34a853);
   transition: width 0.3s ease;
 }
 
 /* 警告 */
 .task-warnings {
-  background-color: #fff3cd;
-  border-left: 4px solid #ffc107;
-  padding: 10px;
-  margin-bottom: 15px;
+  background-color: rgba(253, 214, 99, 0.1);
+  border-left: 4px solid var(--warning);
+  padding: 12px;
+  margin-bottom: 20px;
   border-radius: 4px;
   font-size: 13px;
-  color: #856404;
+  color: var(--warning);
 }
 
 /* 任务操作按钮 */
 .task-actions {
   display: flex;
-  gap: 8px;
+  gap: 12px;
   flex-wrap: wrap;
 }
 
 .download-btn,
 .delete-btn {
-  padding: 8px 12px;
+  padding: 8px 16px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 13px;
-  font-weight: 500;
-  transition: all 0.3s ease;
+  font-weight: 600;
+  transition: all 0.2s ease;
   flex: 1;
   min-width: 80px;
 }
 
 .download-btn {
-  background-color: #4caf50;
-  color: white;
+  background-color: rgba(129, 201, 149, 0.1);
+  color: var(--success);
+  border: 1px solid rgba(129, 201, 149, 0.2);
 }
 
 .download-btn:hover {
-  background-color: #45a049;
-  transform: translateY(-2px);
+  background-color: rgba(129, 201, 149, 0.2);
+  transform: translateY(-1px);
 }
 
 .delete-btn {
-  background-color: #f44336;
-  color: white;
+  background-color: rgba(242, 139, 130, 0.1);
+  color: var(--danger);
+  border: 1px solid rgba(242, 139, 130, 0.2);
 }
 
 .delete-btn:hover:not(:disabled) {
-  background-color: #da190b;
-  transform: translateY(-2px);
+  background-color: rgba(242, 139, 130, 0.2);
+  transform: translateY(-1px);
 }
 
 .delete-btn:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 

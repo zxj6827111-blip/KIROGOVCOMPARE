@@ -1,8 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import './JobCenter.css';
 import { apiClient } from '../apiClient';
+import { ListTodo, Trash2, RefreshCw, AlertTriangle, Ban, Eye } from 'lucide-react';
 
 function JobCenter() {
+    // Pagination
+    const PAGE_SIZE = 20;
+    const [currentPage, setCurrentPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
+    const [totalJobs, setTotalJobs] = useState(0);
+
     // Selection state
     const [jobs, setJobs] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -13,7 +20,7 @@ function JobCenter() {
         unit_name: '',
     });
     const [regions, setRegions] = useState([]);
-    const [selectedIds, setSelectedIds] = useState([]);
+    const [selectedIds, setSelectedIds] = useState([]); // Now stores job_id instead of version_id
 
     // Confirm Dialog State
     const [confirmDialog, setConfirmDialog] = useState({
@@ -55,24 +62,27 @@ function JobCenter() {
         loadRegions();
     }, []);
 
-    // Load jobs
+    // Load jobs when filters or page changes
     useEffect(() => {
         loadJobs();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [filters]);
+    }, [filters, currentPage]);
 
-    // Auto-refresh polling
+    // Auto-refresh polling (keep current page)
     useEffect(() => {
         const intervalId = setInterval(() => {
-            loadJobs(true); // checkActive=true (background)
+            loadJobs(true); // isBackground=true
         }, 3000);
         return () => clearInterval(intervalId);
-    }, [filters]);
+    }, [filters, currentPage]);
 
     const loadJobs = async (isBackground = false) => {
         if (!isBackground) setLoading(true);
         try {
-            const params = {};
+            const params = {
+                page: currentPage,
+                limit: PAGE_SIZE,
+            };
             if (filters.status) params.status = filters.status;
             if (filters.region_id) params.region_id = filters.region_id;
             if (filters.year) params.year = filters.year;
@@ -80,7 +90,11 @@ function JobCenter() {
 
             const resp = await apiClient.get('/jobs', { params });
             const jobsList = resp.data?.jobs ?? [];
+            const pagination = resp.data?.pagination ?? {};
+
             setJobs(jobsList);
+            setTotalPages(pagination.totalPages || 1);
+            setTotalJobs(pagination.total || jobsList.length);
         } catch (error) {
             console.error('Failed to load jobs:', error);
         } finally {
@@ -90,6 +104,7 @@ function JobCenter() {
 
     const handleFilterChange = (key, value) => {
         setFilters((prev) => ({ ...prev, [key]: value }));
+        setCurrentPage(1); // Reset to first page on filter change
     };
 
     const handleRegionChange = (level, value) => {
@@ -138,6 +153,7 @@ function JobCenter() {
             processing: { label: '处理中', className: 'status-processing' },
             succeeded: { label: '成功', className: 'status-success' },
             failed: { label: '失败', className: 'status-failed' },
+            cancelled: { label: '已取消', className: 'status-cancelled' },
         };
         const config = statusMap[normalizeStatus(status)] || { label: status, className: '' };
         return <span className={`status-badge ${config.className}`}>{config.label}</span>;
@@ -150,26 +166,32 @@ function JobCenter() {
 
     const handleSelectAll = (e) => {
         if (e.target.checked) {
-            setSelectedIds(jobs.map((j) => j.version_id));
+            setSelectedIds(jobs.map((j) => j.job_id));
         } else {
             setSelectedIds([]);
         }
     };
 
-    const handleSelectOne = (versionId, checked) => {
+    const handleSelectOne = (jobId, checked) => {
         if (checked) {
-            setSelectedIds((prev) => [...prev, versionId]);
+            setSelectedIds((prev) => [...prev, jobId]);
         } else {
-            setSelectedIds((prev) => prev.filter((id) => id !== versionId));
+            setSelectedIds((prev) => prev.filter((id) => id !== jobId));
         }
     };
 
-    const handleDelete = (versionId) => {
+    const handleDelete = (jobId) => {
         showConfirm('确定要删除该任务记录吗？此操作不可恢复。', async () => {
             try {
-                await apiClient.delete(`/jobs/${versionId}`);
-                setJobs((prev) => prev.filter((j) => j.version_id !== versionId));
-                setSelectedIds((prev) => prev.filter((id) => id !== versionId));
+                // Note: Backend still uses version_id for deletion - we need to send job_id
+                // For now, we'll reload the job list after delete
+                // TODO: Add backend support for job_id based deletion
+                const job = jobs.find(j => j.job_id === jobId);
+                if (job) {
+                    await apiClient.delete(`/jobs/${job.version_id}`);
+                }
+                setJobs((prev) => prev.filter((j) => j.job_id !== jobId));
+                setSelectedIds((prev) => prev.filter((id) => id !== jobId));
             } catch (error) {
                 console.error('Delete failed:', error);
                 alert(`删除失败: ${error.response?.data?.error || error.message}`);
@@ -207,18 +229,18 @@ function JobCenter() {
     return (
         <div className="job-center">
             <div className="job-center-header">
-                <h2>📋 任务中心</h2>
+                <h2><ListTodo size={24} /> 任务中心</h2>
                 <div className="header-actions">
                     {selectedIds.length > 0 && (
                         <button className="btn-batch-delete" onClick={handleBatchDelete}>
-                            🗑️ 删除选中 ({selectedIds.length})
+                            <Trash2 size={16} /> 删除选中 ({selectedIds.length})
                         </button>
                     )}
                     <button className="btn-delete-all" onClick={handleDeleteAll}>
-                        ⚠️ 清空所有
+                        <AlertTriangle size={16} /> 清空所有
                     </button>
-                    <button className="btn-refresh" onClick={loadJobs} disabled={loading}>
-                        🔄 刷新
+                    <button className="btn-refresh" onClick={() => loadJobs(false)} disabled={loading}>
+                        <RefreshCw size={16} className={loading ? 'spin' : ''} /> 刷新
                     </button>
                 </div>
             </div>
@@ -232,6 +254,7 @@ function JobCenter() {
                         <option value="processing">处理中</option>
                         <option value="succeeded">成功</option>
                         <option value="failed">失败</option>
+                        <option value="cancelled">已取消</option>
                     </select>
                 </div>
                 <div className="filter-group">
@@ -283,19 +306,24 @@ function JobCenter() {
                 </div>
             </div>
 
+            {/* Jobs count info */}
+            <div className="jobs-info" style={{ marginBottom: '12px', color: '#666', fontSize: '14px' }}>
+                共 {totalJobs} 条任务记录 {totalPages > 1 && `(第 ${currentPage}/${totalPages} 页)`}
+            </div>
+
             {loading ? (
                 <div className="loading-message">加载中...</div>
             ) : jobs.length === 0 ? (
                 <div className="empty-message">暂无任务</div>
             ) : (
-                <div className="jobs-table-container">
+                <div className="jobs-list-container">
                     <table className="jobs-table">
                         <thead>
                             <tr>
                                 <th style={{ width: '40px' }}>
                                     <input
                                         type="checkbox"
-                                        checked={jobs.length > 0 && selectedIds.length === jobs.length}
+                                        checked={jobs.length > 0 && jobs.every(j => selectedIds.includes(j.job_id))}
                                         onChange={handleSelectAll}
                                     />
                                 </th>
@@ -307,18 +335,18 @@ function JobCenter() {
                                 <th>步骤</th>
                                 <th>尝试次数</th>
                                 <th>模型</th>
-                                <th>更新时间</th>
+                                <th>创建时间</th>
                                 <th>操作</th>
                             </tr>
                         </thead>
                         <tbody>
                             {jobs.map((job) => (
-                                <tr key={job.version_id}>
+                                <tr key={job.job_id}>
                                     <td>
                                         <input
                                             type="checkbox"
-                                            checked={selectedIds.includes(job.version_id)}
-                                            onChange={(e) => handleSelectOne(job.version_id, e.target.checked)}
+                                            checked={selectedIds.includes(job.job_id)}
+                                            onChange={(e) => handleSelectOne(job.job_id, e.target.checked)}
                                         />
                                     </td>
                                     <td>{getRegionName(job.region_id)}</td>
@@ -336,35 +364,42 @@ function JobCenter() {
                                     <td>{job.step_name || '-'}</td>
                                     <td>第 {job.attempt || 1} 轮</td>
                                     <td>{job.model || '-'}</td>
-                                    <td>{job.updated_at ? new Date(job.updated_at).toLocaleString('zh-CN') : '-'}</td>
+                                    <td>{job.created_at ? new Date(job.created_at).toLocaleString('zh-CN') : '-'}</td>
                                     <td>
-                                        <div className="action-buttons" style={{ display: 'flex', gap: '5px' }}>
+                                        <div className="action-buttons" style={{ display: 'flex', gap: '8px' }}>
+                                            <button
+                                                className="icon-btn view"
+                                                onClick={() => handleViewDetail(job.version_id)}
+                                                title="查看详情"
+                                            >
+                                                <Eye size={14} />
+                                                <span>查看</span>
+                                            </button>
                                             {(job.status === 'queued' || job.status === 'processing' || job.status === 'running') ? (
                                                 <button
                                                     onClick={(e) => {
                                                         e.stopPropagation();
                                                         handleCancel(job.version_id);
                                                     }}
-                                                    className="btn-icon-cancel"
+                                                    className="icon-btn cancel"
                                                     title="取消任务"
                                                 >
-                                                    ⛔
+                                                    <Ban size={14} />
+                                                    <span>取消</span>
                                                 </button>
                                             ) : (
                                                 <button
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        handleDelete(job.version_id);
+                                                        handleDelete(job.job_id);
                                                     }}
-                                                    className="btn-icon-delete"
+                                                    className="icon-btn delete"
                                                     title="删除记录"
                                                 >
-                                                    🗑️
+                                                    <Trash2 size={14} />
+                                                    <span>删除</span>
                                                 </button>
                                             )}
-                                            <button className="btn-view-detail" onClick={() => handleViewDetail(job.version_id)}>
-                                                查看详情
-                                            </button>
                                         </div>
                                     </td>
                                 </tr>
@@ -373,10 +408,57 @@ function JobCenter() {
                     </table>
                 </div>
             )}
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+                <div className="pagination" style={{
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    gap: '8px',
+                    marginTop: '16px',
+                    padding: '12px 0'
+                }}>
+                    <button
+                        className="btn-page"
+                        onClick={() => setCurrentPage(1)}
+                        disabled={currentPage === 1}
+                    >
+                        首页
+                    </button>
+                    <button
+                        className="btn-page"
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        disabled={currentPage === 1}
+                    >
+                        上一页
+                    </button>
+                    <span style={{ margin: '0 12px', color: '#333' }}>
+                        第 {currentPage} / {totalPages} 页
+                    </span>
+                    <button
+                        className="btn-page"
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        disabled={currentPage === totalPages}
+                    >
+                        下一页
+                    </button>
+                    <button
+                        className="btn-page"
+                        onClick={() => setCurrentPage(totalPages)}
+                        disabled={currentPage === totalPages}
+                    >
+                        末页
+                    </button>
+                </div>
+            )}
             {/* Custom Confirm Modal */}
             {confirmDialog.isOpen && (
                 <div className="confirm-modal-overlay">
                     <div className="confirm-modal">
+                        <div className="confirm-modal-icon">
+                            <AlertTriangle size={48} />
+                        </div>
                         <h3>确认操作</h3>
                         <p>{confirmDialog.message}</p>
                         <div className="confirm-modal-actions">

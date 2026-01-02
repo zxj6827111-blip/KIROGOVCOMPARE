@@ -1,9 +1,10 @@
 import { LlmProvider, LlmProviderError } from './LlmProvider';
 import { GeminiLlmProvider } from './GeminiLlmProvider';
 import { ModelScopeLlmProvider } from './ModelScopeLlmProvider';
+import { GlmFlashLlmProvider } from './GlmFlashLlmProvider';
 import { StubLlmProvider } from './StubLlmProvider';
 
-export type SupportedLlmProvider = 'stub' | 'gemini' | 'modelscope';
+export type SupportedLlmProvider = 'stub' | 'gemini' | 'modelscope' | 'glm-flash' | 'glm-4.5-flash';
 
 function resolveProviderName(): SupportedLlmProvider {
   const provider = (process.env.LLM_PROVIDER || 'stub').toLowerCase();
@@ -12,6 +13,9 @@ function resolveProviderName(): SupportedLlmProvider {
   }
   if (provider === 'modelscope') {
     return 'modelscope';
+  }
+  if (provider === 'glm-flash') {
+    return 'glm-flash';
   }
   return 'stub';
 }
@@ -40,6 +44,28 @@ export function createLlmProvider(providerName?: string, modelName?: string): Ll
     }
 
     return new ModelScopeLlmProvider(apiKey, model);
+  }
+
+  if (provider === 'glm-flash') {
+    const apiKey = process.env.GLM_FLASH_API_KEY;
+    const apiUrl = process.env.GLM_FLASH_API_URL || 'https://api.example.com/glm-4flash';
+
+    if (!apiKey) {
+      throw new LlmProviderError('GLM_FLASH_API_KEY is required for GLM-Flash provider', 'glm_flash_missing_api_key');
+    }
+
+    return new GlmFlashLlmProvider(apiKey, apiUrl, 'glm-4-flash');
+  }
+
+  if (provider === 'glm-4.5-flash') {
+    const apiKey = process.env.GLM_FLASH_API_KEY;
+    const apiUrl = process.env.GLM_FLASH_API_URL || 'https://open.bigmodel.cn/api/paas/v4/chat/completions';
+
+    if (!apiKey) {
+      throw new LlmProviderError('GLM_FLASH_API_KEY is required for GLM-4.5-Flash provider', 'glm_flash_missing_api_key');
+    }
+
+    return new GlmFlashLlmProvider(apiKey, apiUrl, 'glm-4.5-flash');
   }
 
   return new StubLlmProvider();

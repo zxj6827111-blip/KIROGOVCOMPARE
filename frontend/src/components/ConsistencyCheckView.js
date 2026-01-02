@@ -296,7 +296,7 @@ const ConsistencyCheckView = ({ reportId, onEdit, filterGroups }) => {
     <div className="consistency-check-view">
       <div className="check-header">
         <div className="check-info">
-          <h3>{filterGroups && filterGroups.includes('visual') ? '🛡️ 数据质量审计' : '🧮 勾稽关系校验'}</h3>
+          <h3>{filterGroups && filterGroups.includes('visual') ? '◉ 数据质量审计' : '⬡ 勾稽关系校验'}</h3>
           {latest_run ? (
             <div className="summary">
               <span className="summary-item fail">问题: {displaySummary.fail}</span>

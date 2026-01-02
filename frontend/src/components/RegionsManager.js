@@ -1,40 +1,142 @@
-import React, { useEffect, useMemo, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import './RegionsManager.css';
-import { apiClient, buildDownloadUrl } from '../apiClient';
+import { apiClient } from '../apiClient';
+import {
+  ChevronRight,
+  Map as MapIcon,
+  Building2,
+  FileText,
+  Trash2,
+  Plus,
+  Loader,
+  Upload,
+  X,
+  Download
+} from 'lucide-react';
 
 function RegionsManager() {
   const [regions, setRegions] = useState([]);
-  const [reports, setReports] = useState([]); // 报告列表，用于显示关联数量
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [newName, setNewName] = useState('');
-  const [selectedId, setSelectedId] = useState(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [expandedNodes, setExpandedNodes] = useState(new Set()); // 展开的节点
-  const fileInputRef = useRef(null);
 
+  // Selection Path: Array of full region objects representing the "active" path.
+  const [selectionPath, setSelectionPath] = useState([]);
+
+  // Map for quick report counts: regionId -> count
+  const [reportCountMap, setReportCountMap] = useState(new Map());
+
+  // --- New State for Features ---
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addParentId, setAddParentId] = useState(null); // ID of the column where "Add" was clicked
+  const [newRegionName, setNewRegionName] = useState('');
+  const [showBatchUpload, setShowBatchUpload] = useState(false);
+  const [batchFile, setBatchFile] = useState(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState({ percentage: 0, current: 0, total: 0, message: '' });
+
+  const confirmBatchUpload = async () => {
+    if (!batchFile) return;
+
+    setIsImporting(true);
+    setImportProgress({ percentage: 0, current: 0, total: 0, message: '开始上传...' });
+
+    const formData = new FormData();
+    formData.append('file', batchFile);
+
+    try {
+      // Use fetch directly for streaming support
+      const token = localStorage.getItem('admin_token');
+      const response = await fetch(`${apiClient.defaults.baseURL}/regions/import`, {
+        method: 'POST',
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : ''
+        },
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP error ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // Process line by line
+        let newlineIndex;
+        while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+          const line = buffer.slice(0, newlineIndex);
+          buffer = buffer.slice(newlineIndex + 1);
+
+          if (!line.trim()) continue;
+
+          try {
+            const data = JSON.parse(line);
+            if (data.error) throw new Error(data.error);
+            setImportProgress(data);
+          } catch (e) {
+            console.warn('Failed to parse progress line:', line, e);
+          }
+        }
+      }
+
+      // Success
+      setTimeout(() => {
+        setShowBatchUpload(false);
+        setBatchFile(null);
+        setIsImporting(false);
+        fetchData();
+      }, 500);
+
+    } catch (err) {
+      alert('导入失败: ' + err.message);
+      setIsImporting(false);
+    }
+  };
+
+  const handleDeleteRegion = async (e, region) => {
+    e.stopPropagation();
+    if (!window.confirm(`确定要删除 "${region.name}" 及其所有下级区域吗？`)) return;
+
+    setLoading(true);
+    try {
+      await apiClient.delete(`/regions/${region.id}`);
+      fetchData();
+    } catch (err) {
+      alert('删除失败: ' + (err.response?.data?.error || err.message));
+      setLoading(false);
+    }
+  };
+
+  const scrollContainerRef = useRef(null);
+
+  // --- Data Fetching ---
   const fetchData = async () => {
     setLoading(true);
-    setError('');
     try {
       const [regionsResp, reportsResp] = await Promise.all([
         apiClient.get('/regions'),
-        apiClient.get('/reports'),
+        apiClient.get('/reports')
       ]);
-      const regionRows = regionsResp.data?.data ?? regionsResp.data?.regions ?? regionsResp.data ?? [];
-      const reportRows = reportsResp.data?.data ?? reportsResp.data ?? [];
-      setRegions(Array.isArray(regionRows) ? regionRows : []);
-      setReports(Array.isArray(reportRows) ? reportRows : []);
+      const regionsData = regionsResp.data.data || regionsResp.data;
+      setRegions(Array.isArray(regionsData) ? regionsData : []);
 
-      // 默认展开第一级
-      const topLevelIds = regionRows.filter(r => !r.parent_id).map(r => r.id);
-      setExpandedNodes(new Set(topLevelIds));
+      // Calculate report counts
+      const counts = new Map();
+      reportsResp.data.forEach(r => {
+        const rid = String(r.region_id);
+        counts.set(rid, (counts.get(rid) || 0) + 1);
+      });
+      setReportCountMap(counts);
     } catch (err) {
-      const message = err.response?.data?.error || err.message || '请求失败';
-      setError(`加载数据失败：${message}`);
+      setError(err.message || '加载失败');
     } finally {
       setLoading(false);
     }
@@ -42,402 +144,368 @@ function RegionsManager() {
 
   useEffect(() => {
     fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const treeByParent = useMemo(() => {
-    const byParent = new Map();
-    regions.forEach((r) => {
-      const pid = r.parent_id ?? null;
-      if (!byParent.has(pid)) byParent.set(pid, []);
-      byParent.get(pid).push(r);
-    });
-    byParent.forEach((arr) => arr.sort((a, b) => a.name.localeCompare(b.name)));
-    return byParent;
-  }, [regions]);
-
-  // 计算每个区域的报告数量
-  const reportCountMap = useMemo(() => {
-    const map = new Map();
-    reports.forEach((r) => {
-      const key = String(r.region_id);
-      map.set(key, (map.get(key) || 0) + 1);
-    });
-    return map;
-  }, [reports]);
-
-  const childrenOf = (id) => treeByParent.get(id ?? null) || [];
-
-  const hasChildren = (id) => {
-    return (treeByParent.get(id) || []).length > 0;
-  };
-
-  const toggleExpand = (id) => {
-    setExpandedNodes(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(id)) {
-        newSet.delete(id);
-      } else {
-        newSet.add(id);
-      }
-      return newSet;
-    });
-  };
-
-  const toggleSelect = (id) => {
-    setSelectedId((prev) => (prev === id ? null : id));
-  };
-
-  const levelLabel = (level) => {
-    if (level === 1) return '省/直辖市';
-    if (level === 2) return '市/区';
-    if (level === 3) return '区/县';
-    return '区域';
-  };
-
-  const handleDelete = async (e, regionId, regionName) => {
-    e.stopPropagation();
-    const reportCount = reportCountMap.get(String(regionId)) || 0;
-    const childCount = (treeByParent.get(regionId) || []).length;
-
-    let confirmMsg = `确定要删除"${regionName}"吗？`;
-    if (childCount > 0) {
-      confirmMsg += `\n⚠️ 这将同时删除 ${childCount} 个子区域！`;
-    }
-    if (reportCount > 0) {
-      confirmMsg += `\n⚠️ 该区域有 ${reportCount} 份关联报告，删除区域后报告将无法关联！`;
-    }
-
-    if (!window.confirm(confirmMsg)) {
-      return;
-    }
-
-    try {
-      await apiClient.delete(`/regions/${regionId}`);
-      await fetchData();
-      setError(''); // 清除之前的错误
-    } catch (err) {
-      const message = err.response?.data?.error || err.message || '删除失败';
-      setError(`删除"${regionName}"失败：${message}`);
-    }
-  };
-
-  // 展开所有
-  const expandAll = () => {
-    const allIds = new Set(regions.map(r => r.id));
-    setExpandedNodes(allIds);
-  };
-
-  // 折叠所有
-  const collapseAll = () => {
-    setExpandedNodes(new Set());
-  };
-
-  // 过滤后的区域（搜索功能）
-  const filteredRegions = useMemo(() => {
-    if (!searchTerm.trim()) return null; // 返回 null 表示不过滤，使用树形显示
-    const term = searchTerm.toLowerCase();
-    return regions.filter(r => r.name.toLowerCase().includes(term));
-  }, [regions, searchTerm]);
-
-  const renderTree = (parentId = null, depth = 0) => {
-    const nodes = childrenOf(parentId);
-    if (!nodes.length) return null;
-
-    return (
-      <div className="tree-level">
-        {nodes.map((node) => {
-          const isExpanded = expandedNodes.has(node.id);
-          const isSelected = selectedId === node.id;
-          const hasKids = hasChildren(node.id);
-          const reportCount = reportCountMap.get(String(node.id)) || 0;
-
-          return (
-            <div key={node.id} className="tree-node-container">
-              <div
-                className={`tree-node ${isSelected ? 'selected' : ''}`}
-                style={{ paddingLeft: `${depth * 20 + 12}px` }}
-              >
-                {/* 展开/折叠按钮 */}
-                <span
-                  className={`expand-btn ${hasKids ? 'has-children' : 'no-children'}`}
-                  onClick={(e) => { e.stopPropagation(); if (hasKids) toggleExpand(node.id); }}
-                >
-                  {hasKids ? (isExpanded ? '▼' : '▶') : '•'}
-                </span>
-
-                {/* 节点名称 */}
-                <span className="node-name" onClick={() => toggleSelect(node.id)}>
-                  {node.name}
-                </span>
-
-                {/* 级别标签 */}
-                <span className="node-level">{levelLabel(node.level)}</span>
-
-                {/* 报告数量 */}
-                {reportCount > 0 && (
-                  <span className="report-count">{reportCount}份报告</span>
-                )}
-
-                {/* 操作按钮 */}
-                <div className="node-actions">
-                  <button
-                    className="action-btn add-btn"
-                    onClick={(e) => { e.stopPropagation(); toggleSelect(node.id); setNewName(''); }}
-                    title="添加子区域"
-                  >
-                    +
-                  </button>
-                  <button
-                    className="action-btn delete-btn"
-                    onClick={(e) => handleDelete(e, node.id, node.name)}
-                    title="删除"
-                  >
-                    ×
-                  </button>
-                </div>
-              </div>
-
-              {/* 子节点 */}
-              {isExpanded && renderTree(node.id, depth + 1)}
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
-
-  // 渲染搜索结果（扁平列表）
-  const renderSearchResults = () => {
-    if (!filteredRegions) return null;
-
-    if (filteredRegions.length === 0) {
-      return <div className="no-results">没有找到匹配的区域</div>;
-    }
-
-    return (
-      <div className="search-results">
-        {filteredRegions.map((node) => {
-          const reportCount = reportCountMap.get(String(node.id)) || 0;
-          const parentRegion = regions.find(r => r.id === node.parent_id);
-
-          return (
-            <div
-              key={node.id}
-              className={`search-result-item ${selectedId === node.id ? 'selected' : ''}`}
-            >
-              <div className="result-info" onClick={() => toggleSelect(node.id)}>
-                <span className="node-name">{node.name}</span>
-                <span className="node-level">{levelLabel(node.level)}</span>
-                {parentRegion && <span className="parent-path">← {parentRegion.name}</span>}
-                {reportCount > 0 && (
-                  <span className="report-count">{reportCount}份报告</span>
-                )}
-              </div>
-              <div className="node-actions">
-                <button
-                  className="action-btn add-btn"
-                  onClick={(e) => { e.stopPropagation(); toggleSelect(node.id); setNewName(''); }}
-                  title="添加子区域"
-                >
-                  +
-                </button>
-                <button
-                  className="action-btn delete-btn"
-                  onClick={(e) => handleDelete(e, node.id, node.name)}
-                  title="删除"
-                >
-                  ×
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
-
-  const handleCreate = async (e) => {
-    e.preventDefault();
-    setError('');
-    const name = newName.trim();
-    if (!name) {
-      setError('名称不能为空');
-      return;
-    }
-
-    const code = `AUTO-${Date.now()}`;
-    const payload = {
-      code,
-      name,
-      province: null,
-      parent_id: selectedId,
-    };
-
-    setSubmitting(true);
-    try {
-      await apiClient.post('/regions', payload);
-      setNewName('');
-      await fetchData();
-      // 如果有父级，确保父级展开
-      if (selectedId) {
-        setExpandedNodes(prev => new Set([...prev, selectedId]));
-      }
-    } catch (err) {
-      const message = err.response?.data?.error || err.message || '请求失败';
-      setError(`创建失败：${message}`);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleDownloadTemplate = () => {
-    window.open(buildDownloadUrl('/regions/template'), '_blank');
-  };
-
-  const handleExport = () => {
-    window.open(buildDownloadUrl('/regions/export'), '_blank');
-  };
-
-  const handleImportClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleFileChange = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setImporting(true);
-    setImportResult(null);
-    setError('');
-
-    const formData = new FormData();
-    formData.append('file', file);
-
-    try {
-      const resp = await apiClient.post('/regions/import', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+  // --- Auto-scroll Logic ---
+  useEffect(() => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTo({
+        left: scrollContainerRef.current.scrollWidth,
+        behavior: 'smooth'
       });
-      setImportResult(resp.data);
-      await fetchData();
+    }
+  }, [selectionPath]);
+
+  // --- Helpers ---
+  const isDepartment = (name) => {
+    if (!name) return false;
+    const regionSuffixes = ["省", "市", "区", "县", "乡", "镇", "街道"];
+    const isRegion = regionSuffixes.some(s => name.endsWith(s));
+    return !isRegion;
+  };
+
+  const getChildren = (parentId) => {
+    return regions
+      .filter(r => r.parent_id === parentId)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  };
+
+  const getRootRegions = () => {
+    return regions
+      .filter(r => !r.parent_id || r.level === 1)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  };
+
+  // --- Handlers ---
+  const handleItemClick = (region, columnIndex) => {
+    const newPath = selectionPath.slice(0, columnIndex);
+    newPath.push(region);
+    setSelectionPath(newPath);
+  };
+
+  const handleAddClick = (parentId) => {
+    setAddParentId(parentId);
+    setNewRegionName('');
+    setShowAddModal(true);
+  };
+
+  const confirmAddRegion = async () => {
+    if (!newRegionName.trim()) return;
+    try {
+      // Generate a unique code
+      const code = `manual_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      await apiClient.post('/regions', {
+        code: code,
+        name: newRegionName,
+        parent_id: addParentId
+      });
+      setShowAddModal(false);
+      fetchData(); // Refresh list
     } catch (err) {
-      const message = err.response?.data?.error || err.message || '导入失败';
-      setError(`导入失败：${message}`);
-    } finally {
-      setImporting(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      alert('添加失败: ' + (err.response?.data?.error || err.message));
     }
   };
 
-  const selectedRegion = selectedId ? regions.find(r => r.id === selectedId) : null;
+  // --- Render Logic: Columns ---
+  const columnsToRender = useMemo(() => {
+    const cols = [];
+
+    // Column 0: Roots
+    cols.push({
+      id: 'root',
+      items: getRootRegions(),
+      parentId: null,
+      level: 0
+    });
+
+    // Subsequent Columns based on path
+    selectionPath.forEach((selectedRegion, index) => {
+      if (!isDepartment(selectedRegion.name)) {
+        const children = getChildren(selectedRegion.id);
+        if (children.length > 0 || !isDepartment(selectedRegion.name)) {
+          cols.push({
+            id: selectedRegion.id,
+            items: children,
+            parentId: selectedRegion.id,
+            level: index + 1
+          });
+        }
+      }
+    });
+
+    return cols;
+  }, [regions, selectionPath]);
+
+  const lastSelected = selectionPath[selectionPath.length - 1];
+  const showDetailPanel = lastSelected && isDepartment(lastSelected.name);
+
+  // --- Render Helper for List Items ---
+  const renderColumnItem = (item, colIndex, activeItem) => {
+    const isActive = activeItem?.id === item.id;
+    const isDept = isDepartment(item.name);
+    const count = reportCountMap.get(String(item.id)) || 0;
+
+    return (
+      <div
+        key={item.id}
+        onClick={() => handleItemClick(item, colIndex)}
+        className={`column-item group relative ${isActive ? 'active' : ''}`}
+      >
+        <div className="flex items-center gap-2 overflow-hidden">
+          {isDept ? <Building2 size={16} className="shrink-0 opacity-70" /> : <MapIcon size={16} className="shrink-0 opacity-70" />}
+          <span className="truncate font-medium">{item.name}</span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            className="p-1 hover:bg-red-100 rounded text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity mr-1"
+            onClick={(e) => handleDeleteRegion(e, item)}
+            title="删除区域"
+          >
+            <Trash2 size={14} />
+          </button>
+          {count > 0 && (
+            <span className={`text-xs px-1.5 rounded-full ${isActive ? 'bg-white/20' : 'bg-gray-100 text-gray-500'}`}>
+              {count}
+            </span>
+          )}
+          {!isDept && <ChevronRight size={14} className="opacity-50" />}
+        </div>
+      </div>
+    );
+  };
 
   return (
-    <div className="regions-page">
-      <div className="manager-card">
-        <div className="manager-header">
-          <div>
-            <h2>城市/区域管理</h2>
-            <p className="hint">点击区域名称选中作为父级，然后在下方添加子区域。点击 + 快速添加子区域，× 删除区域。</p>
-          </div>
-          <button className="ghost-btn" onClick={fetchData} disabled={loading}>
-            {loading ? '加载中…' : '刷新'}
+    <div className="miller-layout h-full flex flex-col relative">
+      {/* Header */}
+      <div className="miller-header p-4 border-b border-gray-200 bg-white flex justify-between items-center shrink-0">
+        <div>
+          <p className="text-lg font-medium text-gray-800">
+            {selectionPath.map(r => r.name).join(' / ') || '全区'}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            className="px-3 py-1.5 text-sm border border-gray-200 rounded hover:bg-gray-50 flex items-center gap-2"
+            onClick={() => setShowBatchUpload(true)}
+          >
+            <Upload size={16} /> 批量上传
+          </button>
+          <button className="px-3 py-1.5 text-sm border rounded hover:bg-gray-50" onClick={fetchData}>
+            刷新
           </button>
         </div>
+      </div>
 
-        {/* Excel Import/Export Toolbar */}
-        <div className="import-export-toolbar">
-          <button className="tool-btn template-btn" onClick={handleDownloadTemplate}>
-            📥 下载模板
-          </button>
-          <button className="tool-btn import-btn" onClick={handleImportClick} disabled={importing}>
-            {importing ? '⏳ 导入中...' : '📤 导入Excel'}
-          </button>
-          <button className="tool-btn export-btn" onClick={handleExport}>
-            📊 导出全部
-          </button>
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileChange}
-            accept=".xlsx,.xls,.csv"
-            style={{ display: 'none' }}
-          />
-        </div>
+      {/* Columns Container */}
+      <div
+        className="miller-container flex-1 flex overflow-x-auto bg-gray-50"
+        ref={scrollContainerRef}
+      >
+        {columnsToRender.map((col, colIndex) => {
+          const activeItem = selectionPath[colIndex];
 
-        {/* Search and Tree Controls */}
-        <div className="search-controls">
-          <div className="search-box">
-            <input
-              type="text"
-              placeholder="🔍 搜索区域名称..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-            {searchTerm && (
-              <button className="clear-search" onClick={() => setSearchTerm('')}>×</button>
-            )}
-          </div>
-          {!searchTerm && (
-            <div className="tree-controls">
-              <button className="control-btn" onClick={expandAll}>全部展开</button>
-              <button className="control-btn" onClick={collapseAll}>全部折叠</button>
+          const adminItems = col.items.filter(i => !isDepartment(i.name));
+          const deptItems = col.items.filter(i => isDepartment(i.name));
+
+          return (
+            <div key={col.id} className="miller-column">
+              <div className="flex-1 overflow-y-auto relative">
+                {col.items.length === 0 && (
+                  <div className="p-4 text-gray-400 text-sm italic text-center mt-10">
+                    暂无下级区域
+                  </div>
+                )}
+
+                {/* Group A: Administrative Regions */}
+                {adminItems.length > 0 && (
+                  <>
+                    <div className="sticky top-0 z-10 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-400 border-b border-slate-100 uppercase flex items-center gap-2 backdrop-blur-sm bg-opacity-90">
+                      <MapSizeIconFallback /> 行政区划
+                    </div>
+                    {adminItems.map(item => renderColumnItem(item, colIndex, activeItem))}
+                  </>
+                )}
+
+                {/* Group B: Departments */}
+                {deptItems.length > 0 && (
+                  <>
+                    <div className="sticky top-0 z-10 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-400 border-b border-slate-100 uppercase flex items-center gap-2 backdrop-blur-sm bg-opacity-90 mt-0">
+                      <Building2 size={12} /> 直属部门
+                    </div>
+                    {deptItems.map(item => renderColumnItem(item, colIndex, activeItem))}
+                  </>
+                )}
+              </div>
+
+              {/* Column Footer: Add Region Button */}
+              <div className="border-t border-gray-200 p-2 bg-white/50 backdrop-blur-sm sticky bottom-0">
+                <button
+                  className="w-full text-left text-xs text-gray-500 hover:text-blue-600 px-2 py-1 flex items-center gap-1"
+                  onClick={() => handleAddClick(col.parentId)}
+                >
+                  <Plus size={12} /> 添加区域...
+                </button>
+              </div>
             </div>
-          )}
-        </div>
+          );
+        })}
 
-        {/* Import Result */}
-        {importResult && (
-          <div className="alert success">
-            ✅ {importResult.message}
-            {importResult.errors && importResult.errors.length > 0 && (
-              <ul className="import-errors">
-                {importResult.errors.map((err, i) => (
-                  <li key={i}>{err}</li>
-                ))}
-              </ul>
-            )}
+        {/* Detail Panel */}
+        {showDetailPanel && (
+          <div className="miller-detail-panel">
+            <div className="p-6 border-b border-gray-100 flex flex-col items-center text-center">
+              <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mb-4 text-blue-600">
+                <Building2 size={32} />
+              </div>
+              <h3 className="text-xl font-bold text-gray-800">{lastSelected.name}</h3>
+              <div className="text-sm text-gray-400 mt-1 uppercase tracking-wide">Department / 部门</div>
+            </div>
+            <div className="p-6">
+              <h4 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                <FileText size={16} /> 关联报告 ({reportCountMap.get(String(lastSelected.id)) || 0})
+              </h4>
+              <div className="space-y-3">
+                <button
+                  className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm"
+                  onClick={() => window.location.href = `/upload?regionId=${lastSelected.id}`}
+                >
+                  上传新报告
+                </button>
+              </div>
+            </div>
           </div>
         )}
-
-        {error && <div className="alert error">{error}</div>}
-
-        {/* Tree or Search Results */}
-        <div className="tree-container">
-          {searchTerm ? renderSearchResults() : renderTree()}
-        </div>
-
-        {/* Add Form */}
-        <form className="add-form" onSubmit={handleCreate}>
-          <div className="add-form-header">
-            <label className="add-label">
-              {selectedRegion
-                ? `在「${selectedRegion.name}」下添加子区域：`
-                : '添加顶级区域（省/直辖市）：'}
-            </label>
-            {selectedId && (
-              <button type="button" className="clear-select-btn" onClick={() => setSelectedId(null)}>
-                取消选中
-              </button>
-            )}
-          </div>
-          <div className="add-row">
-            <input
-              type="text"
-              placeholder="输入区域名称..."
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              disabled={submitting}
-            />
-            <button className="primary-btn" type="submit" disabled={submitting}>
-              {submitting ? '添加中…' : '添加'}
-            </button>
-          </div>
-        </form>
       </div>
-    </div>
+
+      {/* Add Region Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg p-6 w-96 shadow-xl animate-in fade-in zoom-in duration-200">
+            <h3 className="text-lg font-bold mb-4">添加新区域 / 部门</h3>
+            <input
+              autoFocus
+              type="text"
+              placeholder="请输入名称 (如: 宿城区 或 某某局)"
+              className="w-full border border-gray-300 rounded p-2 mb-4 focus:ring-2 focus:ring-blue-500 outline-none"
+              value={newRegionName}
+              onChange={e => setNewRegionName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && confirmAddRegion()}
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded"
+                onClick={() => setShowAddModal(false)}
+              >
+                取消
+              </button>
+              <button
+                className="px-4 py-2 text-sm bg-blue-600 text-white hover:bg-blue-700 rounded"
+                onClick={confirmAddRegion}
+              >
+                确认添加
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Batch Region Import Modal */}
+      {showBatchUpload && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg p-6 w-[500px] shadow-xl">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">批量导入城市列表</h3>
+              <button onClick={() => setShowBatchUpload(false)} className="p-1 hover:bg-gray-100 rounded">
+                <X size={20} />
+              </button>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">
+              上传 Excel 或 CSV 文件，按"省份、城市、区县、街道"四列格式导入城市层级结构。
+            </p>
+            <div className="flex gap-2 mb-4">
+              <a
+                href="/api/regions/template"
+                download
+                className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded hover:bg-gray-50 text-sm"
+              >
+                <Download size={16} /> 下载模板
+              </a>
+            </div>
+            {/* New File Input UI */}
+            <div className="mb-6">
+              <label
+                htmlFor="batch-file-upload"
+                className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer hover:bg-gray-50 transition-colors ${batchFile ? 'border-blue-300 bg-blue-50' : 'border-gray-300'
+                  }`}
+              >
+                <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                  {batchFile ? (
+                    <>
+                      <FileText className="w-8 h-8 text-blue-500 mb-2" />
+                      <p className="text-sm text-blue-600 font-medium">{batchFile.name}</p>
+                      <p className="text-xs text-gray-500">{(batchFile.size / 1024).toFixed(1)} KB</p>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-8 h-8 text-gray-400 mb-2" />
+                      <p className="text-sm text-gray-500"><span className="font-semibold">点击上传</span> 或拖拽文件</p>
+                      <p className="text-xs text-gray-400">支持 Excel / CSV</p>
+                    </>
+                  )}
+                </div>
+                <input
+                  id="batch-file-upload"
+                  type="file"
+                  className="hidden"
+                  accept=".xlsx,.xls,.csv"
+                  onChange={(e) => setBatchFile(e.target.files?.[0] || null)}
+                />
+              </label>
+            </div>
+
+            {/* Progress Bar UI */}
+            {isImporting && (
+              <div className="mb-6 animate-in slide-in-from-top-2 duration-300">
+                <div className="flex justify-between text-sm mb-2">
+                  <span className="text-blue-600 font-medium">{importProgress.message}</span>
+                  <span className="text-gray-500">{importProgress.percentage}%</span>
+                </div>
+                <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
+                  <div
+                    className="bg-blue-600 h-full transition-all duration-300 ease-out"
+                    style={{ width: `${importProgress.percentage}%` }}
+                  ></div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3">
+              <button
+                disabled={isImporting}
+                onClick={() => { setShowBatchUpload(false); setBatchFile(null); }}
+                className="px-4 py-2 text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 rounded disabled:opacity-50"
+              >
+                取消
+              </button>
+              <button
+                onClick={confirmBatchUpload}
+                disabled={!batchFile || isImporting}
+                className={`px-4 py-2 text-sm text-white rounded flex items-center gap-2 ${(!batchFile || isImporting) ? 'bg-blue-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+                  }`}
+              >
+                {isImporting ? <Loader size={16} className="animate-spin" /> : <Upload size={16} />}
+                {isImporting ? '正在导入...' : '确认导入'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div >
   );
 }
+
+// Icon wrapper to avoid collision
+const MapSizeIconFallback = () => <MapIcon size={12} />;
 
 export default RegionsManager;

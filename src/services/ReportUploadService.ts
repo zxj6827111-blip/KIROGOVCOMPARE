@@ -13,6 +13,7 @@ export interface ReportUploadPayload {
   mimeType: string;
   size: number;
   model?: string;
+  batchId?: string; // Optional batch ID for grouping batch uploads
 }
 
 export interface ReportTextUploadPayload {
@@ -59,7 +60,17 @@ function resolveProviderAndModel(modelInput?: string): { provider: string; model
     return { provider: 'gemini', model: input.replace('gemini/', '') };
   }
 
-  // 2. Qwen / DeepSeek / GLM -> ModelScope
+  // 2. GLM-Flash Specific
+  if (input === 'glm-flash') {
+    return { provider: 'glm-flash', model: 'glm-4-flash' };
+  }
+
+  // 2.5. GLM-4.5-Flash Specific
+  if (input === 'glm-4.5-flash') {
+    return { provider: 'glm-4.5-flash', model: 'glm-4.5-flash' };
+  }
+
+  // 3. Qwen / DeepSeek / other GLM -> ModelScope
   if (
     input.includes('qwen') ||
     input.includes('deepseek') ||
@@ -146,23 +157,13 @@ export class ReportUploadService {
       throw new Error('version_not_created');
     }
 
-    const job = querySqlite(
-      `SELECT * FROM jobs WHERE version_id = ${sqlValue(versionId)} AND status IN ('queued', 'running')
-       ORDER BY created_at DESC LIMIT 1;`
+    // Always create a new job record for each upload (history mode)
+    const newJob = querySqlite(
+      `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model, batch_id)
+       VALUES (${sqlValue(report.id)}, ${sqlValue(versionId)}, 'parse', 'queued', 0, ${sqlValue(provider)}, ${sqlValue(model)}, ${sqlValue(payload.batchId)}) RETURNING id;`
     )[0];
-
-    let jobId: number;
-    let reusedJob = false;
-    if (job) {
-      jobId = job.id;
-      reusedJob = true;
-    } else {
-      const newJob = querySqlite(
-        `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model)
-         VALUES (${sqlValue(report.id)}, ${sqlValue(versionId)}, 'parse', 'queued', 0, ${sqlValue(provider)}, ${sqlValue(model)}) RETURNING id;`
-      )[0];
-      jobId = newJob.id;
-    }
+    const jobId = newJob.id;
+    const reusedJob = false;
 
     const storageAbsoluteDir = path.join(DATA_DIR, 'uploads', `${payload.regionId}`, `${payload.year}`);
     ensureStorageDir(storageAbsoluteDir);
@@ -256,22 +257,13 @@ export class ReportUploadService {
       throw new Error('version_not_created');
     }
 
-    const existingJob = querySqlite(
-      `SELECT * FROM jobs WHERE version_id = ${sqlValue(versionId)} AND status IN ('queued', 'running') ORDER BY created_at DESC LIMIT 1;`
+    // Always create a new job record for each upload (history mode)
+    const newJob = querySqlite(
+      `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model)
+       VALUES (${sqlValue(report.id)}, ${sqlValue(versionId)}, 'parse', 'queued', 0, ${sqlValue(provider)}, ${sqlValue(model)}) RETURNING id;`
     )[0];
-
-    let jobId: number;
-    let reusedJob = false;
-    if (existingJob) {
-      jobId = existingJob.id;
-      reusedJob = true;
-    } else {
-      const newJob = querySqlite(
-        `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model)
-         VALUES (${sqlValue(report.id)}, ${sqlValue(versionId)}, 'parse', 'queued', 0, ${sqlValue(provider)}, ${sqlValue(model)}) RETURNING id;`
-      )[0];
-      jobId = newJob.id;
-    }
+    const jobId = newJob.id;
+    const reusedJob = false;
 
     const storageAbsoluteDir = path.join(DATA_DIR, 'uploads', `${payload.regionId}`, `${payload.year}`);
     ensureStorageDir(storageAbsoluteDir);

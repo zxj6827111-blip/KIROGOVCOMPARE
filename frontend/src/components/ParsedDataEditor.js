@@ -89,7 +89,7 @@ const ParsedDataEditor = ({ reportId, versionId, parsedJson, onSave, onCancel })
   return (
     <div className="parsed-data-editor">
       <div className="editor-header">
-        <h3>📝 编辑解析数据</h3>
+        <h3>✎ 编辑解析数据</h3>
         <div className="editor-actions">
           <button className="btn-cancel" onClick={onCancel} disabled={saving}>
             取消

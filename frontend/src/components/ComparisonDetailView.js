@@ -2,6 +2,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import './ComparisonDetailView.css';
 import { apiClient } from '../apiClient';
+import { ArrowLeft, Printer } from 'lucide-react';
 import { Table2View, Table3View, Table4View, SimpleDiffTable } from './TableViews';
 import DiffText from './DiffText';
 import CrossYearCheckView from './CrossYearCheckView';
@@ -287,7 +288,7 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
       {/* Back Button */}
       <div className="back-nav mb-4 no-print block">
         <button onClick={onBack} className="flex items-center text-blue-600 hover:text-blue-800">
-          <span className="mr-1">←</span> 返回列表
+          <ArrowLeft size={18} className="mr-1" /> 返回列表
         </button>
       </div>
 
@@ -360,7 +361,7 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
               onClick={handlePrint}
               className="flex items-center px-4 py-2 text-white rounded-md shadow-sm transition-colors bg-gray-800 hover:bg-gray-900"
             >
-              打印/另存为PDF
+              <Printer size={16} className="mr-2" /> 打印/另存为PDF
             </button>
           </div>
         </div>

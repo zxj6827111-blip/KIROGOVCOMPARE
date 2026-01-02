@@ -123,13 +123,11 @@ export function ensureSqliteMigrations(): void {
       const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
       runSqlStatements(sql);
     } catch (error: any) {
-      // If it's a migration file error, log it but don't necessarily crash 
-      // if it's just "duplicate column" or "table already exists"
-      if (error.message?.includes('duplicate column name') || error.message?.includes('already exists')) {
-        console.log(`[sqlite] Migration file ${file} already partially applied, skipping duplicates.`);
+      const errMsg = (error.message || '') + (error.stderr || '');
+      if (errMsg.includes('duplicate column name') || errMsg.includes('already exists')) {
+        console.log(`[sqlite] Migration file ${file} already partially applied (checked by error message), skipping.`);
       } else {
-        console.warn(`[sqlite] Migration file ${file} had issues: ${error.message}`);
-        // For 008, we know it might have issues if run partially, so we continue
+        console.warn(`[sqlite] Migration file ${file} had issues: ${errMsg}`);
       }
     }
   }

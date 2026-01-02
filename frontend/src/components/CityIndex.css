@@ -1,16 +1,351 @@
 .city-index {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
+  padding: 20px;
+  max-width: 1400px;
+  margin: 0 auto;
 }
 
-/* 本级年报区域 */
-.current-reports-section {
-  background: #f0f9ff;
-  border: 2px solid #3b82f6;
-  border-radius: 12px;
-  padding: 20px;
+.header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.header-row h2 {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin-bottom: 4px;
+}
+
+.subtitle {
+  color: #666;
+  font-size: 14px;
+}
+
+.header-actions {
+  display: flex;
+  gap: 12px;
+}
+
+/* Button styles update: row layout for icon + text */
+.ghost-btn,
+.primary-btn {
+  display: flex;
+  flex-direction: row;
+  /* Changed from column (if implicit) or default row */
+  align-items: center;
+  gap: 8px;
+  /* Spacing between icon and text */
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  height: 40px;
+}
+
+.ghost-btn {
+  background: transparent;
+  color: #666;
+  border: 1px solid transparent;
+}
+
+.ghost-btn:hover {
+  background: #f5f5f5;
+  color: #333;
+}
+
+.primary-btn {
+  background: #2563eb;
+  color: white;
+  border: none;
+}
+
+.primary-btn:hover {
+  background: #1d4ed8;
+  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+}
+
+.breadcrumb-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  padding: 12px 20px;
+  /* Increased padding */
+  border-radius: 8px;
+  /* Rounded corners */
+  margin-bottom: 24px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  /* Subtle shadow */
+  font-size: 15px;
+  /* Slightly larger text */
+}
+
+/* Breadcumb link styling */
+.crumb {
+  color: #666;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: color 0.2s, background-color 0.2s;
+}
+
+.crumb:hover {
+  color: #2563eb;
+  background-color: #f0f7ff;
+}
+
+.crumb:last-child {
+  color: #1a1a1a;
+  font-weight: 600;
+  cursor: default;
+  pointer-events: none;
+}
+
+.crumb:last-child:hover {
+  background-color: transparent;
+}
+
+.crumb-sep {
+  color: #ccc;
+  margin: 0 2px;
+}
+
+.link-btn {
+  margin-left: auto;
+  color: #2563eb;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.link-btn:hover {
+  text-decoration: underline;
+}
+
+.sub-index-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 16px;
+}
+
+.sub-index-header h4 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+/* Filter controls layout */
+.filter-controls {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.tab-btn {
+  padding: 6px 16px;
+  border: 1px solid transparent;
+  border-radius: 20px;
+  /* Capsule shape */
+  background: transparent;
+  color: #666;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tab-btn:hover {
+  color: #2563eb;
+  background: #f0f7ff;
+}
+
+.tab-btn.active {
+  background: #2563eb;
+  color: white;
+  font-weight: 500;
+  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+}
+
+/* Hide badge/counts as per request, via display:none or removing form JS.
+   CSS approach as safeguard: */
+.tab-btn .badge {
+  display: none;
+}
+
+
+/* Search Box Styling */
+.search-box {
+  position: relative;
+}
+
+/* Input with Icon Wrapper for Search */
+.input-with-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-icon-inside {
+  position: absolute;
+  left: 10px;
+  color: #9ca3af;
+  pointer-events: none;
+}
+
+.search-input {
+  padding: 8px 12px 8px 36px;
+  /* Left padding for icon */
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s;
+  width: 240px;
+  /* Slightly wider */
+}
+
+.search-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+
+/* Data Grid */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+.city-card {
+  background: white;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  padding: 20px;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+  overflow: hidden;
+}
+
+.city-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  border-color: #dbeafe;
+}
+
+/* Card Strip Accent */
+.city-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+}
+
+.city-card.type-district::before {
+  background: #3b82f6;
+}
+
+/* Blue */
+.city-card.type-town::before {
+  background: #10b981;
+}
+
+/* Green */
+.city-card.type-department::before {
+  background: #8b5cf6;
+}
+
+/* Purple */
+
+.city-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+
+.city-country {
+  color: #666;
+}
+
+.city-level {
+  background: #f3f4f6;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #4b5563;
+}
+
+.city-name {
+  font-size: 18px;
+  font-weight: 600;
+  color: #111;
+  margin-bottom: 16px;
+}
+
+.city-count {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.count-number {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.count-label {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.direct-count {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #059669;
+  background: #ecfdf5;
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* Children Section (下级索引) */
+.children-section {
+  margin-top: 24px;
+}
+
+.section-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.section-header-row h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0;
+}
+
+/* Current Reports Section */
+.current-reports-section {
+  margin-bottom: 32px;
 }
 
 .current-reports-section .section-header {
@@ -21,10 +356,10 @@
 }
 
 .current-reports-section h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #2563eb;
   margin: 0;
-  color: #1e40af;
-  font-size: 18px;
-  font-weight: 700;
 }
 
 .section-actions {
@@ -32,353 +367,19 @@
   gap: 8px;
 }
 
-/* 下级城市区域 */
-.children-section {
-  margin-top: 20px;
-}
-
-.children-section h3 {
-  margin: 0 0 16px 0;
-  color: #374151;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.direct-count {
-  margin-top: 8px;
-  padding: 4px 8px;
-  background: #dbeafe;
-  color: #1e40af;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  text-align: center;
-}
-
-.header-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.subtitle {
-  color: #6b7280;
-  margin-top: 4px;
-  font-size: 14px;
-}
-
-.header-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.primary-btn,
-.ghost-btn,
-.link-btn {
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  padding: 10px 14px;
-  font-weight: 600;
-  font-size: 14px;
-}
-
-.primary-btn {
-  background: #3b82f6;
-  color: #fff;
-}
-
-.ghost-btn {
-  background: #eef2ff;
-  color: #4338ca;
-}
-
-.link-btn {
-  background: transparent;
-  color: #4b5563;
-  padding: 6px 8px;
-}
-
-.breadcrumb-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: #4b5563;
-}
-
-.crumb {
-  cursor: pointer;
-  color: #2563eb;
-  font-weight: 600;
-}
-
-.crumb-sep {
-  color: #9ca3af;
-}
-
-.alert {
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: #f3f4f6;
-  color: #374151;
-}
-
-.alert.error {
-  background: #fef2f2;
-  color: #b91c1c;
-  border: 1px solid #fecdd3;
-}
-
-.empty {
-  color: #6b7280;
-  padding: 12px 8px;
-}
-
-.card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 14px;
-}
-
-.report-list-panel {
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 16px;
-}
-
-.report-list-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-}
-
-.report-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
-}
-
-.report-card {
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  padding: 12px;
-  background: #f8fafc;
-  cursor: pointer;
-  transition: box-shadow 0.2s ease, transform 0.2s ease;
-}
-
-.report-card:hover {
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.06);
-  transform: translateY(-2px);
-}
-
-.report-title {
-  font-weight: 800;
-  color: #111827;
-}
-
-.report-meta {
-  color: #4b5563;
-  font-size: 13px;
-  margin-top: 4px;
-}
-
-.city-card {
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  padding: 16px;
-  cursor: pointer;
-  transition: box-shadow 0.2s ease, transform 0.2s ease;
-}
-
-.city-card:hover {
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
-  transform: translateY(-2px);
-}
-
-.city-meta {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  color: #6b7280;
-  font-size: 13px;
-  margin-bottom: 6px;
-}
-
-.city-level {
-  background: #eef2ff;
-  color: #4338ca;
-  padding: 4px 8px;
-  border-radius: 10px;
-  font-weight: 700;
-  font-size: 12px;
-}
-
-.city-name {
-  margin: 4px 0 8px;
-  font-size: 20px;
-  font-weight: 700;
-  color: #111827;
-}
-
-.city-count {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-}
-
-.count-number {
-  font-size: 24px;
-  font-weight: 800;
-  color: #111827;
-}
-
-.count-label {
-  color: #6b7280;
-  font-size: 14px;
-}
-
-/* Report Card Enhancements */
-.report-card.selected {
-  border-color: #3b82f6;
-  background: #eff6ff;
-}
-
-.report-card-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.report-card-header input[type="checkbox"] {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-}
-
-.report-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.view-btn,
-.delete-report-btn {
-  padding: 6px 12px;
-  border-radius: 6px;
-  border: none;
-  cursor: pointer;
-  font-size: 13px;
-  transition: all 0.2s;
-}
-
-.view-btn {
-  background: #dbeafe;
-  color: #1d4ed8;
-}
-
-.view-btn:hover {
-  background: #bfdbfe;
-}
-
-.delete-report-btn {
-  background: #fee2e2;
-  color: #dc2626;
-}
-
-.delete-report-btn:hover {
-  background: #fecaca;
-}
-
-/* Check Status Badge */
-.check-status-badge {
-  display: inline-block;
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.check-status-badge.ok {
-  background: #d1fae5;
-  color: #065f46;
-}
-
-.check-status-badge.error {
-  background: #fee2e2;
-  color: #dc2626;
-  font-weight: 700;
-}
-
-.check-status-loading {
-  color: #9ca3af;
-  font-size: 11px;
-  font-style: italic;
-}
-
-/* Check Badges Group - 分组标签 */
-.check-badges-group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-}
-
-.check-badge {
-  display: inline-block;
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-  cursor: help;
-  transition: transform 0.2s ease;
-}
-
-.check-badge:hover {
-  transform: scale(1.05);
-}
-
-.check-badge.visual {
-  background: #ffedd5;
-  color: #9a3412;
-  border: 1px solid #fdba74;
-}
-
-.check-badge.structure {
-  background: #fecaca;
-  color: #991b1b;
-  border: 1px solid #f87171;
-}
-
-.check-badge.quality {
-  background: #fef3c7;
-  color: #92400e;
-  border: 1px solid #fcd34d;
-}
-
-/* Compare functionality */
 .compare-btn {
-  padding: 10px 20px;
-  background: #10b981;
-  color: #fff;
+  padding: 8px 16px;
+  background: #2563eb;
+  color: white;
   border: none;
-  border-radius: 8px;
-  font-weight: 600;
-  cursor: pointer;
+  border-radius: 6px;
   font-size: 14px;
+  cursor: pointer;
   transition: all 0.2s;
 }
 
 .compare-btn:hover:not(:disabled) {
-  background: #059669;
+  background: #1d4ed8;
 }
 
 .compare-btn:disabled {
@@ -388,85 +389,191 @@
 
 .selection-hint {
   background: #fef3c7;
-  border: 1px solid #fcd34d;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 13px;
   color: #92400e;
-  padding: 10px 16px;
-  border-radius: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  font-size: 14px;
+  gap: 12px;
 }
 
 .clear-btn {
   background: transparent;
-  border: none;
-  color: #2563eb;
+  border: 1px solid #d97706;
+  color: #d97706;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
   cursor: pointer;
-  font-size: 13px;
-  text-decoration: underline;
 }
 
-/* Filter Controls & Tabs */
-.section-header-row {
-  margin-bottom: 20px;
+.clear-btn:hover {
+  background: #fef3c7;
 }
 
-.tab-btn {
-  padding: 8px 16px;
-  border: 1px solid #e5e7eb;
+/* Report Grid */
+.report-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.report-card {
   background: white;
-  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 16px;
   cursor: pointer;
-  font-size: 14px;
-  color: #4b5563;
+  transition: all 0.2s;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.report-card:hover {
+  border-color: #93c5fd;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);
+}
+
+.report-card.selected {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.report-card-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.header-top {
   display: flex;
   align-items: center;
   gap: 8px;
-  transition: all 0.2s;
 }
 
-.tab-btn:hover {
-  background: #f9fafb;
-  border-color: #d1d5db;
+.report-checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
 }
 
-.tab-btn.active {
-  background: #eff6ff;
-  border-color: #3b82f6;
-  color: #2563eb;
-  font-weight: 600;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-}
-
-.tab-btn .badge {
-  background: #f3f4f6;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-size: 12px;
-  color: #6b7280;
-  line-height: 1;
-}
-
-.tab-btn.active .badge {
+.year-badge {
   background: #dbeafe;
   color: #1d4ed8;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
 }
 
-.search-box input {
+.report-title-text {
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0;
+}
+
+.report-card-status {
+  display: flex;
+  align-items: center;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.status-pill.green {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status-pill.red {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.status-pill.gray {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.status-pill.loading {
+  background: #f3f4f6;
+  color: #9ca3af;
+}
+
+.report-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 8px;
+  border-top: 1px solid #f3f4f6;
+}
+
+.footer-date {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.footer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.action-btn-ghost {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
   transition: all 0.2s;
 }
 
-.search-box input:focus {
-  outline: none;
-  border-color: #3b82f6 !important;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+.action-btn-ghost.blue {
+  color: #2563eb;
 }
 
-.empty-search-state {
-  background: #f9fafb;
-  border-radius: 8px;
-  border: 1px dashed #e5e7eb;
+.action-btn-ghost.blue:hover {
+  background: #eff6ff;
+}
+
+.action-btn-ghost.red {
+  color: #dc2626;
+}
+
+.action-btn-ghost.red:hover {
+  background: #fef2f2;
+}
+
+.empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: #9ca3af;
   font-size: 14px;
+}
+
+.alert {
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+.alert.error {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
 }

@@ -1,5 +1,5 @@
 .job-detail {
-    padding: 24px;
+    padding: 32px;
     max-width: 1200px;
     margin: 0 auto;
 }
@@ -7,28 +7,31 @@
 .job-detail-header {
     display: flex;
     align-items: center;
-    gap: 16px;
-    margin-bottom: 24px;
+    gap: 20px;
+    margin-bottom: 32px;
 }
 
 .btn-back {
     padding: 8px 16px;
-    background: #f5f5f5;
-    border: 1px solid #ddd;
-    border-radius: 4px;
+    background: var(--bg-surface-hover);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
     cursor: pointer;
     font-size: 14px;
-    color: #333;
+    color: var(--text-main);
+    transition: all 0.2s;
 }
 
 .btn-back:hover {
-    background: #e0e0e0;
+    background: var(--bg-app);
+    border-color: var(--text-muted);
 }
 
 .job-detail-header h2 {
     margin: 0;
     font-size: 24px;
-    color: #333;
+    color: var(--text-main);
+    font-weight: 700;
 }
 
 .job-detail-content {
@@ -39,53 +42,59 @@
 
 /* Info Section */
 .info-section {
-    background: white;
-    padding: 20px;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    background: var(--bg-surface);
+    padding: 24px;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--border-color);
 }
 
 .info-section h3 {
-    margin: 0 0 16px 0;
+    margin: 0 0 20px 0;
     font-size: 18px;
-    color: #333;
+    color: var(--text-main);
+    font-weight: 600;
 }
 
 .info-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-    gap: 16px;
+    gap: 20px;
 }
 
 .info-item {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
 }
 
 .info-item label {
     font-size: 13px;
-    color: #666;
-    font-weight: 500;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
 .info-item span {
-    font-size: 14px;
-    color: #333;
+    font-size: 15px;
+    color: var(--text-main);
 }
 
 /* Progress Section */
 .progress-section {
-    background: white;
-    padding: 20px;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    background: var(--bg-surface);
+    padding: 24px;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--border-color);
 }
 
 .progress-section h3 {
-    margin: 0 0 20px 0;
+    margin: 0 0 24px 0;
     font-size: 18px;
-    color: #333;
+    color: var(--text-main);
+    font-weight: 600;
 }
 
 .progress-steps {
@@ -93,7 +102,7 @@
     justify-content: space-between;
     align-items: flex-start;
     position: relative;
-    margin-bottom: 24px;
+    margin-bottom: 32px;
 }
 
 .progress-step {
@@ -108,8 +117,8 @@
     width: 40px;
     height: 40px;
     border-radius: 50%;
-    background: #e0e0e0;
-    color: #999;
+    background: var(--bg-surface-hover);
+    color: var(--text-muted);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -117,30 +126,35 @@
     font-size: 16px;
     z-index: 2;
     transition: all 0.3s ease;
+    border: 2px solid var(--border-color);
 }
 
 .step-indicator.active {
-    background: #2196f3;
-    color: white;
+    background: var(--primary);
+    color: #000;
+    border-color: var(--primary);
 }
 
 .step-indicator.completed {
-    background: #4caf50;
-    color: white;
+    background: var(--success);
+    color: #000;
+    border-color: var(--success);
 }
 
 .step-indicator.current {
-    background: #ff9800;
-    color: white;
-    box-shadow: 0 0 0 4px rgba(255, 152, 0, 0.2);
+    background: var(--warning);
+    color: #000;
+    border-color: var(--warning);
+    box-shadow: 0 0 0 4px rgba(253, 214, 99, 0.2);
 }
 
 .step-label {
-    margin-top: 8px;
+    margin-top: 12px;
     font-size: 13px;
-    color: #666;
+    color: var(--text-muted);
     text-align: center;
     max-width: 120px;
+    font-weight: 500;
 }
 
 .step-connector {
@@ -148,134 +162,154 @@
     top: 20px;
     left: calc(50% + 20px);
     right: calc(-50% + 20px);
-    height: 3px;
-    background: #e0e0e0;
+    height: 2px;
+    background: var(--border-color);
     z-index: 1;
     transition: background 0.3s ease;
 }
 
 .step-connector.completed {
-    background: #4caf50;
+    background: var(--success);
 }
 
 .progress-percent {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 16px;
 }
 
 .progress-bar-bg {
     flex: 1;
-    height: 12px;
-    background: #e0e0e0;
-    border-radius: 6px;
+    height: 8px;
+    background: var(--bg-surface-hover);
+    border-radius: 4px;
     overflow: hidden;
+    border: 1px solid var(--border-color);
 }
 
 .progress-bar-fill {
     height: 100%;
-    background: linear-gradient(90deg, #4caf50, #81c784);
+    background: linear-gradient(90deg, #81c995, #34a853);
     transition: width 0.5s ease;
 }
 
 .progress-text {
     font-size: 16px;
-    font-weight: 600;
-    color: #333;
-    min-width: 45px;
+    font-weight: 700;
+    color: var(--text-main);
+    min-width: 50px;
+    text-align: right;
 }
 
 /* Error Section */
 .error-section {
-    background: #ffebee;
-    padding: 20px;
-    border-radius: 8px;
-    border-left: 4px solid #d32f2f;
+    background: rgba(242, 139, 130, 0.1);
+    padding: 24px;
+    border-radius: var(--radius-md);
+    border-left: 4px solid var(--danger);
+    border: 1px solid rgba(242, 139, 130, 0.2);
 }
 
 .error-section h3 {
     margin: 0 0 12px 0;
     font-size: 18px;
-    color: #c62828;
+    color: var(--danger);
+    font-weight: 600;
 }
 
 .error-code {
     font-size: 13px;
-    color: #c62828;
-    font-weight: 600;
+    color: var(--danger);
+    font-weight: 700;
     margin-bottom: 8px;
 }
 
 .error-message {
     font-size: 14px;
-    color: #d32f2f;
+    color: var(--text-main);
     line-height: 1.6;
     white-space: pre-wrap;
-    margin-bottom: 16px;
+    margin-bottom: 20px;
 }
 
 .btn-retry {
     padding: 10px 20px;
-    background: #ff9800;
-    color: white;
+    background: var(--warning);
+    color: #000;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
     font-size: 14px;
-    font-weight: 500;
+    font-weight: 600;
+    transition: all 0.2s;
 }
 
 .btn-retry:hover {
-    background: #f57c00;
+    background: #e6a700;
+    transform: translateY(-1px);
 }
 
 .btn-retry:disabled {
-    background: #ccc;
+    background: var(--bg-surface-hover);
     cursor: not-allowed;
+    color: var(--text-muted);
 }
 
 /* Sub Jobs Section */
 .sub-jobs-section {
-    background: white;
-    padding: 20px;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    background: var(--bg-surface);
+    padding: 24px;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--border-color);
 }
 
 .sub-jobs-section h3 {
-    margin: 0 0 16px 0;
-    font-size: 16px;
-    color: #666;
+    margin: 0 0 20px 0;
+    font-size: 18px;
+    color: var(--text-main);
+    font-weight: 600;
 }
 
 .sub-jobs-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 13px;
+    font-size: 14px;
 }
 
 .sub-jobs-table th,
 .sub-jobs-table td {
-    padding: 8px 12px;
+    padding: 12px 16px;
     text-align: left;
-    border-bottom: 1px solid #eee;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-main);
 }
 
 .sub-jobs-table th {
-    background: #f5f5f5;
+    background: var(--bg-surface-hover);
     font-weight: 600;
-    color: #555;
+    color: var(--text-muted);
+    font-size: 13px;
+    text-transform: uppercase;
+}
+
+.sub-jobs-table tr:hover {
+    background: rgba(255, 255, 255, 0.02);
 }
 
 /* Loading/Error States */
 .job-detail-loading,
 .job-detail-error {
-    padding: 60px;
+    padding: 80px;
     text-align: center;
     font-size: 16px;
-    color: #999;
+    color: var(--text-muted);
+    background: var(--bg-surface);
+    border-radius: var(--radius-md);
 }
 
 .job-detail-error {
-    color: #d32f2f;
+    color: var(--danger);
+    background: rgba(242, 139, 130, 0.05);
+    border: 1px solid rgba(242, 139, 130, 0.2);
 }

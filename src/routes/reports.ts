@@ -42,6 +42,7 @@ router.post('/reports', upload.single('file'), async (req, res) => {
     const unitName = typeof unitNameRaw === 'string' && unitNameRaw.trim() ? unitNameRaw.trim() : null;
     const file = req.file;
     const model = req.body.model;
+    const batchId = req.body.batch_id; // Extract batch_id from request
 
     if (!regionId || Number.isNaN(regionId) || !Number.isInteger(regionId)) {
       return res.status(400).json({ error: 'region_id 无效' });
@@ -98,46 +99,23 @@ router.post('/reports', upload.single('file'), async (req, res) => {
 
         let hasContent = false;
         if (activeVersion && activeVersion.parsed_json && activeVersion.parsed_json !== '{}') {
-          try {
-            const parsed = JSON.parse(activeVersion.parsed_json);
-            if (Array.isArray(parsed.sections) && parsed.sections.length > 0) {
-              hasContent = true;
-            } else if (parsed.tables && typeof parsed.tables === 'object' && Object.keys(parsed.tables).length > 0) {
-              hasContent = true;
-            } else if (parsed.report_type || parsed.basic_info || parsed.year) {
-              hasContent = true;
-            }
-          } catch (e) {
-            hasContent = false;
-          }
+          // Check content logic...
+          // We previously deleted empty reports here, but this is dangerous as it removes
+          // failed jobs/reports that simply haven't finished parsing yet or failed.
+          // Better to let them exist and just add new versions or fail the upload if exists.
         }
 
+        /*
+        // DANGEROUS: This logic was deleting reports that were merely queued or failed!
         if (!hasContent) {
           console.log(`[ReportUpload] Existing report ${existingReport.id} is empty. Deleting to overwrite.`);
-          // Delete duplicate/empty report to allow overwrite
-          // Cascade delete logic (simplified for single report):
-          // 1. Get all versions
-          const versions = querySqlite(`SELECT id FROM report_versions WHERE report_id = ${existingReport.id}`);
-          const versionIds = versions.map((v: any) => v.id);
-
-          if (versionIds.length > 0) {
-            const vIdsStr = versionIds.join(',');
-            // Delete jobs
-            querySqlite(`DELETE FROM jobs WHERE version_id IN (${vIdsStr})`);
-            // Delete parses
-            querySqlite(`DELETE FROM report_version_parses WHERE report_version_id IN (${vIdsStr})`);
-            // Delete consistency items
-            querySqlite(`DELETE FROM report_consistency_items WHERE report_version_id IN (${vIdsStr})`);
-            // Delete versions
-            querySqlite(`DELETE FROM report_versions WHERE report_id = ${existingReport.id}`);
-          }
-          // Delete report
+          // ... deletion logic ...
           querySqlite(`DELETE FROM reports WHERE id = ${existingReport.id}`);
         }
+        */
       }
     } catch (e) {
-      console.warn('[ReportUpload] Failed to check/delete existing empty report:', e);
-      // Ignore error and proceed to attempt normal upload
+      console.warn('[ReportUpload] Check existing report failed:', e);
     }
 
 
@@ -150,6 +128,7 @@ router.post('/reports', upload.single('file'), async (req, res) => {
       mimeType: file.mimetype,
       size: file.size,
       model,
+      batchId, // Pass batch_id to service
     });
 
     // FIX: Always return 201 for successful upload, even if version is reused

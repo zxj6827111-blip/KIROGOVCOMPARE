@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Bell } from 'lucide-react';
 import './NotificationCenter.css';
 import { apiClient } from '../apiClient';
 
@@ -92,7 +93,7 @@ function NotificationCenter() {
     return (
         <div className="notification-center">
             <button className="notification-bell" onClick={() => setIsOpen(!isOpen)}>
-                🔔 消息
+                <Bell size={18} /> 消息
                 {unreadCount > 0 && <span className="unread-badge">{unreadCount}</span>}
             </button>
 

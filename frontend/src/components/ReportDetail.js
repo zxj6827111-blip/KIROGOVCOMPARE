@@ -260,7 +260,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
           <h3>年报内容</h3>
           <div>
             <button className="btn-edit" onClick={handleEditClick} style={{ marginRight: '10px' }}>
-              ✏️ 编辑全部
+              ✎ 编辑全部
             </button>
             <button className="secondary-btn" onClick={() => setShowParsed((prev) => !prev)}>
               {showParsed ? '折叠内容' : '展开内容'}
@@ -276,12 +276,12 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                   {section.title}
                   {/* 显示第五/六部分的质量问题标记 */}
                   {section.title?.includes('五') && qualityIssues.sec5 && qualityIssues.sec5.length > 0 && (
-                    <span className="quality-issue-badge" title={qualityIssues.sec5.map(i => i.title).join('\n')} style={{ marginLeft: '10px', padding: '2px 8px', backgroundColor: '#ff4d4f', color: 'white', borderRadius: '4px', fontSize: '12px' }}>
+                    <span className="quality-issue-badge" title={qualityIssues.sec5.map(i => i.title).join('\n')}>
                       ⚠️ {qualityIssues.sec5.length}个问题
                     </span>
                   )}
                   {section.title?.includes('六') && qualityIssues.sec6 && qualityIssues.sec6.length > 0 && (
-                    <span className="quality-issue-badge" title={qualityIssues.sec6.map(i => i.title).join('\n')} style={{ marginLeft: '10px', padding: '2px 8px', backgroundColor: '#ff4d4f', color: 'white', borderRadius: '4px', fontSize: '12px' }}>
+                    <span className="quality-issue-badge" title={qualityIssues.sec6.map(i => i.title).join('\n')}>
                       ⚠️ {qualityIssues.sec6.length}个问题
                     </span>
                   )}
@@ -289,21 +289,21 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                 <div className="section-content">
                   {/* 显示质量问题详情 */}
                   {section.title?.includes('五') && qualityIssues.sec5 && qualityIssues.sec5.length > 0 && (
-                    <div className="quality-issues-alert" style={{ marginBottom: '15px', padding: '12px', backgroundColor: '#fff2e8', border: '1px solid #ffbb96', borderRadius: '4px' }}>
+                    <div className="quality-issues-alert">
                       {qualityIssues.sec5.map((issue, i) => (
-                        <div key={i} className="issue-item" style={{ marginBottom: '8px', display: 'flex', alignItems: 'center' }}>
-                          <span className="issue-icon" style={{ marginRight: '8px', fontSize: '16px' }}>⚠️</span>
-                          <span className="issue-text" style={{ color: '#d4380d' }}>{issue.title}</span>
+                        <div key={i} className="issue-item">
+                          <span className="issue-icon">⚠️</span>
+                          <span className="issue-text">{issue.title}</span>
                         </div>
                       ))}
                     </div>
                   )}
                   {section.title?.includes('六') && qualityIssues.sec6 && qualityIssues.sec6.length > 0 && (
-                    <div className="quality-issues-alert" style={{ marginBottom: '15px', padding: '12px', backgroundColor: '#fff2e8', border: '1px solid #ffbb96', borderRadius: '4px' }}>
+                    <div className="quality-issues-alert">
                       {qualityIssues.sec6.map((issue, i) => (
-                        <div key={i} className="issue-item" style={{ marginBottom: '8px', display: 'flex', alignItems: 'center' }}>
-                          <span className="issue-icon" style={{ marginRight: '8px', fontSize: '16px' }}>⚠️</span>
-                          <span className="issue-text" style={{ color: '#d4380d' }}>{issue.title}</span>
+                        <div key={i} className="issue-item">
+                          <span className="issue-icon">⚠️</span>
+                          <span className="issue-text">{issue.title}</span>
                         </div>
                       ))}
                     </div>
@@ -370,16 +370,16 @@ function ReportDetail({ reportId: propReportId, onBack }) {
             <p className="subtitle">查看报告、最新任务与生效版本信息</p>
           </div>
           <div className="actions">
-            <button className="secondary-btn" onClick={refresh} disabled={loading}>
-              刷新
+            <button className="action-btn" onClick={refresh} disabled={loading}>
+              ↻ 刷新
             </button>
-            <button className="secondary-btn" onClick={handleReparse} disabled={loading}>
-              自动解析(轮询)
+            <button className="action-btn" onClick={handleReparse} disabled={loading}>
+              ⟳ 自动解析
             </button>
-            <button className="secondary-btn" onClick={handleDelete} disabled={loading}>
-              删除报告
+            <button className="action-btn danger" onClick={handleDelete} disabled={loading}>
+              ✕ 删除报告
             </button>
-            <button className="secondary-btn" onClick={handleBack}>
+            <button className="action-btn" onClick={handleBack}>
               ← 返回上一层
             </button>
           </div>
@@ -478,19 +478,19 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                   className={`tab ${activeTab === 'content' ? 'active' : ''}`}
                   onClick={() => setActiveTab('content')}
                 >
-                  📄 年报内容
+                  ◈ 年报内容
                 </button>
                 <button
                   className={`tab ${activeTab === 'checks' ? 'active' : ''}`}
                   onClick={() => setActiveTab('checks')}
                 >
-                  🧮 勾稽关系校验
+                  ⬡ 勾稽关系校验
                 </button>
                 <button
                   className={`tab ${activeTab === 'quality' ? 'active' : ''}`}
                   onClick={() => setActiveTab('quality')}
                 >
-                  🛡️ 数据质量审计
+                  ◉ 数据质量审计
                 </button>
               </div>
             </div>
@@ -543,24 +543,8 @@ function ReportDetail({ reportId: propReportId, onBack }) {
 
       {/* 编辑器覆盖层 - 放在最外层以确保任何标签页下都能显示 */}
       {editingData && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0,0,0,0.5)',
-          zIndex: 1000,
-          overflow: 'auto',
-          padding: '20px'
-        }}>
-          <div style={{
-            maxWidth: '1400px',
-            margin: '0 auto',
-            background: 'white',
-            borderRadius: '8px',
-            padding: '0'
-          }}>
+        <div className="editor-overlay">
+          <div className="editor-modal">
             <ParsedDataEditor
               reportId={reportId}
               versionId={report.active_version?.version_id}

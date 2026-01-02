@@ -6,14 +6,19 @@ const router = express.Router();
 
 /**
  * GET /api/jobs
- * List jobs aggregated by version_id
- * Query params: region_id, year, unit_name, status
+ * List jobs - each job is a separate record (history mode)
+ * Query params: region_id, year, unit_name, status, page, limit
  */
 router.get('/', (req, res) => {
     try {
         ensureSqliteMigrations();
 
-        const { region_id, year, unit_name, status } = req.query;
+        const { region_id, year, unit_name, status, page, limit } = req.query;
+
+        // Pagination defaults
+        const pageNum = Math.max(1, Number(page) || 1);
+        const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
+        const offset = (pageNum - 1) * limitNum;
 
         // Build WHERE clause
         const conditions: string[] = [];
@@ -44,88 +49,123 @@ router.get('/', (req, res) => {
         if (unit_name !== undefined && unit_name !== '') {
             conditions.push(`r.unit_name = ${sqlValue(String(unit_name))}`);
         }
+        if (status) {
+            // Map 'processing' to 'running' for backward compatibility
+            const dbStatus = status === 'processing' ? 'running' : status;
+            conditions.push(`j.status = ${sqlValue(String(dbStatus))}`);
+        }
 
         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-        // Efficiently get latest job details per version using a CTE or subqueries
-        const rows = querySqlite(`
-      ${recursiveRegionCTE}
-      SELECT 
-        rv.id AS version_id,
-        rv.report_id,
-        r.region_id,
-        r.year,
-        r.unit_name,
-        rv.created_at,
-        rv.model as version_model,
-        
-        -- Get latest job details directly
-        (SELECT status FROM jobs WHERE version_id = rv.id ORDER BY id DESC LIMIT 1) as latest_status,
-        (SELECT progress FROM jobs WHERE version_id = rv.id ORDER BY id DESC LIMIT 1) as latest_progress,
-        (SELECT step_name FROM jobs WHERE version_id = rv.id ORDER BY id DESC LIMIT 1) as latest_step_name,
-        (SELECT step_code FROM jobs WHERE version_id = rv.id ORDER BY id DESC LIMIT 1) as latest_step_code,
-        (SELECT attempt FROM jobs WHERE version_id = rv.id ORDER BY id DESC LIMIT 1) as latest_attempt,
-        (SELECT provider FROM jobs WHERE version_id = rv.id ORDER BY id DESC LIMIT 1) as latest_provider,
-        (SELECT model FROM jobs WHERE version_id = rv.id ORDER BY id DESC LIMIT 1) as latest_model,
-        (SELECT error_code FROM jobs WHERE version_id = rv.id ORDER BY id DESC LIMIT 1) as error_code,
-        (SELECT error_message FROM jobs WHERE version_id = rv.id ORDER BY id DESC LIMIT 1) as error_message
+        // Count total for pagination
+        const countResult = querySqlite(`
+          ${recursiveRegionCTE}
+          SELECT COUNT(*) as total
+          FROM jobs j
+          JOIN report_versions rv ON j.version_id = rv.id
+          JOIN reports r ON rv.report_id = r.id
+          ${whereClause};
+        `) as Array<{ total: number }>;
+        const total = countResult[0]?.total || 0;
 
-      FROM report_versions rv
-      JOIN reports r ON rv.report_id = r.id
-      ${whereClause}
-      ORDER BY rv.created_at DESC;
-    `) as Array<{
+        // Query jobs as primary table - each job is a separate record
+        const rows = querySqlite(`
+          ${recursiveRegionCTE}
+          SELECT 
+            j.id AS job_id,
+            j.version_id,
+            j.report_id,
+            j.kind,
+            j.status,
+            j.progress,
+            j.step_code,
+            j.step_name,
+            j.attempt,
+            j.provider,
+            j.model,
+            j.error_code,
+            j.error_message,
+            j.batch_id,
+            j.created_at AS job_created_at,
+            j.started_at,
+            j.finished_at,
+            rv.file_name,
+            r.region_id,
+            r.year,
+            r.unit_name
+          FROM jobs j
+          JOIN report_versions rv ON j.version_id = rv.id
+          JOIN reports r ON rv.report_id = r.id
+          ${whereClause}
+          ORDER BY j.created_at DESC
+          LIMIT ${limitNum} OFFSET ${offset};
+        `) as Array<{
+            job_id: number;
             version_id: number;
             report_id: number;
+            kind: string;
+            status: string;
+            progress: number;
+            step_code: string;
+            step_name: string;
+            attempt: number;
+            provider?: string;
+            model?: string;
+            error_code?: string;
+            error_message?: string;
+            batch_id?: string;
+            job_created_at: string;
+            started_at?: string;
+            finished_at?: string;
+            file_name: string;
             region_id: number;
             year: number;
             unit_name: string;
-            created_at: string;
-            version_model: string;
-            latest_status: string;
-            latest_progress: number;
-            latest_step_name: string;
-            latest_step_code: string;
-            latest_attempt: number;
-            latest_provider: string;
-            latest_model: string;
-            error_code?: string;
-            error_message?: string;
         }>;
 
-        // Aggregate status for each version
+        // Map to response format
         const jobs = rows.map((row) => {
+            // Normalize status for frontend compatibility
+            const displayStatus = row.status === 'running' ? 'processing' : row.status;
             return {
+                job_id: row.job_id,
                 version_id: row.version_id,
                 report_id: row.report_id,
                 region_id: row.region_id,
                 year: row.year,
                 unit_name: row.unit_name,
-                status: row.latest_status || 'queued',
-                progress: row.latest_progress || 0,
-                step_code: row.latest_step_code || 'QUEUED',
-                step_name: row.latest_step_name || '等待处理',
-                attempt: row.latest_attempt || 1,
-                provider: row.latest_provider,
-                model: row.latest_model || row.version_model,
+                file_name: row.file_name,
+                kind: row.kind,
+                status: displayStatus,
+                progress: row.progress || 0,
+                step_code: row.step_code || 'QUEUED',
+                step_name: row.step_name || '等待处理',
+                attempt: row.attempt || 1,
+                provider: row.provider,
+                model: row.model,
                 error_code: row.error_code,
                 error_message: row.error_message,
-                created_at: row.created_at,
-                updated_at: row.created_at,
+                batch_id: row.batch_id,
+                created_at: row.job_created_at,
+                updated_at: row.finished_at || row.started_at || row.job_created_at,
             };
         });
 
-        // Filter by aggregated status if requested
-        const filteredJobs = status
-            ? jobs.filter((job) => job.status === status)
-            : jobs;
-
-        return res.json({ jobs: filteredJobs });
+        return res.json({
+            jobs,
+            pagination: {
+                page: pageNum,
+                limit: limitNum,
+                total,
+                totalPages: Math.ceil(total / limitNum),
+            },
+        });
     } catch (error) {
         console.error('Error listing jobs:', error);
         return res.status(500).json({ error: 'Internal server error' });
     }
 });
+
 
 /**
  * GET /api/jobs/:version_id

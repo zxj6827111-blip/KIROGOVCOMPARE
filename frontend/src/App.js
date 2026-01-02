@@ -12,6 +12,7 @@ import JobCenter from './components/JobCenter';
 import JobDetail from './components/JobDetail';
 import NotificationCenter from './components/NotificationCenter';
 import { apiClient, API_BASE_URL, isAuthenticated, getCurrentUser, logout } from './apiClient';
+import { Map, UploadCloud, ListTodo, PieChart, GitCompare, User } from 'lucide-react';
 
 function App() {
   const [currentPath, setCurrentPath] = useState(`${window.location.pathname}${window.location.search}`);
@@ -64,7 +65,7 @@ function App() {
   // Show loading while checking auth
   if (!authChecked) {
     return (
-      <div className="app" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
+      <div className="app app-loading">
         <p>加载中...</p>
       </div>
     );
@@ -116,7 +117,10 @@ function App() {
         </div>
         <div className="header-user">
           <NotificationCenter />
-          <span>👤 {user.displayName || user.username}</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <User size={18} />
+            {user.displayName || user.username}
+          </span>
           <button onClick={handleLogout} className="logout-btn">退出登录</button>
         </div>
       </header>
@@ -127,35 +131,40 @@ function App() {
           className={`nav-btn ${isNavActive('/regions') ? 'active' : ''}`}
           onClick={() => navigate('/regions')}
         >
-          🏙️ 城市管理
+          <Map size={20} className="nav-icon" />
+          <span>城市管理</span>
         </button>
         <button
           type="button"
           className={`nav-btn ${isNavActive('/upload') ? 'active' : ''}`}
           onClick={() => navigate('/upload')}
         >
-          📤 上传报告
+          <UploadCloud size={20} className="nav-icon" />
+          <span>上传报告</span>
         </button>
         <button
           type="button"
           className={`nav-btn ${isNavActive('/jobs') ? 'active' : ''}`}
           onClick={() => navigate('/jobs')}
         >
-          📋 任务中心
+          <ListTodo size={20} className="nav-icon" />
+          <span>任务中心</span>
         </button>
         <button
           type="button"
           className={`nav-btn ${isNavActive('/catalog') ? 'active' : ''}`}
           onClick={() => navigate('/catalog')}
         >
-          📊 年报汇总
+          <PieChart size={20} className="nav-icon" />
+          <span>年报汇总</span>
         </button>
         <button
           type="button"
           className={`nav-btn ${isNavActive('/history') ? 'active' : ''}`}
           onClick={() => navigate('/history')}
         >
-          📊 比对结果汇总
+          <GitCompare size={20} className="nav-icon" />
+          <span>比对结果汇总</span>
         </button>
       </nav>
 

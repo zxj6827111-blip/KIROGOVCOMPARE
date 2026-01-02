@@ -13,6 +13,9 @@ import reportsRouter from './routes/reports';
 import comparisonsRouter from './routes/comparisons';
 import jobsRouter from './routes/jobs';
 import notificationsRouter from './routes/notifications';
+import regionsRouter from './routes/llm-regions';
+import regionsImportRouter from './routes/regions-import';
+import authRouter from './routes/auth';
 
 dotenv.config();
 
@@ -31,6 +34,9 @@ app.use('/api', healthRouter);
 app.use('/api', reportsRouter);
 app.use('/api', jobsRouter);
 app.use('/api', notificationsRouter);
+app.use('/api/regions', regionsImportRouter);
+app.use('/api/regions', regionsRouter);
+app.use('/api/auth', authRouter);
 
 // 根路由
 app.get('/', (_req, res) => {

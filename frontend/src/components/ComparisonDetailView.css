@@ -1,667 +1,147 @@
 /* Global Reset for this view */
 .comparison-container {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    color: #374151;
+    font-family: var(--font-primary);
+    color: var(--color-text-primary);
     line-height: 1.5;
-    background-color: #f9fafb;
-    /* bg-gray-50 */
+    background-color: var(--color-bg-secondary);
     min-height: 100vh;
-    padding: 1rem;
+    padding: 24px;
 }
 
 .comparison-container * {
     box-sizing: border-box;
 }
 
-/* Utilities / Polyfills for Tailwind classes used */
+/* --- Interactive Spreadsheet Table Style --- */
 
-/* Layout */
-.max-w-\[1600px\] {
-    max-width: 1600px;
+/* --- Interactive Spreadsheet Table Style --- */
+
+.comparison-table-container {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    /* Stricter border */
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+    margin-bottom: 24px;
 }
 
-.mx-auto {
-    margin-left: auto;
-    margin-right: auto;
+table.comparison-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
 }
 
-.space-y-4>*+* {
-    margin-top: 1rem;
+/* Header */
+.comparison-table thead th {
+    background-color: #F8FAFC;
+    /* Light gray header */
+    color: var(--color-text-secondary);
+    font-weight: 700;
+    text-transform: uppercase;
+    font-size: 11px;
+    padding: 12px 16px;
+    border-bottom: 2px solid #E2E8F0;
+    text-align: left;
+    white-space: nowrap;
 }
 
-.pb-20 {
-    padding-bottom: 5rem;
+/* Body */
+.comparison-table tbody td {
+    padding: 10px 16px;
+    border-bottom: 1px solid #F1F5F9;
+    /* Specific hex */
+    color: var(--color-text-primary);
+    vertical-align: middle;
 }
 
-.p-4 {
-    padding: 1rem;
+/* No vertical borders logic */
+.comparison-table th,
+.comparison-table td {
+    border-right: none;
+    border-left: none;
 }
 
-.p-6 {
-    padding: 1.5rem;
+/* Row Hover */
+.comparison-table tbody tr:hover td {
+    background-color: var(--color-bg-hover);
 }
 
-.p-8 {
-    padding: 2rem;
+/* Highlight Cells (Exceptions) */
+.cell-warning {
+    background-color: var(--color-tag-warning-bg) !important;
+    color: var(--color-tag-warning-text) !important;
+    font-weight: 600;
+    position: relative;
+    border-radius: 4px;
 }
 
-.px-2 {
-    padding-left: 0.5rem;
-    padding-right: 0.5rem;
-}
+/* Utilities / Overrides */
 
-.py-2 {
-    padding-top: 0.5rem;
-    padding-bottom: 0.5rem;
-}
-
-.px-4 {
-    padding-left: 1rem;
-    padding-right: 1rem;
-}
-
-.mb-2 {
-    margin-bottom: 0.5rem;
-}
-
-.mb-4 {
-    margin-bottom: 1rem;
-}
-
-.mb-6 {
-    margin-bottom: 1.5rem;
-}
-
-.mb-8 {
-    margin-bottom: 2rem;
-}
-
-.mr-1 {
-    margin-right: 0.25rem;
-}
-
-.ml-1 {
-    margin-left: 0.25rem;
-}
-
-.pl-2 {
-    padding-left: 0.5rem;
-}
-
-.pr-2 {
-    padding-right: 0.5rem;
-}
-
-.pt-4 {
-    padding-top: 1rem;
-}
-
-.pb-2 {
-    padding-bottom: 0.5rem;
-}
-
-/* Grid & Flex */
-.flex {
-    display: flex;
-}
-
-.flex-wrap {
-    flex-wrap: wrap;
-}
-
-.items-center {
-    align-items: center;
-}
-
-.justify-between {
-    justify-content: space-between;
-}
-
-.gap-2 {
-    gap: 0.5rem;
-}
-
-.gap-3 {
-    gap: 0.75rem;
-}
-
-.gap-4 {
-    gap: 1rem;
-}
-
-.gap-6 {
-    gap: 1.5rem;
-}
-
-.grid {
-    display: grid;
-}
-
-.grid-cols-2 {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.space-x-2>*+* {
-    margin-left: 0.5rem;
-}
-
-.space-x-8>*+* {
-    margin-left: 2rem;
-}
-
-/* Colors & Backgrounds */
-.bg-gray-50 {
-    background-color: #f9fafb;
-}
-
-.bg-white {
-    background-color: #ffffff;
-}
-
-.bg-gray-100 {
-    background-color: #f3f4f6;
-}
-
-.bg-yellow-200 {
-    background-color: #fde047;
-}
-
-.bg-red-200 {
-    background-color: #fecaca;
-}
-
-.bg-gray-800 {
-    background-color: #1f2937;
-}
-
-.bg-yellow-50 {
-    background-color: #fefce8;
-}
-
-.text-white {
-    color: #ffffff;
-}
-
-.text-gray-300 {
-    color: #d1d5db;
-}
-
-.text-gray-400 {
-    color: #9ca3af;
-}
-
-.text-gray-500 {
-    color: #6b7280;
-}
-
-.text-gray-600 {
-    color: #4b5563;
-}
-
-.text-gray-700 {
-    color: #374151;
-}
-
-.text-gray-900 {
-    color: #111827;
-}
-
-.text-blue-600 {
-    color: #2563eb;
-}
-
-.text-blue-800 {
-    color: #1e40af;
-}
-
-.text-blue-900 {
-    color: #1e3a8a;
-}
-
-.text-red-500 {
-    color: #ef4444;
-}
-
-.text-red-900 {
-    color: #7f1d1d;
-}
-
-.text-yellow-500 {
-    color: #eab308;
+.overflow-x-auto {
+    overflow-x: auto;
 }
 
 .text-center {
     text-align: center;
 }
 
-/* Borders */
-.border {
-    border-width: 1px;
-    border-style: solid;
+.text-right {
+    text-align: right;
 }
 
-.border-b {
-    border-bottom-width: 1px;
-    border-bottom-style: solid;
+.text-left {
+    text-align: left;
 }
 
-.border-r {
-    border-right-width: 1px;
-    border-right-style: solid;
-}
-
-.border-l-4 {
-    border-left-width: 4px;
-    border-left-style: solid;
-}
-
-.border-gray-200 {
-    border-color: #e5e7eb;
-}
-
-.border-gray-300 {
-    border-color: #d1d5db;
-}
-
-.border-gray-400 {
-    border-color: #9ca3af;
-}
-
-.border-blue-500 {
-    border-color: #3b82f6;
-}
-
-.border-yellow-300 {
-    border-color: #fde047;
-}
-
-.border-red-300 {
-    border-color: #fca5a5;
-}
-
-.border-dashed {
-    border-style: dashed;
-}
-
-.rounded {
-    border-radius: 0.25rem;
-}
-
-.rounded-md {
-    border-radius: 0.375rem;
-}
-
-.rounded-lg {
-    border-radius: 0.5rem;
-}
-
-.rounded-sm {
-    border-radius: 0.125rem;
-}
-
-/* Typography */
 .font-bold {
-    font-weight: 700;
-}
-
-.text-sm {
-    font-size: 0.875rem;
-    line-height: 1.25rem;
+    font-weight: 600;
 }
 
 .text-xs {
-    font-size: 0.75rem;
-    line-height: 1rem;
+    font-size: 12px;
 }
 
-.text-lg {
-    font-size: 1.125rem;
-    line-height: 1.75rem;
+.text-sm {
+    font-size: 13px;
 }
 
-.text-2xl {
-    font-size: 1.5rem;
-    line-height: 2rem;
+/* Status Colors */
+.text-green-600 {
+    color: var(--color-tag-green-text);
 }
 
-.font-mono {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+.text-red-600 {
+    color: var(--color-tag-red-text);
 }
 
-.font-serif-sc {
-    font-family: "Source Han Serif SC", "Songti SC", serif;
+.text-gray-400 {
+    color: var(--color-text-tertiary);
 }
 
-.italic {
-    font-style: italic;
+.bg-blue-50 {
+    background-color: var(--primary-light);
 }
 
-.whitespace-pre-line {
-    white-space: pre-line;
+.bg-gray-50 {
+    background-color: var(--color-bg-secondary);
 }
 
-.leading-relaxed {
-    line-height: 1.625;
-}
-
-.break-words {
-    overflow-wrap: break-word;
-}
-
-.list-disc {
-    list-style-type: disc;
-}
-
-.list-inside {
-    list-style-position: inside;
-}
-
-.decoration-dotted {
-    text-decoration-style: dotted;
-}
-
-.underline {
-    text-decoration-line: underline;
-}
-
-/* Effects */
-.shadow-sm {
-    box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-}
-
-.cursor-pointer {
-    cursor: pointer;
-}
-
-.select-none {
-    user-select: none;
-}
-
-.hover\:bg-gray-50:hover {
-    background-color: #f9fafb;
-}
-
-.hover\:bg-gray-900:hover {
-    background-color: #111827;
-}
-
-.hover\:text-blue-800:hover {
-    color: #1e40af;
-}
-
-.opacity-50 {
-    opacity: 0.5;
-}
-
-/* Positioning */
-.sticky {
-    position: sticky;
-}
-
-.top-0 {
-    top: 0;
-}
-
-.z-30 {
-    z-index: 30;
-}
-
-.block {
-    display: block;
-}
-
-.inline-block {
-    display: inline-block;
-}
-
-/* Custom Component Styles */
-.back-nav button {
-    background: none;
-    border: none;
-    cursor: pointer;
-    font-size: 1rem;
-}
-
-/* Button Reset & Style */
-button.bg-gray-800 {
-    border: none;
-    cursor: pointer;
-    transition: background-color 0.2s;
-    display: inline-flex;
-    align-items: center;
-}
-
-/* Print Styles */
+/* --- Print Styles --- */
 @media print {
-
-    /* Use Landscape for better table fit */
-    @page {
-        size: landscape;
-        margin: 10mm;
+    .comparison-container {
+        background: white;
+        padding: 0;
     }
 
-    /* Hide UI elements */
-    nav,
-    .header,
-    .footer,
-    .back-nav,
-    .no-print,
-    button {
-        display: none !important;
+    .comparison-table-container {
+        box-shadow: none;
+        border: 1px solid #000;
     }
 
-    /* Reset layout constraints */
-    body,
-    .app,
-    .main,
-    .comparison-container,
-    .comparison-detail-view {
-        background-color: white !important;
-        margin: 0 !important;
-        padding: 0 !important;
-        width: 100% !important;
-        max-width: 100% !important;
-        min-width: 100% !important;
-        height: auto !important;
-        overflow: visible !important;
-    }
-
-    /* Ensure background colors (highlights) explain themselves */
-    * {
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
-    }
-
-    /* Ensure grid layout persists in print */
-    .comparison-grid {
-        display: grid !important;
-        grid-template-columns: 1fr 1fr !important;
-        gap: 1rem !important;
-        /* Allow breaking inside to prevent huge gaps */
-        page-break-inside: auto !important;
-        break-inside: auto !important;
-    }
-
-    /* Typography tweaks for print */
-    body {
-        font-size: 10pt;
-        font-family: 'SimSun', 'Songti SC', serif;
-        color: black !important;
-    }
-
-    .text-gray-600,
-    .text-gray-700,
-    .text-gray-900 {
-        color: black !important;
-    }
-
-    h2,
-    h3,
-    h4 {
-        color: black !important;
-        page-break-after: avoid;
-        /* Keep headers with content */
-        page-break-inside: avoid;
-        break-after: avoid;
-        break-inside: avoid;
-    }
-
-    /* Allow breaking inside sections so they don't push to next page unnecessarily */
-    .comparison-section-row,
-    .bg-white,
-    .rounded-lg {
-        break-inside: auto !important;
-        page-break-inside: auto !important;
-        border: none !important;
-    }
-
-    /* But try to keep individual table rows together if possible */
-    tr {
-        break-inside: avoid;
-        page-break-inside: avoid;
-    }
-
-    /* Remove shadows and backgrounds for cleaner print */
-    .shadow-sm {
-        box-shadow: none !important;
-    }
-
-    .bg-gray-50,
-    .bg-gray-100 {
-        background-color: transparent !important;
-    }
-
-    /* Keep table borders */
-    table,
-    td,
-    th {
-        border-color: #000 !important;
-    }
-
-    /* Sticky header shouldn't stick in print */
-    .sticky {
-        position: static !important;
-    }
-
-    /* Ensure images/charts don't get cut off randomly if possible */
-    img,
-    svg {
-        break-inside: avoid;
-    }
-
-    /* Force background colors for highlights in print - High Specificity */
-    span.bg-red-200,
-    .bg-red-200 {
-        background-color: #fecaca !important;
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
-        color: #7f1d1d !important;
-    }
-
-    span.bg-yellow-200,
-    .bg-yellow-200 {
-        background-color: #fde047 !important;
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
-        color: #111827 !important;
-    }
-
-    /* Switch from Grid to Flexbox for print to handle paging better?
-       Actually, simple block flow with floating or flex might be safer than Grid.
-    */
-    .comparison-grid {
-        display: flex !important;
-        flex-direction: row !important;
-        flex-wrap: nowrap !important;
-        gap: 1rem !important;
-        page-break-inside: auto !important;
-        break-inside: auto !important;
-    }
-
-    .comparison-grid>div {
-        width: 50% !important;
-        break-inside: auto !important;
-        page-break-inside: auto !important;
-    }
-
-    /* SPECIFIC TABLE PRINT FIXES */
-    table {
-        page-break-inside: auto !important;
-        break-inside: auto !important;
-        width: 100% !important;
-        border-collapse: collapse !important;
+    .comparison-table th,
+    .comparison-table td {
         border: 1px solid #000 !important;
-        /* Force outer border */
-    }
-
-    /* Force borders on all cells in print to avoid missing lines */
-    td,
-    th {
-        border: 1px solid #000 !important;
-    }
-
-    tbody {
-        page-break-inside: auto !important;
-        break-inside: auto !important;
-    }
-
-    /* Important: Keep rows together */
-    tr {
-        break-inside: avoid !important;
-        page-break-inside: avoid !important;
-    }
-
-    /* Ensure table headers repeat on new pages if browser supports it */
-    thead {
-        display: table-header-group !important;
-    }
-
-    /* Remove overflow hiding which cuts off content in print */
-    .overflow-x-auto,
-    .overflow-hidden {
-        overflow: visible !important;
-        display: block !important;
-        /* Reset from potential other displays */
-        border: none !important;
-        /* Let table handle borders */
-    }
-
-    /* Ensure the grid item (column) allows breaking */
-    .comparison-grid>div {
-        break-inside: auto !important;
-        page-break-inside: auto !important;
-    }
-}
-
-/* Highlight style for consistency check failures */
-.cell-warning {
-    background-color: #fef08a !important;
-    /* Yellow-200 */
-    border: 2px solid #ca8a04 !important;
-    /* Yellow-600 */
-    position: relative;
-}
-
-/* Optional: Add an indicator icon */
-.cell-warning::after {
-    content: "!";
-    font-weight: bold;
-    position: absolute;
-    top: 0;
-    right: 0;
-    background-color: #ca8a04;
-    color: white;
-    font-size: 10px;
-    line-height: 1;
-    padding: 1px 3px;
-    border-bottom-left-radius: 4px;
-}
-
-@media print {
-    .cell-warning {
-        background-color: #fef08a !important;
-        border: 2px solid #ca8a04 !important;
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
+        /* Restore borders for print readability */
     }
 }

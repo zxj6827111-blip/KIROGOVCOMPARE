@@ -1,3 +1,68 @@
+/* Antigravity Design System - Airtable Light Mode */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  /* --- Airtable Palette --- */
+
+  /* Backgrounds */
+  --color-bg-main: #FFFFFF;
+  /* Clean White */
+  --color-bg-secondary: #F5F7FA;
+  /* Soft Light Gray for structure */
+  --color-bg-hover: #F1F5F9;
+
+  /* Borders */
+  --color-border: #CBD5E1;
+  /* Darker border for contrast */
+  --color-border-hover: #94A3B8;
+
+  /* Typography & Text Colors */
+  --font-primary: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --color-text-primary: #171717;
+  /* High emphasis */
+  --color-text-secondary: #475569;
+  /* Medium emphasis */
+  --color-text-tertiary: #94A3B8;
+  /* Low emphasis */
+
+  /* Accents & Brand */
+  --primary: #2563EB;
+  /* Vibrant Blue */
+  --primary-light: #EFF6FF;
+  /* Very light blue for active states */
+
+  /* --- Tags (Pastel Bg + Dark Text) --- */
+  --color-tag-blue-bg: #E0F2FE;
+  --color-tag-blue-text: #0284C7;
+
+  --color-tag-green-bg: #DCFCE7;
+  --color-tag-green-text: #16A34A;
+
+  --color-tag-purple-bg: #F3E8FF;
+  --color-tag-purple-text: #9333EA;
+
+  --color-tag-red-bg: #FEE2E2;
+  /* Exception / Anomaly */
+  --color-tag-red-text: #DC2626;
+
+  --color-tag-warning-bg: #FEF3C7;
+  --color-tag-warning-text: #D97706;
+
+  /* --- Elevation System --- */
+  /* Soft, diffused shadows */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+
+  /* --- Layout & Spacing --- */
+  --header-height: 64px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  /* Standard Airtable curve */
+  --radius-lg: 16px;
+}
+
+/* Base Reset & Typography */
 * {
   margin: 0;
   padding: 0;
@@ -5,138 +70,286 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  font-family: var(--font-primary);
+  background-color: var(--color-bg-secondary);
+  /* Structural base is gray */
+  color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #f5f5f5;
+  line-height: 1.5;
 }
 
+/* Scrollbar styling for a cleaner look */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+/* --- App Layout --- */
 .app {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  background-color: var(--color-bg-secondary);
 }
 
-/* 头部 */
+/* --- Header --- */
 .header {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  padding: 40px 20px;
-  text-align: center;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.header-content h1 {
-  font-size: 32px;
-  margin-bottom: 10px;
-  font-weight: 600;
-}
-
-.header-content p {
-  font-size: 16px;
-  opacity: 0.9;
-}
-
-/* Header user section */
-.header {
+  height: var(--header-height);
+  background: var(--color-bg-main);
+  border-bottom: 1px solid var(--color-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
+  padding: 0 24px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: var(--shadow-sm);
+}
+
+.header-content h1 {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.header-content p {
+  display: none;
 }
 
 .header-user {
   display: flex;
   align-items: center;
-  gap: 12px;
-  font-size: 14px;
+  gap: 16px;
 }
 
 .header-user span {
-  opacity: 0.9;
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  font-weight: 500;
 }
 
 .logout-btn {
-  background: rgba(255, 255, 255, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  color: white;
-  padding: 8px 16px;
-  border-radius: 6px;
-  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
   font-size: 13px;
+  cursor: pointer;
   transition: all 0.2s;
 }
 
 .logout-btn:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
 }
 
-/* 导航 */
+/* --- Navigation --- */
 .nav {
+  background: var(--color-bg-main);
+  border-bottom: 1px solid var(--color-border);
+  padding: 0 24px;
   display: flex;
-  gap: 10px;
-  padding: 20px;
-  background-color: white;
-  border-bottom: 1px solid #e0e0e0;
-  justify-content: center;
-  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  height: 48px;
+  /* Sub-header bar similar to Airtable views */
 }
 
 .nav-btn {
-  padding: 10px 20px;
-  border: 2px solid #667eea;
-  background-color: white;
-  color: #667eea;
-  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  /* Space between icon and text */
+  padding: 12px 16px;
+  background: var(--bg-surface);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
   cursor: pointer;
-  font-size: 14px;
+  text-align: left;
+  font-size: 15px;
   font-weight: 500;
-  transition: all 0.3s ease;
-  text-decoration: none;
-  display: inline-block;
+  color: #64748B;
+  /* Slate-500 (Inactive) */
+  transition: all 0.2s;
+  box-shadow: var(--shadow-sm);
+  width: 100%;
+  /* For sidebar layout */
+  stroke-width: 1.5px;
+}
+
+.nav-img {
+  display: none;
+  /* Hide old emoji images if any */
+}
+
+.nav-icon {
+  flex-shrink: 0;
 }
 
 .nav-btn:hover {
-  background-color: #f0f0f0;
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
 }
 
 .nav-btn.active {
-  background-color: #667eea;
-  color: white;
+  background: var(--primary-light);
+  color: var(--primary);
+  font-weight: 600;
 }
 
-/* 主内容 */
+/* --- Main Content --- */
 .main {
   flex: 1;
-  padding: 30px 20px;
-  max-width: 1200px;
-  margin: 0 auto;
   width: 100%;
+  max-width: 1600px;
+  /* Wide canvas */
+  margin: 0 auto;
+  padding: 24px;
 }
 
-/* 页脚 */
+/* --- Footer --- */
 .footer {
-  background-color: #333;
-  color: white;
+  background: var(--color-bg-main);
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-tertiary);
   text-align: center;
-  padding: 20px;
-  font-size: 14px;
-  margin-top: 40px;
+  padding: 16px;
+  font-size: 12px;
+  margin-top: auto;
 }
 
-/* 响应式 */
-@media (max-width: 768px) {
-  .header-content h1 {
-    font-size: 24px;
-  }
+/* --- Utility Classes --- */
 
-  .header-content p {
-    font-size: 14px;
-  }
+/* Cards - "The elevated white card" */
+.card,
+.panel {
+  background: var(--color-bg-main);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 24px;
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 24px;
+  transition: box-shadow 0.2s;
+}
 
-  .main {
-    padding: 20px 10px;
-  }
+.card:hover {
+  box-shadow: var(--shadow-md);
+  /* Lift on hover */
+}
+
+/* Typography Helpers */
+h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 16px;
+}
+
+p {
+  color: var(--color-text-secondary);
+  margin-bottom: 12px;
+}
+
+/* Buttons */
+.btn-primary,
+button.primary-btn {
+  background: var(--primary);
+  color: #FFFFFF;
+  border: none;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.2s;
+}
+
+.btn-primary:hover {
+  background: #1D4ED8;
+  /* Darker Blue */
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+/* Inputs */
+input,
+select,
+textarea {
+  background: #FFFFFF;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  width: 100%;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-light);
+}
+
+/* Tables (Base Style - "Spreadsheet") */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  /* Clean lines */
+  background: var(--color-bg-main);
+}
+
+th {
+  background: #FFFFFF;
+  text-align: left;
+  padding: 10px 16px;
+  font-size: 11px;
+  /* Small, uppercase */
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  border-bottom: 2px solid var(--color-border);
+  /* Slightly thicker header border */
+  white-space: nowrap;
+}
+
+td {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  vertical-align: middle;
+}
+
+tr:hover td {
+  background-color: var(--color-bg-secondary);
+  /* Row hover effect */
+}
+
+/* Loaders */
+.app-loading {
+  justify-content: center;
+  align-items: center;
+  font-size: 14px;
+  color: var(--color-text-secondary);
 }
