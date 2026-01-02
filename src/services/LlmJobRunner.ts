@@ -184,33 +184,45 @@ export class LlmJobRunner {
     let provider: LlmProvider;
 
     if (attempt === 1) {
-      // Fetch specific provider/model config for this version
-      const versionConfig = querySqlite(
-        `SELECT provider, model FROM report_versions WHERE id = ${sqlValue(job.version_id)} LIMIT 1;`
+      // CRITICAL FIX: Prioritize provider/model from the JOBS table (user's actual selection)
+      // Only fallback to report_versions if jobs.provider/model are NULL
+      const jobConfig = querySqlite(
+        `SELECT provider, model FROM jobs WHERE id = ${sqlValue(job.id)} LIMIT 1;`
       )[0] as { provider?: string; model?: string } | undefined;
 
-      // If provider is 'upload' (legacy/default) or 'pending', ignore it and use env default.
-      // Otherwise use the stored provider details.
-      const pName =
-        versionConfig?.provider && versionConfig.provider !== 'upload' && versionConfig.provider !== 'pending'
-          ? versionConfig.provider
-          : undefined;
+      let pName = jobConfig?.provider;
+      let mName = jobConfig?.model;
 
-      const mName =
-        versionConfig?.model && versionConfig.model !== 'pending'
-          ? versionConfig.model
-          : undefined;
+      // If job doesn't have provider/model, fallback to version config
+      if (!pName && !mName) {
+        const versionConfig = querySqlite(
+          `SELECT provider, model FROM report_versions WHERE id = ${sqlValue(job.version_id)} LIMIT 1;`
+        )[0] as { provider?: string; model?: string } | undefined;
+
+        // If provider is 'upload' (legacy/default) or 'pending', ignore it and use env default.
+        pName =
+          versionConfig?.provider && versionConfig.provider !== 'upload' && versionConfig.provider !== 'pending'
+            ? versionConfig.provider
+            : undefined;
+
+        mName =
+          versionConfig?.model && versionConfig.model !== 'pending'
+            ? versionConfig.model
+            : undefined;
+      }
 
       if (pName || mName) {
-        console.log(`[Job ${job.id}] Using custom config: Provider=${pName}, Model=${mName}`);
+        console.log(`[Job ${job.id}] Using config: Provider=${pName}, Model=${mName}`);
       }
 
       // Create a fresh provider instance for this job if customized, or default
       provider = createLlmProvider(pName, mName);
     } else if (attempt === 2) {
-      // Retry Strategy: Force DeepSeek V3.2 (ModelScope) on first retry
-      console.log(`[Job ${job.id}] Retry Attempt 2: Switching to fallback model 'deepseek-ai/DeepSeek-V3.2'`);
-      provider = createLlmProvider('modelscope', 'deepseek-ai/DeepSeek-V3.2');
+      // Retry Strategy: Use fallback model from env, or default to DeepSeek V3.2
+      const fallbackProvider = process.env.LLM_FALLBACK_PROVIDER || 'modelscope';
+      const fallbackModel = process.env.LLM_FALLBACK_MODEL || 'deepseek-ai/DeepSeek-V3.2';
+      console.log(`[Job ${job.id}] Retry Attempt 2: Switching to fallback model '${fallbackModel}'`);
+      provider = createLlmProvider(fallbackProvider, fallbackModel);
     } else {
       // Fallback for subsequent retries (if any)
       provider = this.getProvider(attempt);

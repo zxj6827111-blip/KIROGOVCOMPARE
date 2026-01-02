@@ -72,6 +72,12 @@ export class ModelScopeLlmProvider implements LlmProvider {
 
         const url = 'https://api-inference.modelscope.cn/v1/chat/completions';
 
+        // Only enable thinking for true reasoning models (R1, QwQ)
+        const isReasoningModel = effectiveModel.toLowerCase().includes('r1') ||
+            effectiveModel.toLowerCase().includes('qwq') ||
+            this.model.toLowerCase().includes('r1') ||
+            this.model.toLowerCase().includes('qwq');
+
         try {
             // NOTE: Using non-streaming request for simplicity in backend processing.
             // If streaming is needed for huge responses, we'd need to implement stream handling similar to the python example.
@@ -90,7 +96,8 @@ export class ModelScopeLlmProvider implements LlmProvider {
                         }
                     ],
                     stream: false,
-                    enable_thinking: true // Enable thinking as requested
+                    // Only enable thinking for reasoning models to avoid timeouts
+                    ...(isReasoningModel ? { enable_thinking: true } : {})
                 },
                 {
                     headers: {
@@ -171,7 +178,8 @@ export class ModelScopeLlmProvider implements LlmProvider {
                                 { role: 'user', content: userText }
                             ],
                             stream: false,
-                            enable_thinking: true
+                            // Use same conditional thinking as primary request
+                            ...(isReasoningModel ? { enable_thinking: true } : {})
                         },
                         {
                             headers: {

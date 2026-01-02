@@ -53,6 +53,21 @@ function ensureDataDir(): void {
 function runSqlStatements(sql: string): any[] {
   ensureDataDir();
   const cmd = resolveSqlite3Command();
+
+  // Run pragmas first in a separate call (no -json flag) to avoid corrupting JSON output
+  try {
+    execFileSync(cmd, [SQLITE_DB_PATH], {
+      encoding: 'utf-8',
+      input: 'PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;',
+      timeout: SQLITE_CMD_TIMEOUT_MS,
+    });
+  } catch (pragmaError: any) {
+    // Pragma errors are non-fatal, just log and continue
+    if (pragmaError?.code !== 'ENOENT') {
+      console.warn('[sqlite] Pragma setup warning:', pragmaError?.message || pragmaError);
+    }
+  }
+
   let output = '';
   try {
     output = execFileSync(cmd, ['-json', SQLITE_DB_PATH], {
@@ -91,8 +106,13 @@ function runSqlStatements(sql: string): any[] {
       .map((chunk) => chunk.trim())
       .filter(Boolean)
       .flatMap((chunk) => {
-        const value = JSON.parse(chunk);
-        return Array.isArray(value) ? value : [value];
+        try {
+          const value = JSON.parse(chunk);
+          return Array.isArray(value) ? value : [value];
+        } catch {
+          // Skip non-JSON lines (like pragma output remnants)
+          return [];
+        }
       });
   }
 }

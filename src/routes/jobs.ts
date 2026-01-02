@@ -55,6 +55,10 @@ router.get('/', (req, res) => {
             conditions.push(`j.status = ${sqlValue(String(dbStatus))}`);
         }
 
+        // Exclude 'checks' jobs from the main list - they are internal validation tasks
+        // This merges parse+checks into a single visual row per upload
+        conditions.push(`j.kind != 'checks'`);
+
         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
         // Count total for pagination
