@@ -533,3 +533,60 @@
     border-color: #3b82f6;
     box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
 }
+
+/* Checkbox styling */
+.jobs-table input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: #3b82f6;
+}
+
+/* Selected row */
+.jobs-table tr.selected {
+    background-color: #eff6ff;
+}
+
+.jobs-table tr.selected:hover {
+    background-color: #dbeafe;
+}
+
+/* Batch delete button */
+.btn-batch-delete {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    background: #ef4444;
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.btn-batch-delete:hover {
+    background: #dc2626;
+}
+
+/* Batch download button */
+.btn-batch-download {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    background: #3b82f6;
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.btn-batch-download:hover {
+    background: #2563eb;
+}

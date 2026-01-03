@@ -371,7 +371,7 @@ export class LlmJobRunner {
       WHERE id = (
         SELECT id
         FROM jobs
-        WHERE status = 'queued'
+        WHERE status = 'queued' AND kind != 'pdf_export'
         ORDER BY (CASE kind WHEN 'parse' THEN 0 WHEN 'checks' THEN 1 WHEN 'compare' THEN 2 ELSE 9 END) ASC, created_at ASC
         LIMIT 1
       )

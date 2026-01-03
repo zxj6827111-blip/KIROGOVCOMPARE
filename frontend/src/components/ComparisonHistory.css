@@ -349,3 +349,53 @@
     border: 1px solid #3b82f6;
     color: white;
 }
+
+/* Batch action buttons */
+.batch-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.batch-btn.download-btn {
+    background-color: #3b82f6;
+    color: white;
+}
+
+.batch-btn.download-btn:hover {
+    background-color: #2563eb;
+}
+
+.batch-btn.delete-btn {
+    background-color: #ef4444;
+    color: white;
+}
+
+.batch-btn.delete-btn:hover {
+    background-color: #dc2626;
+}
+
+/* Selected row highlight */
+.history-table tr.selected-row {
+    background-color: #eff6ff;
+}
+
+.history-table tr.selected-row:hover {
+    background-color: #dbeafe;
+}
+
+/* Checkbox styling */
+.history-table input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: #3b82f6;
+}

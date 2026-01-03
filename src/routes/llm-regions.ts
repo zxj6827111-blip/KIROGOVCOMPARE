@@ -96,21 +96,83 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
+import { authMiddleware, AuthRequest } from '../middleware/auth';
+
 // GET /api/regions - 获取区域列表（带层级）
-router.get('/', async (_req: Request, res: Response) => {
+router.get('/', authMiddleware, async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthRequest;
+    const user = authReq.user;
+
+    // Logic: If user has dataScope.regions, filter the query
+    let filterNames: string[] = [];
+    if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
+      filterNames = user.dataScope.regions;
+    }
+
     if (dbType === 'sqlite') {
       const rows = await new Promise<any[]>((resolve, reject) => {
-        pool.all('SELECT id, code, name, province, parent_id, level FROM regions ORDER BY level, id', (err: any, rows: any[]) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        });
+        if (filterNames.length > 0) {
+          // Recursive query for filtered scope
+          // Construct 'IN' clause placeholders manually because sqlite3 array binding is limited
+          const placeholders = filterNames.map(() => '?').join(',');
+          const sql = `
+              WITH RECURSIVE allowed_tree AS (
+                SELECT id, code, name, province, parent_id, level 
+                FROM regions 
+                WHERE name IN (${placeholders})
+                UNION ALL
+                SELECT r.id, r.code, r.name, r.province, r.parent_id, r.level 
+                FROM regions r 
+                JOIN allowed_tree d ON r.parent_id = d.id
+              )
+              SELECT DISTINCT id, code, name, province, parent_id, level FROM allowed_tree ORDER BY level, id
+            `;
+          pool.all(sql, filterNames, (err: any, rows: any[]) => {
+            if (err) reject(err);
+            else {
+              // Fix Orphaned Nodes:
+              // If a node's parent is NOT in the result set, set parent_id to null
+              // This ensures frontend treats them as "roots" and displays them
+              const validIds = new Set(rows?.map(r => r.id));
+              const safeRows = rows?.map(r => ({
+                ...r,
+                parent_id: (r.parent_id && validIds.has(r.parent_id)) ? r.parent_id : null
+              })) || [];
+              resolve(safeRows);
+            }
+          });
+        } else {
+          pool.all('SELECT id, code, name, province, parent_id, level FROM regions ORDER BY level, id', (err: any, rows: any[]) => {
+            if (err) reject(err);
+            else resolve(rows || []);
+          });
+        }
       });
 
       res.json({ data: rows });
     } else {
-      const result = await pool.query('SELECT id, code, name, province, parent_id, level FROM regions ORDER BY level, id');
-      res.json({ data: result.rows });
+      // Postgres implementation (simplified, assuming we might not need it for this user or using similar CTE)
+      if (filterNames.length > 0) {
+        // Note: pg usually uses $1, $2... and ANY($1) for arrays
+        const sql = `
+              WITH RECURSIVE allowed_tree AS (
+                SELECT id, code, name, province, parent_id, level 
+                FROM regions 
+                WHERE name = ANY($1)
+                UNION ALL
+                SELECT r.id, r.code, r.name, r.province, r.parent_id, r.level 
+                FROM regions r 
+                JOIN allowed_tree d ON r.parent_id = d.id
+              )
+              SELECT DISTINCT id, code, name, province, parent_id, level FROM allowed_tree ORDER BY level, id
+            `;
+        const result = await pool.query(sql, [filterNames]);
+        res.json({ data: result.rows });
+      } else {
+        const result = await pool.query('SELECT id, code, name, province, parent_id, level FROM regions ORDER BY level, id');
+        res.json({ data: result.rows });
+      }
     }
   } catch (error) {
     console.error('Error fetching regions:', error);

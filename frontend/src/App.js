@@ -9,6 +9,8 @@ import RegionsManager from './components/RegionsManager';
 import ComparisonHistory from './components/ComparisonHistory';
 import ComparisonDetailView from './components/ComparisonDetailView';
 import ComparisonPrintView from './components/print/ComparisonPrintView';
+import UserManagement from './components/UserManagement';
+
 import JobCenter from './components/JobCenter';
 import JobDetail from './components/JobDetail';
 import NotificationCenter from './components/NotificationCenter';
@@ -87,6 +89,7 @@ function App() {
     if (pathname === '/regions') return <RegionsManager />;
     if (pathname === '/upload') return <UploadReport />;
     if (pathname === '/jobs' || pathname === '/jobs/') return <JobCenter />;
+    if (pathname === '/admin/users') return <UserManagement />;
     if (pathname.startsWith('/jobs/')) {
       const versionId = pathname.split('/').pop();
       return <JobDetail versionId={versionId} onBack={() => navigate('/jobs')} />;
@@ -119,44 +122,69 @@ function App() {
     <div className="app">
       <header className="header">
         <div className="header-content">
-          <h1>📊 政府信息公开年度报告差异比对系统</h1>
+          <h1>政府信息公开年度报告差异比对系统</h1>
           <p>后台管理系统</p>
         </div>
         <div className="header-user">
-          <NotificationCenter />
+          {/* User Management moved to header, replacing NotificationCenter as requested */}
+          {(user.permissions?.manage_users || user.username === 'admin' || user.id === 1) && (
+            <button
+              onClick={() => navigate('/admin/users')}
+              className={`header-nav-btn ${isNavActive('/admin/users') ? 'active' : ''}`}
+              title="用户管理"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                color: isNavActive('/admin/users') ? '#2563eb' : '#64748b',
+                fontWeight: 500,
+                fontSize: '14px',
+                marginRight: '12px'
+              }}
+            >
+              <User size={18} />
+              <span>用户管理</span>
+            </button>
+          )}
+
           <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <User size={18} />
-            {user.displayName || user.username}
+            <div style={{
+              width: 32, height: 32, borderRadius: '50%', background: '#eff6ff',
+              color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontWeight: 'bold', fontSize: '14px'
+            }}>
+              {user.displayName?.[0] || user.username?.[0] || 'A'}
+            </div>
+            <span style={{ fontWeight: 500 }}>{user.displayName || user.username}</span>
           </span>
           <button onClick={handleLogout} className="logout-btn">退出登录</button>
         </div>
       </header>
 
       <nav className="nav">
-        <button
-          type="button"
-          className={`nav-btn ${isNavActive('/regions') ? 'active' : ''}`}
-          onClick={() => navigate('/regions')}
-        >
-          <Map size={20} className="nav-icon" />
-          <span>城市管理</span>
-        </button>
-        <button
-          type="button"
-          className={`nav-btn ${isNavActive('/upload') ? 'active' : ''}`}
-          onClick={() => navigate('/upload')}
-        >
-          <UploadCloud size={20} className="nav-icon" />
-          <span>上传报告</span>
-        </button>
-        <button
-          type="button"
-          className={`nav-btn ${isNavActive('/jobs') ? 'active' : ''}`}
-          onClick={() => navigate('/jobs')}
-        >
-          <ListTodo size={20} className="nav-icon" />
-          <span>任务中心</span>
-        </button>
+        {(user.permissions?.manage_cities || user.username === 'admin' || user.id === 1) && (
+          <button
+            type="button"
+            className={`nav-btn ${isNavActive('/regions') ? 'active' : ''}`}
+            onClick={() => navigate('/regions')}
+          >
+            <Map size={20} className="nav-icon" />
+            <span>城市管理</span>
+          </button>
+        )}
+        {(user.permissions?.upload_reports || user.username === 'admin' || user.id === 1) && (
+          <button
+            type="button"
+            className={`nav-btn ${isNavActive('/upload') ? 'active' : ''}`}
+            onClick={() => navigate('/upload')}
+          >
+            <UploadCloud size={20} className="nav-icon" />
+            <span>上传报告</span>
+          </button>
+        )}
         <button
           type="button"
           className={`nav-btn ${isNavActive('/catalog') ? 'active' : ''}`}
@@ -172,6 +200,14 @@ function App() {
         >
           <GitCompare size={20} className="nav-icon" />
           <span>比对结果汇总</span>
+        </button>
+        <button
+          type="button"
+          className={`nav-btn ${isNavActive('/jobs') ? 'active' : ''}`}
+          onClick={() => navigate('/jobs')}
+        >
+          <ListTodo size={20} className="nav-icon" />
+          <span>任务中心</span>
         </button>
       </nav>
 

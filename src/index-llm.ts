@@ -10,8 +10,11 @@ import reportsRouter from './routes/reports';
 import llmComparisonsRouter from './routes/llm-comparisons';
 import comparisonHistoryRouter from './routes/comparison-history';
 import pdfExportRouter from './routes/pdf-export';
+import pdfJobsRouter from './routes/pdf-jobs';
 import authRouter from './routes/auth';
+import usersRouter from './routes/users';
 import { llmJobRunner } from './services/LlmJobRunner';
+import { startPdfExportWorker } from './services/PdfExportWorker';
 
 dotenv.config();
 
@@ -72,6 +75,9 @@ app.use('/api/comparisons', pdfExportRouter);
 app.use('/api', llmComparisonsRouter);
 app.use('/api', reportsRouter);
 app.use('/api/auth', authRouter);
+app.use('/api/users', usersRouter);
+// PDF export async jobs (for Job Center download tasks)
+app.use('/api/pdf-jobs', pdfJobsRouter);
 
 // 错误处理
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -88,6 +94,9 @@ async function start(): Promise<void> {
     await runLLMMigrations();
 
     llmJobRunner.start();
+
+    // Start PDF export worker for background PDF generation
+    startPdfExportWorker();
 
     app.listen(PORT, () => {
       console.log(`✓ LLM API server running on port ${PORT}`);

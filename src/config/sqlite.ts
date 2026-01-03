@@ -198,6 +198,41 @@ export function ensureSqliteMigrations(): void {
     runSqlStatements('ALTER TABLE report_versions ADD COLUMN raw_text TEXT;');
   }
 
+  // 兼容新增字段：jobs 表 PDF 导出相关字段
+  const jobColumns = runSqlStatements('PRAGMA table_info(jobs);') as Array<{ name?: string }>;
+
+  // file_path: 生成的 PDF 文件路径
+  const hasFilePath = jobColumns.some((column) => column.name === 'file_path');
+  if (!hasFilePath) {
+    try {
+      runSqlStatements('ALTER TABLE jobs ADD COLUMN file_path TEXT;');
+    } catch (e) { }
+  }
+
+  // file_name: 文件显示名称
+  const hasFileName = jobColumns.some((column) => column.name === 'file_name');
+  if (!hasFileName) {
+    try {
+      runSqlStatements('ALTER TABLE jobs ADD COLUMN file_name TEXT;');
+    } catch (e) { }
+  }
+
+  // file_size: 文件大小 (bytes)
+  const hasFileSize = jobColumns.some((column) => column.name === 'file_size');
+  if (!hasFileSize) {
+    try {
+      runSqlStatements('ALTER TABLE jobs ADD COLUMN file_size INTEGER;');
+    } catch (e) { }
+  }
+
+  // export_title: 导出任务标题 (用于显示)
+  const hasExportTitle = jobColumns.some((column) => column.name === 'export_title');
+  if (!hasExportTitle) {
+    try {
+      runSqlStatements('ALTER TABLE jobs ADD COLUMN export_title TEXT;');
+    } catch (e) { }
+  }
+
   migrationsRan = true;
 }
 

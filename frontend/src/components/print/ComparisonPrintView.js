@@ -117,9 +117,10 @@ function ComparisonPrintView({ comparisonId }) {
     const [error, setError] = useState('');
 
     // Read highlight settings from URL search params
+    // Default: show identical parts highlight (yellow), hide diff highlight (red)
     const searchParams = new URLSearchParams(window.location.search);
-    const highlightIdentical = searchParams.get('highlightIdentical') === 'true';
-    const highlightDiff = searchParams.get('highlightDiff') === 'true';
+    const highlightIdentical = searchParams.get('highlightIdentical') !== 'false'; // default true
+    const highlightDiff = searchParams.get('highlightDiff') === 'true'; // default false
 
     // Fetch data directly from API (no auth required for internal access)
     useEffect(() => {
@@ -367,14 +368,6 @@ function ComparisonPrintView({ comparisonId }) {
                             <div>
                                 <span className="text-gray-500">文字重复率:</span>
                                 <span className="font-bold ml-1">{summary.textRepetition ?? '-'}%</span>
-                            </div>
-                            <div>
-                                <span className="text-gray-500">表格重复率:</span>
-                                <span className="font-bold ml-1">{summary.tableRepetition ?? '-'}%</span>
-                            </div>
-                            <div>
-                                <span className="text-gray-500">总体重复率:</span>
-                                <span className="font-bold ml-1">{summary.overallRepetition ?? '-'}%</span>
                             </div>
                         </div>
                     </div>

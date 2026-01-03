@@ -281,55 +281,34 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
 
   const handleDownloadPDF = async () => {
     setDownloading(true);
-    setDownloadStage('准备中...');
+    setDownloadStage('创建任务...');
 
     try {
-      setDownloadStage('渲染页面...');
-
-      // Call the backend PDF export API directly (bypass proxy to avoid timeout)
-      // Pass highlight settings as query params
-      const backendUrl = 'http://localhost:8787';
-      const params = new URLSearchParams({
-        highlightIdentical: highlightIdentical.toString(),
-        highlightDiff: highlightDiff.toString()
-      });
-      const response = await fetch(`${backendUrl}/api/comparisons/${comparisonId}/pdf?${params}`, {
-        method: 'GET',
+      // Create async PDF export job instead of synchronous download
+      const title = `${data.region_name} ${data.year_a}-${data.year_b} 年报对比`;
+      const response = await apiClient.post('/pdf-jobs', {
+        comparison_id: comparisonId,
+        title: title
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || '生成PDF失败');
+      if (response.data?.success) {
+        setDownloadStage('任务已创建!');
+
+        // Brief delay to show success status
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Show success message with option to go to Job Center
+        const goToJobCenter = window.confirm(
+          `PDF 导出任务已创建！\n\n任务名称：${response.data.export_title}\n\n点击"确定"前往任务中心查看进度，或点击"取消"继续浏览。`
+        );
+        if (goToJobCenter) {
+          window.location.href = '/jobs?tab=download';
+        }
       }
-
-      setDownloadStage('下载中...');
-
-      // Get the response as ArrayBuffer to preserve binary data integrity
-      const arrayBuffer = await response.arrayBuffer();
-
-      // Create blob with explicit PDF MIME type
-      const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
-
-      setDownloadStage('完成!');
-
-      // Create download link
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `比对报告_${data.region_name}_${data.year_a}vs${data.year_b}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-
-      // Delay revoking URL to ensure download starts
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-
-      // Brief delay to show "完成" status
-      await new Promise(resolve => setTimeout(resolve, 500));
-
     } catch (error) {
-      console.error('PDF download failed:', error);
-      alert('下载PDF失败：' + error.message);
+      console.error('Create PDF job failed:', error);
+      const message = error.response?.data?.message || error.message || '创建任务失败';
+      alert('创建 PDF 导出任务失败：' + message);
     } finally {
       setDownloading(false);
       setDownloadStage('');
@@ -366,14 +345,6 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
             <div>
               <span className="text-gray-500">文字重复率:</span>
               <span className="font-bold ml-1">{summary.textRepetition ?? '-'}%</span>
-            </div>
-            <div>
-              <span className="text-gray-500">表格重复率:</span>
-              <span className="font-bold ml-1">{summary.tableRepetition ?? '-'}%</span>
-            </div>
-            <div>
-              <span className="text-gray-500">总体重复率:</span>
-              <span className="font-bold ml-1">{summary.overallRepetition ?? '-'}%</span>
             </div>
           </div>
 

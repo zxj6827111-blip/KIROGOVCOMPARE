@@ -1,6 +1,7 @@
 import express from 'express';
 import { ensureSqliteMigrations, querySqlite, sqlValue } from '../config/sqlite';
 import { llmJobRunner } from '../services/LlmJobRunner';
+import { authMiddleware } from '../middleware/auth';
 
 const router = express.Router();
 
@@ -9,7 +10,7 @@ const router = express.Router();
  * List jobs - each job is a separate record (history mode)
  * Query params: region_id, year, unit_name, status, page, limit
  */
-router.get('/', (req, res) => {
+router.get('/', authMiddleware, (req, res) => {
     try {
         ensureSqliteMigrations();
 
@@ -58,6 +59,33 @@ router.get('/', (req, res) => {
         // Exclude 'checks' jobs from the main list - they are internal validation tasks
         // This merges parse+checks into a single visual row per upload
         conditions.push(`j.kind != 'checks'`);
+
+        // DATA SCOPE FILTER
+        const user = (req as any).user;
+        if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
+            const scopeNames = user.dataScope.regions.map((n: string) => `'${n.replace(/'/g, "''")}'`).join(',');
+
+            const scopeIdsQuery = `
+            WITH RECURSIVE allowed_ids AS (
+                SELECT id FROM regions WHERE name IN (${scopeNames})
+                UNION ALL
+                SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
+            )
+            SELECT id FROM allowed_ids
+          `;
+            try {
+                const allowedRows = querySqlite(scopeIdsQuery);
+                const allowedIds = allowedRows.map((row: any) => row.id).join(',');
+                if (allowedIds.length > 0) {
+                    conditions.push(`r.region_id IN (${allowedIds})`);
+                } else {
+                    conditions.push('1=0');
+                }
+            } catch (e) {
+                console.error('Error calculating scope IDs in jobs:', e);
+                conditions.push('1=0');
+            }
+        }
 
         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
