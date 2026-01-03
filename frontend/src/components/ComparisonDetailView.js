@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import './ComparisonDetailView.css';
 import { apiClient } from '../apiClient';
-import { ArrowLeft, Printer } from 'lucide-react';
+import { ArrowLeft, Printer, Download, Loader2 } from 'lucide-react';
 import { Table2View, Table3View, Table4View, SimpleDiffTable } from './TableViews';
 import DiffText from './DiffText';
 import CrossYearCheckView from './CrossYearCheckView';
@@ -275,6 +275,67 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
     return null;
   };
 
+  // PDF Download States
+  const [downloading, setDownloading] = useState(false);
+  const [downloadStage, setDownloadStage] = useState('');
+
+  const handleDownloadPDF = async () => {
+    setDownloading(true);
+    setDownloadStage('准备中...');
+
+    try {
+      setDownloadStage('渲染页面...');
+
+      // Call the backend PDF export API directly (bypass proxy to avoid timeout)
+      // Pass highlight settings as query params
+      const backendUrl = 'http://localhost:8787';
+      const params = new URLSearchParams({
+        highlightIdentical: highlightIdentical.toString(),
+        highlightDiff: highlightDiff.toString()
+      });
+      const response = await fetch(`${backendUrl}/api/comparisons/${comparisonId}/pdf?${params}`, {
+        method: 'GET',
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || '生成PDF失败');
+      }
+
+      setDownloadStage('下载中...');
+
+      // Get the response as ArrayBuffer to preserve binary data integrity
+      const arrayBuffer = await response.arrayBuffer();
+
+      // Create blob with explicit PDF MIME type
+      const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
+
+      setDownloadStage('完成!');
+
+      // Create download link
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `比对报告_${data.region_name}_${data.year_a}vs${data.year_b}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      // Delay revoking URL to ensure download starts
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+      // Brief delay to show "完成" status
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+    } catch (error) {
+      console.error('PDF download failed:', error);
+      alert('下载PDF失败：' + error.message);
+    } finally {
+      setDownloading(false);
+      setDownloadStage('');
+    }
+  };
+
   const handlePrint = () => {
     window.print();
   };
@@ -358,10 +419,26 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
 
           <div className="flex gap-3">
             <button
-              onClick={handlePrint}
-              className="flex items-center px-4 py-2 text-white rounded-md shadow-sm transition-colors bg-gray-800 hover:bg-gray-900"
+              onClick={handleDownloadPDF}
+              disabled={downloading}
+              className="flex items-center px-4 py-2 text-white rounded-md shadow-sm transition-colors bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed"
             >
-              <Printer size={16} className="mr-2" /> 打印/另存为PDF
+              {downloading ? (
+                <>
+                  <Loader2 size={16} className="mr-2 animate-spin" />
+                  {downloadStage}
+                </>
+              ) : (
+                <>
+                  <Download size={16} className="mr-2" /> 下载PDF
+                </>
+              )}
+            </button>
+            <button
+              onClick={handlePrint}
+              className="flex items-center px-4 py-2 text-white rounded-md shadow-sm transition-colors bg-gray-600 hover:bg-gray-700"
+            >
+              <Printer size={16} className="mr-2" /> 网页打印
             </button>
           </div>
         </div>

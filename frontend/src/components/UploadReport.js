@@ -520,11 +520,8 @@ function UploadReport() {
                 onChange={(e) => setModel(e.target.value)}
               >
                 <option value="qwen3-235b">通义千问 Qwen3-235B (ModelScope)</option>
-                <option value="qwq-32b">通义千问 QwQ-32B (推理加强)</option>
                 <option value="mimo-v2">小米 MiMo V2 (极速版)</option>
                 <option value="deepseek-v3">DeepSeek V3.2 (ModelScope)</option>
-                <option value="glm-flash">智谱 GLM-4-Flash (极速解析)</option>
-                <option value="glm-4.5-flash">智谱 GLM-4.5-Flash (均衡推荐)</option>
                 <option value="gemini/gemini-2.5-flash">Gemini 2.5 Flash</option>
                 <option value="gemini/gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
                 <option value="gemini/gemini-2.5-pro">Gemini 2.5 Pro</option>

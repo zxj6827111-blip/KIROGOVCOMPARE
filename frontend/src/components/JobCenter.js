@@ -229,7 +229,66 @@ function JobCenter() {
     return (
         <div className="job-center">
             <div className="job-center-header">
-                <h2><ListTodo size={24} /> 任务中心</h2>
+                <div className="job-filters">
+                    <div className="filter-group">
+                        <label>状态</label>
+                        <select value={filters.status} onChange={(e) => handleFilterChange('status', e.target.value)}>
+                            <option value="">全部</option>
+                            <option value="queued">排队中</option>
+                            <option value="processing">处理中</option>
+                            <option value="succeeded">成功</option>
+                            <option value="failed">失败</option>
+                            <option value="cancelled">已取消</option>
+                        </select>
+                    </div>
+                    <div className="filter-group">
+                        <label>地区筛选</label>
+                        <div className="region-filters" style={{ display: 'flex', gap: '8px' }}>
+                            <select
+                                value={filters.province_id || ''}
+                                onChange={(e) => handleRegionChange('province', e.target.value)}
+                                style={{ width: '100px' }}
+                            >
+                                <option value="">省/直辖市</option>
+                                {regions.filter(r => r.level === 1).map((r) => (
+                                    <option key={r.id} value={r.id}>{r.name}</option>
+                                ))}
+                            </select>
+
+                            <select
+                                value={filters.city_id || ''}
+                                onChange={(e) => handleRegionChange('city', e.target.value)}
+                                style={{ width: '100px' }}
+                                disabled={!filters.province_id}
+                            >
+                                <option value="">市/地区</option>
+                                {regions.filter(r => r.level === 2 && r.parent_id === Number(filters.province_id)).map((r) => (
+                                    <option key={r.id} value={r.id}>{r.name}</option>
+                                ))}
+                            </select>
+
+                            <select
+                                value={filters.district_id || ''}
+                                onChange={(e) => handleRegionChange('district', e.target.value)}
+                                style={{ width: '100px' }}
+                                disabled={!filters.city_id}
+                            >
+                                <option value="">区/县</option>
+                                {regions.filter(r => r.level === 3 && r.parent_id === Number(filters.city_id)).map((r) => (
+                                    <option key={r.id} value={r.id}>{r.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+                    <div className="filter-group">
+                        <label>年份</label>
+                        <input type="number" value={filters.year} onChange={(e) => handleFilterChange('year', e.target.value)} placeholder="全部年份" style={{ width: '90px' }} />
+                    </div>
+                    <div className="filter-group">
+                        <label>单位</label>
+                        <input type="text" value={filters.unit_name} onChange={(e) => handleFilterChange('unit_name', e.target.value)} placeholder="单位名称" />
+                    </div>
+                </div>
                 <div className="header-actions">
                     {selectedIds.length > 0 && (
                         <button className="btn-batch-delete" onClick={handleBatchDelete}>
@@ -242,67 +301,6 @@ function JobCenter() {
                     <button className="btn-refresh" onClick={() => loadJobs(false)} disabled={loading}>
                         <RefreshCw size={16} className={loading ? 'spin' : ''} /> 刷新
                     </button>
-                </div>
-            </div>
-
-            <div className="job-filters">
-                <div className="filter-group">
-                    <label>状态</label>
-                    <select value={filters.status} onChange={(e) => handleFilterChange('status', e.target.value)}>
-                        <option value="">全部</option>
-                        <option value="queued">排队中</option>
-                        <option value="processing">处理中</option>
-                        <option value="succeeded">成功</option>
-                        <option value="failed">失败</option>
-                        <option value="cancelled">已取消</option>
-                    </select>
-                </div>
-                <div className="filter-group">
-                    <label>地区筛选</label>
-                    <div className="region-filters" style={{ display: 'flex', gap: '8px' }}>
-                        <select
-                            value={filters.province_id || ''}
-                            onChange={(e) => handleRegionChange('province', e.target.value)}
-                            style={{ width: '120px' }}
-                        >
-                            <option value="">省/直辖市</option>
-                            {regions.filter(r => r.level === 1).map((r) => (
-                                <option key={r.id} value={r.id}>{r.name}</option>
-                            ))}
-                        </select>
-
-                        <select
-                            value={filters.city_id || ''}
-                            onChange={(e) => handleRegionChange('city', e.target.value)}
-                            style={{ width: '120px' }}
-                            disabled={!filters.province_id}
-                        >
-                            <option value="">市/地区</option>
-                            {regions.filter(r => r.level === 2 && r.parent_id === Number(filters.province_id)).map((r) => (
-                                <option key={r.id} value={r.id}>{r.name}</option>
-                            ))}
-                        </select>
-
-                        <select
-                            value={filters.district_id || ''}
-                            onChange={(e) => handleRegionChange('district', e.target.value)}
-                            style={{ width: '120px' }}
-                            disabled={!filters.city_id}
-                        >
-                            <option value="">区/县</option>
-                            {regions.filter(r => r.level === 3 && r.parent_id === Number(filters.city_id)).map((r) => (
-                                <option key={r.id} value={r.id}>{r.name}</option>
-                            ))}
-                        </select>
-                    </div>
-                </div>
-                <div className="filter-group">
-                    <label>年份</label>
-                    <input type="number" value={filters.year} onChange={(e) => handleFilterChange('year', e.target.value)} placeholder="全部年份" />
-                </div>
-                <div className="filter-group">
-                    <label>单位</label>
-                    <input type="text" value={filters.unit_name} onChange={(e) => handleFilterChange('unit_name', e.target.value)} placeholder="单位名称" />
                 </div>
             </div>
 

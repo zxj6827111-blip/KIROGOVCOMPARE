@@ -27,11 +27,8 @@ export class ModelScopeLlmProvider implements LlmProvider {
     private static readonly MODEL_MAP: Record<string, string> = {
         'qwen3-235b': 'Qwen/Qwen3-235B-A22B-Instruct-2507',
         'qwen3-30b': 'Qwen/Qwen2.5-32B-Instruct',
-        'deepseek-v3': 'deepseek-ai/DeepSeek-V3.2', // Updated to V3.2 as requested
+        'deepseek-v3': 'deepseek-ai/DeepSeek-V3.2',
         'deepseek-r1-32b': 'deepseek-ai/DeepSeek-R1-Distill-Qwen-32B',
-        'glm-4.7': 'ZhipuAI/GLM-4-Plus',
-        // New models added
-        'qwq-32b': 'Qwen/QwQ-32B',
         'mimo-v2': 'XiaomiMiMo/MiMo-V2-Flash',
     };
 

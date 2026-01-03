@@ -8,6 +8,7 @@ import CityIndex from './components/CityIndex';
 import RegionsManager from './components/RegionsManager';
 import ComparisonHistory from './components/ComparisonHistory';
 import ComparisonDetailView from './components/ComparisonDetailView';
+import ComparisonPrintView from './components/print/ComparisonPrintView';
 import JobCenter from './components/JobCenter';
 import JobDetail from './components/JobDetail';
 import NotificationCenter from './components/NotificationCenter';
@@ -69,6 +70,12 @@ function App() {
         <p>加载中...</p>
       </div>
     );
+  }
+
+  // Special route for print pages (no auth required for Puppeteer PDF export)
+  if (pathname.startsWith('/print/comparison/')) {
+    const comparisonId = pathname.split('/').pop();
+    return <ComparisonPrintView comparisonId={comparisonId} />;
   }
 
   // Show login if not authenticated

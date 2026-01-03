@@ -1,4 +1,5 @@
 import React from 'react';
+import { TrendingUp } from 'lucide-react';
 
 // Table 2: Active Disclosure - Matched to PDF format
 const Table2View = ({ data }) => {
@@ -423,7 +424,7 @@ const SimpleDiffTable = ({ title, headers, rows }) => {
     <div className="comparison-table-container">
       <div className="p-3 bg-gray-50 border-b border-gray-200">
         <h4 className="font-bold text-gray-700 flex items-center gap-2">
-          <span>📊</span> {title} - 差异分析
+          <TrendingUp size={18} className="text-blue-500" /> {title} - 差异分析
         </h4>
       </div>
       <table className="comparison-table text-sm">
@@ -442,12 +443,19 @@ const SimpleDiffTable = ({ title, headers, rows }) => {
             const diff = valB - valA;
             const isDiff = Math.abs(diff) > 0.001;
 
+            // Red for Increase (+), Green for Decrease (-)
+            const colorClass = diff > 0 ? 'text-red-600' : diff < 0 ? 'text-green-600' : 'text-gray-900';
+            const diffColorClass = diff > 0 ? 'text-red-600' : diff < 0 ? 'text-green-600' : 'text-gray-400';
+
             return (
-              <tr key={idx} className={isDiff ? 'bg-yellow-50' : ''}>
+              <tr key={idx} className={isDiff ? 'bg-indigo-50/30' : ''}>
                 <td className="text-gray-900">{row.label}</td>
+                {/* Year A: Gray, standard weight */}
                 <td className="text-right text-gray-500 font-mono">{formatNum(valA)}</td>
-                <td className="text-right font-bold font-mono text-gray-900">{formatNum(valB)}</td>
-                <td className={`text-right font-mono font-medium ${diff > 0 ? 'text-green-600' : diff < 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                {/* Year B: Colored based on diff, standard weight (removed font-bold) */}
+                <td className={`text-right font-mono ${colorClass}`}>{formatNum(valB)}</td>
+                {/* Diff: Colored, standard weight */}
+                <td className={`text-right font-mono font-medium ${diffColorClass}`}>
                   {isDiff ? (diff > 0 ? `+${formatNum(diff)}` : formatNum(diff)) : '-'}
                 </td>
               </tr>

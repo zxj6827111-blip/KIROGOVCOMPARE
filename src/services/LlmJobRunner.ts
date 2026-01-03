@@ -625,9 +625,7 @@ export class LlmJobRunner {
   private createFallbackProvider(): LlmProvider {
     // Read fallback config from env
     const fallbackProviderName = process.env.LLM_FALLBACK_PROVIDER?.toLowerCase().trim();
-    // HARDCODE FIX: Override process.env due to persistent loading issue
-    // Valid model IDs: ZhipuAI/GLM-4.7, glm-4-plus, glm-4-flash
-    const fallbackModel = 'ZhipuAI/GLM-4.7'; // process.env.LLM_FALLBACK_MODEL?.trim();
+    const fallbackModel = process.env.LLM_FALLBACK_MODEL?.trim() || 'deepseek-ai/DeepSeek-V3.2';
 
     if (!fallbackProviderName || !fallbackModel) {
       console.warn('[Warning] LLM_FALLBACK_PROVIDER or LLM_FALLBACK_MODEL not configured, using primary provider as fallback');

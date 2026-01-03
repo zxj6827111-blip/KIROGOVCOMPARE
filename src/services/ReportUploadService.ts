@@ -60,21 +60,11 @@ function resolveProviderAndModel(modelInput?: string): { provider: string; model
     return { provider: 'gemini', model: input.replace('gemini/', '') };
   }
 
-  // 2. GLM-Flash Specific
-  if (input === 'glm-flash') {
-    return { provider: 'glm-flash', model: 'glm-4-flash' };
-  }
-
-  // 2.5. GLM-4.5-Flash Specific
-  if (input === 'glm-4.5-flash') {
-    return { provider: 'glm-4.5-flash', model: 'glm-4.5-flash' };
-  }
-
-  // 3. Qwen / DeepSeek / other GLM -> ModelScope
+  // 2. Qwen / DeepSeek -> ModelScope
   if (
     input.includes('qwen') ||
     input.includes('deepseek') ||
-    input.includes('glm')
+    input.includes('mimo')
   ) {
     return { provider: 'modelscope', model: modelInput }; // Keep original case for model ID if needed
   }
