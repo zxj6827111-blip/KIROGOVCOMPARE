@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "ts-node src/index.ts",
-    "dev:llm": "cross-env DATABASE_TYPE=sqlite PORT=8787 ts-node src/index-llm.ts",
+    "dev:llm": "cross-env DATABASE_TYPE=sqlite PORT=8787 FRONTEND_URL=http://localhost:3001 ts-node src/index-llm.ts",
     "health:llm": "node scripts/llm-health.js",
     "ports:llm": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/llm-ports.ps1 -Port 8787",
     "smoke:llm": "node scripts/llm-smoke-insert.js",
@@ -33,7 +33,9 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@types/archiver": "^7.0.0",
     "@types/ejs": "^3.1.5",
+    "archiver": "^7.0.1",
     "aws-sdk": "^2.1500.0",
     "axios": "^1.6.2",
     "bull": "^4.11.5",

@@ -7,24 +7,26 @@
 /* 标签页切换 */
 .upload-tabs {
   display: flex;
-  gap: 0;
+  gap: 8px;
+  /* Added gap */
   margin-bottom: 24px;
-  background: linear-gradient(135deg, #e0e7ff 0%, #f3e8ff 100%);
-  border-radius: 12px;
+  background: var(--bg-surface);
+  border-radius: var(--radius-md);
   padding: 6px;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+  border: 1px solid rgba(138, 180, 248, 0.35);
+  box-shadow: 0 4px 12px rgba(138, 180, 248, 0.1);
 }
 
 .upload-tab {
   flex: 1;
-  padding: 16px 32px;
+  padding: 14px 24px;
   border: none;
   background: transparent;
-  color: #6366f1;
-  font-size: 17px;
-  font-weight: 700;
+  color: var(--text-muted);
+  font-size: 15px;
+  font-weight: 600;
   cursor: pointer;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   transition: all 0.3s;
   display: flex;
   align-items: center;
@@ -33,15 +35,15 @@
 }
 
 .upload-tab:hover {
-  background: rgba(255, 255, 255, 0.5);
-  color: #4f46e5;
+  background: var(--bg-surface-hover);
+  color: var(--text-main);
 }
 
 .upload-tab.active {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
-  transform: scale(1.02);
+  background: rgba(138, 180, 248, 0.1);
+  color: var(--primary);
+  box-shadow: none;
+  border: 1px solid rgba(138, 180, 248, 0.2);
 }
 
 .upload-report-modal {
@@ -49,73 +51,127 @@
 }
 
 .upload-modal-content {
-  background: #fff;
-  border-radius: 16px;
+  background: var(--bg-surface);
+  border-radius: var(--radius-md);
   padding: 32px;
   width: 100%;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-  border: 1px solid #e5e7eb;
+  box-shadow: 0 4px 20px rgba(138, 180, 248, 0.15), 0 0 0 1px rgba(138, 180, 248, 0.1);
+  border: 1px solid rgba(138, 180, 248, 0.35);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Top colored accent strip */
+.upload-modal-content::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #4285f4, #34a853);
+  z-index: 10;
 }
 
 .upload-modal-content h2 {
   margin: 0 0 24px 0;
   font-size: 24px;
-  color: #1f2937;
+  color: var(--text-main);
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .form-section {
-  margin-bottom: 20px;
+  padding: 0 24px;
+  margin-bottom: 24px;
 }
 
 .form-section label {
   display: block;
   margin-bottom: 8px;
-  font-weight: 600;
-  color: #374151;
+  font-weight: 500;
+  color: var(--text-main);
   font-size: 14px;
 }
 
 .label-hint {
   font-weight: 400;
-  color: #9ca3af;
+  color: var(--text-muted);
   font-size: 13px;
+  margin-left: 8px;
 }
 
 /* Drop Zone */
 .drop-zone {
-  border: 2px dashed #d1d5db;
-  border-radius: 12px;
-  padding: 40px 20px;
+  margin: 0 24px 24px;
+  padding: 40px;
+  border: 2px dashed #8ab4f8;
+  border-radius: var(--radius-md);
   text-align: center;
   cursor: pointer;
-  transition: all 0.2s;
-  background: #f9fafb;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  background: rgba(138, 180, 248, 0.02);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
 .drop-zone:hover {
-  border-color: #3b82f6;
-  background: #eff6ff;
+  border-color: #2563EB;
+  /* blue-600 */
+  background: #DBEAFE;
+  /* blue-100 */
 }
 
 .drop-zone.dragging {
-  border-color: #3b82f6;
-  background: #dbeafe;
+  border-color: #2563EB;
+  background: #BFDBFE;
   border-style: solid;
 }
 
 .drop-zone.has-file {
-  border-color: #10b981;
-  background: #d1fae5;
+  border-color: var(--success);
+  background: #DCFCE7;
+}
+
+.upload-icon-wrapper {
+  display: inline-flex;
+  margin-bottom: 16px;
+  color: #8ab4f8;
+  transition: transform 0.3s ease, color 0.3s ease;
+}
+
+.drop-zone:hover .upload-icon-wrapper {
+  transform: translateY(-5px);
+  color: #aecbfa;
+}
+
+.upload-title {
+  font-size: 16px;
+  color: #334155;
+  /* slate-700 */
+  margin-bottom: 4px;
+}
+
+.hint {
+  font-size: 13px;
+  color: #64748B;
+  /* slate-500 */
 }
 
 .drop-hint {
-  color: #6b7280;
+  color: var(--text-muted);
 }
 
 .upload-icon {
   font-size: 32px;
   display: block;
   margin-bottom: 8px;
+  color: var(--text-muted);
 }
 
 .drop-hint p {
@@ -124,7 +180,8 @@
 
 .drop-hint .hint {
   font-size: 13px;
-  color: #9ca3af;
+  color: var(--text-muted);
+  opacity: 0.7;
 }
 
 .file-info {
@@ -140,7 +197,7 @@
 
 .file-name {
   font-weight: 600;
-  color: #047857;
+  color: var(--success);
 }
 
 /* Form Fields */
@@ -150,19 +207,22 @@
 .form-section textarea {
   width: 100%;
   padding: 12px 16px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
+  background: var(--bg-app);
+  border: 1px solid rgba(138, 180, 248, 0.3);
+  border-radius: var(--radius-sm);
   font-size: 14px;
   box-sizing: border-box;
-  transition: border-color 0.2s;
+  transition: all 0.2s;
+  color: var(--text-main);
+  box-shadow: 0 0 8px rgba(138, 180, 248, 0.05);
 }
 
 .form-section input:focus,
 .form-section select:focus,
 .form-section textarea:focus {
   outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(138, 180, 248, 0.1);
 }
 
 .form-section textarea {
@@ -174,63 +234,63 @@
 .form-row-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  gap: 20px;
 }
 
 /* Messages */
 .message {
   padding: 12px 16px;
-  border-radius: 8px;
-  margin-bottom: 16px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 20px;
   font-size: 14px;
 }
 
 .message.success {
-  background: #d1fae5;
-  color: #047857;
-  border: 1px solid #a7f3d0;
+  background: rgba(129, 201, 149, 0.1);
+  color: var(--success);
+  border: 1px solid rgba(129, 201, 149, 0.2);
 }
 
 .message.warning {
-  background: #fef3c7;
-  color: #92400e;
-  border: 1px solid #fcd34d;
+  background: rgba(253, 214, 99, 0.1);
+  color: var(--warning);
+  border: 1px solid rgba(253, 214, 99, 0.2);
 }
 
 .message.error {
-  background: #fee2e2;
-  color: #dc2626;
-  border: 1px solid #fecaca;
+  background: rgba(242, 139, 130, 0.1);
+  color: var(--danger);
+  border: 1px solid rgba(242, 139, 130, 0.2);
 }
 
 .result-info {
-  background: #f0f9ff;
-  border: 1px solid #bae6fd;
-  border-radius: 8px;
-  padding: 12px 16px;
-  margin-bottom: 16px;
+  background: rgba(138, 180, 248, 0.05);
+  border: 1px solid rgba(138, 180, 248, 0.2);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  margin-bottom: 20px;
   font-size: 14px;
 }
 
 .result-info p {
   margin: 4px 0;
-  color: #0c4a6e;
+  color: var(--text-main);
 }
 
 /* Actions */
 .form-actions {
+  padding: 0 24px 24px;
   display: flex;
   justify-content: flex-end;
   gap: 12px;
-  padding-top: 20px;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--border-color);
 }
 
 .btn-cancel,
 .btn-secondary,
 .btn-primary {
   padding: 12px 24px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -238,33 +298,35 @@
 }
 
 .btn-cancel {
-  background: #fff;
-  border: 1px solid #d1d5db;
-  color: #4b5563;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
 }
 
 .btn-cancel:hover:not(:disabled) {
-  background: #f3f4f6;
+  background: var(--bg-surface-hover);
+  color: var(--text-main);
 }
 
 .btn-secondary {
-  background: #fff;
-  border: 1px solid #3b82f6;
-  color: #3b82f6;
+  background: transparent;
+  border: 1px solid var(--primary);
+  color: var(--primary);
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: #eff6ff;
+  background: rgba(138, 180, 248, 0.1);
 }
 
 .btn-primary {
-  background: #3b82f6;
+  background: var(--primary);
   border: none;
-  color: #fff;
+  color: #000;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #2563eb;
+  background: #9bbcf9;
+  transform: translateY(-1px);
 }
 
 .btn-cancel:disabled,
@@ -272,4 +334,31 @@
 .btn-primary:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* New classes replacing inline styles */
+.duplicate-badge {
+  margin-left: 10px;
+  color: #e6a23c;
+  background-color: rgba(230, 162, 60, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  border: 1px solid rgba(230, 162, 60, 0.2);
+}
+
+.w-full {
+  width: 100%;
+}
+
+.mb-15 {
+  margin-bottom: 15px;
+}
+
+.max-w-200 {
+  max-width: 200px;
+}
+
+.hidden {
+  display: none;
 }

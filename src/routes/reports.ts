@@ -6,6 +6,7 @@ import path from 'path';
 import { PROJECT_ROOT, UPLOADS_TMP_DIR, ensureSqliteMigrations, querySqlite, sqlValue } from '../config/sqlite';
 import { reportUploadService } from '../services/ReportUploadService';
 import { ValidationIssue } from '../types/models';
+import { authMiddleware, requirePermission, AuthRequest } from '../middleware/auth';
 
 const router = express.Router();
 
@@ -33,7 +34,8 @@ const upload = multer({
   },
 });
 
-router.post('/reports', upload.single('file'), async (req, res) => {
+// Protect upload route
+router.post('/reports', authMiddleware, requirePermission('upload_reports'), upload.single('file'), async (req: AuthRequest, res) => {
   const tmpFilePath = req.file?.path;
   try {
     const regionId = Number(req.body.region_id);
@@ -42,9 +44,22 @@ router.post('/reports', upload.single('file'), async (req, res) => {
     const unitName = typeof unitNameRaw === 'string' && unitNameRaw.trim() ? unitNameRaw.trim() : null;
     const file = req.file;
     const model = req.body.model;
+    const batchId = req.body.batch_id; // Extract batch_id from request
+
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
 
     if (!regionId || Number.isNaN(regionId) || !Number.isInteger(regionId)) {
       return res.status(400).json({ error: 'region_id 无效' });
+    }
+
+    // Check Data Scope for Upload (Can only upload to allowed regions)
+    if (req.user.dataScope && Array.isArray(req.user.dataScope.regions) && req.user.dataScope.regions.length > 0) {
+      const region = querySqlite(`SELECT name FROM regions WHERE id = ${regionId} LIMIT 1`)[0] as { name: string } | undefined;
+      if (!region || !req.user.dataScope.regions.includes(region.name)) {
+        return res.status(403).json({ error: '您无权为此地区上传报告' });
+      }
     }
 
     if (!year || Number.isNaN(year) || !Number.isInteger(year)) {
@@ -98,46 +113,14 @@ router.post('/reports', upload.single('file'), async (req, res) => {
 
         let hasContent = false;
         if (activeVersion && activeVersion.parsed_json && activeVersion.parsed_json !== '{}') {
-          try {
-            const parsed = JSON.parse(activeVersion.parsed_json);
-            if (Array.isArray(parsed.sections) && parsed.sections.length > 0) {
-              hasContent = true;
-            } else if (parsed.tables && typeof parsed.tables === 'object' && Object.keys(parsed.tables).length > 0) {
-              hasContent = true;
-            } else if (parsed.report_type || parsed.basic_info || parsed.year) {
-              hasContent = true;
-            }
-          } catch (e) {
-            hasContent = false;
-          }
-        }
-
-        if (!hasContent) {
-          console.log(`[ReportUpload] Existing report ${existingReport.id} is empty. Deleting to overwrite.`);
-          // Delete duplicate/empty report to allow overwrite
-          // Cascade delete logic (simplified for single report):
-          // 1. Get all versions
-          const versions = querySqlite(`SELECT id FROM report_versions WHERE report_id = ${existingReport.id}`);
-          const versionIds = versions.map((v: any) => v.id);
-
-          if (versionIds.length > 0) {
-            const vIdsStr = versionIds.join(',');
-            // Delete jobs
-            querySqlite(`DELETE FROM jobs WHERE version_id IN (${vIdsStr})`);
-            // Delete parses
-            querySqlite(`DELETE FROM report_version_parses WHERE report_version_id IN (${vIdsStr})`);
-            // Delete consistency items
-            querySqlite(`DELETE FROM report_consistency_items WHERE report_version_id IN (${vIdsStr})`);
-            // Delete versions
-            querySqlite(`DELETE FROM report_versions WHERE report_id = ${existingReport.id}`);
-          }
-          // Delete report
-          querySqlite(`DELETE FROM reports WHERE id = ${existingReport.id}`);
+          // Check content logic...
+          // We previously deleted empty reports here, but this is dangerous as it removes
+          // failed jobs/reports that simply haven't finished parsing yet or failed.
+          // Better to let them exist and just add new versions or fail the upload if exists.
         }
       }
     } catch (e) {
-      console.warn('[ReportUpload] Failed to check/delete existing empty report:', e);
-      // Ignore error and proceed to attempt normal upload
+      console.warn('[ReportUpload] Check existing report failed:', e);
     }
 
 
@@ -150,6 +133,7 @@ router.post('/reports', upload.single('file'), async (req, res) => {
       mimeType: file.mimetype,
       size: file.size,
       model,
+      batchId, // Pass batch_id to service
     });
 
     // FIX: Always return 201 for successful upload, even if version is reused
@@ -189,7 +173,7 @@ router.post('/reports', upload.single('file'), async (req, res) => {
   }
 });
 
-router.post('/reports/text', express.json({ limit: '10mb' }), async (req, res) => {
+router.post('/reports/text', authMiddleware, requirePermission('upload_reports'), express.json({ limit: '10mb' }), async (req: AuthRequest, res) => {
   try {
     const regionId = Number(req.body?.region_id);
     const year = Number(req.body?.year);
@@ -245,7 +229,7 @@ router.post('/reports/text', express.json({ limit: '10mb' }), async (req, res) =
   }
 });
 
-router.get('/reports', (req, res) => {
+router.get('/reports', authMiddleware, (req: AuthRequest, res) => {
   try {
     const { region_id, year, unit_name } = req.query;
 
@@ -275,6 +259,39 @@ router.get('/reports', (req, res) => {
     if (unit_name !== undefined && String(unit_name).trim() !== '') {
       conditions.push(`r.unit_name = ${sqlValue(String(unit_name).trim())}`);
     }
+
+    // [Data Scope Filtering]
+    // Check if user has restricted data scope (admin usually has empty scope or full perms)
+    // Assuming if dataScope.regions is not empty, we filter.
+    const user = req.user;
+    if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
+      // Calculate all allowed descendant IDs (including children)
+      // This ensures that if scope is 'Suqian', reports for 'Shuyang' (child) are also shown.
+      const scopeNames = user.dataScope.regions.map((r: string) => `'${r.replace(/'/g, "''")}'`).join(',');
+
+      const idsQuery = `
+            WITH RECURSIVE allowed_ids AS (
+                SELECT id FROM regions WHERE name IN (${scopeNames})
+                UNION ALL
+                SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
+            )
+            SELECT id FROM allowed_ids
+      `;
+      try {
+        const allowedRows = querySqlite(idsQuery);
+        const allowedIds = allowedRows.map((r: any) => r.id).join(',');
+
+        if (allowedIds.length > 0) {
+          conditions.push(`r.region_id IN (${allowedIds})`);
+        } else {
+          conditions.push('1=0'); // Scope matches no regions
+        }
+      } catch (e) {
+        console.error('Error calculating scope IDs:', e);
+        conditions.push('1=0'); // Fail safe
+      }
+    }
+
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const rows = querySqlite(`

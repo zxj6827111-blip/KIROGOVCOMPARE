@@ -44,6 +44,33 @@ router.get('/history', optionalAuthMiddleware, (req: AuthRequest, res: Response)
       }
     }
 
+    // DATA SCOPE FILTER
+    const user = req.user;
+    if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
+      const scopeNames = user.dataScope.regions.map((n: string) => `'${n.replace(/'/g, "''")}'`).join(',');
+
+      const scopeIdsQuery = `
+        WITH RECURSIVE allowed_ids AS (
+            SELECT id FROM regions WHERE name IN (${scopeNames})
+            UNION ALL
+            SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
+        )
+        SELECT id FROM allowed_ids
+      `;
+      try {
+        const allowedRows = querySqlite(scopeIdsQuery);
+        const allowedIds = allowedRows.map((row: any) => row.id).join(',');
+        if (allowedIds.length > 0) {
+          conditions.push(`c.region_id IN (${allowedIds})`);
+        } else {
+          conditions.push('1=0');
+        }
+      } catch (e) {
+        console.error('Error calculating scope IDs in comparison history:', e);
+        conditions.push('1=0');
+      }
+    }
+
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     // Get total count

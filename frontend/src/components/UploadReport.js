@@ -1,8 +1,14 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './UploadReport.css';
 import { apiClient } from '../apiClient';
-import { translateJobError } from '../utils/errorTranslator';
 import BatchUpload from './BatchUpload';
+import {
+  FileText,
+  FolderOpen,
+  AlertTriangle,
+  UploadCloud
+} from 'lucide-react';
 
 const extractField = (payload, key) => payload?.[key] || payload?.[key.replace(/_./g, (m) => m[1].toUpperCase())];
 
@@ -16,7 +22,6 @@ function UploadReport() {
   const [model, setModel] = useState('qwen3-235b');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
-  const [result, setResult] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadMode, setUploadMode] = useState('single'); // 'single' | 'batch'
   const fileInputRef = useRef(null);
@@ -106,16 +111,16 @@ function UploadReport() {
       }
 
       // 2. 祖先上下文匹配
-      let current = r;
+      let curr = r;
       let depth = 0;
-      while (current.parent_id && regionMap.has(current.parent_id) && depth < 10) {
-        const parent = regionMap.get(current.parent_id);
+      while (curr.parent_id && regionMap.has(curr.parent_id) && depth < 10) {
+        const parent = regionMap.get(curr.parent_id);
         const parentName = parent.name.replace(/(?:人民政府|办事处|委员会|政府)$/g, '');
 
         if (searchName.includes(parentName)) {
           score += 20; // 匹配到一级祖先奖励20分
         }
-        current = parent;
+        curr = parent;
         depth++;
       }
 
@@ -346,33 +351,44 @@ function UploadReport() {
   };
 
   const [duplicate, setDuplicate] = useState(false);
+  const [emptyReport, setEmptyReport] = useState(false); // Existing report has no content
 
-  // Check for duplicate report
+  // Check for duplicate report and its content status
   useEffect(() => {
     const checkDuplicate = async () => {
-      if (!unitName || !year) {
+      if (!regionId || !year) {
         setDuplicate(false);
+        setEmptyReport(false);
         return;
       }
       try {
-        const resp = await apiClient.get('/reports', { params: { unit_name: unitName, year } });
-        // API returns { data: [...] } or { reports: [...] }
-        const list = resp.data?.data || resp.data?.reports || [];
-        if (list.length > 0) {
+        const resp = await apiClient.get('/reports', { params: { region_id: regionId, year } });
+        const list = resp.data?.data || resp.data?.reports || resp.data || [];
+        if (Array.isArray(list) && list.length > 0) {
+          const existing = list[0];
           setDuplicate(true);
+          try {
+            const detailResp = await apiClient.get(`/reports/${existing.report_id || existing.id}`);
+            const detail = detailResp.data;
+            const parsedJson = detail.parsed_json || detail.latest_version?.parsed_json;
+            const hasContent = parsedJson && Object.keys(parsedJson).length > 0;
+            setEmptyReport(!hasContent);
+          } catch (detailErr) {
+            setEmptyReport(false);
+          }
         } else {
           setDuplicate(false);
+          setEmptyReport(false);
         }
       } catch (error) {
-        // ignore error
         setDuplicate(false);
+        setEmptyReport(false);
       }
     };
 
-    // Debounce check
     const timer = setTimeout(checkDuplicate, 500);
     return () => clearTimeout(timer);
-  }, [unitName, year]);
+  }, [regionId, year]);
 
   // Upload handler
   const handleUpload = async (autoParse = false) => {
@@ -382,14 +398,16 @@ function UploadReport() {
     }
 
     if (duplicate) {
-      if (!window.confirm('该报告已存在，是否继续上传？')) {
+      const confirmMsg = emptyReport
+        ? '该报告已存在但内容为空，是否覆盖并重新解析？'
+        : '该报告已存在，是否继续上传并覆盖？';
+      if (!window.confirm(confirmMsg)) {
         return;
       }
     }
 
     setLoading(true);
     setMessage('');
-    setResult(null);
 
     try {
       const formData = new FormData();
@@ -408,15 +426,13 @@ function UploadReport() {
 
       const payload = response.data || {};
       const uploadResult = {
-        reportId: extractField(payload, 'report_id'),
         versionId: extractField(payload, 'version_id'),
-        jobId: extractField(payload, 'job_id'),
       };
-      setResult(uploadResult);
 
       // Show toast message
       setMessage('✅ 任务已创建，正在跳转到任务中心...');
 
+      // Navigate to task center detail page after short delay
       // Navigate to task center detail page after short delay
       setTimeout(() => {
         if (uploadResult.versionId) {
@@ -438,57 +454,14 @@ function UploadReport() {
           }
         }, 1000);
       } else {
-        setMessage(`❌ ${error.response?.data?.error || error.message || '上传失败'}`);
+        setMessage(`❌ ${error.response?.data?.error || error.message || '上传失败'} `);
       }
     } finally {
       setLoading(false);
     }
   };
 
-  // Save text only (no file upload)
-  const handleSaveText = async () => {
-    if (!regionId || !textContent.trim()) {
-      setMessage('❌ 请填写文本内容并选择所属区域');
-      return;
-    }
-
-    setLoading(true);
-    setMessage('');
-
-    try {
-      const response = await apiClient.post('/reports/text', {
-        region_id: regionId,
-        year,
-        unit_name: unitName || undefined,
-        raw_text: textContent,
-        auto_parse: true, // Assuming text save implies auto-parse as per original logic? Or maybe explicit?
-        model: model,
-      });
-
-      const payload = response.data || {};
-      const uploadResult = {
-        reportId: extractField(payload, 'report_id'),
-        versionId: extractField(payload, 'version_id'),
-        jobId: extractField(payload, 'job_id'),
-      };
-      setResult(uploadResult);
-
-      // Show toast message
-      setMessage('✅ 任务已创建，正在跳转到任务中心...');
-
-      // Navigate to task center detail page after short delay
-      setTimeout(() => {
-        if (uploadResult.versionId) {
-          window.location.href = `/jobs/${uploadResult.versionId}`;
-        }
-      }, 1000);
-
-    } catch (error) {
-      setMessage(`❌ ${error.response?.data?.error || error.message || '保存失败'}`);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // handleSaveText removed as unused
 
   const handleCancel = () => {
     setFile(null);
@@ -496,7 +469,6 @@ function UploadReport() {
     setUnitName('');
     setRegionId('');
     setMessage('');
-    setResult(null);
   };
 
   // Build region path for display
@@ -505,12 +477,12 @@ function UploadReport() {
     if (!region) return '';
 
     const path = [region.name];
-    let current = region;
-    while (current.parent_id) {
-      const parent = regions.find(r => r.id === current.parent_id);
+    let curr = region;
+    while (curr.parent_id) {
+      const parent = regions.find(r => r.id === curr.parent_id);
       if (parent) {
         path.unshift(parent.name);
-        current = parent;
+        curr = parent;
       } else {
         break;
       }
@@ -526,77 +498,71 @@ function UploadReport() {
           className={`upload-tab ${uploadMode === 'single' ? 'active' : ''}`}
           onClick={() => setUploadMode('single')}
         >
-          📄 单个上传
+          <FileText size={16} /> 单个上传
         </button>
         <button
           className={`upload-tab ${uploadMode === 'batch' ? 'active' : ''}`}
           onClick={() => setUploadMode('batch')}
         >
-          📁 批量上传
+          <FolderOpen size={16} /> 批量上传
         </button>
       </div>
 
       {uploadMode === 'single' ? (
         <div className="upload-report-modal">
           <div className="upload-modal-content">
-            <h2>录入新报告</h2>
-
             {/* File Drop Zone */}
+            {/* AI 模型选择 - 结构与批量一致 */}
             <div className="form-section">
-              <div className="form-group full-width" style={{ marginBottom: '15px' }}>
-                <label>AI 模型</label>
-                <select
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }}
-                >
-                  <option value="qwen3-235b">通义千问 Qwen3-235B (ModelScope)</option>
-                  <option value="gemini/gemini-2.5-flash">Gemini 2.5 Flash</option>
-                  <option value="deepseek-v3">DeepSeek V3.2 (ModelScope)</option>
-                </select>
-              </div>
-
-              <label>选择文件 (PDF / HTML / TXT)</label>
-              <div
-                className={`drop-zone ${isDragging ? 'dragging' : ''} ${file ? 'has-file' : ''}`}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                onClick={handleDropZoneClick}
+              <label>AI 模型</label>
+              <select
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
               >
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileSelect}
-                  accept=".pdf,.html,.txt"
-                  style={{ display: 'none' }}
-                />
-                {file ? (
-                  <div className="file-info">
-                    <span className="file-icon">📄</span>
-                    <span className="file-name">{file.name}</span>
-                    {duplicate && (
-                      <span className="duplicate-badge" style={{
-                        marginLeft: '10px',
-                        color: '#e6a23c',
-                        backgroundColor: '#fdf6ec',
-                        padding: '2px 8px',
-                        borderRadius: '4px',
-                        fontSize: '12px',
-                        border: '1px solid #faecd8'
-                      }}>
-                        ⚠️ 报告已存在
-                      </span>
-                    )}
+                <option value="qwen3-235b">通义千问 Qwen3-235B (ModelScope)</option>
+                <option value="mimo-v2">小米 MiMo V2 (极速版)</option>
+                <option value="deepseek-v3">DeepSeek V3.2 (ModelScope)</option>
+                <option value="gemini/gemini-2.5-flash">Gemini 2.5 Flash</option>
+                <option value="gemini/gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
+                <option value="gemini/gemini-2.5-pro">Gemini 2.5 Pro</option>
+                <option value="gemini/gemini-3-flash">Gemini 3.0 Flash</option>
+              </select>
+            </div>
+
+            {/* 拖拽区域 - 结构与批量一致，移除上面的 Label */}
+            <div
+              className={`drop-zone ${isDragging ? 'dragging' : ''} ${file ? 'has-file' : ''}`}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={handleDropZoneClick}
+            >
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileSelect}
+                accept=".pdf,.html,.txt"
+                className="hidden"
+              />
+              {file ? (
+                <div className="file-info" onClick={(e) => e.stopPropagation()}>
+                  <span className="file-icon"><FileText size={24} /></span>
+                  <span className="file-name">{file.name}</span>
+                  {duplicate && (
+                    <span className={`duplicate-badge ${emptyReport ? 'empty' : ''}`}>
+                      <AlertTriangle size={14} /> {emptyReport ? '内容为空，将覆盖' : '报告已存在'}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div className="drop-hint">
+                  <div className="upload-icon-wrapper">
+                    <UploadCloud size={48} />
                   </div>
-                ) : (
-                  <div className="drop-hint">
-                    <span className="upload-icon">⬆️</span>
-                    <p><strong>点击上传</strong> 或 <strong>拖拽文件至此</strong></p>
-                    <p className="hint">支持 PDF、HTML 或 TXT 文件</p>
-                  </div>
-                )}
-              </div>
+                  <p className="upload-title"><strong>点击上传</strong> 或 <strong>拖拽文件至此</strong></p>
+                  <p className="hint">支持 PDF、HTML 或 TXT 文件</p>
+                </div>
+              )}
             </div>
 
             {/* Metadata */}
@@ -606,7 +572,7 @@ function UploadReport() {
                 type="number"
                 value={year}
                 onChange={(e) => setYear(parseInt(e.target.value) || new Date().getFullYear())}
-                style={{ maxWidth: '200px' }}
+                className="max-w-200"
               />
             </div>
 
@@ -627,7 +593,7 @@ function UploadReport() {
 
             {/* Messages */}
             {message && (
-              <div className={`message ${message.startsWith('❌') ? 'error' : message.startsWith('⚠️') ? 'warning' : 'success'}`}>
+              <div className={`message ${message.startsWith('❌') ? 'error' : message.startsWith('⚠️') ? 'warning' : 'success'} `}>
                 {message}
               </div>
             )}

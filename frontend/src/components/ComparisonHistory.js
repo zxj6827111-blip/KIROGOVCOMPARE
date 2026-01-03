@@ -2,6 +2,16 @@ import React, { useEffect, useState, useCallback } from 'react';
 import './ComparisonHistory.css';
 import { apiClient } from '../apiClient';
 import ComparisonDetailView from './ComparisonDetailView';
+import {
+  MapPin,
+  Calendar,
+  Search,
+  RefreshCw,
+  Eye,
+  Printer,
+  Trash2,
+  Download
+} from 'lucide-react';
 
 function ComparisonHistory() {
   const [comparisons, setComparisons] = useState([]);
@@ -16,6 +26,7 @@ function ComparisonHistory() {
 
   const [regionFilter, setRegionFilter] = useState('');
   const [yearFilter, setYearFilter] = useState('');
+  const [selectedIds, setSelectedIds] = useState([]);
 
   const fetchComparisons = useCallback(async () => {
     setLoading(true);
@@ -68,10 +79,95 @@ function ComparisonHistory() {
     setSelectedComparisonId(null);
   };
 
-  const handleExportPdf = (id) => {
-    // Strategy Change: Instead of backend generation, open the detail view 
-    // in a new tab with autoPrint flag to use the browser's print engine.
-    window.open(`/comparison/${id}?autoPrint=true`, '_blank');
+  const handleExportPdf = async (id, title) => {
+    // Create async PDF export job instead of synchronous download
+    try {
+      const response = await apiClient.post('/pdf-jobs', {
+        comparison_id: id,
+        title: title
+      });
+
+      if (response.data?.success) {
+        // Show success message with option to go to Job Center
+        const goToJobCenter = window.confirm(
+          `PDF 导出任务已创建！\n\n任务名称：${response.data.export_title}\n\n点击"确定"前往任务中心查看进度，或点击"取消"继续浏览。`
+        );
+        if (goToJobCenter) {
+          window.location.href = '/jobs?tab=download';
+        }
+      }
+    } catch (error) {
+      const message = error.response?.data?.message || error.message || '创建任务失败';
+      alert(`创建 PDF 导出任务失败：${message}`);
+    }
+  };
+
+  // Selection handlers
+  const toggleSelect = (id) => {
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.length === comparisons.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(comparisons.map(c => c.id));
+    }
+  };
+
+  // Batch download - creates PDF export jobs for all selected
+  const handleBatchDownload = async () => {
+    if (selectedIds.length === 0) {
+      alert('请先选择要导出的记录');
+      return;
+    }
+
+    if (!window.confirm(`确定要批量导出 ${selectedIds.length} 个比对报告吗？`)) return;
+
+    let successCount = 0;
+    for (const id of selectedIds) {
+      const c = comparisons.find(comp => comp.id === id);
+      if (c) {
+        try {
+          await apiClient.post('/pdf-jobs', {
+            comparison_id: id,
+            title: `${c.regionName || '未知地区'} ${c.yearA}-${c.yearB} 年报对比`
+          });
+          successCount++;
+        } catch (err) {
+          console.error('Failed to create PDF job for', id, err);
+        }
+      }
+    }
+
+    setSelectedIds([]);
+    alert(`已创建 ${successCount} 个导出任务，请前往任务中心查看进度`);
+  };
+
+  // Batch delete
+  const handleBatchDelete = async () => {
+    if (selectedIds.length === 0) {
+      alert('请先选择要删除的记录');
+      return;
+    }
+
+    if (!window.confirm(`确定要删除选中的 ${selectedIds.length} 条比对记录吗？此操作不可恢复。`)) return;
+
+    let successCount = 0;
+    for (const id of selectedIds) {
+      try {
+        await apiClient.delete(`/comparisons/${id}`);
+        successCount++;
+      } catch (err) {
+        console.error('Failed to delete comparison', id, err);
+      }
+    }
+
+    setSelectedIds([]);
+    fetchComparisons();
+    alert(`已删除 ${successCount} 条记录`);
   };
 
   const formatDate = (dateStr) => {
@@ -96,35 +192,52 @@ function ComparisonHistory() {
   return (
     <div className="comparison-history">
       <div className="history-header">
-        <h2>📋 比对结果汇总</h2>
-
         <div className="filter-bar" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <input
-            type="text"
-            placeholder="📍 按地区筛选"
-            value={regionFilter}
-            onChange={e => setRegionFilter(e.target.value)}
-            style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}
-          />
-          <input
-            type="text"
-            placeholder="📅 按年份筛选"
-            value={yearFilter}
-            onChange={e => setYearFilter(e.target.value)}
-            style={{ padding: '8px', border: '1px solid #ccc', borderRadius: '4px', width: '120px' }}
-          />
+          <div className="input-with-icon">
+            <MapPin size={16} className="input-icon" />
+            <input
+              type="text"
+              placeholder="按地区筛选"
+              value={regionFilter}
+              onChange={e => setRegionFilter(e.target.value)}
+              className="filter-input"
+            />
+          </div>
+          <div className="input-with-icon">
+            <Calendar size={16} className="input-icon" />
+            <input
+              type="text"
+              placeholder="按年份筛选"
+              value={yearFilter}
+              onChange={e => setYearFilter(e.target.value)}
+              className="filter-input"
+              style={{ width: '120px' }}
+            />
+          </div>
           <button
             onClick={handleSearch}
-            className="refresh-btn"
-            style={{ background: '#3b82f6', color: 'white', border: 'none' }}
+            className="search-btn"
           >
-            🔍 查询
+            <Search size={16} /> 查询
           </button>
         </div>
 
-        <button onClick={fetchComparisons} disabled={loading} className="refresh-btn">
-          {loading ? '刷新中...' : '刷新'}
-        </button>
+        <div className="header-actions" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {selectedIds.length > 0 && (
+            <>
+              <button onClick={handleBatchDownload} className="batch-btn download-btn">
+                <Download size={16} /> 批量导出 ({selectedIds.length})
+              </button>
+              <button onClick={handleBatchDelete} className="batch-btn delete-btn">
+                <Trash2 size={16} /> 批量删除 ({selectedIds.length})
+              </button>
+            </>
+          )}
+          <button onClick={fetchComparisons} disabled={loading} className="refresh-btn iconic-btn">
+            <RefreshCw size={16} className={loading ? 'spin' : ''} />
+            {loading ? '刷新中...' : '刷新'}
+          </button>
+        </div>
       </div>
 
       {error && <div className="alert error">{error}</div>}
@@ -141,7 +254,14 @@ function ComparisonHistory() {
           <table className="history-table">
             <thead>
               <tr>
-                <th>ID</th>
+                <th style={{ width: '40px' }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.length === comparisons.length && comparisons.length > 0}
+                    onChange={toggleSelectAll}
+                    title="全选/取消全选"
+                  />
+                </th>
                 <th>地区</th>
                 <th>年份A</th>
                 <th>年份B</th>
@@ -153,8 +273,14 @@ function ComparisonHistory() {
             </thead>
             <tbody>
               {comparisons.map((c) => (
-                <tr key={c.id}>
-                  <td>#{c.id}</td>
+                <tr key={c.id} className={selectedIds.includes(c.id) ? 'selected-row' : ''}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.includes(c.id)}
+                      onChange={() => toggleSelect(c.id)}
+                    />
+                  </td>
                   <td>{c.regionName || '未知'}</td>
                   <td>{c.yearA}</td>
                   <td>{c.yearB}</td>
@@ -174,22 +300,15 @@ function ComparisonHistory() {
                         onClick={() => handleViewDetail(c)}
                         title="查看详情"
                       >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                          <circle cx="12" cy="12" r="3"></circle>
-                        </svg>
+                        <Eye size={16} />
                         <span>查看</span>
                       </button>
                       <button
                         className="icon-btn print"
-                        onClick={() => handleExportPdf(c.id)}
+                        onClick={() => handleExportPdf(c.id, `${c.regionName || '未知地区'} ${c.yearA}-${c.yearB} 年报对比`)}
                         title="打印导出"
                       >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <polyline points="6 9 6 2 18 2 18 9"></polyline>
-                          <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
-                          <rect x="6" y="14" width="12" height="8"></rect>
-                        </svg>
+                        <Printer size={16} />
                         <span>打印</span>
                       </button>
                       <button
@@ -197,10 +316,7 @@ function ComparisonHistory() {
                         onClick={() => handleDelete(c.id)}
                         title="删除记录"
                       >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <polyline points="3 6 5 6 21 6"></polyline>
-                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                        </svg>
+                        <Trash2 size={16} />
                         <span>删除</span>
                       </button>
                     </div>

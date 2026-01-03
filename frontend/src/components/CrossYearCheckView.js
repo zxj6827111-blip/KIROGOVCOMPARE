@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { apiClient } from '../apiClient';
 import { highlightNumber } from './DiffUtils';
+import { BarChart3, MapPin, Search, FileText, Table2, CheckCircle2, AlertCircle } from 'lucide-react';
 import './CrossYearCheckView.css';
 
 // 复制自 ConsistencyCheckView.js 的路径解析逻辑
@@ -258,7 +259,7 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
     return (
         <div className="cross-check-card break-inside-avoid">
             <div className="cross-check-header">
-                <h3>📊 数据勾稽问题清单</h3>
+                <h3><BarChart3 size={20} className="text-blue-400" /> 数据勾稽问题清单</h3>
             </div>
 
             {/* 1. 旧年度数据勾稽 */}
@@ -268,9 +269,9 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
                     {leftIntraLoading ? (
                         <span className="text-gray-400 text-sm">检查中...</span>
                     ) : leftIntraIssues.length === 0 ? (
-                        <span className="status-valid">✅ 无问题</span>
+                        <span className="status-valid"><CheckCircle2 size={15} /> 无问题</span>
                     ) : (
-                        <span className="status-issue">❌ 发现 {leftIntraIssues.length} 个问题</span>
+                        <span className="status-issue"><AlertCircle size={15} /> 发现 {leftIntraIssues.length} 个问题</span>
                     )}
                 </div>
 
@@ -301,9 +302,9 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
                     {intraLoading ? (
                         <span className="text-gray-400 text-sm">检查中...</span>
                     ) : intraIssues.length === 0 ? (
-                        <span className="status-valid">✅ 无问题</span>
+                        <span className="status-valid"><CheckCircle2 size={15} /> 无问题</span>
                     ) : (
-                        <span className="status-issue">❌ 发现 {intraIssues.length} 个问题</span>
+                        <span className="status-issue"><AlertCircle size={15} /> 发现 {intraIssues.length} 个问题</span>
                     )}
                 </div>
 
@@ -327,10 +328,10 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
                                         <div className="issue-detail">
                                             {/* 数据定位 */}
                                             <div className="detail-section">
-                                                <div className="ds-header">📍 数据定位</div>
+                                                <div className="ds-header"><MapPin size={14} className="inline-block" /> 数据定位</div>
                                                 <div className="ds-body location-grid">
                                                     <div className="loc-box text-side">
-                                                        <div className="loc-title">📄 正文来源</div>
+                                                        <div className="loc-title"><FileText size={14} className="inline-block" /> 正文来源</div>
                                                         <div className="loc-content">{details.textSource || '未定位'}</div>
                                                         <div className="loc-val">
                                                             <span className="val-tag">{item.left_value}</span>
@@ -338,7 +339,7 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
                                                     </div>
                                                     <div className="arrow-divider">↔</div>
                                                     <div className="loc-box table-side">
-                                                        <div className="loc-title">📊 表格来源</div>
+                                                        <div className="loc-title"><Table2 size={14} className="inline-block" /> 表格来源</div>
                                                         <div className="loc-content">{details.tableSource || '未定位'}</div>
                                                         <div className="loc-val">
                                                             <span className="val-tag">{item.right_value}</span>
@@ -350,7 +351,7 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
                                             {/* 匹配文本 */}
                                             {(details.context) && (
                                                 <div className="detail-section">
-                                                    <div className="ds-header">🔍 匹配文本</div>
+                                                    <div className="ds-header"><Search size={14} className="inline-block" /> 匹配文本</div>
                                                     <div className="ds-body">
                                                         <div
                                                             className="context-content"
@@ -373,9 +374,9 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
                 <div className="section-title">
                     <span>3. 跨年度结转政府信息公开申请数量</span>
                     {!crossDiff ? (
-                        <span className="status-valid">✅ 数据一致</span>
+                        <span className="status-valid"><CheckCircle2 size={15} /> 数据一致</span>
                     ) : (
-                        <span className="status-issue">❌ 数据不一致</span>
+                        <span className="status-issue"><AlertCircle size={15} /> 数据不一致</span>
                     )}
                 </div>
 
@@ -412,9 +413,9 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
                     <div className="section-title">
                         <span>4. 跨年度规章和行政规范性文件数量</span>
                         {!table2HasIssues ? (
-                            <span className="status-valid">✅ 数据一致</span>
+                            <span className="status-valid"><CheckCircle2 size={15} /> 数据一致</span>
                         ) : (
-                            <span className="status-issue">❌ 数据不一致</span>
+                            <span className="status-issue"><AlertCircle size={15} /> 数据不一致</span>
                         )}
                     </div>
                     <div className="text-sm text-gray-600 text-center mb-2">

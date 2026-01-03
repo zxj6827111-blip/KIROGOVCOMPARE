@@ -31,4 +31,22 @@ router.get('/health', async (_req: Request, res: Response) => {
   }
 });
 
+router.get('/public-stats', async (_req: Request, res: Response) => {
+  try {
+    const { querySqlite } = require('../config/sqlite');
+
+    const reportsCount = querySqlite('SELECT COUNT(*) as cnt FROM reports')[0]?.cnt || 0;
+    const regionsCount = querySqlite('SELECT COUNT(*) as cnt FROM regions')[0]?.cnt || 0;
+
+    res.json({
+      reports: reportsCount,
+      regions: regionsCount
+    });
+  } catch (error) {
+    console.error('Stats check failed:', error);
+    // Return zeros on error to allow page to load
+    res.json({ reports: 0, regions: 0 });
+  }
+});
+
 export default router;

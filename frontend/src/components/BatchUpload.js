@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './BatchUpload.css';
 import { apiClient } from '../apiClient';
-import { translateJobError } from '../utils/errorTranslator';
+import {
+    UploadCloud, X, FileText, Clock, Loader, Check, XCircle,
+    SkipForward, Edit2, Trash2, Play, AlertTriangle
+} from 'lucide-react';
 
 const MAX_FILES = 50;
 
@@ -89,6 +92,7 @@ function BatchUpload({ onClose, isEmbedded = false }) {
     const [isDragging, setIsDragging] = useState(false);
     const [model, setModel] = useState('qwen3-235b');
     const [editingId, setEditingId] = useState(null);
+    const [batchId, setBatchId] = useState(null); // Track current batch session
     const fileInputRef = useRef(null);
 
     // 加载区域列表
@@ -239,73 +243,6 @@ function BatchUpload({ onClose, isEmbedded = false }) {
         return path.join(' / ');
     }, [regions]);
 
-    // 处理文件选择
-    const handleFilesSelect = useCallback((fileList) => {
-        const existingCount = files.length;
-        const newFileArray = Array.from(fileList);
-
-        if (existingCount + newFileArray.length > MAX_FILES) {
-            alert(`最多支持${MAX_FILES}个文件，当前已有${existingCount}个`);
-            return;
-        }
-
-        const newFiles = newFileArray.map(file => {
-            const regionName = extractRegionFromFilename(file.name);
-            const regionId = autoMatchRegion(regionName);
-            return {
-                id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-                file,
-                filename: file.name,
-                year: extractYearFromFilename(file.name),
-                unitName: regionName,
-                regionId,
-                matchStatus: regionId ? 'auto' : 'unmatched',
-                status: 'pending',
-                message: '',
-                reportId: null,
-            };
-        });
-
-        setFiles(prev => [...prev, ...newFiles]);
-        checkFilesExistence(newFiles);
-    }, [files.length, autoMatchRegion]);
-
-    // 拖拽处理
-    const handleDragOver = (e) => {
-        e.preventDefault();
-        setIsDragging(true);
-    };
-
-    const handleDragLeave = (e) => {
-        e.preventDefault();
-        setIsDragging(false);
-    };
-
-    const handleDrop = (e) => {
-        e.preventDefault();
-        setIsDragging(false);
-        handleFilesSelect(e.dataTransfer.files);
-    };
-
-    const handleFileInputChange = (e) => {
-        if (e.target.files) {
-            handleFilesSelect(e.target.files);
-        }
-        e.target.value = '';
-    };
-
-    // 删除文件
-    const removeFile = (id) => {
-        setFiles(prev => prev.filter(f => f.id !== id));
-    };
-
-    // 更新文件信息
-    const updateFile = (id, updates) => {
-        setFiles(prev => prev.map(f =>
-            f.id === id ? { ...f, ...updates, matchStatus: updates.regionId ? 'manual' : f.matchStatus } : f
-        ));
-    };
-
     // 检查重复报告
     const checkDuplicate = async (unitName, year) => {
         if (!unitName || !year) return { exists: false };
@@ -346,22 +283,78 @@ function BatchUpload({ onClose, isEmbedded = false }) {
         }));
     };
 
-    // Poll job status
-    const pollJob = async (jobId, { timeoutMs = 180000, intervalMs = 2000 } = {}) => {
-        const start = Date.now();
-        while (Date.now() - start < timeoutMs) {
-            const resp = await apiClient.get(`/jobs/${jobId}`);
-            const status = (resp.data?.status || '').toLowerCase();
-            if (status === 'succeeded' || status === 'failed') {
-                return resp.data;
-            }
-            await new Promise((r) => setTimeout(r, intervalMs));
+    // 处理文件选择
+    const handleFilesSelect = useCallback((fileList) => {
+        const existingCount = files.length;
+        const newFileArray = Array.from(fileList);
+
+        if (existingCount + newFileArray.length > MAX_FILES) {
+            alert(`最多支持${MAX_FILES}个文件，当前已有${existingCount}个`);
+            return;
         }
-        throw new Error('解析超时');
+
+        const newFiles = newFileArray.map(file => {
+            const regionName = extractRegionFromFilename(file.name);
+            const regionId = autoMatchRegion(regionName);
+            return {
+                id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+                file,
+                filename: file.name,
+                year: extractYearFromFilename(file.name),
+                unitName: regionName,
+                regionId,
+                matchStatus: regionId ? 'auto' : 'unmatched',
+                status: 'pending',
+                message: '',
+                reportId: null,
+            };
+        });
+
+        setFiles(prev => [...prev, ...newFiles]);
+        checkFilesExistence(newFiles);
+    }, [files.length, autoMatchRegion, checkFilesExistence]);
+
+    // 拖拽处理
+    const handleDragOver = (e) => {
+        e.preventDefault();
+        setIsDragging(true);
     };
 
+    const handleDragLeave = (e) => {
+        e.preventDefault();
+        setIsDragging(false);
+    };
+
+    const handleDrop = (e) => {
+        e.preventDefault();
+        setIsDragging(false);
+        handleFilesSelect(e.dataTransfer.files);
+    };
+
+    const handleFileInputChange = (e) => {
+        if (e.target.files) {
+            handleFilesSelect(e.target.files);
+        }
+        e.target.value = '';
+    };
+
+    // 删除文件
+    const removeFile = (id) => {
+        setFiles(prev => prev.filter(f => f.id !== id));
+    };
+
+    // 更新文件信息
+    const updateFile = (id, updates) => {
+        setFiles(prev => prev.map(f =>
+            f.id === id ? { ...f, ...updates, matchStatus: updates.regionId ? 'manual' : f.matchStatus } : f
+        ));
+    };
+
+
+
+
     // 上传单个文件
-    const uploadSingleFile = async (fileItem) => {
+    const uploadSingleFile = async (fileItem, currentBatchId) => {
         const formData = new FormData();
         formData.append('region_id', fileItem.regionId);
         formData.append('year', fileItem.year);
@@ -371,6 +364,7 @@ function BatchUpload({ onClose, isEmbedded = false }) {
         formData.append('file', fileItem.file);
         formData.append('auto_parse', 'true');
         if (model) formData.append('model', model);
+        if (currentBatchId) formData.append('batch_id', currentBatchId); // Pass batch_id explicitly
 
         const response = await apiClient.post('/reports', formData, {
             headers: { 'Content-Type': 'multipart/form-data' },
@@ -394,6 +388,10 @@ function BatchUpload({ onClose, isEmbedded = false }) {
             return;
         }
 
+        // Generate unique batch ID for this upload session
+        const newBatchId = `batch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        setBatchId(newBatchId);
+
         setIsProcessing(true);
 
         for (let i = 0; i < files.length; i++) {
@@ -408,7 +406,7 @@ function BatchUpload({ onClose, isEmbedded = false }) {
             ));
 
             try {
-                const uploadResult = await uploadSingleFile(fileItem);
+                const uploadResult = await uploadSingleFile(fileItem, newBatchId);
                 const jobId = uploadResult.job_id || uploadResult.jobId;
                 const versionId = uploadResult.version_id || uploadResult.versionId;
 
@@ -484,13 +482,13 @@ function BatchUpload({ onClose, isEmbedded = false }) {
     // 获取状态图标
     const getStatusIcon = (status) => {
         switch (status) {
-            case 'pending': return '⏸️';
-            case 'uploading': return '⬆️';
-            case 'parsing': return '⏳';
-            case 'success': return '✅';
-            case 'failed': return '❌';
-            case 'skipped': return '⏭️';
-            default: return '❓';
+            case 'pending': return <Clock size={18} className="text-secondary" />;
+            case 'uploading': return <Loader size={18} className="spin text-primary" />;
+            case 'parsing': return <Loader size={18} className="spin text-warning" />;
+            case 'success': return <Check size={18} className="text-success" />;
+            case 'failed': return <XCircle size={18} className="text-danger" />;
+            case 'skipped': return <SkipForward size={18} className="text-muted" />;
+            default: return <AlertTriangle size={18} className="text-muted" />;
         }
     };
 
@@ -506,8 +504,10 @@ function BatchUpload({ onClose, isEmbedded = false }) {
             <div className="batch-upload-content">
                 {!isEmbedded && (
                     <div className="batch-upload-header">
-                        <h2>📤 批量上传报告</h2>
-                        <button className="close-btn" onClick={onClose} disabled={isProcessing}>×</button>
+                        <h2><UploadCloud size={24} style={{ marginRight: '10px' }} /> 批量上传报告</h2>
+                        <button className="close-btn" onClick={onClose} disabled={isProcessing}>
+                            <X size={20} />
+                        </button>
                     </div>
                 )}
 
@@ -520,8 +520,12 @@ function BatchUpload({ onClose, isEmbedded = false }) {
                         disabled={isProcessing}
                     >
                         <option value="qwen3-235b">通义千问 Qwen3-235B (ModelScope)</option>
-                        <option value="gemini/gemini-2.5-flash">Gemini 2.5 Flash</option>
+                        <option value="mimo-v2">小米 MiMo V2 (极速版)</option>
                         <option value="deepseek-v3">DeepSeek V3.2 (ModelScope)</option>
+                        <option value="gemini/gemini-2.5-flash">Gemini 2.5 Flash</option>
+                        <option value="gemini/gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
+                        <option value="gemini/gemini-2.5-pro">Gemini 2.5 Pro</option>
+                        <option value="gemini/gemini-3-flash">Gemini 3.0 Flash</option>
                     </select>
                 </div>
 
@@ -543,7 +547,7 @@ function BatchUpload({ onClose, isEmbedded = false }) {
                         disabled={isProcessing}
                     />
                     <div className="drop-hint">
-                        <span className="upload-icon">📁</span>
+                        <span className="upload-icon"><UploadCloud size={48} strokeWidth={1.5} /></span>
                         <p><strong>点击选择多个文件</strong> 或 <strong>拖拽文件至此</strong></p>
                         <p className="hint">支持 PDF、HTML 或 TXT 文件，最多 {MAX_FILES} 个</p>
                     </div>
@@ -553,9 +557,12 @@ function BatchUpload({ onClose, isEmbedded = false }) {
                 {files.length > 0 && (
                     <div className="file-list-section">
                         <div className="file-list-header">
-                            <h3>📋 文件列表 ({files.length}个)</h3>
+                            <h3><FileText size={18} style={{ marginRight: '8px' }} /> 文件列表 ({files.length}个)</h3>
                             {stats.unmatched > 0 && (
-                                <span className="warning-badge">⚠️ {stats.unmatched}个未分配区域</span>
+                                <span className="warning-badge">
+                                    <AlertTriangle size={14} style={{ marginRight: '4px' }} />
+                                    {stats.unmatched}个未分配区域
+                                </span>
                             )}
                         </div>
 
@@ -582,7 +589,7 @@ function BatchUpload({ onClose, isEmbedded = false }) {
                                                 fontSize: '12px',
                                                 border: fileItem.duplicateEmpty ? '1px solid #fde2e2' : '1px solid #faecd8'
                                             }}>
-                                                {fileItem.duplicateEmpty ? "✗ 无内容 (可覆盖)" : "⚠️ 报告已存在"}
+                                                {fileItem.duplicateEmpty ? <span><XCircle size={12} style={{ marginRight: 4, verticalAlign: 'text-bottom' }} /> 无内容 (可覆盖)</span> : <span><AlertTriangle size={12} style={{ marginRight: 4, verticalAlign: 'text-bottom' }} /> 报告已存在</span>}
                                             </span>
                                         )}
                                     </div>
@@ -644,7 +651,7 @@ function BatchUpload({ onClose, isEmbedded = false }) {
                                             <span className={`file-region ${!fileItem.regionId ? 'missing' : ''}`}>
                                                 {fileItem.regionId
                                                     ? getRegionPath(fileItem.regionId)
-                                                    : '⚠️ 未分配'}
+                                                    : <span className="flex-center"><AlertTriangle size={12} style={{ marginRight: 4 }} /> 未分配</span>}
                                             </span>
                                             {fileItem.message && (
                                                 <span className="file-message">{fileItem.message}</span>
@@ -660,14 +667,14 @@ function BatchUpload({ onClose, isEmbedded = false }) {
                                                     onClick={() => setEditingId(editingId === fileItem.id ? null : fileItem.id)}
                                                     title="编辑"
                                                 >
-                                                    ✏️
+                                                    <Edit2 size={16} />
                                                 </button>
                                                 <button
                                                     className="btn-icon danger"
                                                     onClick={() => removeFile(fileItem.id)}
                                                     title="删除"
                                                 >
-                                                    🗑️
+                                                    <Trash2 size={16} />
                                                 </button>
                                             </>
                                         )}
@@ -696,9 +703,9 @@ function BatchUpload({ onClose, isEmbedded = false }) {
                 {/* 统计信息 */}
                 {files.length > 0 && !isProcessing && progress.completed > 0 && (
                     <div className="stats-section">
-                        <span className="stat success">✅ 成功: {stats.success}</span>
-                        <span className="stat failed">❌ 失败: {stats.failed}</span>
-                        <span className="stat skipped">⏭️ 跳过: {stats.skipped}</span>
+                        <span className="stat success"><Check size={14} /> 成功: {stats.success}</span>
+                        <span className="stat failed"><XCircle size={14} /> 失败: {stats.failed}</span>
+                        <span className="stat skipped"><SkipForward size={14} /> 跳过: {stats.skipped}</span>
                     </div>
                 )}
 
@@ -718,7 +725,7 @@ function BatchUpload({ onClose, isEmbedded = false }) {
                                 onClick={startProcessing}
                                 disabled={files.length === 0 || stats.pending === 0}
                             >
-                                🚀 开始批量上传 ({stats.pending}个)
+                                <Play size={16} fill="currentColor" style={{ marginRight: '8px' }} /> 开始批量上传 ({stats.pending}个)
                             </button>
                         </>
                     ) : (

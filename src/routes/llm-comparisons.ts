@@ -1,6 +1,7 @@
 import express from 'express';
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
 import { ensureSqliteMigrations, querySqlite, sqlValue } from '../config/sqlite';
+import { authMiddleware } from '../middleware/auth';
 
 const router = express.Router();
 
@@ -257,7 +258,7 @@ router.post('/comparisons', (req, res) => {
   }
 });
 
-router.get('/comparisons', (req, res) => {
+router.get('/comparisons', authMiddleware, (req, res) => {
   try {
     const { region_id, year_a, year_b } = req.query;
 
@@ -284,6 +285,35 @@ router.get('/comparisons', (req, res) => {
         return res.status(400).json({ error: 'year_b 无效' });
       }
       conditions.push(`year_b = ${sqlValue(yearBNum)}`);
+    }
+
+    // CHECK DATA SCOPE
+    const user = (req as any).user;
+    if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
+      // Calculate all allowed descendant IDs
+      const scopeNames = user.dataScope.regions.map((r: string) => `'${r.replace(/'/g, "''")}'`).join(',');
+
+      const idsQuery = `
+            WITH RECURSIVE allowed_ids AS (
+                SELECT id FROM regions WHERE name IN (${scopeNames})
+                UNION ALL
+                SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
+            )
+            SELECT id FROM allowed_ids
+      `;
+      try {
+        const allowedRows = querySqlite(idsQuery);
+        const allowedIds = allowedRows.map((r: any) => r.id).join(',');
+
+        if (allowedIds.length > 0) {
+          conditions.push(`c.region_id IN (${allowedIds})`);
+        } else {
+          conditions.push('1=0'); // Scope matches no regions
+        }
+      } catch (e) {
+        console.error('Error calculating scope IDs in comparisons:', e);
+        conditions.push('1=0'); // Fail safe
+      }
     }
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 

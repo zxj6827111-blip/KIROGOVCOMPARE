@@ -2,6 +2,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import './ComparisonDetailView.css';
 import { apiClient } from '../apiClient';
+import { ArrowLeft, Printer, Download, Loader2 } from 'lucide-react';
 import { Table2View, Table3View, Table4View, SimpleDiffTable } from './TableViews';
 import DiffText from './DiffText';
 import CrossYearCheckView from './CrossYearCheckView';
@@ -274,6 +275,46 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
     return null;
   };
 
+  // PDF Download States
+  const [downloading, setDownloading] = useState(false);
+  const [downloadStage, setDownloadStage] = useState('');
+
+  const handleDownloadPDF = async () => {
+    setDownloading(true);
+    setDownloadStage('创建任务...');
+
+    try {
+      // Create async PDF export job instead of synchronous download
+      const title = `${data.region_name} ${data.year_a}-${data.year_b} 年报对比`;
+      const response = await apiClient.post('/pdf-jobs', {
+        comparison_id: comparisonId,
+        title: title
+      });
+
+      if (response.data?.success) {
+        setDownloadStage('任务已创建!');
+
+        // Brief delay to show success status
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Show success message with option to go to Job Center
+        const goToJobCenter = window.confirm(
+          `PDF 导出任务已创建！\n\n任务名称：${response.data.export_title}\n\n点击"确定"前往任务中心查看进度，或点击"取消"继续浏览。`
+        );
+        if (goToJobCenter) {
+          window.location.href = '/jobs?tab=download';
+        }
+      }
+    } catch (error) {
+      console.error('Create PDF job failed:', error);
+      const message = error.response?.data?.message || error.message || '创建任务失败';
+      alert('创建 PDF 导出任务失败：' + message);
+    } finally {
+      setDownloading(false);
+      setDownloadStage('');
+    }
+  };
+
   const handlePrint = () => {
     window.print();
   };
@@ -287,7 +328,7 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
       {/* Back Button */}
       <div className="back-nav mb-4 no-print block">
         <button onClick={onBack} className="flex items-center text-blue-600 hover:text-blue-800">
-          <span className="mr-1">←</span> 返回列表
+          <ArrowLeft size={18} className="mr-1" /> 返回列表
         </button>
       </div>
 
@@ -304,14 +345,6 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
             <div>
               <span className="text-gray-500">文字重复率:</span>
               <span className="font-bold ml-1">{summary.textRepetition ?? '-'}%</span>
-            </div>
-            <div>
-              <span className="text-gray-500">表格重复率:</span>
-              <span className="font-bold ml-1">{summary.tableRepetition ?? '-'}%</span>
-            </div>
-            <div>
-              <span className="text-gray-500">总体重复率:</span>
-              <span className="font-bold ml-1">{summary.overallRepetition ?? '-'}%</span>
             </div>
           </div>
 
@@ -357,10 +390,26 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
 
           <div className="flex gap-3">
             <button
-              onClick={handlePrint}
-              className="flex items-center px-4 py-2 text-white rounded-md shadow-sm transition-colors bg-gray-800 hover:bg-gray-900"
+              onClick={handleDownloadPDF}
+              disabled={downloading}
+              className="flex items-center px-4 py-2 text-white rounded-md shadow-sm transition-colors bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed"
             >
-              打印/另存为PDF
+              {downloading ? (
+                <>
+                  <Loader2 size={16} className="mr-2 animate-spin" />
+                  {downloadStage}
+                </>
+              ) : (
+                <>
+                  <Download size={16} className="mr-2" /> 下载PDF
+                </>
+              )}
+            </button>
+            <button
+              onClick={handlePrint}
+              className="flex items-center px-4 py-2 text-white rounded-md shadow-sm transition-colors bg-gray-600 hover:bg-gray-700"
+            >
+              <Printer size={16} className="mr-2" /> 网页打印
             </button>
           </div>
         </div>

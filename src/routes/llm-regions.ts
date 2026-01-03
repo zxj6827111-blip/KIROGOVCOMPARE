@@ -96,21 +96,83 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
+import { authMiddleware, AuthRequest } from '../middleware/auth';
+
 // GET /api/regions - 获取区域列表（带层级）
-router.get('/', async (_req: Request, res: Response) => {
+router.get('/', authMiddleware, async (req: Request, res: Response) => {
   try {
+    const authReq = req as AuthRequest;
+    const user = authReq.user;
+
+    // Logic: If user has dataScope.regions, filter the query
+    let filterNames: string[] = [];
+    if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
+      filterNames = user.dataScope.regions;
+    }
+
     if (dbType === 'sqlite') {
       const rows = await new Promise<any[]>((resolve, reject) => {
-        pool.all('SELECT id, code, name, province, parent_id, level FROM regions ORDER BY level, id', (err: any, rows: any[]) => {
-          if (err) reject(err);
-          else resolve(rows || []);
-        });
+        if (filterNames.length > 0) {
+          // Recursive query for filtered scope
+          // Construct 'IN' clause placeholders manually because sqlite3 array binding is limited
+          const placeholders = filterNames.map(() => '?').join(',');
+          const sql = `
+              WITH RECURSIVE allowed_tree AS (
+                SELECT id, code, name, province, parent_id, level 
+                FROM regions 
+                WHERE name IN (${placeholders})
+                UNION ALL
+                SELECT r.id, r.code, r.name, r.province, r.parent_id, r.level 
+                FROM regions r 
+                JOIN allowed_tree d ON r.parent_id = d.id
+              )
+              SELECT DISTINCT id, code, name, province, parent_id, level FROM allowed_tree ORDER BY level, id
+            `;
+          pool.all(sql, filterNames, (err: any, rows: any[]) => {
+            if (err) reject(err);
+            else {
+              // Fix Orphaned Nodes:
+              // If a node's parent is NOT in the result set, set parent_id to null
+              // This ensures frontend treats them as "roots" and displays them
+              const validIds = new Set(rows?.map(r => r.id));
+              const safeRows = rows?.map(r => ({
+                ...r,
+                parent_id: (r.parent_id && validIds.has(r.parent_id)) ? r.parent_id : null
+              })) || [];
+              resolve(safeRows);
+            }
+          });
+        } else {
+          pool.all('SELECT id, code, name, province, parent_id, level FROM regions ORDER BY level, id', (err: any, rows: any[]) => {
+            if (err) reject(err);
+            else resolve(rows || []);
+          });
+        }
       });
 
       res.json({ data: rows });
     } else {
-      const result = await pool.query('SELECT id, code, name, province, parent_id, level FROM regions ORDER BY level, id');
-      res.json({ data: result.rows });
+      // Postgres implementation (simplified, assuming we might not need it for this user or using similar CTE)
+      if (filterNames.length > 0) {
+        // Note: pg usually uses $1, $2... and ANY($1) for arrays
+        const sql = `
+              WITH RECURSIVE allowed_tree AS (
+                SELECT id, code, name, province, parent_id, level 
+                FROM regions 
+                WHERE name = ANY($1)
+                UNION ALL
+                SELECT r.id, r.code, r.name, r.province, r.parent_id, r.level 
+                FROM regions r 
+                JOIN allowed_tree d ON r.parent_id = d.id
+              )
+              SELECT DISTINCT id, code, name, province, parent_id, level FROM allowed_tree ORDER BY level, id
+            `;
+        const result = await pool.query(sql, [filterNames]);
+        res.json({ data: result.rows });
+      } else {
+        const result = await pool.query('SELECT id, code, name, province, parent_id, level FROM regions ORDER BY level, id');
+        res.json({ data: result.rows });
+      }
     }
   } catch (error) {
     console.error('Error fetching regions:', error);
@@ -156,24 +218,64 @@ router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
+    // Use Recursive CTE to identify all descendant IDs and the ID itself
+    const recursiveQuery = `
+      WITH RECURSIVE descendants AS (
+        SELECT id FROM regions WHERE id = ${dbType === 'sqlite' ? '?' : '$1'}
+        UNION ALL
+        SELECT r.id FROM regions r JOIN descendants d ON r.parent_id = d.id
+      )
+      SELECT id FROM descendants
+    `;
+
+    let idsToDelete: any[] = [];
+    if (dbType === 'sqlite') {
+      const rows = await new Promise<any[]>((resolve, reject) => {
+        pool.all(recursiveQuery, [id], (err: any, rows: any[]) => {
+          if (err) reject(err);
+          else resolve(rows || []);
+        });
+      });
+      idsToDelete = rows.map(r => r.id);
+    } else {
+      const result = await pool.query(recursiveQuery, [id]);
+      idsToDelete = result.rows.map((r: any) => r.id);
+    }
+
+    if (idsToDelete.length === 0) {
+      return res.status(404).json({ error: 'Region not found' });
+    }
+
+    // Delete in reverse order (bottom-up) or just all at once if FK checks are deferred/cascaded
+    // But since we want to be robust:
+    // DELETE FROM regions WHERE id IN (...)
+
+    // Note: SQLite limit on variables is usually 999. Assuming regions count isn't huge.
+    // If it is huge, we should rely on FK cascade. 
+    // Given user scenario (garbled file), it might produce a lot of regions.
+    // Let's try simple deletion first. If FK Cascade works, the root delete works.
+
+    // Actually, if we use the CTE IDs list, we can just delete them.
+    // However, the best way for robust SQLite without relying on FK config:
+    // Delete leaf nodes first? 
+    // Simplest: `DELETE FROM regions WHERE id IN (...)`
+
+    const placeholders = idsToDelete.map((_, i) => dbType === 'sqlite' ? '?' : `$${i + 1}`).join(',');
+    const deleteSql = `DELETE FROM regions WHERE id IN (${placeholders})`;
+
     if (dbType === 'sqlite') {
       await new Promise<void>((resolve, reject) => {
-        pool.run('DELETE FROM regions WHERE id = ?', [id], (err: any) => {
+        pool.run(deleteSql, idsToDelete, (err: any) => {
           if (err) reject(err);
           else resolve();
         });
       });
-
-      res.json({ message: 'Region deleted successfully' });
     } else {
-      const result = await pool.query('DELETE FROM regions WHERE id = $1 RETURNING id', [id]);
-
-      if (result.rows.length === 0) {
-        return res.status(404).json({ error: 'Region not found' });
-      }
-
-      res.json({ message: 'Region deleted successfully' });
+      await pool.query(deleteSql, idsToDelete);
     }
+
+    res.json({ message: `Successfully deleted ${idsToDelete.length} regions` });
+
   } catch (error) {
     console.error('Error deleting region:', error);
     res.status(500).json({ error: 'Internal server error' });

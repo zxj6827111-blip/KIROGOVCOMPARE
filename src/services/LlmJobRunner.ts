@@ -115,7 +115,7 @@ export class LlmJobRunner {
       querySqlite(`
         UPDATE jobs 
         SET status = 'cancelled',
-            description = '用户手动取消',
+            error_message = '用户手动取消',
             progress = 100,
             step_code = 'CANCELLED',
             step_name = '已取消',
@@ -184,33 +184,45 @@ export class LlmJobRunner {
     let provider: LlmProvider;
 
     if (attempt === 1) {
-      // Fetch specific provider/model config for this version
-      const versionConfig = querySqlite(
-        `SELECT provider, model FROM report_versions WHERE id = ${sqlValue(job.version_id)} LIMIT 1;`
+      // CRITICAL FIX: Prioritize provider/model from the JOBS table (user's actual selection)
+      // Only fallback to report_versions if jobs.provider/model are NULL
+      const jobConfig = querySqlite(
+        `SELECT provider, model FROM jobs WHERE id = ${sqlValue(job.id)} LIMIT 1;`
       )[0] as { provider?: string; model?: string } | undefined;
 
-      // If provider is 'upload' (legacy/default) or 'pending', ignore it and use env default.
-      // Otherwise use the stored provider details.
-      const pName =
-        versionConfig?.provider && versionConfig.provider !== 'upload' && versionConfig.provider !== 'pending'
-          ? versionConfig.provider
-          : undefined;
+      let pName = jobConfig?.provider;
+      let mName = jobConfig?.model;
 
-      const mName =
-        versionConfig?.model && versionConfig.model !== 'pending'
-          ? versionConfig.model
-          : undefined;
+      // If job doesn't have provider/model, fallback to version config
+      if (!pName && !mName) {
+        const versionConfig = querySqlite(
+          `SELECT provider, model FROM report_versions WHERE id = ${sqlValue(job.version_id)} LIMIT 1;`
+        )[0] as { provider?: string; model?: string } | undefined;
+
+        // If provider is 'upload' (legacy/default) or 'pending', ignore it and use env default.
+        pName =
+          versionConfig?.provider && versionConfig.provider !== 'upload' && versionConfig.provider !== 'pending'
+            ? versionConfig.provider
+            : undefined;
+
+        mName =
+          versionConfig?.model && versionConfig.model !== 'pending'
+            ? versionConfig.model
+            : undefined;
+      }
 
       if (pName || mName) {
-        console.log(`[Job ${job.id}] Using custom config: Provider=${pName}, Model=${mName}`);
+        console.log(`[Job ${job.id}] Using config: Provider=${pName}, Model=${mName}`);
       }
 
       // Create a fresh provider instance for this job if customized, or default
       provider = createLlmProvider(pName, mName);
     } else if (attempt === 2) {
-      // Retry Strategy: Force DeepSeek V3.2 (ModelScope) on first retry
-      console.log(`[Job ${job.id}] Retry Attempt 2: Switching to fallback model 'deepseek-ai/DeepSeek-V3.2'`);
-      provider = createLlmProvider('modelscope', 'deepseek-ai/DeepSeek-V3.2');
+      // Retry Strategy: Use fallback model from env, or default to DeepSeek V3.2
+      const fallbackProvider = process.env.LLM_FALLBACK_PROVIDER || 'modelscope';
+      const fallbackModel = process.env.LLM_FALLBACK_MODEL || 'deepseek-ai/DeepSeek-V3.2';
+      console.log(`[Job ${job.id}] Retry Attempt 2: Switching to fallback model '${fallbackModel}'`);
+      provider = createLlmProvider(fallbackProvider, fallbackModel);
     } else {
       // Fallback for subsequent retries (if any)
       provider = this.getProvider(attempt);
@@ -359,7 +371,7 @@ export class LlmJobRunner {
       WHERE id = (
         SELECT id
         FROM jobs
-        WHERE status = 'queued'
+        WHERE status = 'queued' AND kind != 'pdf_export'
         ORDER BY (CASE kind WHEN 'parse' THEN 0 WHEN 'checks' THEN 1 WHEN 'compare' THEN 2 ELSE 9 END) ASC, created_at ASC
         LIMIT 1
       )
@@ -613,9 +625,7 @@ export class LlmJobRunner {
   private createFallbackProvider(): LlmProvider {
     // Read fallback config from env
     const fallbackProviderName = process.env.LLM_FALLBACK_PROVIDER?.toLowerCase().trim();
-    // HARDCODE FIX: Override process.env due to persistent loading issue
-    // Valid model IDs: ZhipuAI/GLM-4.7, glm-4-plus, glm-4-flash
-    const fallbackModel = 'ZhipuAI/GLM-4.7'; // process.env.LLM_FALLBACK_MODEL?.trim();
+    const fallbackModel = process.env.LLM_FALLBACK_MODEL?.trim() || 'deepseek-ai/DeepSeek-V3.2';
 
     if (!fallbackProviderName || !fallbackModel) {
       console.warn('[Warning] LLM_FALLBACK_PROVIDER or LLM_FALLBACK_MODEL not configured, using primary provider as fallback');

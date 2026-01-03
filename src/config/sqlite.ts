@@ -53,6 +53,21 @@ function ensureDataDir(): void {
 function runSqlStatements(sql: string): any[] {
   ensureDataDir();
   const cmd = resolveSqlite3Command();
+
+  // Run pragmas first in a separate call (no -json flag) to avoid corrupting JSON output
+  try {
+    execFileSync(cmd, [SQLITE_DB_PATH], {
+      encoding: 'utf-8',
+      input: 'PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;',
+      timeout: SQLITE_CMD_TIMEOUT_MS,
+    });
+  } catch (pragmaError: any) {
+    // Pragma errors are non-fatal, just log and continue
+    if (pragmaError?.code !== 'ENOENT') {
+      console.warn('[sqlite] Pragma setup warning:', pragmaError?.message || pragmaError);
+    }
+  }
+
   let output = '';
   try {
     output = execFileSync(cmd, ['-json', SQLITE_DB_PATH], {
@@ -91,8 +106,13 @@ function runSqlStatements(sql: string): any[] {
       .map((chunk) => chunk.trim())
       .filter(Boolean)
       .flatMap((chunk) => {
-        const value = JSON.parse(chunk);
-        return Array.isArray(value) ? value : [value];
+        try {
+          const value = JSON.parse(chunk);
+          return Array.isArray(value) ? value : [value];
+        } catch {
+          // Skip non-JSON lines (like pragma output remnants)
+          return [];
+        }
       });
   }
 }
@@ -123,13 +143,11 @@ export function ensureSqliteMigrations(): void {
       const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf-8');
       runSqlStatements(sql);
     } catch (error: any) {
-      // If it's a migration file error, log it but don't necessarily crash 
-      // if it's just "duplicate column" or "table already exists"
-      if (error.message?.includes('duplicate column name') || error.message?.includes('already exists')) {
-        console.log(`[sqlite] Migration file ${file} already partially applied, skipping duplicates.`);
+      const errMsg = (error.message || '') + (error.stderr || '');
+      if (errMsg.includes('duplicate column name') || errMsg.includes('already exists')) {
+        console.log(`[sqlite] Migration file ${file} already partially applied (checked by error message), skipping.`);
       } else {
-        console.warn(`[sqlite] Migration file ${file} had issues: ${error.message}`);
-        // For 008, we know it might have issues if run partially, so we continue
+        console.warn(`[sqlite] Migration file ${file} had issues: ${errMsg}`);
       }
     }
   }
@@ -178,6 +196,41 @@ export function ensureSqliteMigrations(): void {
   const hasRawText = versionColumns.some((column) => column.name === 'raw_text');
   if (!hasRawText) {
     runSqlStatements('ALTER TABLE report_versions ADD COLUMN raw_text TEXT;');
+  }
+
+  // 兼容新增字段：jobs 表 PDF 导出相关字段
+  const jobColumns = runSqlStatements('PRAGMA table_info(jobs);') as Array<{ name?: string }>;
+
+  // file_path: 生成的 PDF 文件路径
+  const hasFilePath = jobColumns.some((column) => column.name === 'file_path');
+  if (!hasFilePath) {
+    try {
+      runSqlStatements('ALTER TABLE jobs ADD COLUMN file_path TEXT;');
+    } catch (e) { }
+  }
+
+  // file_name: 文件显示名称
+  const hasFileName = jobColumns.some((column) => column.name === 'file_name');
+  if (!hasFileName) {
+    try {
+      runSqlStatements('ALTER TABLE jobs ADD COLUMN file_name TEXT;');
+    } catch (e) { }
+  }
+
+  // file_size: 文件大小 (bytes)
+  const hasFileSize = jobColumns.some((column) => column.name === 'file_size');
+  if (!hasFileSize) {
+    try {
+      runSqlStatements('ALTER TABLE jobs ADD COLUMN file_size INTEGER;');
+    } catch (e) { }
+  }
+
+  // export_title: 导出任务标题 (用于显示)
+  const hasExportTitle = jobColumns.some((column) => column.name === 'export_title');
+  if (!hasExportTitle) {
+    try {
+      runSqlStatements('ALTER TABLE jobs ADD COLUMN export_title TEXT;');
+    } catch (e) { }
   }
 
   migrationsRan = true;
