@@ -1,6 +1,9 @@
+import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { execFileSync } from 'child_process';
+
+dotenv.config();
 
 function resolveProjectRoot(): string {
   // 在 src/ 与编译后的 dist/ 下运行都能定位到仓库根目录。
