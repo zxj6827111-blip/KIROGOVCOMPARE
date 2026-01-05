@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const crypto = require('crypto');
 require('dotenv').config();
 
 const pool = new Pool({
@@ -9,52 +10,45 @@ const pool = new Pool({
     password: process.env.DB_PASSWORD,
 });
 
-// bcrypt hash for 'admin123'
-const DEFAULT_PASS_HASH = '$2b$10$rQZ8K8HbXxjwG8CfTr1qReQ9D.Wkj8TbKf5kj1xY6VqYC0PvC3XHe';
+// Implementation matching src/middleware/auth.ts
+function hashPassword(password) {
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
+    return `${salt}:${hash}`;
+}
 
 async function main() {
-    console.log('🐘 Connecting to PostgreSQL...');
-    console.log(`Endpoint: ${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`);
+    console.log('🔍 Fixing Admin User (PBKDF2 Mode)...');
+    console.log(`- DB Connection: ${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`);
 
     const client = await pool.connect();
     try {
-        console.log('🔧 Ensuring admin_users table exists...');
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS admin_users (
-                id SERIAL PRIMARY KEY,
-                username VARCHAR(50) UNIQUE NOT NULL,
-                password_hash VARCHAR(255) NOT NULL,
-                display_name VARCHAR(100),
-                permissions TEXT DEFAULT '{}',
-                data_scope TEXT DEFAULT '{}',
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW(),
-                last_login_at TIMESTAMPTZ
-            );
-        `);
+        // Generate valid PBKDF2 hash for 'admin123'
+        const newHash = hashPassword('admin123');
+        console.log('🔐 Generated new PBKDF2 hash for "admin123"');
 
-        console.log('👤 Checking admin user...');
-        const res = await client.query("SELECT id, username FROM admin_users WHERE username = 'admin'");
+        // Check user
+        const res = await client.query("SELECT id FROM admin_users WHERE username = 'admin'");
         
         if (res.rows.length === 0) {
             console.log('🆕 Admin user not found. Creating...');
             await client.query(`
-                INSERT INTO admin_users (username, password_hash, display_name, created_at)
-                VALUES ('admin', $1, 'System Admin', NOW())
-            `, [DEFAULT_PASS_HASH]);
-            console.log('✅ Admin user created.');
+                INSERT INTO admin_users (username, password_hash, display_name, created_at, updated_at)
+                VALUES ('admin', $1, 'System Admin', NOW(), NOW())
+            `, [newHash]);
+            console.log('✅ Admin user created with PBKDF2 hash.');
         } else {
-            console.log('🔄 Admin user exists. Resetting password...');
+            console.log('🔄 Admin user exists. Updating password...');
             await client.query(`
                 UPDATE admin_users 
                 SET password_hash = $1, updated_at = NOW() 
                 WHERE username = 'admin'
-            `, [DEFAULT_PASS_HASH]);
-            console.log('✅ Admin password reset to default (admin123).');
+            `, [newHash]);
+            console.log('✅ Admin password updated to "admin123" (PBKDF2 format).');
         }
 
     } catch (err) {
-        console.error('❌ Error:', err);
+        console.error('❌ Error executing query:', err);
     } finally {
         client.release();
         await pool.end();
