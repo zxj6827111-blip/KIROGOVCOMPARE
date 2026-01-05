@@ -2,6 +2,9 @@
   "name": "gov-report-diff",
   "version": "1.0.0",
   "description": "政府信息公开年度报告差异比对系统",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "main": "dist/index.js",
   "scripts": {
     "dev": "ts-node src/index.ts",
@@ -18,6 +21,7 @@
     "test:watch": "jest --watch",
     "test:pbt": "jest --testPathPattern=pbt",
     "test:phase2": "jest --testPathPattern=phase2",
+    "test:regression": "jest --testPathPattern=regressionSmoke",
     "test:unit": "jest --testPathPattern=__tests__",
     "test:integration": "jest --testPathPattern=integration",
     "test:coverage": "jest --coverage",

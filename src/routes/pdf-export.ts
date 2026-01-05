@@ -1,10 +1,13 @@
-import express, { Request, Response, Router } from 'express';
+import express, { Response, Router } from 'express';
 import puppeteer from 'puppeteer';
 import http from 'http';
 import path from 'path';
-import fs from 'fs';
+import { ensureSqliteMigrations, querySqlite, sqlValue } from '../config/sqlite';
+import { authMiddleware, AuthRequest, generateExpiringToken } from '../middleware/auth';
+import { getAllowedRegionIds } from '../utils/dataScope';
 
 const router: Router = express.Router();
+const SERVICE_TOKEN_TTL_MS = 5 * 60 * 1000;
 
 /**
  * Check if a URL is accessible
@@ -63,13 +66,48 @@ async function findFrontendUrl(): Promise<string | null> {
  * GET /api/comparisons/:id/pdf
  * 使用 Puppeteer 生成比对报告的 PDF
  */
-router.get('/:id/pdf', async (req: Request, res: Response) => {
-    const { id } = req.params;
+router.get('/:id/pdf', authMiddleware, async (req: AuthRequest, res: Response) => {
+    const comparisonId = Number(req.params.id);
 
     let browser = null;
 
     try {
-        console.log(`[PDF Export] Starting PDF generation for comparison ${id}`);
+        if (!Number.isInteger(comparisonId) || comparisonId < 1) {
+            return res.status(400).json({ error: 'invalid_comparison_id' });
+        }
+
+        if (!req.user) {
+            return res.status(401).json({ error: 'unauthorized' });
+        }
+
+        ensureSqliteMigrations();
+
+        const allowedRegionIds = getAllowedRegionIds(req.user);
+        if (allowedRegionIds && allowedRegionIds.length === 0) {
+            return res.status(403).json({ error: 'forbidden' });
+        }
+
+        const comparisonRows = querySqlite(`
+            SELECT c.id, lr.region_id as left_region_id, rr.region_id as right_region_id
+            FROM comparisons c
+            JOIN reports lr ON c.left_report_id = lr.id
+            JOIN reports rr ON c.right_report_id = rr.id
+            WHERE c.id = ${sqlValue(comparisonId)}
+            LIMIT 1;
+        `) as Array<{ id: number; left_region_id: number; right_region_id: number }>;
+
+        if (comparisonRows.length === 0) {
+            return res.status(404).json({ error: 'comparison_not_found' });
+        }
+
+        if (allowedRegionIds) {
+            const { left_region_id, right_region_id } = comparisonRows[0];
+            if (!allowedRegionIds.includes(left_region_id) || !allowedRegionIds.includes(right_region_id)) {
+                return res.status(403).json({ error: 'forbidden' });
+            }
+        }
+
+        console.log(`[PDF Export] Starting PDF generation for comparison ${comparisonId}`);
 
         // Find available frontend
         const frontendUrl = await findFrontendUrl();
@@ -81,12 +119,19 @@ router.get('/:id/pdf', async (req: Request, res: Response) => {
         // Forward highlight settings from query params to print page
         const highlightIdentical = req.query.highlightIdentical === 'true';
         const highlightDiff = req.query.highlightDiff === 'true';
+        const serviceToken = generateExpiringToken(req.user.id, req.user.username, SERVICE_TOKEN_TTL_MS);
         const printParams = new URLSearchParams({
+            highlightIdentical: highlightIdentical.toString(),
+            highlightDiff: highlightDiff.toString(),
+            service_token: serviceToken
+        });
+        const logParams = new URLSearchParams({
             highlightIdentical: highlightIdentical.toString(),
             highlightDiff: highlightDiff.toString()
         });
-        const printUrl = `${frontendUrl}/print/comparison/${id}?${printParams}`;
-        console.log(`[PDF Export] Accessing print URL: ${printUrl}`);
+        const printUrl = `${frontendUrl}/print/comparison/${comparisonId}?${printParams}`;
+        const logUrl = `${frontendUrl}/print/comparison/${comparisonId}?${logParams}`;
+        console.log(`[PDF Export] Accessing print URL: ${logUrl} (service token redacted)`);
 
         // 启动无头浏览器
         browser = await puppeteer.launch({
@@ -125,7 +170,7 @@ router.get('/:id/pdf', async (req: Request, res: Response) => {
         await new Promise(resolve => setTimeout(resolve, 5000));
 
         // Take a screenshot for debugging
-        const screenshotPath = path.join(__dirname, '..', '..', 'logs', `pdf-debug-${id}-${Date.now()}.png`);
+        const screenshotPath = path.join(__dirname, '..', '..', 'logs', `pdf-debug-${comparisonId}-${Date.now()}.png`);
         try {
             await page.screenshot({ path: screenshotPath, fullPage: true });
             console.log(`[PDF Export] Debug screenshot saved to: ${screenshotPath}`);
@@ -199,7 +244,7 @@ router.get('/:id/pdf', async (req: Request, res: Response) => {
         res.setHeader('Access-Control-Allow-Credentials', 'true');
 
         // 设置响应头
-        const filename = encodeURIComponent(pageTitle || `比对报告_${id}`) + '.pdf';
+        const filename = encodeURIComponent(pageTitle || `比对报告_${comparisonId}`) + '.pdf';
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"; filename*=UTF-8''${filename}`);
 

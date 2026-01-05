@@ -4,6 +4,7 @@ import TaskService from '../services/TaskService';
 import AISuggestionService from '../services/AISuggestionService';
 import AISuggestionCacheService from '../services/AISuggestionCacheService';
 import { aiSuggestionQueue } from '../config/queue';
+import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
 
@@ -11,7 +12,7 @@ const router = Router();
  * 生成AI建议
  * POST /api/v1/tasks/:taskId/suggestions
  */
-router.post('/:taskId/suggestions', async (req: Request, res: Response) => {
+router.post('/:taskId/suggestions', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { taskId } = req.params;
     const { forceRegenerate } = req.body;
@@ -83,7 +84,7 @@ router.post('/:taskId/suggestions', async (req: Request, res: Response) => {
  * 查询AI建议
  * GET /api/v1/tasks/:taskId/suggestions
  */
-router.get('/:taskId/suggestions', async (req: Request, res: Response) => {
+router.get('/:taskId/suggestions', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { taskId } = req.params;
 

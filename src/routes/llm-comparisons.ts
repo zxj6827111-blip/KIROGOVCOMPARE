@@ -128,7 +128,7 @@ function buildDiffSection(title: string, entries: any[], emphasize: string): Par
   return paragraphs;
 }
 
-router.post('/comparisons', (req, res) => {
+router.post('/comparisons', authMiddleware, (req, res) => {
   try {
     const { region_id, year_a, year_b, left_report_id, right_report_id } = req.body;
 
@@ -200,6 +200,29 @@ router.post('/comparisons', (req, res) => {
     regionId = leftReport.region_id;
     yearA = Math.min(leftReport.year, rightReport.year);
     yearB = Math.max(leftReport.year, rightReport.year);
+
+    const user = (req as any).user;
+    if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
+      const scopeNames = user.dataScope.regions.map((r: string) => `'${r.replace(/'/g, "''")}'`).join(',');
+      const idsQuery = `
+            WITH RECURSIVE allowed_ids AS (
+                SELECT id FROM regions WHERE name IN (${scopeNames})
+                UNION ALL
+                SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
+            )
+            SELECT id FROM allowed_ids
+      `;
+      try {
+        const allowedRows = querySqlite(idsQuery);
+        const allowedIds = allowedRows.map((r: any) => r.id);
+        if (!allowedIds.includes(Number(regionId))) {
+          return res.status(403).json({ error: '无权限访问该地区' });
+        }
+      } catch (e) {
+        console.error('Error calculating scope IDs in comparisons create:', e);
+        return res.status(403).json({ error: '无权限访问该地区' });
+      }
+    }
 
     if (leftReport.year > rightReport.year) {
       [leftReportId, rightReportId] = [rightReportId, leftReportId];
@@ -347,7 +370,7 @@ router.get('/comparisons', authMiddleware, (req, res) => {
   }
 });
 
-router.get('/comparisons/:id', (req, res) => {
+router.get('/comparisons/:id', authMiddleware, (req, res) => {
   try {
     const comparisonId = Number(req.params.id);
     if (!Number.isInteger(comparisonId) || comparisonId < 1) {
@@ -365,6 +388,29 @@ router.get('/comparisons/:id', (req, res) => {
 
     if (!comparison) {
       return res.status(404).json({ error: 'comparison 不存在' });
+    }
+
+    const user = (req as any).user;
+    if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
+      const scopeNames = user.dataScope.regions.map((r: string) => `'${r.replace(/'/g, "''")}'`).join(',');
+      const idsQuery = `
+            WITH RECURSIVE allowed_ids AS (
+                SELECT id FROM regions WHERE name IN (${scopeNames})
+                UNION ALL
+                SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
+            )
+            SELECT id FROM allowed_ids
+      `;
+      try {
+        const allowedRows = querySqlite(idsQuery);
+        const allowedIds = allowedRows.map((r: any) => r.id);
+        if (!allowedIds.includes(Number(comparison.region_id))) {
+          return res.status(403).json({ error: '无权限访问该地区' });
+        }
+      } catch (e) {
+        console.error('Error calculating scope IDs in comparison detail:', e);
+        return res.status(403).json({ error: '无权限访问该地区' });
+      }
     }
 
     const resultRow = querySqlite(`
@@ -392,7 +438,7 @@ router.get('/comparisons/:id', (req, res) => {
   }
 });
 
-router.get('/comparisons/:id/export', async (req, res) => {
+router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
   try {
     const comparisonId = Number(req.params.id);
     if (!Number.isInteger(comparisonId) || comparisonId < 1) {
@@ -412,6 +458,29 @@ router.get('/comparisons/:id/export', async (req, res) => {
 
     if (!comparison) {
       return res.status(404).json({ error: 'comparison 不存在' });
+    }
+
+    const user = (req as any).user;
+    if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
+      const scopeNames = user.dataScope.regions.map((r: string) => `'${r.replace(/'/g, "''")}'`).join(',');
+      const idsQuery = `
+            WITH RECURSIVE allowed_ids AS (
+                SELECT id FROM regions WHERE name IN (${scopeNames})
+                UNION ALL
+                SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
+            )
+            SELECT id FROM allowed_ids
+      `;
+      try {
+        const allowedRows = querySqlite(idsQuery);
+        const allowedIds = allowedRows.map((r: any) => r.id);
+        if (!allowedIds.includes(Number(comparison.region_id))) {
+          return res.status(403).json({ error: '无权限访问该地区' });
+        }
+      } catch (e) {
+        console.error('Error calculating scope IDs in comparison export:', e);
+        return res.status(403).json({ error: '无权限访问该地区' });
+      }
     }
 
     // Fetch parsed content from both reports

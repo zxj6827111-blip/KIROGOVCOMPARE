@@ -37,7 +37,7 @@ export class URLDownloadService {
   ): Promise<DownloadResult> {
     try {
       // 验证URL安全性
-      const validation = validateURLSecurity(urlString);
+      const validation = await validateURLSecurity(urlString);
       if (!validation.valid) {
         return { success: false, error: validation.error };
       }
@@ -148,7 +148,7 @@ export class URLDownloadService {
         }
 
         // 验证重定向URL
-        const redirectValidation = validateRedirectURL(urlString, redirectURL);
+        const redirectValidation = await validateRedirectURL(urlString, redirectURL);
         if (!redirectValidation.valid) {
           return { success: false, error: redirectValidation.error };
         }

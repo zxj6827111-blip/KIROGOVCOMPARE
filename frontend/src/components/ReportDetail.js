@@ -194,20 +194,46 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     setEditingData(null);
   };
 
-  // 对文本中的问题数字进行高亮
+  // 对文本中的问题数字进行高亮 - SECURITY FIX: Use safe React elements instead of dangerouslySetInnerHTML
   const highlightTextIssues = (text, highlights) => {
     if (!highlights || highlights.length === 0 || !text) return text;
 
-    let result = text;
-    highlights.forEach(({ value }) => {
-      if (value !== null && value !== undefined) {
-        const numStr = String(value);
-        const regex = new RegExp(`(${numStr})`, 'g');
-        result = result.replace(regex, '<mark class="text-warning">$1</mark>');
-      }
-    });
+    // Collect all values to highlight
+    const valuesToHighlight = highlights
+      .map(h => h.value)
+      .filter(v => v !== null && v !== undefined)
+      .map(v => String(v));
 
-    return <span dangerouslySetInnerHTML={{ __html: result }} />;
+    if (valuesToHighlight.length === 0) return text;
+
+    // Build result as React elements
+    const elements = [];
+    let remainingText = String(text);
+    let keyIndex = 0;
+
+    // For each value to highlight, split and reconstruct
+    for (const numStr of valuesToHighlight) {
+      const parts = remainingText.split(numStr);
+      if (parts.length > 1) {
+        const newParts = [];
+        parts.forEach((part, idx) => {
+          if (part) newParts.push(part);
+          if (idx < parts.length - 1) {
+            newParts.push(<mark key={`hl-${keyIndex++}`} className="text-warning">{numStr}</mark>);
+          }
+        });
+        // Convert back to components
+        if (elements.length === 0) {
+          elements.push(...newParts);
+        }
+        remainingText = parts.join(`{{HL${numStr}HL}}`);
+      }
+    }
+
+    // If no highlights found, return original text
+    if (elements.length === 0) return text;
+
+    return <span>{elements}</span>;
   };
 
   const renderParsedContent = (parsed) => {

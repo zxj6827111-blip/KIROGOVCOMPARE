@@ -398,10 +398,10 @@ const ConsistencyCheckView = ({ reportId, onEdit, filterGroups }) => {
                                 {locInfo.context && (
                                   <div className="context-highlight">
                                     <div className="context-label">🔍 匹配文本：</div>
-                                    <div
-                                      className="context-text"
-                                      dangerouslySetInnerHTML={{ __html: locInfo.context }}
-                                    />
+                                    <div className="context-text">
+                                      {/* SECURITY FIX: Render as plain text to prevent XSS */}
+                                      {locInfo.context.replace(/<[^>]*>/g, '')}
+                                    </div>
                                   </div>
                                 )}
                               </div>

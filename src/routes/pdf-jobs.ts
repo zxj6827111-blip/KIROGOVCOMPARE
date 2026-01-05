@@ -1,9 +1,10 @@
-import express, { Request, Response, Router } from 'express';
+import express, { Response, Router } from 'express';
 import path from 'path';
 import fs from 'fs';
 import archiver from 'archiver';
 import { ensureSqliteMigrations, querySqlite, executeSqlite, sqlValue, DATA_DIR } from '../config/sqlite';
-import { authMiddleware } from '../middleware/auth';
+import { authMiddleware, AuthRequest } from '../middleware/auth';
+import { getAllowedRegionIds } from '../utils/dataScope';
 
 const router: Router = express.Router();
 
@@ -21,24 +22,31 @@ function ensureExportsDir(): void {
  * POST /api/pdf-jobs
  * 创建 PDF 导出任务
  */
-router.post('/', (req: Request, res: Response) => {
+router.post('/', authMiddleware, (req: AuthRequest, res: Response) => {
     try {
         ensureSqliteMigrations();
         ensureExportsDir();
 
         const { comparison_id, title } = req.body;
+        const allowedRegionIds = getAllowedRegionIds(req.user);
+
+        if (allowedRegionIds && allowedRegionIds.length === 0) {
+            return res.status(403).json({ error: 'forbidden' });
+        }
 
         if (!comparison_id) {
             return res.status(400).json({ error: 'comparison_id is required' });
         }
 
         // 检查 comparison 是否存在
+        const scopeClause = allowedRegionIds ? `AND reg.id IN (${allowedRegionIds.join(',')})` : '';
         const comparisonRows = querySqlite(`
       SELECT c.id, c.year_a, c.year_b, r.unit_name, reg.name as region_name
       FROM comparisons c
       JOIN reports r ON c.left_report_id = r.id
       JOIN regions reg ON r.region_id = reg.id
-      WHERE c.id = ${sqlValue(comparison_id)};
+      WHERE c.id = ${sqlValue(comparison_id)}
+      ${scopeClause};
     `) as Array<{ id: number; year_a: number; year_b: number; unit_name: string; region_name: string }>;
 
         if (comparisonRows.length === 0) {
@@ -104,7 +112,7 @@ router.post('/', (req: Request, res: Response) => {
  * GET /api/pdf-jobs
  * 获取 PDF 导出任务列表
  */
-router.get('/', authMiddleware, (req: Request, res: Response) => {
+router.get('/', authMiddleware, (req: AuthRequest, res: Response) => {
     try {
         ensureSqliteMigrations();
 
@@ -121,27 +129,11 @@ router.get('/', authMiddleware, (req: Request, res: Response) => {
         }
 
         // DATA SCOPE FILTER
-        const user = (req as any).user;
-        if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
-            const scopeNames = user.dataScope.regions.map((n: string) => `'${n.replace(/'/g, "''")}'`).join(',');
-            const scopeIdsQuery = `
-            WITH RECURSIVE allowed_ids AS (
-                SELECT id FROM regions WHERE name IN (${scopeNames})
-                UNION ALL
-                SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
-            )
-            SELECT id FROM allowed_ids
-          `;
-            try {
-                const allowedRows = querySqlite(scopeIdsQuery);
-                const allowedIds = allowedRows.map((row: any) => row.id).join(',');
-                if (allowedIds.length > 0) {
-                    conditions.push(`c.region_id IN (${allowedIds})`);
-                } else {
-                    conditions.push('1=0');
-                }
-            } catch (e) {
-                console.error('Error calculating scope IDs in pdf-jobs:', e);
+        const allowedRegionIds = getAllowedRegionIds(req.user);
+        if (allowedRegionIds) {
+            if (allowedRegionIds.length > 0) {
+                conditions.push(`c.region_id IN (${allowedRegionIds.join(',')})`);
+            } else {
                 conditions.push('1=0');
             }
         }
@@ -230,7 +222,7 @@ router.get('/', authMiddleware, (req: Request, res: Response) => {
  * GET /api/pdf-jobs/:id/download
  * 下载已生成的 PDF 文件
  */
-router.get('/:id/download', (req: Request, res: Response) => {
+router.get('/:id/download', authMiddleware, (req: AuthRequest, res: Response) => {
     try {
         ensureSqliteMigrations();
 
@@ -239,12 +231,22 @@ router.get('/:id/download', (req: Request, res: Response) => {
             return res.status(400).json({ error: 'Invalid job ID' });
         }
 
+        const allowedRegionIds = getAllowedRegionIds(req.user);
+        if (allowedRegionIds && allowedRegionIds.length === 0) {
+            return res.status(403).json({ error: 'forbidden' });
+        }
+
+        const scopeClause = allowedRegionIds ? `AND r.region_id IN (${allowedRegionIds.join(',')})` : '';
+
         // 获取任务信息
         const rows = querySqlite(`
       SELECT 
         j.id, j.status, j.file_path, j.file_name, j.comparison_id, j.export_title
       FROM jobs j
-      WHERE j.id = ${sqlValue(jobId)} AND j.kind = 'pdf_export';
+      LEFT JOIN comparisons c ON j.comparison_id = c.id
+      LEFT JOIN reports r ON c.left_report_id = r.id
+      WHERE j.id = ${sqlValue(jobId)} AND j.kind = 'pdf_export'
+      ${scopeClause};
     `) as Array<{
             id: number;
             status: string;
@@ -298,7 +300,7 @@ router.get('/:id/download', (req: Request, res: Response) => {
  * DELETE /api/pdf-jobs/:id
  * 删除 PDF 导出任务及其文件
  */
-router.delete('/:id', (req: Request, res: Response) => {
+router.delete('/:id', authMiddleware, (req: AuthRequest, res: Response) => {
     try {
         ensureSqliteMigrations();
 
@@ -307,9 +309,21 @@ router.delete('/:id', (req: Request, res: Response) => {
             return res.status(400).json({ error: 'Invalid job ID' });
         }
 
+        const allowedRegionIds = getAllowedRegionIds(req.user);
+        if (allowedRegionIds && allowedRegionIds.length === 0) {
+            return res.status(403).json({ error: 'forbidden' });
+        }
+
+        const scopeClause = allowedRegionIds ? `AND r.region_id IN (${allowedRegionIds.join(',')})` : '';
+
         // 获取任务信息
         const rows = querySqlite(`
-      SELECT file_path FROM jobs WHERE id = ${sqlValue(jobId)} AND kind = 'pdf_export';
+      SELECT j.file_path
+      FROM jobs j
+      LEFT JOIN comparisons c ON j.comparison_id = c.id
+      LEFT JOIN reports r ON c.left_report_id = r.id
+      WHERE j.id = ${sqlValue(jobId)} AND j.kind = 'pdf_export'
+      ${scopeClause};
     `) as Array<{ file_path: string | null }>;
 
         if (rows.length === 0) {
@@ -341,7 +355,7 @@ router.delete('/:id', (req: Request, res: Response) => {
  * POST /api/pdf-jobs/:id/regenerate
  * 重新生成已过期的 PDF
  */
-router.post('/:id/regenerate', (req: Request, res: Response) => {
+router.post('/:id/regenerate', authMiddleware, (req: AuthRequest, res: Response) => {
     try {
         ensureSqliteMigrations();
 
@@ -350,10 +364,21 @@ router.post('/:id/regenerate', (req: Request, res: Response) => {
             return res.status(400).json({ error: 'Invalid job ID' });
         }
 
+        const allowedRegionIds = getAllowedRegionIds(req.user);
+        if (allowedRegionIds && allowedRegionIds.length === 0) {
+            return res.status(403).json({ error: 'forbidden' });
+        }
+
+        const scopeClause = allowedRegionIds ? `AND r.region_id IN (${allowedRegionIds.join(',')})` : '';
+
         // 获取原任务信息
         const rows = querySqlite(`
-      SELECT comparison_id, export_title FROM jobs 
-      WHERE id = ${sqlValue(jobId)} AND kind = 'pdf_export';
+      SELECT j.comparison_id, j.export_title
+      FROM jobs j
+      LEFT JOIN comparisons c ON j.comparison_id = c.id
+      LEFT JOIN reports r ON c.left_report_id = r.id
+      WHERE j.id = ${sqlValue(jobId)} AND j.kind = 'pdf_export'
+      ${scopeClause};
     `) as Array<{ comparison_id: number; export_title: string }>;
 
         if (rows.length === 0) {
@@ -399,7 +424,7 @@ router.post('/:id/regenerate', (req: Request, res: Response) => {
  * POST /api/pdf-jobs/batch-download
  * 批量下载 PDF（打包成 ZIP）
  */
-router.post('/batch-download', (req: Request, res: Response) => {
+router.post('/batch-download', authMiddleware, (req: AuthRequest, res: Response) => {
     try {
         ensureSqliteMigrations();
 
@@ -409,15 +434,25 @@ router.post('/batch-download', (req: Request, res: Response) => {
             return res.status(400).json({ error: 'job_ids array is required' });
         }
 
+        const allowedRegionIds = getAllowedRegionIds(req.user);
+        if (allowedRegionIds && allowedRegionIds.length === 0) {
+            return res.status(403).json({ error: 'forbidden' });
+        }
+
+        const scopeClause = allowedRegionIds ? `AND r.region_id IN (${allowedRegionIds.join(',')})` : '';
+
         // 获取指定任务的文件信息
         const placeholders = job_ids.map(() => '?').join(',');
         const jobs = querySqlite(`
-      SELECT id, file_path, file_name, export_title, status 
-      FROM jobs 
+      SELECT j.id, j.file_path, j.file_name, j.export_title, j.status 
+      FROM jobs j
+      LEFT JOIN comparisons c ON j.comparison_id = c.id
+      LEFT JOIN reports r ON c.left_report_id = r.id
       WHERE id IN (${job_ids.map(id => sqlValue(id)).join(',')}) 
         AND kind = 'pdf_export' 
         AND status = 'done'
-        AND file_path IS NOT NULL;
+        AND file_path IS NOT NULL
+        ${scopeClause};
     `) as Array<{
             id: number;
             file_path: string;

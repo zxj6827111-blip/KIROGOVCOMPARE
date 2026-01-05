@@ -3,12 +3,16 @@ import http from 'http';
 import path from 'path';
 import fs from 'fs';
 import { ensureSqliteMigrations, querySqlite, executeSqlite, sqlValue, DATA_DIR } from '../config/sqlite';
+import { generateExpiringToken } from '../middleware/auth';
 
 // PDF 导出文件存储目录
 const PDF_EXPORTS_DIR = path.join(DATA_DIR, 'exports', 'pdf');
 
 // 文件过期时间（7天，单位：毫秒）
 const FILE_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
+const SERVICE_TOKEN_TTL_MS = 5 * 60 * 1000;
+const SERVICE_TOKEN_USER_ID = Number(process.env.PDF_EXPORT_SERVICE_USER_ID || 1);
+const SERVICE_TOKEN_USERNAME = process.env.PDF_EXPORT_SERVICE_USERNAME || 'pdf-export-worker';
 
 // Worker 轮询间隔（5秒）
 const POLL_INTERVAL_MS = 5000;
@@ -140,8 +144,15 @@ async function processJob(job: {
         });
 
         // 导航到打印页面
-        const printUrl = `${frontendUrl}/print/comparison/${job.comparison_id}`;
-        console.log(`[PdfExportWorker] Navigating to ${printUrl}`);
+        const serviceToken = generateExpiringToken(
+            Number.isFinite(SERVICE_TOKEN_USER_ID) && SERVICE_TOKEN_USER_ID > 0 ? SERVICE_TOKEN_USER_ID : 1,
+            SERVICE_TOKEN_USERNAME,
+            SERVICE_TOKEN_TTL_MS
+        );
+        const printParams = new URLSearchParams({ service_token: serviceToken });
+        const printUrl = `${frontendUrl}/print/comparison/${job.comparison_id}?${printParams}`;
+        const logUrl = `${frontendUrl}/print/comparison/${job.comparison_id}`;
+        console.log(`[PdfExportWorker] Navigating to ${logUrl} (service token redacted)`);
 
         executeSqlite(`
       UPDATE jobs SET progress = 30, step_name = '正在加载页面'

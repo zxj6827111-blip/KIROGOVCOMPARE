@@ -1,7 +1,16 @@
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'govinfo-admin-secret-key-change-in-production';
+// SECURITY: JWT_SECRET must be set via environment variable
+const JWT_SECRET_ENV = process.env.JWT_SECRET;
+if (!JWT_SECRET_ENV || JWT_SECRET_ENV.length < 32) {
+  console.error('FATAL: JWT_SECRET environment variable must be set with at least 32 characters');
+  if (process.env.NODE_ENV === 'production') {
+    process.exit(1);
+  }
+}
+// Use a safe fallback for dev/test only - production exits above
+const JWT_SECRET: string = JWT_SECRET_ENV || 'dev-only-insecure-key-min-32-chars!!';
 const TOKEN_EXPIRY_HOURS = 24;
 
 export interface AuthRequest extends Request {
@@ -25,6 +34,23 @@ export function generateToken(userId: number, username: string): string {
     id: userId,
     username,
     exp: Date.now() + TOKEN_EXPIRY_HOURS * 60 * 60 * 1000,
+  };
+
+  const payloadStr = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = crypto
+    .createHmac('sha256', JWT_SECRET)
+    .update(payloadStr)
+    .digest('base64url');
+
+  return `${payloadStr}.${signature}`;
+}
+
+export function generateExpiringToken(userId: number, username: string, ttlMs: number): string {
+  const safeTtl = Number.isFinite(ttlMs) && ttlMs > 0 ? ttlMs : TOKEN_EXPIRY_HOURS * 60 * 60 * 1000;
+  const payload = {
+    id: userId,
+    username,
+    exp: Date.now() + safeTtl,
   };
 
   const payloadStr = Buffer.from(JSON.stringify(payload)).toString('base64url');
@@ -73,13 +99,16 @@ export function hashPassword(password: string): string {
 
 /**
  * Verify password against stored hash
+ * SECURITY: Removed hardcoded password bypass - users must change default password
  */
 export function verifyPassword(password: string, storedHash: string): boolean {
   // Handle bcrypt format (from migration default)
   if (storedHash.startsWith('$2b$') || storedHash.startsWith('$2a$')) {
-    // For bcrypt, we need to use a simple comparison for the default password
-    // In production, use bcrypt library
-    return password === 'admin123' && storedHash.includes('rQZ8K8HbXxjwG8CfTr1qRe');
+    // SECURITY FIX: Do not allow default bcrypt password
+    // Users MUST change their password using the change-password endpoint first
+    // The migration inserts a bcrypt hash, but we only support PBKDF2 for verification
+    console.warn('SECURITY: Bcrypt password detected. User must change password via /api/auth/reset-default-password');
+    return false;
   }
 
   // Handle our PBKDF2 format
@@ -100,7 +129,7 @@ export function authMiddleware(req: AuthRequest, res: Response, next: NextFuncti
     req.user = {
       id: 1,
       username: 'ci-test-user',
-      permissions: { upload_reports: true, view_reports: true, manage_users: true, manage_cities: true },
+      permissions: { upload_reports: true, view_reports: true, manage_users: true, manage_regions: true, manage_jobs: true },
       dataScope: {}
     };
     next();
@@ -126,8 +155,9 @@ export function authMiddleware(req: AuthRequest, res: Response, next: NextFuncti
 
   // Fetch latest permissions from DB to ensure they are up to date
   try {
-    const { querySqlite } = require('../config/sqlite');
-    const users = querySqlite(`SELECT * FROM admin_users WHERE id = ${decoded.id}`);
+    const { querySqlite, sqlValue } = require('../config/sqlite');
+    // SECURITY FIX: Use parameterized query to prevent SQL injection
+    const users = querySqlite(`SELECT * FROM admin_users WHERE id = ${sqlValue(decoded.id)}`);
     if (users && users.length > 0) {
       const dbUser = users[0];
       req.user = {
@@ -158,8 +188,9 @@ export function optionalAuthMiddleware(req: AuthRequest, _res: Response, next: N
 
       // Fetch latest permissions from DB (same as authMiddleware)
       try {
-        const { querySqlite } = require('../config/sqlite');
-        const users = querySqlite(`SELECT * FROM admin_users WHERE id = ${decoded.id}`);
+        const { querySqlite, sqlValue } = require('../config/sqlite');
+        // SECURITY FIX: Use parameterized query to prevent SQL injection
+        const users = querySqlite(`SELECT * FROM admin_users WHERE id = ${sqlValue(decoded.id)}`);
         if (users && users.length > 0) {
           const dbUser = users[0];
           req.user = {

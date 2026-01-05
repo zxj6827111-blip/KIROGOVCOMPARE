@@ -1,7 +1,8 @@
-import { Router, Request, Response } from 'express';
+import { Router, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import pool from '../config/database';
 import { batchJobQueue } from '../config/queue';
+import { authMiddleware, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
@@ -9,7 +10,7 @@ const router = Router();
  * 批量比对预览
  * POST /api/v1/admin/batch-jobs/preview
  */
-router.post('/preview', async (req: Request, res: Response) => {
+router.post('/preview', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { assetIds, rule, region, department } = req.body;
 
@@ -41,10 +42,10 @@ router.post('/preview', async (req: Request, res: Response) => {
  * 执行批量比对
  * POST /api/v1/admin/batch-jobs/run
  */
-router.post('/run', async (req: Request, res: Response) => {
+router.post('/run', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { pairs } = req.body;
-    const userId = req.headers['x-user-id'] as string || 'admin';
+    const userId = req.user?.id ? String(req.user.id) : 'admin';
 
     if (!pairs || pairs.length === 0) {
       return res.status(400).json({ error: '必须提供配对列表' });
@@ -88,7 +89,7 @@ router.post('/run', async (req: Request, res: Response) => {
  * 查询批量比对进度
  * GET /api/v1/admin/batch-jobs/:batchId
  */
-router.get('/:batchId', async (req: Request, res: Response) => {
+router.get('/:batchId', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { batchId } = req.params;
 

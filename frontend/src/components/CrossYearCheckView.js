@@ -353,10 +353,10 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
                                                 <div className="detail-section">
                                                     <div className="ds-header"><Search size={14} className="inline-block" /> 匹配文本</div>
                                                     <div className="ds-body">
-                                                        <div
-                                                            className="context-content"
-                                                            dangerouslySetInnerHTML={{ __html: details.context }}
-                                                        />
+                                                        <div className="context-content">
+                                                            {/* SECURITY FIX: Render as plain text to prevent XSS */}
+                                                            {details.context.replace(/<[^>]*>/g, '')}
+                                                        </div>
                                                     </div>
                                                 </div>
                                             )}

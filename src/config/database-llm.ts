@@ -5,6 +5,17 @@ import { SQLITE_DB_PATH, querySqlite, sqlValue } from './sqlite';
 
 const dbType = process.env.DATABASE_TYPE || 'sqlite';
 
+// ⛔ SECURITY: Prevent silent fallback to SQLite when Postgres is expected
+if (dbType === 'postgres') {
+  const requiredEnvVars = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'];
+  const missing = requiredEnvVars.filter(v => !process.env[v]);
+  if (missing.length > 0) {
+    console.error(`❌ FATAL: DATABASE_TYPE=postgres but missing required env vars: ${missing.join(', ')}`);
+    console.error('⚠️  Refusing to silently fallback to SQLite. Fix your .env configuration!');
+    process.exit(1);
+  }
+}
+
 let pool: any;
 
 function formatParams(statement: string, params?: any[]): string {
@@ -13,10 +24,10 @@ function formatParams(statement: string, params?: any[]): string {
   }
 
   let formatted = statement;
-  
+
   // 先检查是否使用 $N 格式（PostgreSQL风格）
   const hasPostgresPlaceholders = /\$\d+/.test(formatted);
-  
+
   if (hasPostgresPlaceholders) {
     // PostgreSQL 风格：$1, $2 等
     params.forEach((param, index) => {

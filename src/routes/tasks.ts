@@ -8,6 +8,7 @@ import AssetService from '../services/AssetService';
 import FileUploadService from '../services/FileUploadService';
 import URLDownloadService from '../services/URLDownloadService';
 import { compareTaskQueue } from '../config/queue';
+import { authMiddleware, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 
@@ -20,8 +21,9 @@ if (!fs.existsSync(uploadDir)) {
 const upload = multer({
   storage: multer.diskStorage({
     destination: uploadDir,
-    filename: (_req: any, file: any, cb: any) => {
-      cb(null, `${Date.now()}-${file.originalname}`);
+    filename: (_req: any, _file: any, cb: any) => {
+      // SECURITY FIX: Use UUID for temp filename to prevent path traversal
+      cb(null, `${Date.now()}-${uuidv4()}.pdf`);
     },
   }),
   limits: {
@@ -39,14 +41,16 @@ const upload = multer({
 /**
  * 创建比对任务 - 上传方式
  * POST /api/v1/tasks/compare/upload
+ * SECURITY: Requires authentication
  */
-router.post('/compare/upload', upload.fields([
+router.post('/compare/upload', authMiddleware, upload.fields([
   { name: 'fileA', maxCount: 1 },
   { name: 'fileB', maxCount: 1 },
-]), async (req: Request, res: Response) => {
+]), async (req: AuthRequest, res: Response) => {
   try {
     const files = (req as any).files as { [key: string]: any[] };
-    const userId = req.headers['x-user-id'] as string || 'anonymous';
+    // SECURITY FIX: Use authenticated user ID instead of trusting x-user-id header
+    const userId = req.user?.id ? String(req.user.id) : 'anonymous';
 
     // 验证文件
     if (!files || !files.fileA || !files.fileB) {
@@ -117,11 +121,13 @@ router.post('/compare/upload', upload.fields([
 /**
  * 创建比对任务 - URL方式
  * POST /api/v1/tasks/compare/url
+ * SECURITY: Requires authentication
  */
-router.post('/compare/url', async (req: Request, res: Response) => {
+router.post('/compare/url', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { urlA, urlB } = req.body;
-    const userId = req.headers['x-user-id'] as string || 'anonymous';
+    // SECURITY FIX: Use authenticated user ID
+    const userId = req.user?.id ? String(req.user.id) : 'anonymous';
 
     if (!urlA || !urlB) {
       return res.status(400).json({ error: '必须提供两个URL' });
@@ -166,11 +172,13 @@ router.post('/compare/url', async (req: Request, res: Response) => {
 /**
  * 创建比对任务 - 资产方式
  * POST /api/v1/tasks/compare/asset
+ * SECURITY: Requires authentication  
  */
-router.post('/compare/asset', async (req: Request, res: Response) => {
+router.post('/compare/asset', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { assetIdA, assetIdB } = req.body;
-    const userId = req.headers['x-user-id'] as string || 'anonymous';
+    // SECURITY FIX: Use authenticated user ID
+    const userId = req.user?.id ? String(req.user.id) : 'anonymous';
 
     if (!assetIdA || !assetIdB) {
       return res.status(400).json({ error: '必须提供两个资产ID' });
@@ -216,7 +224,7 @@ router.post('/compare/asset', async (req: Request, res: Response) => {
  * 查询任务状态
  * GET /api/v1/tasks/:taskId
  */
-router.get('/:taskId', async (req: Request, res: Response) => {
+router.get('/:taskId', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { taskId } = req.params;
 
@@ -242,12 +250,12 @@ router.get('/:taskId', async (req: Request, res: Response) => {
  * 查询任务列表
  * GET /api/v1/tasks
  */
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const page = parseInt(req.query.page as string) || 1;
     const limit = parseInt(req.query.limit as string) || 20;
     const status = req.query.status as string;
-    const userId = req.headers['x-user-id'] as string || 'anonymous';
+    const userId = req.user?.id ? String(req.user.id) : 'anonymous';
 
     const result = await TaskService.queryTasks({
       status: status as any,
@@ -275,7 +283,7 @@ router.get('/', async (req: Request, res: Response) => {
  * 获取比对结果
  * GET /api/v1/tasks/:taskId/result
  */
-router.get('/:taskId/result', async (req: Request, res: Response) => {
+router.get('/:taskId/result', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { taskId } = req.params;
 
@@ -305,7 +313,7 @@ router.get('/:taskId/result', async (req: Request, res: Response) => {
  * 获取差异结果
  * GET /api/v1/tasks/:taskId/diff
  */
-router.get('/:taskId/diff', async (req: Request, res: Response) => {
+router.get('/:taskId/diff', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { taskId } = req.params;
 
@@ -332,7 +340,7 @@ router.get('/:taskId/diff', async (req: Request, res: Response) => {
  * 获取摘要信息
  * GET /api/v1/tasks/:taskId/summary
  */
-router.get('/:taskId/summary', async (req: Request, res: Response) => {
+router.get('/:taskId/summary', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { taskId } = req.params;
 
@@ -367,7 +375,7 @@ router.get('/:taskId/summary', async (req: Request, res: Response) => {
  * 获取对照视图模型（用于前端左右并排展示）
  * GET /api/v1/tasks/:taskId/view-model
  */
-router.get('/:taskId/view-model', async (req: Request, res: Response) => {
+router.get('/:taskId/view-model', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { taskId } = req.params;
 
@@ -396,10 +404,10 @@ router.get('/:taskId/view-model', async (req: Request, res: Response) => {
  * 重试任务
  * POST /api/v1/tasks/:taskId/retry
  */
-router.post('/:taskId/retry', async (req: Request, res: Response) => {
+router.post('/:taskId/retry', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { taskId } = req.params;
-    const userId = req.headers['x-user-id'] as string || 'anonymous';
+    const userId = req.user?.id ? String(req.user.id) : 'anonymous';
 
     const originalTask = await TaskService.getTaskById(taskId);
     if (!originalTask) {
@@ -429,7 +437,7 @@ router.post('/:taskId/retry', async (req: Request, res: Response) => {
  * 删除任务
  * DELETE /api/v1/tasks/:taskId
  */
-router.delete('/:taskId', async (req: Request, res: Response) => {
+router.delete('/:taskId', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { taskId } = req.params;
 

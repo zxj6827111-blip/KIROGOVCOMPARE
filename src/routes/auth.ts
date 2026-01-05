@@ -67,6 +67,75 @@ router.post('/login', (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/auth/reset-default-password
+ * Reset password for users with the default bcrypt hash
+ * This is a special endpoint to migrate from the insecure default password
+ */
+router.post('/reset-default-password', (req: Request, res: Response) => {
+  try {
+    const { username, currentPassword, newPassword, bootstrapToken } = req.body;
+
+    if (!username || !currentPassword || !newPassword) {
+      return res.status(400).json({ error: '请提供用户名、当前密码和新密码' });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: '新密码长度至少8位' });
+    }
+    const expectedBootstrapToken = process.env.ADMIN_BOOTSTRAP_TOKEN;
+    if (!expectedBootstrapToken || expectedBootstrapToken.length < 16) {
+      return res.status(403).json({ error: 'ADMIN_BOOTSTRAP_TOKEN is missing or too short' });
+    }
+
+    if (bootstrapToken !== expectedBootstrapToken) {
+      return res.status(403).json({ error: 'invalid_bootstrap_token' });
+    }
+
+    if (username !== 'admin') {
+      return res.status(403).json({ error: 'reset_only_allowed_for_admin' });
+    }
+
+
+    ensureSqliteMigrations();
+
+    const users = querySqlite(`
+      SELECT id, username, password_hash
+      FROM admin_users 
+      WHERE username = ${sqlValue(username)}
+    `);
+
+    if (!users || users.length === 0) {
+      return res.status(401).json({ error: '用户不存在' });
+    }
+
+    const user = users[0];
+
+    // Only allow this endpoint for bcrypt hashes (default password)
+    if (!user.password_hash.startsWith('$2b$') && !user.password_hash.startsWith('$2a$')) {
+      return res.status(400).json({ error: '密码格式不支持，请使用普通密码修改接口' });
+    }
+
+    // Verify the default password
+    if (currentPassword !== 'admin123') {
+      return res.status(401).json({ error: '当前密码错误' });
+    }
+
+    // Hash the new password with PBKDF2
+    const newHash = hashPassword(newPassword);
+    querySqlite(`
+      UPDATE admin_users 
+      SET password_hash = ${sqlValue(newHash)}, updated_at = datetime('now') 
+      WHERE id = ${sqlValue(user.id)}
+    `);
+
+    res.json({ message: '密码重置成功，请使用新密码登录' });
+  } catch (error) {
+    console.error('Reset default password error:', error);
+    res.status(500).json({ error: '密码重置失败' });
+  }
+});
+
+/**
  * GET /api/auth/me
  * Get current user info (requires auth)
  */

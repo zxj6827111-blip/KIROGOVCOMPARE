@@ -43,11 +43,13 @@ export const buildApiUrl = (path) => {
 };
 
 // For file downloads that need to bypass React proxy (window.open, etc.)
-// Uses the direct backend URL since proxy doesn't work for those
+// Uses the API_BASE_URL which works in both dev and production
 export const buildDownloadUrl = (path) => {
   const cleanedPath = path.startsWith('/') ? path : `/${path}`;
-  // Use full backend URL for downloads
-  return `http://localhost:8787/api${cleanedPath}`;
+  // Use API_BASE_URL - in production this should be configured correctly
+  // In development with proxy, this will be /api which proxies to backend
+  const base = API_BASE_URL || '/api';
+  return `${base}${cleanedPath}`;
 };
 
 // Helper to check if user is authenticated

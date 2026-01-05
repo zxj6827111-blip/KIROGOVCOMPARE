@@ -1,7 +1,50 @@
 import express from 'express';
 import { ensureSqliteMigrations, querySqlite, sqlValue } from '../config/sqlite';
+import { authMiddleware, AuthRequest } from '../middleware/auth';
+import { getAllowedRegionIds } from '../utils/dataScope';
 
 const router = express.Router();
+router.use(authMiddleware);
+
+function isNotificationAllowed(
+    notification: { related_version_id?: number; related_job_id?: number; created_by?: number },
+    allowedRegionIds: number[] | null,
+    userId: number
+): boolean {
+    if (!allowedRegionIds) return true;
+    if (allowedRegionIds.length === 0) return false;
+
+    if (notification.created_by && notification.created_by === userId) {
+        return true;
+    }
+
+    if (notification.related_version_id) {
+        const row = querySqlite(`
+      SELECT 1
+      FROM report_versions rv
+      JOIN reports r ON rv.report_id = r.id
+      WHERE rv.id = ${sqlValue(notification.related_version_id)}
+        AND r.region_id IN (${allowedRegionIds.join(',')})
+      LIMIT 1;
+    `)[0];
+        return !!row;
+    }
+
+    if (notification.related_job_id) {
+        const row = querySqlite(`
+      SELECT 1
+      FROM jobs j
+      JOIN report_versions rv ON j.version_id = rv.id
+      JOIN reports r ON rv.report_id = r.id
+      WHERE j.id = ${sqlValue(notification.related_job_id)}
+        AND r.region_id IN (${allowedRegionIds.join(',')})
+      LIMIT 1;
+    `)[0];
+        return !!row;
+    }
+
+    return false;
+}
 
 /**
  * GET /api/notifications
@@ -13,11 +56,36 @@ router.get('/notifications', (req, res) => {
         ensureSqliteMigrations();
 
         const { unread_only } = req.query;
-
-        let whereClause = '';
-        if (unread_only === '1' || unread_only === 'true') {
-            whereClause = 'WHERE read_at IS NULL';
+        const authReq = req as AuthRequest;
+        const user = authReq.user;
+        const allowedRegionIds = getAllowedRegionIds(user);
+        if (allowedRegionIds && allowedRegionIds.length === 0) {
+            return res.json({ notifications: [] });
         }
+
+        const conditions: string[] = [];
+        if (unread_only === '1' || unread_only === 'true') {
+            conditions.push('n.read_at IS NULL');
+        }
+        if (allowedRegionIds && user) {
+            const allowed = allowedRegionIds.join(',');
+            conditions.push(`(
+        (n.related_version_id IS NOT NULL AND EXISTS (
+          SELECT 1 FROM report_versions rv
+          JOIN reports r ON rv.report_id = r.id
+          WHERE rv.id = n.related_version_id AND r.region_id IN (${allowed})
+        ))
+        OR (n.related_job_id IS NOT NULL AND EXISTS (
+          SELECT 1 FROM jobs j
+          JOIN report_versions rv ON j.version_id = rv.id
+          JOIN reports r ON rv.report_id = r.id
+          WHERE j.id = n.related_job_id AND r.region_id IN (${allowed})
+        ))
+        OR (n.created_by IS NOT NULL AND n.created_by = ${sqlValue(user.id)})
+      )`);
+        }
+
+        const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
         const notifications = querySqlite(`
       SELECT 
@@ -30,7 +98,7 @@ router.get('/notifications', (req, res) => {
         related_job_id,
         related_version_id,
         created_by
-      FROM notifications
+      FROM notifications n
       ${whereClause}
       ORDER BY created_at DESC;
     `) as Array<{
@@ -88,14 +156,26 @@ router.post('/notifications/:id/read', (req, res) => {
         if (Number.isNaN(notificationId)) {
             return res.status(400).json({ error: 'Invalid notification ID' });
         }
+        const authReq = req as AuthRequest;
+        const user = authReq.user;
+        const allowedRegionIds = getAllowedRegionIds(user);
+        if (allowedRegionIds && allowedRegionIds.length === 0) {
+            return res.status(403).json({ error: 'forbidden' });
+        }
 
         // Check if notification exists
         const notification = querySqlite(`
-      SELECT id, read_at FROM notifications WHERE id = ${sqlValue(notificationId)} LIMIT 1;
-    `)[0] as { id: number; read_at?: string } | undefined;
+      SELECT id, read_at, related_job_id, related_version_id, created_by
+      FROM notifications
+      WHERE id = ${sqlValue(notificationId)} LIMIT 1;
+    `)[0] as { id: number; read_at?: string; related_job_id?: number; related_version_id?: number; created_by?: number } | undefined;
 
         if (!notification) {
             return res.status(404).json({ error: 'Notification not found' });
+        }
+
+        if (user && !isNotificationAllowed(notification, allowedRegionIds, user.id)) {
+            return res.status(403).json({ error: 'forbidden' });
         }
 
         if (notification.read_at) {
@@ -124,10 +204,39 @@ router.post('/notifications/read-all', (req, res) => {
     try {
         ensureSqliteMigrations();
 
-        const result = querySqlite(`
+        const authReq = req as AuthRequest;
+        const user = authReq.user;
+        const allowedRegionIds = getAllowedRegionIds(user);
+        if (allowedRegionIds && allowedRegionIds.length === 0) {
+            return res.status(403).json({ error: 'forbidden' });
+        }
+
+        let scopeClause = '';
+        if (allowedRegionIds && user) {
+            const allowed = allowedRegionIds.join(',');
+            scopeClause = `
+        AND (
+          (related_version_id IS NOT NULL AND EXISTS (
+            SELECT 1 FROM report_versions rv
+            JOIN reports r ON rv.report_id = r.id
+            WHERE rv.id = notifications.related_version_id AND r.region_id IN (${allowed})
+          ))
+          OR (related_job_id IS NOT NULL AND EXISTS (
+            SELECT 1 FROM jobs j
+            JOIN report_versions rv ON j.version_id = rv.id
+            JOIN reports r ON rv.report_id = r.id
+            WHERE j.id = notifications.related_job_id AND r.region_id IN (${allowed})
+          ))
+          OR (created_by IS NOT NULL AND created_by = ${sqlValue(user.id)})
+        )
+      `;
+        }
+
+        querySqlite(`
       UPDATE notifications
       SET read_at = datetime('now')
-      WHERE read_at IS NULL;
+      WHERE read_at IS NULL
+      ${scopeClause};
     `);
 
         return res.json({ message: 'All notifications marked as read' });
