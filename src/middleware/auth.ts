@@ -164,7 +164,6 @@ export async function authMiddleware(req: AuthRequest, res: Response, next: Next
        const { querySqlite, sqlValue } = require('../config/sqlite');
        users = querySqlite(`SELECT * FROM admin_users WHERE id = ${sqlValue(decoded.id)}`);
     }
-
     if (users && users.length > 0) {
       const dbUser = users[0];
       req.user = {
@@ -202,7 +201,6 @@ export async function optionalAuthMiddleware(req: AuthRequest, _res: Response, n
             const { querySqlite, sqlValue } = require('../config/sqlite');
             users = querySqlite(`SELECT * FROM admin_users WHERE id = ${sqlValue(decoded.id)}`);
         }
-        
         if (users && users.length > 0) {
           const dbUser = users[0];
           req.user = {
