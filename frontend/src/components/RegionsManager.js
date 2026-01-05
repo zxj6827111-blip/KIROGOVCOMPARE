@@ -11,7 +11,8 @@ import {
   Loader,
   Upload,
   X,
-  Download
+  Download,
+  AlertTriangle
 } from 'lucide-react';
 
 function RegionsManager() {
@@ -33,6 +34,32 @@ function RegionsManager() {
   const [batchFile, setBatchFile] = useState(null);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState({ percentage: 0, current: 0, total: 0, message: '' });
+
+  // Confirm Dialog State
+  const [confirmDialog, setConfirmDialog] = useState({
+    isOpen: false,
+    message: '',
+    onConfirm: null,
+  });
+
+  const closeConfirm = () => {
+    setConfirmDialog({ isOpen: false, message: '', onConfirm: null });
+  };
+
+  const showConfirm = (message, onConfirm) => {
+    setConfirmDialog({
+      isOpen: true,
+      message,
+      onConfirm: () => {
+        try {
+          onConfirm();
+        } catch (e) {
+          console.log('Error executing onConfirm callback:', e);
+        }
+        closeConfirm();
+      }
+    });
+  };
 
   const confirmBatchUpload = async () => {
     if (!batchFile) return;
@@ -103,16 +130,17 @@ function RegionsManager() {
 
   const handleDeleteRegion = async (e, region) => {
     e.stopPropagation();
-    if (!window.confirm(`确定要删除 "${region.name}" 及其所有下级区域吗？`)) return;
 
-    setLoading(true);
-    try {
-      await apiClient.delete(`/regions/${region.id}`);
-      fetchData();
-    } catch (err) {
-      alert('删除失败: ' + (err.response?.data?.error || err.message));
-      setLoading(false);
-    }
+    showConfirm(`确定要删除 "${region.name}" 及其所有下级区域吗？`, async () => {
+      setLoading(true);
+      try {
+        await apiClient.delete(`/regions/${region.id}`);
+        fetchData();
+      } catch (err) {
+        alert('删除失败: ' + (err.response?.data?.error || err.message));
+        setLoading(false);
+      }
+    });
   };
 
   const scrollContainerRef = useRef(null);
@@ -130,7 +158,9 @@ function RegionsManager() {
 
       // Calculate report counts
       const counts = new Map();
-      reportsResp.data.forEach(r => {
+      const reportsData = reportsResp.data.data || reportsResp.data;
+      const reportsList = Array.isArray(reportsData) ? reportsData : [];
+      reportsList.forEach(r => {
         const rid = String(r.region_id);
         counts.set(rid, (counts.get(rid) || 0) + 1);
       });
@@ -501,6 +531,25 @@ function RegionsManager() {
           </div>
         </div>
       )}
+
+      {/* Custom Confirm Modal */}
+      {
+        confirmDialog.isOpen && (
+          <div className="confirm-modal-overlay">
+            <div className="confirm-modal">
+              <div className="confirm-modal-icon">
+                <AlertTriangle size={48} />
+              </div>
+              <h3>确认操作</h3>
+              <p>{confirmDialog.message}</p>
+              <div className="confirm-modal-actions">
+                <button className="btn-cancel-modal" onClick={closeConfirm}>取消</button>
+                <button className="btn-confirm-modal" onClick={confirmDialog.onConfirm}>确定</button>
+              </div>
+            </div>
+          </div>
+        )
+      }
     </div >
   );
 }

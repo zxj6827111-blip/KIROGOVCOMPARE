@@ -4,10 +4,11 @@ import TaskService from '../services/TaskService';
 import AssetService from '../services/AssetService';
 import PdfExportService, { ComparisonReportData } from '../services/PdfExportService';
 import { calculateDiffs, renderDiffHtml } from '../utils/diffRenderer';
+import { authMiddleware } from '../middleware/auth';
 
 const router = express.Router();
 
-router.get('/:id/export', async (req: Request, res: Response) => {
+router.get('/:id/export', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const format = (req.query.format as string) || 'pdf';

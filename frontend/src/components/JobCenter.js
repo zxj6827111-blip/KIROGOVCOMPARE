@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './JobCenter.css';
-import { apiClient } from '../apiClient';
+import { apiClient, API_BASE_URL } from '../apiClient';
 import { ListTodo, Trash2, RefreshCw, AlertTriangle, Ban, Eye, Download, RotateCw, Upload, FileDown } from 'lucide-react';
 
 function JobCenter() {
@@ -257,7 +257,12 @@ function JobCenter() {
         if (selectedIds.length === 0) return;
         showConfirm(`确定要删除选中的 ${selectedIds.length} 个任务吗？`, async () => {
             try {
-                await apiClient.post('/jobs/batch-delete', { version_ids: selectedIds });
+                // Map job_ids to version_ids
+                const versionIds = selectedIds
+                    .map(jobId => jobs.find(j => j.job_id === jobId)?.version_id)
+                    .filter(vid => vid !== undefined);
+
+                await apiClient.post('/jobs/batch-delete', { version_ids: versionIds });
                 loadJobs();
                 setSelectedIds([]);
                 alert('批量删除成功');
@@ -404,7 +409,7 @@ function JobCenter() {
         }
 
         try {
-            const response = await fetch('http://localhost:8787/api/pdf-jobs/batch-download', {
+            const response = await fetch(`${API_BASE_URL}/pdf-jobs/batch-download`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ job_ids: completedIds })

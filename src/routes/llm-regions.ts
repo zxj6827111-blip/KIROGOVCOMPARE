@@ -1,10 +1,11 @@
 import express, { Request, Response } from 'express';
 import pool, { dbType } from '../config/database-llm';
+import { authMiddleware, AuthRequest, requirePermission } from '../middleware/auth';
 
 const router = express.Router();
 
 // POST /api/regions - 创建区域（支持层级）
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', authMiddleware, requirePermission('manage_cities'), async (req: Request, res: Response) => {
   try {
     const { code, name, province } = req.body;
     // 兼容前端 parentId / parent_id 传参
@@ -96,8 +97,6 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
-import { authMiddleware, AuthRequest } from '../middleware/auth';
-
 // GET /api/regions - 获取区域列表（带层级）
 router.get('/', authMiddleware, async (req: Request, res: Response) => {
   try {
@@ -181,7 +180,7 @@ router.get('/', authMiddleware, async (req: Request, res: Response) => {
 });
 
 // GET /api/regions/:id - 获取区域详情
-router.get('/:id', async (req: Request, res: Response) => {
+router.get('/:id', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
@@ -214,7 +213,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 // DELETE /api/regions/:id - 删除区域
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', authMiddleware, requirePermission('manage_cities'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 

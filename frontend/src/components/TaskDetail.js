@@ -3,9 +3,7 @@ import TextComparison from './TextComparison';
 import TableComparison from './TableComparison';
 import JobStatus from './JobStatus';
 import './TaskDetail.css';
-import { apiClient } from '../apiClient';
-
-const API_ROOT = 'http://localhost:3000/api';
+import { apiClient, API_BASE_URL } from '../apiClient';
 
 function TaskDetail({ task, onBack }) {
   const [diffResult, setDiffResult] = useState(null);
@@ -39,7 +37,7 @@ function TaskDetail({ task, onBack }) {
 
   const handleDownload = () => {
     setDownloadError('');
-    const url = `${API_ROOT}/comparisons/${task.taskId}/export?format=docx`;
+    const url = `${API_BASE_URL}/comparisons/${task.taskId}/export?format=docx`;
 
     fetch(url)
       .then((response) => {

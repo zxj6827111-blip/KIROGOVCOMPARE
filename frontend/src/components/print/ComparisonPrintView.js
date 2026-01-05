@@ -1,9 +1,8 @@
 /**
  * ComparisonPrintView.js
- * 专用于 Puppeteer PDF 导出的打印页面
- * 不需要用户认证，直接从 API 获取数据并渲染
+ * Print view for Puppeteer PDF export.
+ * Requires auth; supports service_token in query string.
  */
-
 import React, { useEffect, useState, useMemo } from 'react';
 import '../ComparisonDetailView.css';
 import { Table2View, Table3View, Table4View, SimpleDiffTable } from '../TableViews';
@@ -122,16 +121,19 @@ function ComparisonPrintView({ comparisonId }) {
     const highlightIdentical = searchParams.get('highlightIdentical') !== 'false'; // default true
     const highlightDiff = searchParams.get('highlightDiff') === 'true'; // default false
 
-    // Fetch data directly from API (no auth required for internal access)
+    // Fetch data directly from API (auth required)
     useEffect(() => {
         const fetchData = async () => {
             try {
-                // Use direct backend URL for Puppeteer access (bypasses proxy)
-                // Try common backend ports
-                const backendUrls = [
-                    'http://localhost:8787',
-                    'http://127.0.0.1:8787'
-                ];
+                const serviceToken = searchParams.get('service_token');
+                const token = serviceToken || localStorage.getItem('admin_token');
+                const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+                // Use configured API base or current origin to reach backend.
+                const apiBase = process.env.REACT_APP_API_BASE_URL || '/api';
+                const normalizedBase = apiBase.replace(/\/+$/, '');
+                const baseWithoutApi = normalizedBase.replace(/\/api\/?$/, '');
+                const fallbackBase = baseWithoutApi || window.location.origin;
+                const backendUrls = [fallbackBase].filter(Boolean);
 
                 let response = null;
                 let lastError = null;
@@ -139,7 +141,9 @@ function ComparisonPrintView({ comparisonId }) {
                 for (const baseUrl of backendUrls) {
                     try {
                         console.log(`[PrintView] Trying backend at ${baseUrl}...`);
-                        response = await fetch(`${baseUrl}/api/comparisons/${comparisonId}/result`);
+                        response = await fetch(`${baseUrl}/api/comparisons/${comparisonId}/result`, {
+                            headers
+                        });
                         if (response.ok) {
                             console.log(`[PrintView] Successfully connected to ${baseUrl}`);
                             break;

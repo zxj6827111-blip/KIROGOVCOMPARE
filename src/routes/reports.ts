@@ -7,6 +7,7 @@ import { PROJECT_ROOT, UPLOADS_TMP_DIR, ensureSqliteMigrations, querySqlite, sql
 import { reportUploadService } from '../services/ReportUploadService';
 import { ValidationIssue } from '../types/models';
 import { authMiddleware, requirePermission, AuthRequest } from '../middleware/auth';
+import { getAllowedRegionIds } from '../utils/dataScope';
 
 const router = express.Router();
 
@@ -54,11 +55,12 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
       return res.status(400).json({ error: 'region_id 无效' });
     }
 
-    // Check Data Scope for Upload (Can only upload to allowed regions)
-    if (req.user.dataScope && Array.isArray(req.user.dataScope.regions) && req.user.dataScope.regions.length > 0) {
-      const region = querySqlite(`SELECT name FROM regions WHERE id = ${regionId} LIMIT 1`)[0] as { name: string } | undefined;
-      if (!region || !req.user.dataScope.regions.includes(region.name)) {
-        return res.status(403).json({ error: '您无权为此地区上传报告' });
+    ensureSqliteMigrations();
+
+    const allowedRegionIds = getAllowedRegionIds(req.user);
+    if (allowedRegionIds) {
+      if (allowedRegionIds.length === 0 || !allowedRegionIds.includes(regionId)) {
+        return res.status(403).json({ error: 'forbidden' });
       }
     }
 
@@ -186,6 +188,15 @@ router.post('/reports/text', authMiddleware, requirePermission('upload_reports')
 
     if (!year || Number.isNaN(year) || !Number.isInteger(year)) {
       return res.status(400).json({ error: 'year 无效' });
+    }
+
+    ensureSqliteMigrations();
+
+    const allowedRegionIds = getAllowedRegionIds(req.user);
+    if (allowedRegionIds) {
+      if (allowedRegionIds.length === 0 || !allowedRegionIds.includes(regionId)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
     }
 
     const rawText = typeof rawTextRaw === 'string' ? rawTextRaw : '';
@@ -357,19 +368,35 @@ router.get('/reports', authMiddleware, (req: AuthRequest, res) => {
 });
 
 // Batch check status endpoint - MUST be before /reports/:id to avoid route conflict
-router.get('/reports/batch-check-status', (req, res) => {
+router.get('/reports/batch-check-status', authMiddleware, (req, res) => {
   try {
     const reportIdsParam = req.query.report_ids;
     if (!reportIdsParam || typeof reportIdsParam !== 'string') {
       return res.status(400).json({ error: 'report_ids query parameter required' });
     }
 
-    const reportIds = reportIdsParam.split(',').map(id => Number(id.trim())).filter(id => !isNaN(id) && id > 0);
+    let reportIds = reportIdsParam.split(',').map(id => Number(id.trim())).filter(id => !isNaN(id) && id > 0);
     if (reportIds.length === 0) {
       return res.json({});
     }
 
     ensureSqliteMigrations();
+
+    const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+    if (allowedRegionIds) {
+      if (allowedRegionIds.length === 0) {
+        return res.json({});
+      }
+      const allowedReportRows = querySqlite(`
+        SELECT id FROM reports
+        WHERE id IN (${reportIds.join(',')})
+          AND region_id IN (${allowedRegionIds.join(',')});
+      `) as Array<{ id: number }>;
+      reportIds = allowedReportRows.map((row) => row.id);
+      if (reportIds.length === 0) {
+        return res.json({});
+      }
+    }
 
     // Get active version_ids for these reports + check parsed_json
     const versionRows = querySqlite(`
@@ -463,7 +490,7 @@ router.get('/reports/batch-check-status', (req, res) => {
   }
 });
 
-router.get('/reports/:id', (req, res) => {
+router.get('/reports/:id', authMiddleware, (req, res) => {
   try {
     const reportId = Number(req.params.id);
     if (!reportId || Number.isNaN(reportId) || !Number.isInteger(reportId) || reportId < 1) {
@@ -498,6 +525,13 @@ router.get('/reports/:id', (req, res) => {
 
     if (!report) {
       return res.status(404).json({ error: 'report 不存在' });
+    }
+
+    const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+    if (allowedRegionIds) {
+      if (allowedRegionIds.length === 0 || !allowedRegionIds.includes(report.region_id)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
     }
 
     const job = querySqlite(`
@@ -553,7 +587,7 @@ router.get('/reports/:id', (req, res) => {
   }
 });
 
-router.post('/reports/:id/parse', (req, res) => {
+router.post('/reports/:id/parse', authMiddleware, (req, res) => {
   try {
     const reportId = Number(req.params.id);
     if (!reportId || Number.isNaN(reportId) || !Number.isInteger(reportId) || reportId < 1) {
@@ -562,11 +596,17 @@ router.post('/reports/:id/parse', (req, res) => {
 
     ensureSqliteMigrations();
 
-    const report = querySqlite(`SELECT id FROM reports WHERE id = ${sqlValue(reportId)} LIMIT 1;`)[0] as
-      | { id?: number }
+    const report = querySqlite(`SELECT id, region_id FROM reports WHERE id = ${sqlValue(reportId)} LIMIT 1;`)[0] as
+      | { id?: number; region_id?: number }
       | undefined;
     if (!report?.id) {
       return res.status(404).json({ error: 'report 不存在' });
+    }
+    const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+    if (allowedRegionIds) {
+      if (allowedRegionIds.length === 0 || !allowedRegionIds.includes(report.region_id || 0)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
     }
 
     const version = querySqlite(
@@ -598,7 +638,7 @@ router.post('/reports/:id/parse', (req, res) => {
   }
 });
 
-router.delete('/reports/:id', async (req, res) => {
+router.delete('/reports/:id', authMiddleware, async (req, res) => {
   try {
     const reportId = Number(req.params.id);
     if (!reportId || Number.isNaN(reportId) || !Number.isInteger(reportId) || reportId < 1) {
@@ -607,12 +647,19 @@ router.delete('/reports/:id', async (req, res) => {
 
     ensureSqliteMigrations();
 
-    const existing = querySqlite(`SELECT id FROM reports WHERE id = ${sqlValue(reportId)} LIMIT 1;`)[0] as
-      | { id?: number }
+    const existing = querySqlite(`SELECT id, region_id FROM reports WHERE id = ${sqlValue(reportId)} LIMIT 1;`)[0] as
+      | { id?: number; region_id?: number }
       | undefined;
 
     if (!existing || !existing.id) {
       return res.status(404).json({ error: 'report 不存在' });
+    }
+
+    const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+    if (allowedRegionIds) {
+      if (allowedRegionIds.length === 0 || !allowedRegionIds.includes(existing.region_id || 0)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
     }
 
     // Best-effort remove stored files first
@@ -672,7 +719,7 @@ router.delete('/reports/:id', async (req, res) => {
  * PATCH /api/reports/:id/parsed-data
  * 更新报告的 parsed_json（手动修正解析错误）
  */
-router.patch('/reports/:id/parsed-data', async (req, res) => {
+router.patch('/reports/:id/parsed-data', authMiddleware, async (req, res) => {
   try {
     ensureSqliteMigrations();
 
@@ -681,6 +728,23 @@ router.patch('/reports/:id/parsed-data', async (req, res) => {
 
     if (!parsed_json) {
       return res.status(400).json({ error: 'parsed_json is required' });
+    }
+
+    const reportRow = querySqlite(`
+      SELECT region_id FROM reports
+      WHERE id = ${sqlValue(reportId)}
+      LIMIT 1;
+    `)[0] as { region_id?: number } | undefined;
+
+    if (!reportRow?.region_id) {
+      return res.status(404).json({ error: 'report_not_found' });
+    }
+
+    const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+    if (allowedRegionIds) {
+      if (allowedRegionIds.length === 0 || !allowedRegionIds.includes(reportRow.region_id)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
     }
 
     // 验证 parsed_json 是有效的 JSON
@@ -693,12 +757,14 @@ router.patch('/reports/:id/parsed-data', async (req, res) => {
 
     // 获取 active version
     const version = querySqlite(`
-      SELECT id as version_id FROM report_versions
-      WHERE report_id = ${sqlValue(reportId)} AND is_active = 1
+      SELECT rv.id as version_id, r.region_id
+      FROM report_versions rv
+      JOIN reports r ON r.id = rv.report_id
+      WHERE rv.report_id = ${sqlValue(reportId)} AND rv.is_active = 1
       LIMIT 1;
-    `)[0];
+    `)[0] as { version_id?: number; region_id?: number } | undefined;
 
-    if (!version) {
+    if (!version?.version_id) {
       return res.status(404).json({ error: 'no_active_version' });
     }
 
@@ -724,7 +790,7 @@ router.patch('/reports/:id/parsed-data', async (req, res) => {
 });
 
 // 获取报告的一致性校验结果 (从数据库读取)
-router.get('/reports/:id/checks', async (req, res) => {
+router.get('/reports/:id/checks', authMiddleware, async (req, res) => {
   try {
     const reportId = Number(req.params.id);
     if (!reportId || isNaN(reportId)) {
@@ -900,7 +966,7 @@ router.get('/reports/:id/checks', async (req, res) => {
 });
 
 // 运行一致性校验 (入队 checks job)
-router.post('/reports/:id/checks/run', async (req, res) => {
+router.post('/reports/:id/checks/run', authMiddleware, async (req, res) => {
   try {
     const reportId = Number(req.params.id);
     if (!reportId || isNaN(reportId)) {
@@ -911,13 +977,22 @@ router.post('/reports/:id/checks/run', async (req, res) => {
 
     // Get the active version
     const version = querySqlite(`
-      SELECT id as version_id FROM report_versions
-      WHERE report_id = ${sqlValue(reportId)} AND is_active = 1
+      SELECT rv.id as version_id, r.region_id
+      FROM report_versions rv
+      JOIN reports r ON r.id = rv.report_id
+      WHERE rv.report_id = ${sqlValue(reportId)} AND rv.is_active = 1
       LIMIT 1;
-    `)[0] as { version_id?: number } | undefined;
+    `)[0] as { version_id?: number; region_id?: number } | undefined;
 
     if (!version?.version_id) {
       return res.status(404).json({ error: 'report_version_not_found' });
+    }
+
+    const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+    if (allowedRegionIds) {
+      if (allowedRegionIds.length === 0 || !allowedRegionIds.includes(version.region_id || 0)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
     }
 
     const versionId = version.version_id;
@@ -948,7 +1023,7 @@ router.post('/reports/:id/checks/run', async (req, res) => {
 });
 
 // 更新校验项的人工状态
-router.patch('/reports/:id/checks/items/:itemId', async (req, res) => {
+router.patch('/reports/:id/checks/items/:itemId', authMiddleware, async (req, res) => {
   try {
     const reportId = Number(req.params.id);
     const itemId = Number(req.params.itemId);
@@ -971,15 +1046,23 @@ router.patch('/reports/:id/checks/items/:itemId', async (req, res) => {
 
     // Verify item exists and belongs to this report
     const item = querySqlite(`
-      SELECT ci.id, rv.report_id
+      SELECT ci.id, rv.report_id, r.region_id
       FROM report_consistency_items ci
       JOIN report_versions rv ON rv.id = ci.report_version_id
+      JOIN reports r ON r.id = rv.report_id
       WHERE ci.id = ${sqlValue(itemId)}
       LIMIT 1;
-    `)[0] as { id?: number; report_id?: number } | undefined;
+    `)[0] as { id?: number; report_id?: number; region_id?: number } | undefined;
 
     if (!item?.id) {
       return res.status(404).json({ error: 'item_not_found' });
+    }
+
+    const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+    if (allowedRegionIds) {
+      if (allowedRegionIds.length === 0 || !allowedRegionIds.includes(item.region_id || 0)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
     }
 
     if (item.report_id !== reportId) {
@@ -1010,7 +1093,7 @@ router.patch('/reports/:id/checks/items/:itemId', async (req, res) => {
  * DELETE /api/reports/:id
  * Delete a report and all related data (versions, jobs, parses, consistency items)
  */
-router.delete('/reports/:id', (req, res) => {
+router.delete('/reports/:id', authMiddleware, (req, res) => {
   try {
     ensureSqliteMigrations();
     const reportId = Number(req.params.id);
@@ -1019,9 +1102,16 @@ router.delete('/reports/:id', (req, res) => {
     }
 
     // Check if report exists
-    const report = querySqlite(`SELECT id FROM reports WHERE id = ${sqlValue(reportId)} LIMIT 1`)[0];
+    const report = querySqlite(`SELECT id, region_id FROM reports WHERE id = ${sqlValue(reportId)} LIMIT 1`)[0] as { id?: number; region_id?: number } | undefined;
     if (!report) {
       return res.status(404).json({ error: 'report_not_found' });
+    }
+
+    const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+    if (allowedRegionIds) {
+      if (allowedRegionIds.length === 0 || !allowedRegionIds.includes(report.region_id || 0)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
     }
 
     // Get all version IDs for this report

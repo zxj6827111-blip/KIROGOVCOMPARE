@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import * as XLSX from 'xlsx';
 import { querySqlite, sqlValue, ensureSqliteMigrations } from '../config/sqlite';
-import { authMiddleware, AuthRequest } from '../middleware/auth';
+import { authMiddleware, AuthRequest, requirePermission } from '../middleware/auth';
 
 const router = express.Router();
 
@@ -83,7 +83,7 @@ router.get('/template', (_req: Request, res: Response) => {
  * POST /api/regions/import
  * Import regions from Excel/CSV file
  */
-router.post('/import', authMiddleware, upload.single('file'), async (req: AuthRequest, res: Response) => {
+router.post('/import', authMiddleware, requirePermission('manage_cities'), upload.single('file'), async (req: AuthRequest, res: Response) => {
   const filePath = req.file?.path;
 
   try {
@@ -374,7 +374,7 @@ router.post('/import', authMiddleware, upload.single('file'), async (req: AuthRe
  * GET /api/regions/export
  * Export all regions to Excel
  */
-router.get('/export', authMiddleware, (_req: AuthRequest, res: Response) => {
+router.get('/export', authMiddleware, requirePermission('manage_cities'), (_req: AuthRequest, res: Response) => {
   try {
     ensureSqliteMigrations();
 

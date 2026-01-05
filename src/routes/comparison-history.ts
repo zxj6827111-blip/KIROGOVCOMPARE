@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import { querySqlite, sqlValue, ensureSqliteMigrations } from '../config/sqlite';
-import { authMiddleware, AuthRequest, optionalAuthMiddleware } from '../middleware/auth';
+import { authMiddleware, AuthRequest } from '../middleware/auth';
 import pdfExportService from '../services/PdfExportService';
 import path from 'path';
 import fs from 'fs';
@@ -14,7 +14,7 @@ const router = express.Router();
  * GET /api/comparisons/history
  * Get comparison history list with pagination
  */
-router.get('/history', optionalAuthMiddleware, (req: AuthRequest, res: Response) => {
+router.get('/history', authMiddleware, (req: AuthRequest, res: Response) => {
   try {
     ensureSqliteMigrations();
 
@@ -242,7 +242,7 @@ router.post('/create', authMiddleware, (req: AuthRequest, res: Response) => {
  * GET /api/comparisons/:id/result
  * Get comparison result details with both reports' content
  */
-router.get('/:id/result', optionalAuthMiddleware, (req: AuthRequest, res: Response) => {
+router.get('/:id/result', authMiddleware, (req: AuthRequest, res: Response) => {
   try {
     const comparisonId = Number(req.params.id);
     if (!comparisonId || Number.isNaN(comparisonId)) {
@@ -264,6 +264,30 @@ router.get('/:id/result', optionalAuthMiddleware, (req: AuthRequest, res: Respon
     }
 
     const comparison = comparisons[0];
+
+    // DATA SCOPE CHECK
+    const user = req.user;
+    if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
+      const scopeNames = user.dataScope.regions.map((n: string) => `'${n.replace(/'/g, "''")}'`).join(',');
+      const scopeIdsQuery = `
+        WITH RECURSIVE allowed_ids AS (
+            SELECT id FROM regions WHERE name IN (${scopeNames})
+            UNION ALL
+            SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
+        )
+        SELECT id FROM allowed_ids
+      `;
+      try {
+        const allowedRows = querySqlite(scopeIdsQuery);
+        const allowedIds = allowedRows.map((row: any) => row.id);
+        if (!allowedIds.includes(Number(comparison.region_id))) {
+          return res.status(403).json({ error: '无权限访问该地区' });
+        }
+      } catch (e) {
+        console.error('Error calculating scope IDs in comparison result:', e);
+        return res.status(403).json({ error: '无权限访问该地区' });
+      }
+    }
 
     // Get left report parsed content
     const leftVersions = querySqlite(`
@@ -356,7 +380,7 @@ router.delete('/:id', authMiddleware, (req: AuthRequest, res: Response) => {
  * POST /api/comparisons/:id/export/pdf
  * Export comparison to PDF with optional watermark
  */
-router.post('/:id/export/pdf', optionalAuthMiddleware, async (req: AuthRequest, res: Response) => {
+router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const comparisonId = Number(req.params.id);
     if (!comparisonId || Number.isNaN(comparisonId)) {
@@ -385,6 +409,30 @@ router.post('/:id/export/pdf', optionalAuthMiddleware, async (req: AuthRequest, 
     }
 
     const comparison = comparisons[0];
+
+    // DATA SCOPE CHECK
+    const user = req.user;
+    if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
+      const scopeNames = user.dataScope.regions.map((n: string) => `'${n.replace(/'/g, "''")}'`).join(',');
+      const scopeIdsQuery = `
+        WITH RECURSIVE allowed_ids AS (
+            SELECT id FROM regions WHERE name IN (${scopeNames})
+            UNION ALL
+            SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
+        )
+        SELECT id FROM allowed_ids
+      `;
+      try {
+        const allowedRows = querySqlite(scopeIdsQuery);
+        const allowedIds = allowedRows.map((row: any) => row.id);
+        if (!allowedIds.includes(Number(comparison.region_id))) {
+          return res.status(403).json({ error: '无权限访问该地区' });
+        }
+      } catch (e) {
+        console.error('Error calculating scope IDs in comparison export:', e);
+        return res.status(403).json({ error: '无权限访问该地区' });
+      }
+    }
 
     // Get comparison result for summary
     const results = querySqlite(`
@@ -503,7 +551,7 @@ router.post('/:id/export/pdf', optionalAuthMiddleware, async (req: AuthRequest, 
  * GET /api/comparisons/:id/exports
  * Get export history for a comparison
  */
-router.get('/:id/exports', optionalAuthMiddleware, (req: AuthRequest, res: Response) => {
+router.get('/:id/exports', authMiddleware, (req: AuthRequest, res: Response) => {
   try {
     const comparisonId = Number(req.params.id);
     if (!comparisonId || Number.isNaN(comparisonId)) {
@@ -511,6 +559,38 @@ router.get('/:id/exports', optionalAuthMiddleware, (req: AuthRequest, res: Respo
     }
 
     ensureSqliteMigrations();
+
+    const comparison = querySqlite(`
+      SELECT region_id FROM comparisons WHERE id = ${sqlValue(comparisonId)}
+    `)[0];
+
+    if (!comparison) {
+      return res.status(404).json({ error: '比较记录不存在' });
+    }
+
+    // DATA SCOPE CHECK
+    const user = req.user;
+    if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
+      const scopeNames = user.dataScope.regions.map((n: string) => `'${n.replace(/'/g, "''")}'`).join(',');
+      const scopeIdsQuery = `
+        WITH RECURSIVE allowed_ids AS (
+            SELECT id FROM regions WHERE name IN (${scopeNames})
+            UNION ALL
+            SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
+        )
+        SELECT id FROM allowed_ids
+      `;
+      try {
+        const allowedRows = querySqlite(scopeIdsQuery);
+        const allowedIds = allowedRows.map((row: any) => row.id);
+        if (!allowedIds.includes(Number(comparison.region_id))) {
+          return res.status(403).json({ error: '无权限访问该地区' });
+        }
+      } catch (e) {
+        console.error('Error calculating scope IDs in comparison exports:', e);
+        return res.status(403).json({ error: '无权限访问该地区' });
+      }
+    }
 
     const exports = querySqlite(`
       SELECT id, format, file_size, watermark_text, created_at

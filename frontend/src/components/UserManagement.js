@@ -121,6 +121,8 @@ export default function UserManagement() {
                 permissions: {
                     manage_users: user.permissions?.manage_users || false,
                     manage_cities: user.permissions?.manage_cities || false,
+                    manage_jobs: user.permissions?.manage_jobs || false,
+                    view_reports: user.permissions?.view_reports || false,
                     upload_reports: user.permissions?.upload_reports || false,
                     compare_reports: user.permissions?.compare_reports || false,
                 },
@@ -243,6 +245,7 @@ export default function UserManagement() {
                                             {user.permissions?.view_reports && <span className="tag-cyan">查看</span>}
                                             {user.permissions?.upload_reports && <span className="tag-orange">上传</span>}
                                             {user.permissions?.compare_reports && <span className="tag-purple">比对</span>}
+                                            {user.permissions?.manage_jobs && <span className="tag-red">任务</span>}
                                             {Object.keys(user.permissions || {}).every(k => !user.permissions[k]) && <span className="text-gray-400 text-sm">无特殊权限</span>}
                                         </div>
                                     </td>
@@ -322,6 +325,7 @@ export default function UserManagement() {
                                 <label className="checkbox-label"><input type="checkbox" checked={formData.permissions.view_reports} onChange={() => togglePermission('view_reports')} /> 查看报告</label>
                                 <label className="checkbox-label"><input type="checkbox" checked={formData.permissions.upload_reports} onChange={() => togglePermission('upload_reports')} /> 上传报告</label>
                                 <label className="checkbox-label"><input type="checkbox" checked={formData.permissions.compare_reports} onChange={() => togglePermission('compare_reports')} /> 比对报告</label>
+                                <label className="checkbox-label"><input type="checkbox" checked={formData.permissions.manage_jobs} onChange={() => togglePermission('manage_jobs')} /> 任务管理</label>
                             </div>
 
                             <div className="section-divider"></div>
@@ -374,6 +378,7 @@ export default function UserManagement() {
         .tag-orange { background: #fff7e6; color: #fa8c16; padding: 2px 8px; border-radius: 4px; font-size: 12px; border: 1px solid #ffd591; }
         .tag-purple { background: #f9f0ff; color: #722ed1; padding: 2px 8px; border-radius: 4px; font-size: 12px; border: 1px solid #d3adf7; }
         .tag-cyan { background: #e6fffb; color: #13c2c2; padding: 2px 8px; border-radius: 4px; font-size: 12px; border: 1px solid #87e8de; }
+        .tag-red { background: #fff1f0; color: #f5222d; padding: 2px 8px; border-radius: 4px; font-size: 12px; border: 1px solid #ffa39e; }
         
         .modal-overlay {
             position: fixed;

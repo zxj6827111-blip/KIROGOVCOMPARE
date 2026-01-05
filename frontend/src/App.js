@@ -92,6 +92,12 @@ function App() {
     if (pathname === '/admin/users') return <UserManagement />;
     if (pathname.startsWith('/jobs/')) {
       const versionId = pathname.split('/').pop();
+      // Validate versionId
+      if (!versionId || versionId === 'undefined' || isNaN(Number(versionId))) {
+        // Invalid versionId, redirect to jobs list
+        navigate('/jobs');
+        return null;
+      }
       return <JobDetail versionId={versionId} onBack={() => navigate('/jobs')} />;
     }
     if (pathname === '/catalog' || pathname === '/catalog/reports') {
