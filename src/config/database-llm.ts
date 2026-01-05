@@ -1,7 +1,12 @@
 /// <reference path="../types/sqlite3.d.ts" />
+import dotenv from 'dotenv';
 import { Pool } from 'pg';
 import path from 'path';
 import { SQLITE_DB_PATH, querySqlite, sqlValue } from './sqlite';
+
+dotenv.config();
+
+console.log(`[Config] Initializing DB with DATABASE_TYPE=${process.env.DATABASE_TYPE || 'undefined (defaulting to sqlite)'}`);
 
 const dbType = process.env.DATABASE_TYPE || 'sqlite';
 

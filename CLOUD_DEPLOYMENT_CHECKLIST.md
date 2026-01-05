@@ -32,58 +32,27 @@ sudo apt install -y docker.io docker-compose
 
 ## ⚠️ 关键配置修改清单
 
-### 【必须修改】前端硬编码 localhost 地址
+### 【必须配置】环境变量确认
 
-> [!CAUTION]
-> 以下文件包含硬编码的 `localhost` 地址,**部署前必须修改**!
+> [!TIP]
+> 代码库已经优化，不再包含硬编码的 `localhost`。**只需要确保环境变量配置正确即可**。
 
-#### 1. apiClient.js (第 50 行)
+请重点检查下列配置项是否在 `.env` 文件中正确设置：
 
-**文件路径**: `frontend/src/apiClient.js`
-
-```javascript
-// 修改前
-return `http://localhost:8787/api${cleanedPath}`;
-
-// 修改后 - 使用环境变量
-return `${process.env.REACT_APP_API_BASE_URL || '/api'}${cleanedPath}`;
+#### 1. 前端连接后端
+确保 `frontend/.env.production` 中设置了正确的 API 地址：
+```bash
+REACT_APP_API_BASE_URL=http://64.181.246.139:8787/api
 ```
 
-#### 2. JobCenter.js (第 412 行)
+#### 2. 后端 CORS 与 回调
+确保后端 `.env` 中允许了前端的 IP/域名访问：
+```bash
+# 允许前端访问后端 API
+CORS_ALLOWED_ORIGINS=http://64.181.246.139,http://64.181.246.139:80,http://64.181.246.139:3000
 
-**文件路径**: `frontend/src/components/JobCenter.js`
-
-```javascript
-// 修改前
-const response = await fetch('http://localhost:8787/api/pdf-jobs/batch-download', {
-
-// 修改后 - 使用 apiClient
-const response = await fetch(`${apiClient.defaults.baseURL}/pdf-jobs/batch-download`, {
-```
-
-#### 3. ComparisonPrintView.js (第 132 行)
-
-**文件路径**: `frontend/src/components/print/ComparisonPrintView.js`
-
-```javascript
-// 修改前
-'http://localhost:8787',
-
-// 修改后 - 使用环境变量或相对路径
-process.env.REACT_APP_API_BASE_URL || '',
-```
-
-#### 4. TaskDetail.js (第 8 行)
-
-**文件路径**: `frontend/src/components/TaskDetail.js`
-
-```javascript
-// 修改前
-const API_ROOT = 'http://localhost:3000/api';
-
-// 修改后 - 使用 apiClient 导入
-import { apiClient, API_BASE_URL } from '../apiClient';
-// 然后使用 API_BASE_URL 替代 API_ROOT
+# 用于 PDF 导出等功能找回前端资源
+FRONTEND_URL=http://64.181.246.139
 ```
 
 ---
@@ -99,21 +68,23 @@ import { apiClient, API_BASE_URL } from '../apiClient';
 
 # 数据库配置 (PostgreSQL)
 DATABASE_TYPE=postgres
-DB_HOST=localhost          # 改为你的数据库服务器地址
+DB_HOST=localhost          # 数据库在本机
 DB_PORT=5432
 DB_NAME=gov_report_diff
-DB_USER=postgres           # 改为生产用户名
+DB_USER=postgres
 DB_PASSWORD=YOUR_STRONG_PASSWORD  # 使用强密码!
 
 # Redis 配置
-REDIS_HOST=localhost       # 改为你的 Redis 服务器地址
+REDIS_HOST=localhost       # Redis 在本机
 REDIS_PORT=6379
 REDIS_DB=0
 
 # 服务器配置
 PORT=8787                  # 后端 API 端口
 NODE_ENV=production
-FRONTEND_URL=https://your-domain.com  # 你的域名
+# 您的服务器 IP
+FRONTEND_URL=http://64.181.246.139
+CORS_ALLOWED_ORIGINS=http://64.181.246.139,http://64.181.246.139:80
 
 # 文件存储
 STORAGE_TYPE=local         # 或 s3
@@ -139,7 +110,7 @@ LOG_LEVEL=info
 
 ```bash
 # frontend/.env.production
-REACT_APP_API_BASE_URL=https://your-domain.com/api
+REACT_APP_API_BASE_URL=http://64.181.246.139:8787/api
 ```
 
 ---
@@ -196,8 +167,11 @@ npm run build
 # 使用 PM2 管理进程 (推荐)
 npm install -g pm2
 
-# 启动后端
-pm2 start dist/index-llm.js --name "kiro-backend"
+# 启动后端 (使用 production 预设)
+npm run start:prod
+
+# 或者直接使用 PM2 (推荐生产环境)
+pm2 start dist/index-llm.js --name "kiro-backend" --node-args="-r dotenv/config"
 
 # 查看状态
 pm2 status
@@ -258,7 +232,7 @@ services:
     build:
       context: ./frontend
       args:
-        REACT_APP_API_BASE_URL: /api
+        REACT_APP_API_BASE_URL: http://64.181.246.139:8787/api
     ports:
       - "3001:80"
     depends_on:
@@ -307,7 +281,7 @@ docker-compose up -d --build
 ```nginx
 server {
     listen 80;
-    server_name your-domain.com;
+    server_name 64.181.246.139;
 
     # 前端静态文件
     location / {
@@ -352,6 +326,10 @@ server {
 
 ```bash
 sudo ln -s /etc/nginx/sites-available/kirogovcompare /etc/nginx/sites-enabled/
+ 
+# ⚠️ 重要: 移除默认配置，否则可能显示 "Welcome to Nginx"
+sudo rm /etc/nginx/sites-enabled/default
+ 
 sudo nginx -t
 sudo systemctl reload nginx
 ```
@@ -366,11 +344,10 @@ sudo systemctl reload nginx
 # 安装 certbot
 sudo apt install certbot python3-certbot-nginx
 
-# 获取证书
+# 获取证书 (如果有域名)
 sudo certbot --nginx -d your-domain.com
 
-# 自动续期
-sudo certbot renew --dry-run
+# 如果仅使用 IP (64.181.246.139)，则无法使用 Let's Encrypt，跳过此步仅使用 HTTP
 ```
 
 ### 2. 防火墙配置
@@ -484,15 +461,18 @@ npm run build
 ```
 
 ### 数据迁移 (从 SQLite 到 PostgreSQL)
-
-如果之前使用 SQLite,需要导出数据:
-
-```bash
-# 导出 SQLite 数据
-sqlite3 data/gov_report.db .dump > backup.sql
-
-# 转换并导入到 PostgreSQL (需要手动调整语法)
-```
+ 
+ 本项目包含自动化迁移脚本，可直接将 SQLite 数据（包括孤儿数据处理）迁移至 Postgres：
+ 
+ ```bash
+ # 1. 确保 SQLite 文件存在 (默认在 data/gov-reports-llm.db)
+ # 如果是本地上传的，确保路径与 .env 中 SQLITE_DB_PATH 一致
+ 
+ # 2. 执行迁移 (带 --clean 参数会先清空 Postgres 表)
+ node scripts/migrate_sqlite_to_pg.js --clean
+ ```
+ 
+ > **注意**: 脚本已优化，会自动处理外键约束问题，即使存在少量数据不一致也能成功迁移。
 
 ---
 

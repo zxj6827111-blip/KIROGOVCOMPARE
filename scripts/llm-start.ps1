@@ -50,8 +50,8 @@ if ($listener -and -not $Force) {
 }
 
 $env:PORT = "$Port"
-$env:DATABASE_TYPE = 'sqlite'
-$env:SQLITE_DB_PATH = $DbPath
+# DATABASE_TYPE and SQLITE_DB_PATH will be loaded from .env by the Node app
+
 
 $pidFile = Join-Path $root ".llm-$Port.pid"
 
