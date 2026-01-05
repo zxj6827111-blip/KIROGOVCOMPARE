@@ -356,8 +356,22 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_by BIGINT
 );
 
+
 CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(read_at);
 CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
+
+-- Admin users table
+CREATE TABLE IF NOT EXISTS admin_users (
+  id BIGSERIAL PRIMARY KEY,
+  username VARCHAR(50) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  display_name VARCHAR(100),
+  permissions TEXT DEFAULT '{}',
+  data_scope TEXT DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_login_at TIMESTAMPTZ
+);
 `;
 
 export async function runLLMMigrations(): Promise<void> {
