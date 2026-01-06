@@ -166,10 +166,16 @@ export async function authMiddleware(req: AuthRequest, res: Response, next: Next
     }
     if (users && users.length > 0) {
       const dbUser = users[0];
+      // PostgreSQL jsonb returns objects directly, SQLite returns strings
+      const parseJsonField = (val: any) => {
+        if (!val) return {};
+        if (typeof val === 'object') return val;
+        try { return JSON.parse(val); } catch { return {}; }
+      };
       req.user = {
         ...decoded,
-        permissions: dbUser.permissions ? JSON.parse(dbUser.permissions) : {},
-        dataScope: dbUser.data_scope ? JSON.parse(dbUser.data_scope) : {}
+        permissions: parseJsonField(dbUser.permissions),
+        dataScope: parseJsonField(dbUser.data_scope)
       };
     }
   } catch (error) {
@@ -203,10 +209,16 @@ export async function optionalAuthMiddleware(req: AuthRequest, _res: Response, n
         }
         if (users && users.length > 0) {
           const dbUser = users[0];
+          // PostgreSQL jsonb returns objects directly, SQLite returns strings
+          const parseJsonField = (val: any) => {
+            if (!val) return {};
+            if (typeof val === 'object') return val;
+            try { return JSON.parse(val); } catch { return {}; }
+          };
           req.user = {
             ...decoded,
-            permissions: dbUser.permissions ? JSON.parse(dbUser.permissions) : {},
-            dataScope: dbUser.data_scope ? JSON.parse(dbUser.data_scope) : {}
+            permissions: parseJsonField(dbUser.permissions),
+            dataScope: parseJsonField(dbUser.data_scope)
           };
         }
       } catch (error) {
