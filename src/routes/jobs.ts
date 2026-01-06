@@ -1,4 +1,5 @@
 ﻿import express from 'express';
+import fs from 'fs';
 import { dbQuery, ensureDbMigrations, dbNowExpression } from '../config/db-llm';
 import { sqlValue } from '../config/sqlite';
 import { llmJobRunner } from '../services/LlmJobRunner';
@@ -602,6 +603,73 @@ router.post('/batch-delete', requirePermission('manage_jobs'), async (req, res) 
         return res.json({ message: 'Batch delete successful', count });
     } catch (error) {
         console.error('Error batch deleting:', error);
+        return res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
+ * DELETE /api/jobs/task/:jobId
+ * Delete a specific job/task securely.
+ * - If it's a 'pdf_export' job, delete the job row and file.
+ * - If it's a 'parse' job, delete the associated Version (and all its jobs).
+ */
+router.delete('/task/:jobId', requirePermission('manage_jobs'), async (req, res) => {
+    try {
+        ensureDbMigrations();
+        const jobId = Number(req.params.jobId);
+        if (Number.isNaN(jobId)) {
+            return res.status(400).json({ error: 'Invalid job_id' });
+        }
+
+        const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+
+        // 1. Get job details ensuring region permission
+        const jobQuery = `
+            SELECT j.*, r.region_id 
+            FROM jobs j
+            JOIN reports r ON j.report_id = r.id
+            WHERE j.id = ${sqlValue(jobId)}
+        `;
+        const jobs = await dbQuery(jobQuery) as any[];
+
+        if (jobs.length === 0) {
+            return res.status(404).json({ error: 'Job not found' });
+        }
+        const job = jobs[0];
+
+        // Check permission
+        if (!isRegionAllowed(job.region_id, allowedRegionIds)) {
+            return res.status(403).json({ error: 'forbidden' });
+        }
+
+        if (job.kind === 'pdf_export') {
+            // Simply delete the job row. File cleanup (if needed) can be done here or by worker.
+            // Better to try deleting the file instantly.
+            if (job.file_path && fs.existsSync(job.file_path)) {
+                try {
+                    fs.unlinkSync(job.file_path);
+                } catch (e) {
+                    console.warn('Failed to delete PDF file:', e);
+                }
+            }
+            await dbQuery(`DELETE FROM jobs WHERE id = ${sqlValue(jobId)}`);
+            console.log(`[Delete Task] Deleted PDF job ${jobId}`);
+        } else {
+            // For Parse/Check jobs, we deleting the VERSION is the standard behavior 
+            // because "Task" usually implies the Version in this system context.
+            if (job.version_id) {
+                await deleteVersion(job.version_id);
+                console.log(`[Delete Task] Deleted Version ${job.version_id} via job ${jobId}`);
+            } else {
+                // Orphaned job? Just delete it.
+                await dbQuery(`DELETE FROM jobs WHERE id = ${sqlValue(jobId)}`);
+                console.log(`[Delete Task] Deleted orphan job ${jobId}`);
+            }
+        }
+
+        return res.json({ message: 'Task deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting task:', error);
         return res.status(500).json({ error: 'Internal server error' });
     }
 });

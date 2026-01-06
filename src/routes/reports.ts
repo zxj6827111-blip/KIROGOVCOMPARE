@@ -486,7 +486,15 @@ router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
         AND auto_status = 'FAIL'
         AND (human_status != 'dismissed' OR human_status IS NULL)
       GROUP BY report_version_id, group_key
-    `)) as Array<{ report_version_id: number; group_key: string; cnt: number }>;
+    `));
+    
+    // DEBUG: Log the raw group counts to diagnose "No issues found" bug
+    console.log('[BatchCheckStatus] Version IDs:', versionIds);
+    // console.log('[BatchCheckStatus] Group counts result:', JSON.stringify(groupCounts));
+
+    // Force cast to avoid Postgres string-count issue
+    const typedGroupCounts = groupCounts as Array<{ report_version_id: number; group_key: string; cnt: number | string }>;
+
 
     // Build result map: reportId => { total, visual, structure, quality, has_content }
     const result: Record<string, any> = {};

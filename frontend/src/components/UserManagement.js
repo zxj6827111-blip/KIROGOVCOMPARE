@@ -88,9 +88,11 @@ export default function UserManagement() {
     const handleAddRegion = () => {
         // Find the most specific selected region
         let targetId = selectedStreet || selectedDistrict || selectedCity || selectedProvince;
+        console.log('Adding region, targetId:', targetId);
         if (!targetId) return;
 
-        const region = regions.find(r => r.id === parseInt(targetId));
+        const region = regions.find(r => r.id == targetId);
+        console.log('Found region:', region);
         if (region && !formData.dataScope.regions.includes(region.name)) {
             setFormData(prev => ({
                 ...prev,
