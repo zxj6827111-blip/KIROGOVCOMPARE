@@ -1,5 +1,5 @@
 // Quick diagnostic script to check report_consistency_items data
-const pool = require('./src/config/database-llm').default;
+const pool = require('../dist/config/database-llm').default;
 
 async function checkConsistencyData() {
   try {

@@ -559,6 +559,9 @@ router.get('/reports/:id', authMiddleware, async (req, res) => {
     }
 
     ensureDbMigrations();
+    
+    // Use flexible is_active condition for Postgres compatibility
+    const isActiveCondition = dbType === 'postgres' ? `(rv.is_active = true OR rv.is_active::integer = 1)` : `rv.is_active = 1`;
 
     const report = (await dbQuery(`
       SELECT
@@ -579,7 +582,7 @@ router.get('/reports/:id', authMiddleware, async (req, res) => {
         rv.created_at
       FROM reports r
       LEFT JOIN regions reg ON reg.id = r.region_id
-      LEFT JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = ${dbBool(true)}
+      LEFT JOIN report_versions rv ON rv.report_id = r.id AND ${isActiveCondition}
       WHERE r.id = ${sqlValue(reportId)}
       LIMIT 1;
     `))[0];
