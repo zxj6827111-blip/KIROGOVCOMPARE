@@ -1,6 +1,6 @@
 ﻿import express from 'express';
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
-import { dbBool, dbQuery, ensureDbMigrations } from '../config/db-llm';
+import { dbBool, dbQuery, ensureDbMigrations, dbNowExpression } from '../config/db-llm';
 import { sqlValue } from '../config/sqlite';
 import { authMiddleware } from '../middleware/auth';
 
@@ -144,15 +144,15 @@ router.post('/comparisons', authMiddleware, async (req, res) => {
     let rightReportId = right_report_id !== undefined ? Number(right_report_id) : undefined;
 
     if (regionId !== undefined && (!Number.isInteger(regionId) || regionId < 1)) {
-      return res.status(400).json({ error: 'region_id 鏃犳晥' });
+      return res.status(400).json({ error: 'region_id 无效' });
     }
 
     const validateYear = (year: number | undefined): boolean => year !== undefined && Number.isInteger(year);
     if (yearA !== undefined && !validateYear(yearA)) {
-      return res.status(400).json({ error: 'year_a 鏃犳晥' });
+      return res.status(400).json({ error: 'year_a 无效' });
     }
     if (yearB !== undefined && !validateYear(yearB)) {
-      return res.status(400).json({ error: 'year_b 鏃犳晥' });
+      return res.status(400).json({ error: 'year_b 无效' });
     }
 
     if (leftReportId !== undefined && (!Number.isInteger(leftReportId) || leftReportId < 1)) {
@@ -217,11 +217,11 @@ router.post('/comparisons', authMiddleware, async (req, res) => {
         const allowedRows = await dbQuery(idsQuery);
         const allowedIds = allowedRows.map((r: any) => r.id);
         if (!allowedIds.includes(Number(regionId))) {
-          return res.status(403).json({ error: '鏃犳潈闄愯闂鍦板尯' });
+          return res.status(403).json({ error: '无权限访问该地区' });
         }
       } catch (e) {
         console.error('Error calculating scope IDs in comparisons create:', e);
-        return res.status(403).json({ error: '鏃犳潈闄愯闂鍦板尯' });
+        return res.status(403).json({ error: '无权限访问该地区' });
       }
     }
 
@@ -292,21 +292,21 @@ router.get('/comparisons', authMiddleware, async (req, res) => {
     if (region_id !== undefined) {
       const regionIdNum = Number(region_id);
       if (!Number.isInteger(regionIdNum) || regionIdNum < 1) {
-        return res.status(400).json({ error: 'region_id 鏃犳晥' });
+        return res.status(400).json({ error: 'region_id 无效' });
       }
       conditions.push(`region_id = ${sqlValue(regionIdNum)}`);
     }
     if (year_a !== undefined) {
       const yearANum = Number(year_a);
       if (!Number.isInteger(yearANum)) {
-        return res.status(400).json({ error: 'year_a 鏃犳晥' });
+        return res.status(400).json({ error: 'year_a 无效' });
       }
       conditions.push(`year_a = ${sqlValue(yearANum)}`);
     }
     if (year_b !== undefined) {
       const yearBNum = Number(year_b);
       if (!Number.isInteger(yearBNum)) {
-        return res.status(400).json({ error: 'year_b 鏃犳晥' });
+        return res.status(400).json({ error: 'year_b 无效' });
       }
       conditions.push(`year_b = ${sqlValue(yearBNum)}`);
     }
@@ -406,11 +406,11 @@ router.get('/comparisons/:id', authMiddleware, async (req, res) => {
         const allowedRows = await dbQuery(idsQuery);
         const allowedIds = allowedRows.map((r: any) => r.id);
         if (!allowedIds.includes(Number(comparison.region_id))) {
-          return res.status(403).json({ error: '鏃犳潈闄愯闂鍦板尯' });
+          return res.status(403).json({ error: '无权限访问该地区' });
         }
       } catch (e) {
         console.error('Error calculating scope IDs in comparison detail:', e);
-        return res.status(403).json({ error: '鏃犳潈闄愯闂鍦板尯' });
+        return res.status(403).json({ error: '无权限访问该地区' });
       }
     }
 
@@ -476,11 +476,11 @@ router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
         const allowedRows = await dbQuery(idsQuery);
         const allowedIds = allowedRows.map((r: any) => r.id);
         if (!allowedIds.includes(Number(comparison.region_id))) {
-          return res.status(403).json({ error: '鏃犳潈闄愯闂鍦板尯' });
+          return res.status(403).json({ error: '无权限访问该地区' });
         }
       } catch (e) {
         console.error('Error calculating scope IDs in comparison export:', e);
-        return res.status(403).json({ error: '鏃犳潈闄愯闂鍦板尯' });
+        return res.status(403).json({ error: '无权限访问该地区' });
       }
     }
 

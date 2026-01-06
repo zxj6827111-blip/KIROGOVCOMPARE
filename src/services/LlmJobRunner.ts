@@ -1,5 +1,6 @@
 import { ensureSqliteMigrations, querySqlite, sqlValue } from '../config/sqlite';
 import pool, { dbType } from '../config/database-llm';
+import { dbNowExpression } from '../config/db-llm';
 import { LlmParseResult, LlmProvider, LlmProviderError } from './LlmProvider';
 import { createLlmProvider } from './LlmProviderFactory';
 import { summarizeDiff } from '../utils/jsonDiff';
@@ -109,7 +110,7 @@ export class LlmJobRunner {
             step_code = 'CANCELLED',
             step_name = '已取消',
             progress = 100,
-            finished_at = datetime('now'),
+            finished_at = ${dbNowExpression()},
             error_message = '用户手动取消'
         WHERE id = ${sqlValue(jobId)} AND status IN ('queued', 'running');`);
     }
@@ -205,7 +206,7 @@ export class LlmJobRunner {
           SET status = 'failed',
               error_code = ${sqlValue(code)},
               error_message = ${sqlValue(finalMessage)},
-              finished_at = datetime('now'),
+              finished_at = ${dbNowExpression()},
               progress = 100,
               step_code = ${sqlValue(STEPS.DONE.code)},
               step_name = ${sqlValue('失败')}
@@ -531,7 +532,7 @@ export class LlmJobRunner {
       updatedJobs = querySqlite(`
         UPDATE jobs
         SET status = 'running', 
-            started_at = datetime('now'),
+            started_at = ${dbNowExpression()},
             step_code = ${sqlValue(STEPS.PARSING.code)},
             step_name = ${sqlValue(STEPS.PARSING.name)},
             progress = ${STEPS.PARSING.progress}

@@ -1,5 +1,5 @@
 ﻿import express from 'express';
-import { dbQuery, ensureDbMigrations } from '../config/db-llm';
+import { dbQuery, ensureDbMigrations, dbNowExpression } from '../config/db-llm';
 import { sqlValue } from '../config/sqlite';
 import { llmJobRunner } from '../services/LlmJobRunner';
 import { authMiddleware, AuthRequest, requirePermission } from '../middleware/auth';
@@ -457,8 +457,8 @@ router.post('/:version_id/retry', requirePermission('manage_jobs'), async (req, 
                     'queued',
                     0,
                     'QUEUED',
-                    '绛夊緟澶勭悊',
-                    datetime('now'),
+                    '等待处理',
+                    ${dbNowExpression()},
                     0,
                     1
                 )

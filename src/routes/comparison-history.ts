@@ -1,5 +1,5 @@
 ﻿import express, { Request, Response } from 'express';
-import { dbBool, dbQuery, ensureDbMigrations, parseDbJson } from '../config/db-llm';
+import { dbBool, dbQuery, ensureDbMigrations, parseDbJson, dbNowExpression } from '../config/db-llm';
 import { sqlValue } from '../config/sqlite';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import pdfExportService from '../services/PdfExportService';
@@ -212,7 +212,7 @@ router.post('/create', authMiddleware, async (req: AuthRequest, res: Response) =
     // Create comparison record
     await dbQuery(`
       INSERT INTO comparisons (region_id, year_a, year_b, left_report_id, right_report_id, similarity, check_status, created_at)
-      VALUES (${sqlValue(region_id)}, ${sqlValue(year_a)}, ${sqlValue(year_b)}, ${sqlValue(left_report_id)}, ${sqlValue(right_report_id)}, ${similarity}, ${checkStatus ? sqlValue(checkStatus) : 'NULL'}, datetime('now'))
+      VALUES (${sqlValue(region_id)}, ${sqlValue(year_a)}, ${sqlValue(year_b)}, ${sqlValue(left_report_id)}, ${sqlValue(right_report_id)}, ${similarity}, ${checkStatus ? sqlValue(checkStatus) : 'NULL'}, ${dbNowExpression()})
     `);
 
     // Get the created comparison
@@ -230,12 +230,12 @@ router.post('/create', authMiddleware, async (req: AuthRequest, res: Response) =
 
     res.json({
       success: true,
-      message: '姣斿璁板綍鍒涘缓鎴愬姛',
+      message: '比对记录创建成功',
       comparisonId: created[0].id
     });
   } catch (error: any) {
     console.error('Error creating comparison:', error);
-    res.status(500).json({ error: `鍒涘缓姣斿澶辫触: ${error.message}` });
+    res.status(500).json({ error: `创建比对失败: ${error.message}` });
   }
 });
 
@@ -336,7 +336,7 @@ router.get('/:id/result', authMiddleware, async (req: AuthRequest, res: Response
     });
   } catch (error) {
     console.error('Error fetching comparison result:', error);
-    res.status(500).json({ error: '鑾峰彇姣斿缁撴灉澶辫触' });
+    res.status(500).json({ error: '获取比对结果失败' });
   }
 });
 
