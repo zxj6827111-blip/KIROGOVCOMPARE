@@ -108,14 +108,31 @@ async function findFrontendUrl(): Promise<string | null> {
         }
     }
 
+    // Check process.env.PORT (backend port)
+    if (process.env.PORT) {
+        const port = Number(process.env.PORT);
+        // Try localhost and 127.0.0.1
+        const urls = [`http://localhost:${port}`, `http://127.0.0.1:${port}`];
+        for (const url of urls) {
+             if (await isUrlAccessible(url)) {
+                console.log(`[PdfExportWorker] Found locally on PORT: ${url}`);
+                return url;
+            }
+        }
+    }
+
     // 检查常用端口
-    const portsToCheck = [3001, 3002, 3000, 3003];
+    const portsToCheck = [80, 8080, 3000, 3001, 3002, 3003];
     for (const port of portsToCheck) {
-        const url = `http://localhost:${port}`;
-        const isAccessible = await isUrlAccessible(url);
-        if (isAccessible) {
-            console.log(`[PdfExportWorker] Found frontend at ${url}`);
-            return url;
+        // Try both localhost and 127.0.0.1 to be safe against IPv6 binding issues
+        const hosts = ['localhost', '127.0.0.1'];
+        for (const host of hosts) {
+            const url = `http://${host}:${port}`;
+            const isAccessible = await isUrlAccessible(url);
+            if (isAccessible) {
+                console.log(`[PdfExportWorker] Found frontend at ${url}`);
+                return url;
+            }
         }
     }
 
