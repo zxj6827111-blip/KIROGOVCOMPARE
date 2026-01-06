@@ -155,7 +155,7 @@ router.post('/create', authMiddleware, async (req: AuthRequest, res: Response) =
       // Return existing comparison
       return res.json({
         success: true,
-        message: '姣斿璁板綍宸插瓨鍦?,
+        message: '比较已存在',
         comparisonId: existing[0].id
       });
     }
@@ -178,19 +178,19 @@ router.post('/create', authMiddleware, async (req: AuthRequest, res: Response) =
       const leftVersionId = (await dbQuery(`SELECT id FROM report_versions WHERE report_id=${sqlValue(left_report_id)} AND is_active=${dbBool(true)}`))?.[0]?.id;
       const rightVersionId = (await dbQuery(`SELECT id FROM report_versions WHERE report_id=${sqlValue(right_report_id)} AND is_active=${dbBool(true)}`))?.[0]?.id;
 
-      const leftIssues = leftVersionId ? await dbQuery(`
+      const leftIssues = leftVersionId ? (await dbQuery(`
         SELECT COUNT(*) as cnt FROM report_consistency_items 
         WHERE report_version_id=${sqlValue(leftVersionId)} 
         AND auto_status='FAIL' 
         AND human_status='pending'
-      `)?.[0]?.cnt || 0 : 0;
+      `))?.[0]?.cnt || 0 : 0;
 
-      const rightIssues = rightVersionId ? await dbQuery(`
+      const rightIssues = rightVersionId ? (await dbQuery(`
         SELECT COUNT(*) as cnt FROM report_consistency_items 
         WHERE report_version_id=${sqlValue(rightVersionId)} 
         AND auto_status='FAIL' 
         AND human_status='pending'
-      `)?.[0]?.cnt || 0 : 0;
+      `))?.[0]?.cnt || 0 : 0;
 
       // Combine cross-year and intra-report checks
       if (leftIssues > 0 || rightIssues > 0) {
@@ -261,7 +261,7 @@ router.get('/:id/result', authMiddleware, async (req: AuthRequest, res: Response
     `);
 
     if (!comparisons || comparisons.length === 0) {
-      return res.status(404).json({ error: '姣斿璁板綍涓嶅瓨鍦? });
+      return res.status(404).json({ error: '比较不存在' });
     }
 
     const comparison = comparisons[0];
@@ -344,7 +344,7 @@ router.get('/:id/result', authMiddleware, async (req: AuthRequest, res: Response
  * DELETE /api/comparisons/:id
  * Delete a comparison record
  */
-router.delete('/:id', authMiddleware, (req: AuthRequest, res: Response) => {
+router.delete('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const comparisonId = Number(req.params.id);
     if (!comparisonId || Number.isNaN(comparisonId)) {
@@ -356,7 +356,7 @@ router.delete('/:id', authMiddleware, (req: AuthRequest, res: Response) => {
     // Check if exists
     const existing = await dbQuery(`SELECT id FROM comparisons WHERE id = ${sqlValue(comparisonId)}`);
     if (!existing || existing.length === 0) {
-      return res.status(404).json({ error: '姣斿璁板綍涓嶅瓨鍦? });
+      return res.status(404).json({ error: '比较不存在' });
     }
 
     // Delete (cascade will handle related records)
@@ -398,7 +398,7 @@ router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Res
     `);
 
     if (!comparisons || comparisons.length === 0) {
-      return res.status(404).json({ error: '姣斿璁板綍涓嶅瓨鍦? });
+      return res.status(404).json({ error: '比较不存在' });
     }
 
     const comparison = comparisons[0];
@@ -472,10 +472,10 @@ router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Res
     });
 
     // Sort Sections
-    const numerals = ['涓€', '浜?, '涓?, '鍥?, '浜?, '鍏?, '涓?, '鍏?];
+    const numerals = ['一', '二', '三', '四', '五', '六', '七', '八'];
     sections.sort((a, b) => {
-      const isTitleA = a.title === '鏍囬' || a.title.includes('骞村害鎶ュ憡');
-      const isTitleB = b.title === '鏍囬' || b.title.includes('骞村害鎶ュ憡');
+      const isTitleA = a.title === '标题' || a.title.includes('年度报告');
+      const isTitleB = b.title === '标题' || b.title.includes('年度报告');
       if (isTitleA && !isTitleB) return -1;
       if (!isTitleA && isTitleB) return 1;
       const idxA = numerals.findIndex(n => a.title.includes(n));
@@ -553,12 +553,12 @@ router.get('/:id/exports', authMiddleware, async (req: AuthRequest, res: Respons
 
     ensureDbMigrations();
 
-    const comparison = await dbQuery(`
+    const comparison = (await dbQuery(`
       SELECT region_id FROM comparisons WHERE id = ${sqlValue(comparisonId)}
-    `)[0];
+    `))[0];
 
     if (!comparison) {
-      return res.status(404).json({ error: '姣旇緝璁板綍涓嶅瓨鍦? });
+      return res.status(404).json({ error: '比较不存在' });
     }
 
     // DATA SCOPE CHECK

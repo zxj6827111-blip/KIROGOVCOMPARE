@@ -268,7 +268,7 @@ router.get('/:id/download', authMiddleware, async (req: AuthRequest, res: Respon
             return res.status(400).json({
                 error: 'PDF not ready',
                 status: job.status,
-                message: job.status === 'running' ? '姝ｅ湪鐢熸垚涓紝璇风◢鍚庡啀璇? : '浠诲姟灏氭湭瀹屾垚'
+                message: job.status === 'running' ? 'PDF is still generating' : 'PDF job is not finished'
             });
         }
 
@@ -372,7 +372,8 @@ router.post('/:id/regenerate', authMiddleware, async (req: AuthRequest, res: Res
 
         const scopeClause = allowedRegionIds ? `AND r.region_id IN (${allowedRegionIds.join(',')})` : '';
 
-        // 鑾峰彇鍘熶换鍔′俊鎭?        const rows = await dbQuery(`
+        // Load comparison info for job
+        const rows = await dbQuery(`
       SELECT j.comparison_id, j.export_title
       FROM jobs j
       LEFT JOIN comparisons c ON j.comparison_id = c.id
@@ -410,7 +411,7 @@ router.post('/:id/regenerate', authMiddleware, async (req: AuthRequest, res: Res
         return res.json({
             success: true,
             job_id: jobId,
-            message: '宸查噸鏂板姞鍏ョ敓鎴愰槦鍒楋紝璇风◢鍚庢煡鐪?,
+            message: 'PDF regeneration queued',
             file_name: fileName
         });
 
@@ -441,7 +442,8 @@ router.post('/batch-download', authMiddleware, async (req: AuthRequest, res: Res
 
         const scopeClause = allowedRegionIds ? `AND r.region_id IN (${allowedRegionIds.join(',')})` : '';
 
-        // 鑾峰彇鎸囧畾浠诲姟鐨勬枃浠朵俊鎭?        const placeholders = job_ids.map(() => '?').join(',');
+        // Build placeholders for batch download
+        const placeholders = job_ids.map(() => '?').join(',');
         const jobs = await dbQuery(`
       SELECT j.id, j.file_path, j.file_name, j.export_title, j.status 
       FROM jobs j

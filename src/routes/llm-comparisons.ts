@@ -98,7 +98,7 @@ function buildDiffSection(title: string, entries: any[], emphasize: string): Par
   if (!entries || !entries.length) {
     paragraphs.push(
       new Paragraph({
-        children: [new TextRun({ text: '鏃犲彉鍖栭」', italics: true })],
+        children: [new TextRun({ text: '无差异', italics: true })],
         spacing: { after: 150 },
       })
     );
@@ -107,15 +107,15 @@ function buildDiffSection(title: string, entries: any[], emphasize: string): Par
 
   for (const entry of entries) {
     const bulletParts: TextRun[] = [
-      new TextRun({ text: `璺緞锛?{entry.path || '(绌鸿矾寰?'}`, bold: true }),
-      new TextRun({ text: `锛?{emphasize}锛塦, break: 1, bold: true }),
+      new TextRun({ text: `路径: ${entry.path || '(未知)'}`, bold: true }),
+      new TextRun({ text: `${emphasize}`, break: 1, bold: true }),
     ];
 
     if (entry.left !== undefined) {
-      bulletParts.push(new TextRun({ text: `宸︿晶锛?{stringifyValue(entry.left)}`, break: 1 }));
+      bulletParts.push(new TextRun({ text: `左侧: ${stringifyValue(entry.left)}`, break: 1 }));
     }
     if (entry.right !== undefined) {
-      bulletParts.push(new TextRun({ text: `鍙充晶锛?{stringifyValue(entry.right)}`, break: 1 }));
+      bulletParts.push(new TextRun({ text: `右侧: ${stringifyValue(entry.right)}`, break: 1 }));
     }
 
     paragraphs.push(
@@ -134,7 +134,7 @@ router.post('/comparisons', authMiddleware, async (req, res) => {
     const { region_id, year_a, year_b, left_report_id, right_report_id } = req.body;
 
     if (!region_id && (!left_report_id || !right_report_id)) {
-      return res.status(400).json({ error: 'region_id/year_a/year_b 鎴?report_id 缁勫悎涓嶈兘涓虹┖' });
+      return res.status(400).json({ error: 'region_id/year_a/year_b or report_id required' });
     }
 
     let regionId = region_id ? Number(region_id) : undefined;
@@ -156,10 +156,10 @@ router.post('/comparisons', authMiddleware, async (req, res) => {
     }
 
     if (leftReportId !== undefined && (!Number.isInteger(leftReportId) || leftReportId < 1)) {
-      return res.status(400).json({ error: 'left_report_id 鏃犳晥' });
+      return res.status(400).json({ error: 'left_report_id invalid' });
     }
     if (rightReportId !== undefined && (!Number.isInteger(rightReportId) || rightReportId < 1)) {
-      return res.status(400).json({ error: 'right_report_id 鏃犳晥' });
+      return res.status(400).json({ error: 'right_report_id invalid' });
     }
 
     ensureDbMigrations();
@@ -168,34 +168,34 @@ router.post('/comparisons', authMiddleware, async (req, res) => {
       if (yearA > yearB) {
         [yearA, yearB] = [yearB, yearA];
       }
-      const leftReport = await dbQuery(
+      const leftReport = (await dbQuery(
         `SELECT id, region_id, year FROM reports WHERE region_id = ${sqlValue(regionId)} AND year = ${sqlValue(yearA)} LIMIT 1;`
-      )[0];
-      const rightReport = await dbQuery(
+      ))[0];
+      const rightReport = (await dbQuery(
         `SELECT id, region_id, year FROM reports WHERE region_id = ${sqlValue(regionId)} AND year = ${sqlValue(yearB)} LIMIT 1;`
-      )[0];
+      ))[0];
 
       if (!leftReport || !rightReport) {
-        return res.status(404).json({ error: '鎶ュ憡涓嶅瓨鍦? });
-      }
+      return res.status(404).json({ error: 'report not found' });
+    }
 
       leftReportId = leftReport.id;
       rightReportId = rightReport.id;
     }
 
     if (leftReportId === undefined || rightReportId === undefined) {
-      return res.status(400).json({ error: '鎶ュ憡淇℃伅涓嶈冻锛屾棤娉曞垱寤烘瘮瀵? });
+      return res.status(400).json({ error: 'left_report_id and right_report_id required' });
     }
 
     const leftReport = (await dbQuery(`SELECT id, region_id, year FROM reports WHERE id = ${sqlValue(leftReportId)} LIMIT 1;`))[0];
     const rightReport = (await dbQuery(`SELECT id, region_id, year FROM reports WHERE id = ${sqlValue(rightReportId)} LIMIT 1;`))[0];
 
     if (!leftReport || !rightReport) {
-      return res.status(404).json({ error: '鎶ュ憡涓嶅瓨鍦? });
+      return res.status(404).json({ error: 'report not found' });
     }
 
     if (leftReport.region_id !== rightReport.region_id) {
-      return res.status(400).json({ error: '蹇呴』姣旇緝鍚屼竴鍦板尯鐨勬姤鍛? });
+      return res.status(400).json({ error: 'reports must be in the same region' });
     }
 
     regionId = leftReport.region_id;
@@ -233,42 +233,42 @@ router.post('/comparisons', authMiddleware, async (req, res) => {
     const rightVersion = await fetchParsedVersion(rightReportId);
 
     if (!isParsedReady(leftVersion) || !isParsedReady(rightVersion)) {
-      return res.status(409).json({ error: '瑙ｆ瀽鏈畬鎴?, error_code: 'PARSE_NOT_READY' });
+      return res.status(409).json({ error: 'parse not ready', error_code: 'PARSE_NOT_READY' });
     }
 
-    const existingComparison = await dbQuery(`
+    const existingComparison = (await dbQuery(`
       SELECT id FROM comparisons WHERE region_id = ${sqlValue(regionId)} AND year_a = ${sqlValue(yearA)} AND year_b = ${sqlValue(yearB)} LIMIT 1;
-    `)[0];
+    `))[0];
 
-    const comparison = await dbQuery(`
+    const comparison = (await dbQuery(`
       INSERT INTO comparisons (region_id, year_a, year_b, left_report_id, right_report_id)
       VALUES (${sqlValue(regionId)}, ${sqlValue(yearA)}, ${sqlValue(yearB)}, ${sqlValue(leftReportId)}, ${sqlValue(rightReportId)})
       ON CONFLICT(region_id, year_a, year_b) DO UPDATE SET
         left_report_id = excluded.left_report_id,
         right_report_id = excluded.right_report_id
       RETURNING id;
-    `)[0];
+    `))[0];
 
     if (!comparison?.id) {
       return res.status(500).json({ error: 'comparison 鍒涘缓澶辫触' });
     }
 
-    const existingJob = await dbQuery(`
+    const existingJob = (await dbQuery(`
       SELECT id FROM jobs
       WHERE comparison_id = ${sqlValue(comparison.id)} AND status IN ('queued', 'running')
       ORDER BY id DESC
       LIMIT 1;
-    `)[0];
+    `))[0];
 
     let jobId: number;
     if (existingJob?.id) {
       jobId = existingJob.id;
     } else {
-      const newJob = await dbQuery(`
+      const newJob = (await dbQuery(`
         INSERT INTO jobs (report_id, kind, status, progress, comparison_id)
         VALUES (${sqlValue(leftReportId)}, 'compare', 'queued', 0, ${sqlValue(comparison.id)})
         RETURNING id;
-      `)[0];
+      `))[0];
       jobId = newJob.id;
     }
 
@@ -375,20 +375,20 @@ router.get('/comparisons/:id', authMiddleware, async (req, res) => {
   try {
     const comparisonId = Number(req.params.id);
     if (!Number.isInteger(comparisonId) || comparisonId < 1) {
-      return res.status(400).json({ error: 'comparison_id 鏃犳晥' });
+      return res.status(400).json({ error: 'comparison_id invalid' });
     }
 
     ensureDbMigrations();
 
-    const comparison = await dbQuery(`
+    const comparison = (await dbQuery(`
       SELECT id, region_id, year_a, year_b, left_report_id, right_report_id
       FROM comparisons
       WHERE id = ${sqlValue(comparisonId)}
       LIMIT 1;
-    `)[0];
+    `))[0];
 
     if (!comparison) {
-      return res.status(404).json({ error: 'comparison 涓嶅瓨鍦? });
+      return res.status(404).json({ error: 'comparison not found' });
     }
 
     const user = (req as any).user;
@@ -414,9 +414,9 @@ router.get('/comparisons/:id', authMiddleware, async (req, res) => {
       }
     }
 
-    const resultRow = await dbQuery(`
+    const resultRow = (await dbQuery(`
       SELECT diff_json FROM comparison_results WHERE comparison_id = ${sqlValue(comparisonId)} LIMIT 1;
-    `)[0];
+    `))[0];
 
     let diffJson: any = null;
     if (resultRow?.diff_json !== undefined) {
@@ -443,22 +443,22 @@ router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
   try {
     const comparisonId = Number(req.params.id);
     if (!Number.isInteger(comparisonId) || comparisonId < 1) {
-      return res.status(400).json({ error: 'comparison_id 鏃犳晥' });
+      return res.status(400).json({ error: 'comparison_id invalid' });
     }
 
     ensureDbMigrations();
 
-    const comparison = await dbQuery(`
+    const comparison = (await dbQuery(`
       SELECT c.id, c.region_id, c.year_a, c.year_b, c.left_report_id, c.right_report_id,
              r.name as region_name
       FROM comparisons c
       LEFT JOIN regions r ON r.id = c.region_id
       WHERE c.id = ${sqlValue(comparisonId)}
       LIMIT 1;
-    `)[0];
+    `))[0];
 
     if (!comparison) {
-      return res.status(404).json({ error: 'comparison 涓嶅瓨鍦? });
+      return res.status(404).json({ error: 'comparison not found' });
     }
 
     const user = (req as any).user;
@@ -494,14 +494,14 @@ router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
     // Get unit name from parsed data or reports
     const leftReport = (await dbQuery(`SELECT unit_name FROM reports WHERE id = ${sqlValue(comparison.left_report_id)} LIMIT 1;`))[0];
     const rightReport = (await dbQuery(`SELECT unit_name FROM reports WHERE id = ${sqlValue(comparison.right_report_id)} LIMIT 1;`))[0];
-    const unitName = leftReport?.unit_name || rightReport?.unit_name || comparison.region_name || '鏈煡鍗曚綅';
+    const unitName = leftReport?.unit_name || rightReport?.unit_name || comparison.region_name || '未知地区';
 
     const paragraphs: Paragraph[] = [];
 
     // Title
     paragraphs.push(
       new Paragraph({
-        text: `${unitName} 鏀垮簻淇℃伅鍏紑骞村害鎶ュ憡姣斿鍒嗘瀽`,
+        text: `${unitName} 政府信息公开年度报告对比分析`,
         heading: HeadingLevel.TITLE,
         spacing: { after: 300 },
       })
@@ -511,7 +511,7 @@ router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
     paragraphs.push(
       new Paragraph({
         children: [
-          new TextRun({ text: `姣斿骞翠唤锛?{comparison.year_a} 骞?vs ${comparison.year_b} 骞碻, bold: true }),
+          new TextRun({ text: `对比年份：${comparison.year_a} 年 vs ${comparison.year_b} 年`, bold: true }),
         ],
         spacing: { after: 200 },
       })
@@ -519,7 +519,7 @@ router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
 
     paragraphs.push(
       new Paragraph({
-        text: `鐢熸垚鏃堕棿锛?{new Date().toLocaleString('zh-CN')}`,
+        text: `导出时间：${new Date().toLocaleString('zh-CN')}`,
         spacing: { after: 300 },
       })
     );
@@ -527,7 +527,7 @@ router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
     // Summary section
     paragraphs.push(
       new Paragraph({
-        text: '涓€銆佹瘮瀵规憳瑕?,
+        text: '对比摘要',
         heading: HeadingLevel.HEADING_1,
         spacing: { before: 200, after: 200 },
       })
@@ -538,12 +538,12 @@ router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
     const rightSections = Array.isArray(rightParsed.sections) ? rightParsed.sections : [];
 
     const sectionTitles = [
-      '涓€銆佹€讳綋鎯呭喌',
-      '浜屻€佷富鍔ㄥ叕寮€鏀垮簻淇℃伅鎯呭喌',
-      '涓夈€佹敹鍒板拰澶勭悊鏀垮簻淇℃伅鍏紑鐢宠鎯呭喌',
-      '鍥涖€佹斂搴滀俊鎭叕寮€琛屾斂澶嶈銆佽鏀胯瘔璁兼儏鍐?,
-      '浜斻€佸瓨鍦ㄧ殑涓昏闂鍙婃敼杩涙儏鍐?,
-      '鍏€佸叾浠栭渶瑕佹姤鍛婄殑浜嬮」',
+      '一、总体情况',
+      '二、主动公开政府信息情况',
+      '三、收到和处理政府信息公开申请情况',
+      '四、政府信息公开行政复议、行政诉讼情况',
+      '五、存在的主要问题及改进情况',
+      '六、其他需要报告的事项',
     ];
 
     // Count sections
@@ -552,7 +552,7 @@ router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
 
     paragraphs.push(
       new Paragraph({
-        text: `鏈姣斿鍒嗘瀽浜?${comparison.year_a} 骞村拰 ${comparison.year_b} 骞翠袱浠藉勾搴︽姤鍛婏紝${comparison.year_a} 骞存姤鍛婂寘鍚?${leftCount} 涓珷鑺傦紝${comparison.year_b} 骞存姤鍛婂寘鍚?${rightCount} 涓珷鑺傘€俙,
+        text: `本次对比分析了${comparison.year_a}年和${comparison.year_b}年两份年度报告，${comparison.year_a}年报告包含${leftCount}个章节，${comparison.year_b}年报告包含${rightCount}个章节。`,
         spacing: { after: 200 },
       })
     );
@@ -560,7 +560,7 @@ router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
     // Section-by-section comparison
     paragraphs.push(
       new Paragraph({
-        text: '浜屻€佺珷鑺傚唴瀹瑰姣?,
+        text: '章节对比',
         heading: HeadingLevel.HEADING_1,
         spacing: { before: 300, after: 200 },
       })
@@ -582,7 +582,7 @@ router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
       paragraphs.push(
         new Paragraph({
           children: [
-            new TextRun({ text: `銆?{comparison.year_a} 骞淬€慲, bold: true }),
+            new TextRun({ text: `${comparison.year_a} 年内容`, bold: true }),
           ],
           spacing: { after: 100 },
         })
@@ -592,21 +592,21 @@ router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
         const content = String(leftSec.content).substring(0, 500);
         paragraphs.push(
           new Paragraph({
-            text: content + (leftSec.content.length > 500 ? '...(鍐呭宸叉埅鏂?' : ''),
+            text: content + (leftSec.content.length > 500 ? '...(内容过长已截断)' : ''),
             spacing: { after: 150 },
           })
         );
       } else if (leftSec?.type === 'table_2' || leftSec?.type === 'table_3' || leftSec?.type === 'table_4') {
         paragraphs.push(
           new Paragraph({
-            text: '锛堟绔犺妭涓鸿〃鏍兼暟鎹紝璇﹁鍘熸姤鍛婏級',
+            text: '该章节为表格数据，无法直接输出文字内容。',
             spacing: { after: 150 },
           })
         );
       } else {
         paragraphs.push(
           new Paragraph({
-            text: '锛堟棤姝ょ珷鑺傚唴瀹癸級',
+            text: '暂无正文内容。',
             spacing: { after: 150 },
           })
         );
@@ -616,7 +616,7 @@ router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
       paragraphs.push(
         new Paragraph({
           children: [
-            new TextRun({ text: `銆?{comparison.year_b} 骞淬€慲, bold: true }),
+            new TextRun({ text: `${comparison.year_b} 年内容`, bold: true }),
           ],
           spacing: { after: 100 },
         })
@@ -626,21 +626,21 @@ router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
         const content = String(rightSec.content).substring(0, 500);
         paragraphs.push(
           new Paragraph({
-            text: content + (rightSec.content.length > 500 ? '...(鍐呭宸叉埅鏂?' : ''),
+            text: content + (rightSec.content.length > 500 ? '...(内容过长已截断)' : ''),
             spacing: { after: 200 },
           })
         );
       } else if (rightSec?.type === 'table_2' || rightSec?.type === 'table_3' || rightSec?.type === 'table_4') {
         paragraphs.push(
           new Paragraph({
-            text: '锛堟绔犺妭涓鸿〃鏍兼暟鎹紝璇﹁鍘熸姤鍛婏級',
+            text: '该章节为表格数据，无法直接输出文字内容。',
             spacing: { after: 200 },
           })
         );
       } else {
         paragraphs.push(
           new Paragraph({
-            text: '锛堟棤姝ょ珷鑺傚唴瀹癸級',
+            text: '暂无正文内容。',
             spacing: { after: 200 },
           })
         );
@@ -650,10 +650,11 @@ router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
     // Footer
     paragraphs.push(
       new Paragraph({
-        text: '--- 鎶ュ憡缁撴潫 ---',
+        text: '--- 对比报告结束 ---',
         spacing: { before: 400 },
       })
     );
+
 
     const doc = new Document({
       sections: [

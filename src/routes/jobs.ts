@@ -216,7 +216,7 @@ router.get('/:version_id', async (req, res) => {
         }
 
         // Get version details
-        const version = await dbQuery(`
+        const version = (await dbQuery(`
       SELECT 
         rv.id AS version_id,
         rv.report_id,
@@ -229,7 +229,7 @@ router.get('/:version_id', async (req, res) => {
       JOIN reports r ON rv.report_id = r.id
       WHERE rv.id = ${sqlValue(versionId)}
       LIMIT 1;
-    `)[0] as {
+    `))[0] as {
             version_id: number;
             report_id: number;
             region_id: number;
@@ -513,7 +513,7 @@ function determineVersionStatus(jobs: Array<{ status: string; kind: string }>): 
 /**
  * Helper: Delete a specific version and all its related data
  */
-function deleteVersion(versionId: number) {
+async function deleteVersion(versionId: number) {
     // 1. Delete associated jobs
     await dbQuery(`DELETE FROM jobs WHERE version_id = ${sqlValue(versionId)}`);
 
@@ -593,7 +593,7 @@ router.post('/batch-delete', requirePermission('manage_jobs'), async (req, res) 
         for (const id of ids) {
             const vid = Number(id);
             if (!Number.isNaN(vid)) {
-                deleteVersion(vid);
+                await deleteVersion(vid);
                 count++;
             }
         }
@@ -626,7 +626,7 @@ router.delete('/:version_id', requirePermission('manage_jobs'), async (req, res)
             return res.status(403).json({ error: 'forbidden' });
         }
 
-        deleteVersion(versionId);
+        await deleteVersion(versionId);
         console.log(`[Delete] Deleted version ${versionId}`);
 
         return res.json({ message: 'Job deleted', version_id: versionId });

@@ -93,7 +93,7 @@ router.put('/:id', requirePermission('manage_users'), async (req: AuthRequest, r
         // For now, allow it but maybe warn? 
         // Usually ID 1 is protected.
         if (Number(userId) === 1 && req.user?.id !== 1) {
-            return res.status(403).json({ error: '鏃犳硶淇敼瓒呯骇绠＄悊鍛? });
+            return res.status(403).json({ error: 'cannot modify super admin' });
         }
 
         let updates: string[] = [];
@@ -108,7 +108,7 @@ router.put('/:id', requirePermission('manage_users'), async (req: AuthRequest, r
         updates.push(`updated_at = ${dbNowExpression()}`);
 
         if (updates.length === 0) {
-            return res.json({ message: '鏃犲彉鏇? });
+            return res.json({ message: 'no fields to update' });
         }
 
         ensureDbMigrations();
@@ -135,7 +135,7 @@ router.delete('/:id', requirePermission('manage_users'), async (req: AuthRequest
         const userId = req.params.id;
 
         if (Number(userId) === 1) {
-            return res.status(400).json({ error: '涓嶈兘鍒犻櫎瓒呯骇绠＄悊鍛? });
+            return res.status(400).json({ error: 'cannot delete super admin' });
         }
 
         if (Number(userId) === req.user?.id) {

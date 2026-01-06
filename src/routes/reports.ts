@@ -31,7 +31,7 @@ const upload = multer({
     if (isPdf || isHtml) {
       cb(null, true);
     } else {
-      cb(new Error('仅支�?PDF �?HTML 文件'));
+      cb(new Error('仅支持 PDF 或 HTML 文件'));
     }
   },
 });
@@ -77,7 +77,7 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
     const isHtml = file.mimetype === 'text/html' || file.originalname.toLowerCase().endsWith('.html') || file.originalname.toLowerCase().endsWith('.htm');
 
     if (!isPdf && !isHtml) {
-      return res.status(400).json({ error: '仅支�?PDF �?HTML 文件' });
+      return res.status(400).json({ error: '仅支持 PDF 或 HTML 文件' });
     }
 
     // Fix for garbled filenames (UTF-8 bytes interpreted as Latin-1)
@@ -104,15 +104,15 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
     // [New Logic] Check if a report exists and if it is "empty".
     // If so, delete it before uploading, to act as an overwrite and avoid "Report exists" error.
     try {
-      const existingReport = await dbQuery(
+      const existingReport = (await dbQuery(
         `SELECT id FROM reports WHERE region_id = ${regionId} AND year = ${year} AND unit_name = ${sqlValue(unitName)} LIMIT 1`
-      )[0];
+      ))[0];
 
       if (existingReport) {
         // Check active version
-        const activeVersion = await dbQuery(
+        const activeVersion = (await dbQuery(
           `SELECT parsed_json FROM report_versions WHERE report_id = ${existingReport.id} AND is_active = ${dbBool(true)} LIMIT 1`
-        )[0];
+        ))[0];
 
         let hasContent = false;
         if (activeVersion && activeVersion.parsed_json && activeVersion.parsed_json !== '{}') {
@@ -153,14 +153,14 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
     });
   } catch (error: any) {
     if (error?.message === 'region_not_found') {
-      return res.status(404).json({ error: 'region 不存�? });
+      return res.status(404).json({ error: 'region 不存在' });
     }
     if (error?.message === 'version_not_created') {
       return res.status(500).json({ error: 'report version 创建失败' });
     }
 
     if (typeof error?.message === 'string' && error.message.includes('UNIQUE constraint failed')) {
-      return res.status(409).json({ error: '记录已存�? });
+      return res.status(409).json({ error: '记录已存在' });
     }
 
     if (error instanceof multer.MulterError) {
@@ -227,7 +227,7 @@ router.post('/reports/text', authMiddleware, requirePermission('upload_reports')
     });
   } catch (error: any) {
     if (error?.message === 'region_not_found') {
-      return res.status(404).json({ error: 'region 不存�? });
+      return res.status(404).json({ error: 'region 不存在' });
     }
     if (error?.message === 'raw_text_empty') {
       return res.status(400).json({ error: 'raw_text 不能为空' });
@@ -290,7 +290,7 @@ router.get('/reports', authMiddleware, async (req: AuthRequest, res) => {
             SELECT id FROM allowed_ids
       `;
       try {
-        const allowedRows = await dbQuery(idsQuery);
+        const allowedRows = (await dbQuery(idsQuery));
         const allowedIds = allowedRows.map((r: any) => r.id).join(',');
 
         if (allowedIds.length > 0) {
@@ -306,7 +306,7 @@ router.get('/reports', authMiddleware, async (req: AuthRequest, res) => {
 
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    const rows = await dbQuery(`
+    const rows = (await dbQuery(`
       SELECT
         r.id AS report_id,
         r.region_id,
@@ -323,7 +323,7 @@ router.get('/reports', authMiddleware, async (req: AuthRequest, res) => {
       LEFT JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = ${dbBool(true)}
       ${whereClause}
       ORDER BY r.id DESC;
-    `);
+    `));
 
     return res.json({
       data: rows.map((row) => {
@@ -384,11 +384,11 @@ router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
       if (allowedRegionIds.length === 0) {
         return res.json({});
       }
-      const allowedReportRows = await dbQuery(`
+      const allowedReportRows = (await dbQuery(`
         SELECT id FROM reports
         WHERE id IN (${reportIds.join(',')})
           AND region_id IN (${allowedRegionIds.join(',')});
-      `) as Array<{ id: number }>;
+      `)) as Array<{ id: number }>;
       reportIds = allowedReportRows.map((row) => row.id);
       if (reportIds.length === 0) {
         return res.json({});
@@ -396,12 +396,12 @@ router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
     }
 
     // Get active version_ids for these reports + check parsed_json
-    const versionRows = await dbQuery(`
+    const versionRows = (await dbQuery(`
       SELECT r.id as report_id, rv.id as version_id, rv.parsed_json
       FROM reports r
       JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = ${dbBool(true)}
       WHERE r.id IN (${reportIds.join(',')})
-    `) as Array<{ report_id: number; version_id: number; parsed_json: string | null }>;
+    `)) as Array<{ report_id: number; version_id: number; parsed_json: string | null }>;
 
     const versionMap = new Map(versionRows.map(v => [v.report_id, v.version_id]));
 
@@ -432,14 +432,14 @@ router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
       return res.json({});
     }
 
-    const groupCounts = await dbQuery(`
-      SELECT report_version_id, group_key, COUNT(*) as cnt
+    const groupCounts = (await dbQuery(`
+      SELECT report_version_id, group_key, COUNT(*)) as cnt
       FROM report_consistency_items
       WHERE report_version_id IN (${versionIds.join(',')})
         AND auto_status = 'FAIL'
         AND human_status != 'dismissed'
       GROUP BY report_version_id, group_key
-    `) as Array<{ report_version_id: number; group_key: string; cnt: number }>;
+    `)) as Array<{ report_version_id: number; group_key: string; cnt: number }>;
 
     // Build result map: reportId => { total, visual, structure, quality, has_content }
     const result: Record<string, any> = {};
@@ -489,7 +489,7 @@ router.get('/reports/:id', authMiddleware, async (req, res) => {
 
     ensureDbMigrations();
 
-    const report = await dbQuery(`
+    const report = (await dbQuery(`
       SELECT
         r.id AS report_id,
         r.region_id,
@@ -511,10 +511,10 @@ router.get('/reports/:id', authMiddleware, async (req, res) => {
       LEFT JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = ${dbBool(true)}
       WHERE r.id = ${sqlValue(reportId)}
       LIMIT 1;
-    `)[0];
+    `))[0];
 
     if (!report) {
-      return res.status(404).json({ error: 'report 不存�? });
+      return res.status(404).json({ error: 'report 不存在' });
     }
 
     const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
@@ -524,13 +524,13 @@ router.get('/reports/:id', authMiddleware, async (req, res) => {
       }
     }
 
-    const job = await dbQuery(`
+    const job = (await dbQuery(`
       SELECT id, status, progress, error_code, error_message
       FROM jobs
       WHERE report_id = ${sqlValue(reportId)}
       ORDER BY id DESC
       LIMIT 1;
-    `)[0];
+    `))[0];
 
     let parsedJson: any = null;
     if (report?.parsed_json) {
@@ -590,7 +590,7 @@ router.post('/reports/:id/parse', authMiddleware, async (req, res) => {
       | { id?: number; region_id?: number }
       | undefined;
     if (!report?.id) {
-      return res.status(404).json({ error: 'report 不存�? });
+      return res.status(404).json({ error: 'report 不存在' });
     }
     const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
     if (allowedRegionIds) {
@@ -599,27 +599,27 @@ router.post('/reports/:id/parse', authMiddleware, async (req, res) => {
       }
     }
 
-    const version = await dbQuery(
+    const version = (await dbQuery(
       `SELECT id FROM report_versions WHERE report_id = ${sqlValue(reportId)} AND is_active = ${dbBool(true)} ORDER BY id DESC LIMIT 1;`
-    )[0] as { id?: number } | undefined;
+    ))[0] as { id?: number } | undefined;
 
     if (!version?.id) {
-      return res.status(404).json({ error: 'report_version 不存�? });
+      return res.status(404).json({ error: 'report_version 不存在' });
     }
 
-    const existingJob = await dbQuery(
+    const existingJob = (await dbQuery(
       `SELECT id FROM jobs WHERE report_id = ${sqlValue(reportId)} AND version_id = ${sqlValue(version.id)} AND kind = 'parse' AND status IN ('queued','running') ORDER BY id DESC LIMIT 1;`
-    )[0] as { id?: number } | undefined;
+    ))[0] as { id?: number } | undefined;
 
     if (existingJob?.id) {
       return res.json({ job_id: existingJob.id, reused: true });
     }
 
-    const newJob = await dbQuery(
+    const newJob = (await dbQuery(
       `INSERT INTO jobs (report_id, version_id, kind, status, progress)
        VALUES (${sqlValue(reportId)}, ${sqlValue(version.id)}, 'parse', 'queued', 0)
        RETURNING id;`
-    )[0] as { id?: number } | undefined;
+    ))[0] as { id?: number } | undefined;
 
     return res.status(201).json({ job_id: newJob?.id || null, reused: false });
   } catch (error) {
@@ -642,7 +642,7 @@ router.delete('/reports/:id', authMiddleware, async (req, res) => {
       | undefined;
 
     if (!existing || !existing.id) {
-      return res.status(404).json({ error: 'report 不存�? });
+      return res.status(404).json({ error: 'report 不存在' });
     }
 
     const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
@@ -653,9 +653,9 @@ router.delete('/reports/:id', authMiddleware, async (req, res) => {
     }
 
     // Best-effort remove stored files first
-    const versions = await dbQuery(
+    const versions = (await dbQuery(
       `SELECT storage_path, text_path FROM report_versions WHERE report_id = ${sqlValue(reportId)};`
-    ) as Array<{ storage_path?: string | null; text_path?: string | null }>;
+    )) as Array<{ storage_path?: string | null; text_path?: string | null }>;
 
     const toAbsoluteSafe = (maybeRelative: string) => {
       const absolute = path.isAbsolute(maybeRelative)
@@ -682,9 +682,9 @@ router.delete('/reports/:id', authMiddleware, async (req, res) => {
     }
 
     // Remove comparisons referencing this report (and their results)
-    const comparisonIds = await dbQuery(
+    const comparisonIds = (await dbQuery(
       `SELECT id FROM comparisons WHERE left_report_id = ${sqlValue(reportId)} OR right_report_id = ${sqlValue(reportId)};`
-    ) as Array<{ id?: number }>;
+    )) as Array<{ id?: number }>;
     const ids = comparisonIds.map((c) => c.id).filter((id): id is number => typeof id === 'number' && id > 0);
     if (ids.length) {
       const inClause = ids.join(',');
@@ -707,7 +707,7 @@ router.delete('/reports/:id', authMiddleware, async (req, res) => {
 
 /**
  * PATCH /api/reports/:id/parsed-data
- * 更新报告�?parsed_json（手动修正解析错误）
+ * Update report parsed_json (manual correction)
  */
 router.patch('/reports/:id/parsed-data', authMiddleware, async (req, res) => {
   try {
@@ -720,11 +720,11 @@ router.patch('/reports/:id/parsed-data', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'parsed_json is required' });
     }
 
-    const reportRow = await dbQuery(`
+    const reportRow = (await dbQuery(`
       SELECT region_id FROM reports
       WHERE id = ${sqlValue(reportId)}
       LIMIT 1;
-    `)[0] as { region_id?: number } | undefined;
+    `))[0] as { region_id?: number } | undefined;
 
     if (!reportRow?.region_id) {
       return res.status(404).json({ error: 'report_not_found' });
@@ -746,13 +746,13 @@ router.patch('/reports/:id/parsed-data', authMiddleware, async (req, res) => {
     }
 
     // 获取 active version
-    const version = await dbQuery(`
+    const version = (await dbQuery(`
       SELECT rv.id as version_id, r.region_id
       FROM report_versions rv
       JOIN reports r ON r.id = rv.report_id
       WHERE rv.report_id = ${sqlValue(reportId)} AND rv.is_active = ${dbBool(true)}
       LIMIT 1;
-    `)[0] as { version_id?: number; region_id?: number } | undefined;
+    `))[0] as { version_id?: number; region_id?: number } | undefined;
 
     if (!version?.version_id) {
       return res.status(404).json({ error: 'no_active_version' });
@@ -779,7 +779,7 @@ router.patch('/reports/:id/parsed-data', authMiddleware, async (req, res) => {
   }
 });
 
-// 获取报告的一致性校验结�?(从数据库读取)
+// Load report consistency results (from DB)
 router.get('/reports/:id/checks', authMiddleware, async (req, res) => {
   try {
     const reportId = Number(req.params.id);
@@ -792,11 +792,11 @@ router.get('/reports/:id/checks', authMiddleware, async (req, res) => {
     ensureDbMigrations();
 
     // Get the active version
-    const version = await dbQuery(`
+    const version = (await dbQuery(`
       SELECT id as version_id FROM report_versions
       WHERE report_id = ${sqlValue(reportId)} AND is_active = ${dbBool(true)}
       LIMIT 1;
-    `)[0] as { version_id?: number } | undefined;
+    `))[0] as { version_id?: number } | undefined;
 
     if (!version?.version_id) {
       return res.status(404).json({ error: 'report_not_found' });
@@ -805,13 +805,13 @@ router.get('/reports/:id/checks', authMiddleware, async (req, res) => {
     const versionId = version.version_id;
 
     // Get latest run
-    const latestRun = await dbQuery(`
+    const latestRun = (await dbQuery(`
       SELECT id as run_id, status, engine_version, summary_json, created_at, finished_at
       FROM report_consistency_runs
       WHERE report_version_id = ${sqlValue(versionId)}
       ORDER BY id DESC
       LIMIT 1;
-    `)[0] as { run_id?: number; status?: string; engine_version?: string; summary_json?: string; created_at?: string; finished_at?: string } | undefined;
+    `))[0] as { run_id?: number; status?: string; engine_version?: string; summary_json?: string; created_at?: string; finished_at?: string } | undefined;
 
     // Build filter for items
     // By default: show items that need attention (FAIL/UNCERTAIN/NOT_ASSESSABLE) OR pending for review
@@ -832,14 +832,14 @@ router.get('/reports/:id/checks', authMiddleware, async (req, res) => {
     }
 
     // Get items grouped by group_key
-    const items = await dbQuery(`
+    const items = (await dbQuery(`
       SELECT id, group_key, check_key, fingerprint, title, expr,
              left_value, right_value, delta, tolerance, auto_status,
              evidence_json, human_status, human_comment, created_at, updated_at
       FROM report_consistency_items
       WHERE report_version_id = ${sqlValue(versionId)} AND ${itemFilter}
       ORDER BY group_key, id;
-    `) as Array<any>;
+    `)) as Array<any>;
 
     // Parse summary from run
     let runSummary = null;
@@ -850,12 +850,12 @@ router.get('/reports/:id/checks', authMiddleware, async (req, res) => {
     }
 
     // Count human statuses
-    const humanCounts = await dbQuery(`
-      SELECT human_status, COUNT(*) as cnt
+    const humanCounts = (await dbQuery(`
+      SELECT human_status, COUNT(*)) as cnt
       FROM report_consistency_items
       WHERE report_version_id = ${sqlValue(versionId)}
       GROUP BY human_status;
-    `) as Array<{ human_status: string; cnt: number }>;
+    `)) as Array<{ human_status: string; cnt: number }>;
 
     const humanStatusMap: Record<string, number> = {};
     for (const row of humanCounts) {
@@ -863,13 +863,13 @@ router.get('/reports/:id/checks', authMiddleware, async (req, res) => {
     }
 
     // Count pending items with FAIL status (active problems)
-    const pendingFailCount = await dbQuery(`
-      SELECT COUNT(*) as cnt
+    const pendingFailCount = (await dbQuery(`
+      SELECT COUNT(*)) as cnt
       FROM report_consistency_items
       WHERE report_version_id = ${sqlValue(versionId)}
         AND auto_status = 'FAIL'
         AND human_status = 'pending';
-    `) as Array<{ cnt: number }>;
+    `)) as Array<{ cnt: number }>;
     const activeProblemCount = pendingFailCount[0]?.cnt || 0;
 
     // Group items by group_key
@@ -877,7 +877,7 @@ router.get('/reports/:id/checks', authMiddleware, async (req, res) => {
       'table2': '表二数据',
       'table3': '表三数据',
       'table4': '表四数据',
-      'text': '正文一致�?,
+      'text': '正文一致',
       'visual': '表格审计',
       'structure': '结构审计',
       'quality': '语义审计',
@@ -955,7 +955,7 @@ router.get('/reports/:id/checks', authMiddleware, async (req, res) => {
   }
 });
 
-// 运行一致性校�?(入队 checks job)
+// Run consistency check (enqueue checks job)
 router.post('/reports/:id/checks/run', authMiddleware, async (req, res) => {
   try {
     const reportId = Number(req.params.id);
@@ -966,13 +966,13 @@ router.post('/reports/:id/checks/run', authMiddleware, async (req, res) => {
     ensureDbMigrations();
 
     // Get the active version
-    const version = await dbQuery(`
+    const version = (await dbQuery(`
       SELECT rv.id as version_id, r.region_id
       FROM report_versions rv
       JOIN reports r ON r.id = rv.report_id
       WHERE rv.report_id = ${sqlValue(reportId)} AND rv.is_active = ${dbBool(true)}
       LIMIT 1;
-    `)[0] as { version_id?: number; region_id?: number } | undefined;
+    `))[0] as { version_id?: number; region_id?: number } | undefined;
 
     if (!version?.version_id) {
       return res.status(404).json({ error: 'report_version_not_found' });
@@ -988,22 +988,22 @@ router.post('/reports/:id/checks/run', authMiddleware, async (req, res) => {
     const versionId = version.version_id;
 
     // Check for existing queued/running checks job
-    const existingJob = await dbQuery(`
+    const existingJob = (await dbQuery(`
       SELECT id FROM jobs
       WHERE report_id = ${sqlValue(reportId)} AND version_id = ${sqlValue(versionId)} AND kind = 'checks' AND status IN ('queued', 'running')
       LIMIT 1;
-    `)[0] as { id?: number } | undefined;
+    `))[0] as { id?: number } | undefined;
 
     if (existingJob?.id) {
       return res.json({ job_id: existingJob.id, reused: true });
     }
 
     // Create new checks job
-    const newJob = await dbQuery(`
+    const newJob = (await dbQuery(`
       INSERT INTO jobs (report_id, version_id, kind, status, progress)
       VALUES (${sqlValue(reportId)}, ${sqlValue(versionId)}, 'checks', 'queued', 0)
       RETURNING id;
-    `)[0] as { id?: number } | undefined;
+    `))[0] as { id?: number } | undefined;
 
     return res.status(201).json({ job_id: newJob?.id || null, reused: false });
   } catch (error: any) {
@@ -1012,7 +1012,7 @@ router.post('/reports/:id/checks/run', authMiddleware, async (req, res) => {
   }
 });
 
-// 更新校验项的人工状�?
+// Update manual status for check item
 router.patch('/reports/:id/checks/items/:itemId', authMiddleware, async (req, res) => {
   try {
     const reportId = Number(req.params.id);
@@ -1035,14 +1035,14 @@ router.patch('/reports/:id/checks/items/:itemId', authMiddleware, async (req, re
     ensureDbMigrations();
 
     // Verify item exists and belongs to this report
-    const item = await dbQuery(`
+    const item = (await dbQuery(`
       SELECT ci.id, rv.report_id, r.region_id
       FROM report_consistency_items ci
       JOIN report_versions rv ON rv.id = ci.report_version_id
       JOIN reports r ON r.id = rv.report_id
       WHERE ci.id = ${sqlValue(itemId)}
       LIMIT 1;
-    `)[0] as { id?: number; report_id?: number; region_id?: number } | undefined;
+    `))[0] as { id?: number; report_id?: number; region_id?: number } | undefined;
 
     if (!item?.id) {
       return res.status(404).json({ error: 'item_not_found' });
@@ -1105,7 +1105,7 @@ router.delete('/reports/:id', authMiddleware, async (req, res) => {
     }
 
     // Get all version IDs for this report
-    const versions = await dbQuery(`SELECT id FROM report_versions WHERE report_id = ${sqlValue(reportId)}`) as Array<{ id: number }>;
+    const versions = (await dbQuery(`SELECT id FROM report_versions WHERE report_id = ${sqlValue(reportId)}`)) as Array<{ id: number }>;
     const versionIds = versions.map(v => v.id);
 
     if (versionIds.length > 0) {
