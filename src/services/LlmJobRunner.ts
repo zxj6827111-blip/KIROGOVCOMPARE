@@ -6,31 +6,6 @@ import { summarizeDiff } from '../utils/jsonDiff';
 import { consistencyCheckService } from './ConsistencyCheckService';
 import axios from 'axios';
 
-// Database helper: get the correct datetime expression
-function getNowExpression(): string {
-  return dbType === 'postgres' ? 'NOW()' : "datetime('now')";
-}
-
-// Database helper: execute query for both PostgreSQL and SQLite
-async function dbQuery(sql: string, params?: any[]): Promise<any[]> {
-  if (dbType === 'postgres') {
-    const result = await pool.query(sql, params);
-    return result.rows;
-  } else {
-    return querySqlite(sql);
-  }
-}
-
-// Database helper: execute update/insert (returns affected rows for PostgreSQL)
-async function dbExecute(sql: string, params?: any[]): Promise<any[]> {
-  if (dbType === 'postgres') {
-    const result = await pool.query(sql, params);
-    return result.rows;
-  } else {
-    return querySqlite(sql);
-  }
-}
-
 interface QueuedJob {
   id: number;
   kind: string;
@@ -642,7 +617,7 @@ export class LlmJobRunner {
 
     // Run consistency checks
     try {
-      const { runId, items } = consistencyCheckService.runAndPersist(job.version_id, version.parsed_json);
+      const { runId, items } = await consistencyCheckService.runAndPersist(job.version_id, version.parsed_json);
       console.log(`[Job ${job.id}] Consistency checks completed: runId=${runId}, items=${items.length}`);
     } catch (error) {
       console.error('[Job ${job.id}] Consistency check failed:', error);
@@ -962,6 +937,7 @@ export class LlmJobRunner {
       this.parsedJsonColumnExists = true;
       return true;
     }
+
 
     // SQLite: check using PRAGMA
     const columns = querySqlite('PRAGMA table_info(report_versions);') as Array<{ name?: string }>;
