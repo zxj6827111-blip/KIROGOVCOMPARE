@@ -42,13 +42,13 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
         // 妫€鏌?comparison 鏄惁瀛樺湪
         const scopeClause = allowedRegionIds ? `AND reg.id IN (${allowedRegionIds.join(',')})` : '';
         const comparisonRows = await dbQuery(`
-      SELECT c.id, c.year_a, c.year_b, r.unit_name, reg.name as region_name
+      SELECT c.id, c.year_a, c.year_b, r.unit_name, reg.name as region_name, c.left_report_id
       FROM comparisons c
       JOIN reports r ON c.left_report_id = r.id
       JOIN regions reg ON r.region_id = reg.id
       WHERE c.id = ${sqlValue(comparison_id)}
       ${scopeClause};
-    `) as Array<{ id: number; year_a: number; year_b: number; unit_name: string; region_name: string }>;
+    `) as Array<{ id: number; year_a: number; year_b: number; unit_name: string; region_name: string; left_report_id: number }>;
 
         if (comparisonRows.length === 0) {
             return res.status(404).json({ error: 'Comparison not found' });
@@ -76,7 +76,7 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
         export_title,
         file_name
       ) VALUES (
-        0,
+        ${comparison.left_report_id},
         'pdf_export',
         'queued',
         0,
