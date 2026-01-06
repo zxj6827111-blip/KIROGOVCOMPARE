@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS report_versions (
   schema_version TEXT NOT NULL DEFAULT 'v1',
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (${dbNowExpression()}),
+  updated_at TEXT NOT NULL DEFAULT (${dbNowExpression()}),
   UNIQUE(report_id, file_hash)
 );
 
