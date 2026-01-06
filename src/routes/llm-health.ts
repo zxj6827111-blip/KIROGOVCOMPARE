@@ -33,10 +33,19 @@ router.get('/health', async (_req: Request, res: Response) => {
 
 router.get('/public-stats', async (_req: Request, res: Response) => {
   try {
-    const { querySqlite } = require('../config/sqlite');
+    let reportsCount = 0;
+    let regionsCount = 0;
 
-    const reportsCount = querySqlite('SELECT COUNT(*) as cnt FROM reports')[0]?.cnt || 0;
-    const regionsCount = querySqlite('SELECT COUNT(*) as cnt FROM regions')[0]?.cnt || 0;
+    if (dbType === 'postgres') {
+      const reportsResult = await pool.query('SELECT COUNT(*) as cnt FROM reports');
+      const regionsResult = await pool.query('SELECT COUNT(*) as cnt FROM regions');
+      reportsCount = parseInt(reportsResult.rows[0]?.cnt) || 0;
+      regionsCount = parseInt(regionsResult.rows[0]?.cnt) || 0;
+    } else {
+      const { querySqlite } = require('../config/sqlite');
+      reportsCount = querySqlite('SELECT COUNT(*) as cnt FROM reports')[0]?.cnt || 0;
+      regionsCount = querySqlite('SELECT COUNT(*) as cnt FROM regions')[0]?.cnt || 0;
+    }
 
     res.json({
       reports: reportsCount,
