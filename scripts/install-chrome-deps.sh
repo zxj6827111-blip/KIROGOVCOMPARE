@@ -8,6 +8,7 @@ echo "Installing Chrome/Puppeteer dependencies..."
 apt-get update
 
 # Install required libraries for headless Chrome
+# Chrome dependencies
 apt-get install -y \
     libnss3 \
     libnspr4 \
@@ -30,6 +31,17 @@ apt-get install -y \
     xdg-utils \
     wget \
     ca-certificates
+
+# Chinese fonts for PDF export (fixes □□□ display issue)
+echo "Installing Chinese fonts..."
+apt-get install -y \
+    fonts-noto-cjk \
+    fonts-noto-cjk-extra \
+    fonts-wqy-zenhei \
+    fonts-wqy-microhei
+
+# Rebuild font cache
+fc-cache -fv
 
 # Alternative minimal set if above fails
 # apt-get install -y libatk1.0-0 libatk-bridge2.0-0 libcups2 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2

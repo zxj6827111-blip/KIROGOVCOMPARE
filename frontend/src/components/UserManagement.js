@@ -61,11 +61,11 @@ export default function UserManagement() {
         }
     };
 
-    // Derived Selection Options
-    const provinces = useMemo(() => regions.filter(r => r.level === 1), [regions]);
-    const cities = useMemo(() => selectedProvince ? regions.filter(r => Number(r.parent_id) === parseInt(selectedProvince)) : [], [regions, selectedProvince]);
-    const districts = useMemo(() => selectedCity ? regions.filter(r => Number(r.parent_id) === parseInt(selectedCity)) : [], [regions, selectedCity]);
-    const streets = useMemo(() => selectedDistrict ? regions.filter(r => Number(r.parent_id) === parseInt(selectedDistrict)) : [], [regions, selectedDistrict]);
+    // Derived Selection Options - use Number/String coercion for Postgres compatibility
+    const provinces = useMemo(() => regions.filter(r => Number(r.level) === 1), [regions]);
+    const cities = useMemo(() => selectedProvince ? regions.filter(r => String(r.parent_id) === String(selectedProvince)) : [], [regions, selectedProvince]);
+    const districts = useMemo(() => selectedCity ? regions.filter(r => String(r.parent_id) === String(selectedCity)) : [], [regions, selectedCity]);
+    const streets = useMemo(() => selectedDistrict ? regions.filter(r => String(r.parent_id) === String(selectedDistrict)) : [], [regions, selectedDistrict]);
 
     // Handle cascading changes
     const handleProvinceChange = (e) => {
