@@ -516,9 +516,19 @@ router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
     }
 
     // Fill in actual counts
-    const versionToReport = new Map(Array.from(versionMap.entries()).map(([rid, vid]) => [vid, rid]));
-    for (const gc of groupCounts) {
-      const reportId = versionToReport.get(gc.report_version_id);
+    // CRITICAL: Postgres returns strings for version IDs, so we must normalize both keys and lookups
+    const versionToReport = new Map<number, number>();
+    for (const [rid, vid] of versionMap) {
+      versionToReport.set(Number(vid), Number(rid));
+    }
+    
+    console.log('[BatchCheckStatus] Group counts:', typedGroupCounts.length, 'items');
+    
+    for (const gc of typedGroupCounts) {
+      // Normalize report_version_id to number for Map lookup
+      const vid = Number(gc.report_version_id);
+      const reportId = versionToReport.get(vid);
+      console.log(`[BatchCheckStatus] Processing: vid=${vid}, reportId=${reportId}, group=${gc.group_key}, cnt=${gc.cnt}`);
       if (reportId) {
         const key = String(reportId);
         const cnt = Number(gc.cnt);
