@@ -47,7 +47,6 @@ async function main() {
                     display_name VARCHAR(255),
                     permissions JSONB DEFAULT '[]',
                     data_scope JSONB DEFAULT '{}',
-                    is_admin BOOLEAN DEFAULT false,
                     created_at TIMESTAMP DEFAULT NOW(),
                     updated_at TIMESTAMP DEFAULT NOW()
                 )
@@ -57,7 +56,7 @@ async function main() {
             console.log('   ✓ admin_users table exists');
         }
         
-        // Step 2: Create/update admin user
+        // Step 2: Create/update admin user (using only columns that definitely exist)
         console.log('\n📋 Setting up admin user...');
         const newHash = hashPassword('admin123');
         
@@ -67,14 +66,14 @@ async function main() {
         
         if (userCheck.rows.length === 0) {
             await client.query(`
-                INSERT INTO admin_users (username, password_hash, display_name, is_admin, permissions)
-                VALUES ('admin', $1, 'System Admin', true, '["all"]')
+                INSERT INTO admin_users (username, password_hash, display_name, created_at, updated_at)
+                VALUES ('admin', $1, 'System Admin', NOW(), NOW())
             `, [newHash]);
             console.log('   ✓ Admin user created');
         } else {
             await client.query(`
                 UPDATE admin_users 
-                SET password_hash = $1, is_admin = true, permissions = '["all"]', updated_at = NOW() 
+                SET password_hash = $1, updated_at = NOW() 
                 WHERE username = 'admin'
             `, [newHash]);
             console.log('   ✓ Admin user password reset');
