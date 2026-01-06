@@ -120,6 +120,7 @@ async function fixSchema() {
     
     console.log('\n📋 Fixing report_versions table columns...');
     await addColumnIfNotExists(client, 'report_versions', 'raw_text', 'TEXT');
+    await addColumnIfNotExists(client, 'report_versions', 'updated_at', 'TIMESTAMPTZ DEFAULT NOW()');
     
     console.log('\n✅ Schema fix complete!');
     console.log('\n📝 Next steps:');

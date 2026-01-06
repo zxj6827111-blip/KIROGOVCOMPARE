@@ -228,7 +228,8 @@ CREATE TABLE IF NOT EXISTS report_versions (
   parsed_json JSONB NOT NULL,
   schema_version VARCHAR(50) NOT NULL DEFAULT 'v1',
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_report_versions_report_file
