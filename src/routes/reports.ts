@@ -484,7 +484,7 @@ router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
       FROM report_consistency_items
       WHERE report_version_id IN (${versionIds.join(',')})
         AND auto_status = 'FAIL'
-        AND human_status != 'dismissed'
+        AND (human_status != 'dismissed' OR human_status IS NULL)
       GROUP BY report_version_id, group_key
     `)) as Array<{ report_version_id: number; group_key: string; cnt: number }>;
 
@@ -508,14 +508,15 @@ router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
       const reportId = versionToReport.get(gc.report_version_id);
       if (reportId) {
         const key = String(reportId);
-        result[key].total += gc.cnt;
+        const cnt = Number(gc.cnt);
+        result[key].total += cnt;
         if (gc.group_key === 'visual') {
-          result[key].visual += gc.cnt;
+          result[key].visual += cnt;
         } else if (['structure', 'table2', 'table3', 'table4', 'text'].includes(gc.group_key)) {
           // Merge structure, tables, and text checks into "Structure/Consistency" (勾稽)
-          result[key].structure += gc.cnt;
+          result[key].structure += cnt;
         } else if (gc.group_key === 'quality') {
-          result[key].quality += gc.cnt;
+          result[key].quality += cnt;
         }
       }
     }
