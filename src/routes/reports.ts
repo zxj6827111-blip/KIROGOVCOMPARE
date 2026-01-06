@@ -3,7 +3,7 @@ import multer from 'multer';
 import fs from 'fs';
 import fsPromises from 'fs/promises';
 import path from 'path';
-import { dbBool, dbNowExpression, dbQuery, ensureDbMigrations, parseDbJson } from '../config/db-llm';
+import { dbBool, dbNowExpression, dbQuery, dbType, ensureDbMigrations, parseDbJson } from '../config/db-llm';
 import { PROJECT_ROOT, UPLOADS_TMP_DIR, sqlValue } from '../config/sqlite';
 import { reportUploadService } from '../services/ReportUploadService';
 import { ValidationIssue } from '../types/models';
