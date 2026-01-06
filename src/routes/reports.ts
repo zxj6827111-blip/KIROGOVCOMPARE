@@ -241,6 +241,53 @@ router.post('/reports/text', authMiddleware, requirePermission('upload_reports')
   }
 });
 
+router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('upload_reports'), async (req: AuthRequest, res) => {
+  try {
+    const reportId = Number(req.params.id);
+    const { parsed_json } = req.body;
+
+    if (!reportId || isNaN(reportId)) {
+      return res.status(400).json({ error: 'Invalid report ID' });
+    }
+
+    if (!parsed_json || typeof parsed_json !== 'object') {
+      return res.status(400).json({ error: 'Invalid parsed_json format' });
+    }
+
+    // 1. Find the latest active version for this report
+    const versions = await dbQuery(
+      `SELECT id FROM report_versions 
+       WHERE report_id = ${dbType === 'postgres' ? '$1' : '?'} 
+       AND is_active = ${dbBool(true)} 
+       ORDER BY created_at DESC LIMIT 1`,
+      [reportId]
+    );
+
+    if (versions.length === 0) {
+      return res.status(404).json({ error: 'No active version found for this report' });
+    }
+
+    const versionId = versions[0].id;
+    const jsonStr = JSON.stringify(parsed_json);
+
+    // 2. Update the version's parsed_json
+    await dbQuery(
+      `UPDATE report_versions 
+       SET parsed_json = ${dbType === 'postgres' ? '$1' : '?'}, 
+           updated_at = ${dbNowExpression()} 
+       WHERE id = ${dbType === 'postgres' ? '$2' : '?'}`,
+      [jsonStr, versionId]
+    );
+
+    console.log(`[ParsedDataParams] Updated parsed_json for report ${reportId} (version ${versionId})`);
+
+    return res.json({ success: true, version_id: versionId });
+  } catch (error) {
+    console.error('Error updating parsed data:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.get('/reports', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { region_id, year, unit_name } = req.query;
