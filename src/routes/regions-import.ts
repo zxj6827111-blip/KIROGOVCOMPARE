@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import * as XLSX from 'xlsx';
 import { querySqlite, sqlValue, ensureSqliteMigrations } from '../config/sqlite';
+import pool, { dbType } from '../config/database-llm';
 import { authMiddleware, AuthRequest, requirePermission } from '../middleware/auth';
 
 const router = express.Router();
@@ -91,7 +92,10 @@ router.post('/import', authMiddleware, requirePermission('manage_cities'), uploa
       return res.status(400).json({ error: '请上传文件' });
     }
 
-    ensureSqliteMigrations();
+    // Only run SQLite migrations if using SQLite
+    if (dbType === 'sqlite') {
+      ensureSqliteMigrations();
+    }
 
     let wb: XLSX.WorkBook;
 
@@ -147,11 +151,17 @@ router.post('/import', authMiddleware, requirePermission('manage_cities'), uploa
     const errors: string[] = [];
     const regionCache: Map<string, number> = new Map();
 
-    // Load existing regions into cache
-    const existingRegions = querySqlite('SELECT id, name, level, parent_id FROM regions ORDER BY level');
+    // Load existing regions into cache (support both SQLite and PostgreSQL)
+    let existingRegions: any[] = [];
+    if (dbType === 'postgres') {
+      const result = await pool.query('SELECT id, name, level, parent_id FROM regions ORDER BY level');
+      existingRegions = result.rows;
+    } else {
+      existingRegions = querySqlite('SELECT id, name, level, parent_id FROM regions ORDER BY level');
+    }
     for (const r of existingRegions) {
       const key = `${r.level}_${r.name}_${r.parent_id || 'null'}`;
-      regionCache.set(key, r.id);
+      regionCache.set(key, Number(r.id));
     }
 
     // Prepare data structures for level-based processing
@@ -164,31 +174,49 @@ router.post('/import', authMiddleware, requirePermission('manage_cities'), uploa
     // Helper to generate cache key
     const genKey = (level: number, name: string, parentId: number | null) => `${level}_${name}_${parentId || 'null'}`;
 
-    // Helper to batch insert
-    const batchInsert = (items: { name: string, level: number, parentId: number | null }[]) => {
+    // Helper to batch insert (async for PostgreSQL)
+    const batchInsert = async (items: { name: string, level: number, parentId: number | null }[]) => {
       if (items.length === 0) return;
 
-      const values = items.map(item => {
-        const code = `import_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-        return `(${sqlValue(code)}, ${sqlValue(item.name)}, ${sqlValue(item.level)}, ${item.parentId ? sqlValue(item.parentId) : 'NULL'})`;
-      });
+      if (dbType === 'postgres') {
+        // PostgreSQL: Use parameterized batch insert
+        for (const item of items) {
+          const code = `import_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+          await pool.query(
+            'INSERT INTO regions (code, name, level, parent_id) VALUES ($1, $2, $3, $4)',
+            [code, item.name, item.level, item.parentId]
+          );
+        }
+      } else {
+        // SQLite: Use string concatenation for batch insert
+        const values = items.map(item => {
+          const code = `import_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+          return `(${sqlValue(code)}, ${sqlValue(item.name)}, ${sqlValue(item.level)}, ${item.parentId ? sqlValue(item.parentId) : 'NULL'})`;
+        });
 
-      // SQLite limit is usually 999 vars, but we are concatenating strings, so limit is SQL length.
-      // Split into safe chunks (e.g. 500 rows)
-      const CHUNK = 200;
-      for (let i = 0; i < values.length; i += CHUNK) {
-        const chunkValues = values.slice(i, i + CHUNK);
-        const sql = `INSERT INTO regions (code, name, level, parent_id) VALUES ${chunkValues.join(',')}`;
-        querySqlite(sql);
+        // SQLite limit is usually 999 vars, but we are concatenating strings, so limit is SQL length.
+        // Split into safe chunks (e.g. 500 rows)
+        const CHUNK = 200;
+        for (let i = 0; i < values.length; i += CHUNK) {
+          const chunkValues = values.slice(i, i + CHUNK);
+          const sql = `INSERT INTO regions (code, name, level, parent_id) VALUES ${chunkValues.join(',')}`;
+          querySqlite(sql);
+        }
       }
     };
 
-    // Helper to refresh cache for a specific level
-    const refreshCache = (level: number) => {
-      const rows = querySqlite(`SELECT id, name, parent_id FROM regions WHERE level = ${level}`);
+    // Helper to refresh cache for a specific level (async for PostgreSQL)
+    const refreshCache = async (level: number) => {
+      let rows: any[] = [];
+      if (dbType === 'postgres') {
+        const result = await pool.query('SELECT id, name, parent_id FROM regions WHERE level = $1', [level]);
+        rows = result.rows;
+      } else {
+        rows = querySqlite(`SELECT id, name, parent_id FROM regions WHERE level = ${level}`);
+      }
       for (const r of rows) {
         const key = genKey(level, r.name, r.parent_id);
-        regionCache.set(key, r.id);
+        regionCache.set(key, Number(r.id));
       }
     };
 
@@ -211,8 +239,8 @@ router.post('/import', authMiddleware, requirePermission('manage_cities'), uploa
 
     if (pendingL1.size > 0) {
       sendProgress({ percentage: 20, current: 0, total: totalRows, message: '正在创建一级行政区...' });
-      batchInsert(Array.from(pendingL1.values()).map(v => ({ name: v.name, level: 1, parentId: null })));
-      refreshCache(1);
+      await batchInsert(Array.from(pendingL1.values()).map(v => ({ name: v.name, level: 1, parentId: null })));
+      await refreshCache(1);
     }
 
     // L2
@@ -243,8 +271,8 @@ router.post('/import', authMiddleware, requirePermission('manage_cities'), uploa
 
     if (pendingL2.size > 0) {
       sendProgress({ percentage: 40, current: 0, total: totalRows, message: '正在创建二级行政区...' });
-      batchInsert(Array.from(pendingL2.values()).map(v => ({ name: v.name, level: 2, parentId: v.parentId })));
-      refreshCache(2);
+      await batchInsert(Array.from(pendingL2.values()).map(v => ({ name: v.name, level: 2, parentId: v.parentId })));
+      await refreshCache(2);
     }
 
     // L3
@@ -293,8 +321,8 @@ router.post('/import', authMiddleware, requirePermission('manage_cities'), uploa
 
     if (pendingL3.size > 0) {
       sendProgress({ percentage: 60, current: 0, total: totalRows, message: '正在创建三级行政区...' });
-      batchInsert(Array.from(pendingL3.values()).map(v => ({ name: v.name, level: 3, parentId: v.parentId })));
-      refreshCache(3);
+      await batchInsert(Array.from(pendingL3.values()).map(v => ({ name: v.name, level: 3, parentId: v.parentId })));
+      await refreshCache(3);
     }
 
     // L4
@@ -334,7 +362,7 @@ router.post('/import', authMiddleware, requirePermission('manage_cities'), uploa
 
     if (pendingL4.size > 0) {
       sendProgress({ percentage: 80, current: 0, total: totalRows, message: '正在创建四级行政区...' });
-      batchInsert(Array.from(pendingL4.values()).map(v => ({ name: v.name, level: 4, parentId: v.parentId })));
+      await batchInsert(Array.from(pendingL4.values()).map(v => ({ name: v.name, level: 4, parentId: v.parentId })));
       // No need to refresh cache for L4 as it's the last level
     }
 
@@ -374,16 +402,30 @@ router.post('/import', authMiddleware, requirePermission('manage_cities'), uploa
  * GET /api/regions/export
  * Export all regions to Excel
  */
-router.get('/export', authMiddleware, requirePermission('manage_cities'), (_req: AuthRequest, res: Response) => {
+router.get('/export', authMiddleware, requirePermission('manage_cities'), async (_req: AuthRequest, res: Response) => {
   try {
-    ensureSqliteMigrations();
+    // Only run SQLite migrations if using SQLite
+    if (dbType === 'sqlite') {
+      ensureSqliteMigrations();
+    }
 
-    const regions = querySqlite(`
-      SELECT r.id, r.name, r.level, r.parent_id, p.name as parent_name
-      FROM regions r
-      LEFT JOIN regions p ON r.parent_id = p.id
-      ORDER BY r.level, r.id
-    `);
+    let regions: any[] = [];
+    if (dbType === 'postgres') {
+      const result = await pool.query(`
+        SELECT r.id, r.name, r.level, r.parent_id, p.name as parent_name
+        FROM regions r
+        LEFT JOIN regions p ON r.parent_id = p.id
+        ORDER BY r.level, r.id
+      `);
+      regions = result.rows;
+    } else {
+      regions = querySqlite(`
+        SELECT r.id, r.name, r.level, r.parent_id, p.name as parent_name
+        FROM regions r
+        LEFT JOIN regions p ON r.parent_id = p.id
+        ORDER BY r.level, r.id
+      `);
+    }
 
     // Build hierarchical data
     const data: string[][] = [['省份', '城市', '区县', '街道']];
