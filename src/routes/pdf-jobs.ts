@@ -57,11 +57,11 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
         const comparison = comparisonRows[0];
 
         // 鐢熸垚浠诲姟鏍囬
-        const exportTitle = title || `${comparison.region_name} ${comparison.year_a}-${comparison.year_b} 骞存姤瀵规瘮`;
+        const exportTitle = title || `${comparison.region_name} ${comparison.year_a}-${comparison.year_b} 年报比对`;
 
-        // 鐢熸垚鏂囦欢鍚?(鍦板尯_骞翠唤A-骞翠唤B.pdf)
-        const safeRegionName = (comparison.region_name || '鏈煡鍦板尯').replace(/[\\/:*?"<>|]/g, '_');
-        const fileName = `${safeRegionName}_${comparison.year_a}-${comparison.year_b}骞存姤瀵规瘮.pdf`;
+        // 生成文件名 (地区_年份A-年份B.pdf)
+        const safeRegionName = (comparison.region_name || '未知地区').replace(/[\\/:*?"<>|]/g, '_');
+        const fileName = `${safeRegionName}_${comparison.year_a}-${comparison.year_b}年报比对.pdf`;
 
         // 鍒涘缓 PDF 瀵煎嚭浠诲姟
         const result = await dbQuery(`
@@ -81,7 +81,7 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
         'queued',
         0,
         'QUEUED',
-        '绛夊緟澶勭悊',
+        '等待处理',
         ${sqlValue(comparison_id)},
         ${sqlValue(exportTitle)},
         ${sqlValue(fileName)}
@@ -95,7 +95,7 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
         return res.status(201).json({
             success: true,
             job_id: jobId,
-            message: 'PDF 瀵煎嚭浠诲姟宸插垱寤猴紝璇峰墠寰€浠诲姟涓績鏌ョ湅杩涘害',
+            message: 'PDF 导出任务已创建，请前往任务中心查看进度',
             export_title: exportTitle,
             file_name: fileName
         });
@@ -277,7 +277,7 @@ router.get('/:id/download', authMiddleware, async (req: AuthRequest, res: Respon
             // 鏂囦欢宸茶娓呯悊锛岄渶瑕侀噸鏂扮敓鎴?
             return res.status(410).json({
                 error: 'File expired',
-                message: '鏂囦欢宸茶繃鏈熻娓呯悊锛岃閲嶆柊鐢熸垚',
+                message: '文件已过期被清理，请重新生成',
                 comparison_id: job.comparison_id,
                 needs_regeneration: true
             });
@@ -398,7 +398,7 @@ router.post('/:id/regenerate', authMiddleware, async (req: AuthRequest, res: Res
         status = 'queued',
         progress = 0,
         step_code = 'QUEUED',
-        step_name = '绛夊緟澶勭悊',
+        step_name = '等待处理',
         file_path = NULL,
         file_size = NULL,
         file_name = ${sqlValue(fileName)},
@@ -463,19 +463,19 @@ router.post('/batch-download', authMiddleware, async (req: AuthRequest, res: Res
         }>;
 
         if (jobs.length === 0) {
-            return res.status(404).json({ error: '娌℃湁鍙笅杞界殑鏂囦欢' });
+            return res.status(404).json({ error: '没有可下载的文件' });
         }
 
         // 妫€鏌ユ枃浠舵槸鍚﹀瓨鍦?
         const existingFiles = jobs.filter(job => fs.existsSync(job.file_path));
 
         if (existingFiles.length === 0) {
-            return res.status(404).json({ error: '鎵€鏈夋枃浠跺凡杩囨湡锛岃閲嶆柊鐢熸垚' });
+            return res.status(404).json({ error: '所有文件已过期，请重新生成' });
         }
 
         // 鐢熸垚 ZIP 鏂囦欢鍚?
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        const zipFileName = `姣斿鎶ュ憡鎵归噺涓嬭浇_${timestamp}.zip`;
+        const zipFileName = `比对报告批量下载_${timestamp}.zip`;
 
         // 璁剧疆鍝嶅簲澶?
         res.setHeader('Content-Type', 'application/zip');
@@ -496,7 +496,7 @@ router.post('/batch-download', authMiddleware, async (req: AuthRequest, res: Res
 
         // 娣诲姞鏂囦欢鍒?ZIP
         for (const job of existingFiles) {
-            const fileName = job.file_name || `姣斿鎶ュ憡_${job.id}.pdf`;
+            const fileName = job.file_name || `比对报告_${job.id}.pdf`;
             archive.file(job.file_path, { name: fileName });
         }
 

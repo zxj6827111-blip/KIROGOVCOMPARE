@@ -107,7 +107,7 @@ router.get('/history', authMiddleware, async (req: AuthRequest, res: Response) =
       data: comparisons.map((c: any) => ({
         id: c.id,
         regionId: c.region_id,
-        regionName: c.region_name || '鏈煡鍦板尯',
+        regionName: c.region_name || '未知地区',
         yearA: c.year_a,
         yearB: c.year_b,
         leftReportId: c.left_report_id,
@@ -282,11 +282,11 @@ router.get('/:id/result', authMiddleware, async (req: AuthRequest, res: Response
         const allowedRows = await dbQuery(scopeIdsQuery);
         const allowedIds = allowedRows.map((row: any) => row.id);
         if (!allowedIds.includes(Number(comparison.region_id))) {
-          return res.status(403).json({ error: '鏃犳潈闄愯闂鍦板尯' });
+          return res.status(403).json({ error: '无权限访问该地区' });
         }
       } catch (e) {
         console.error('Error calculating scope IDs in comparison result:', e);
-        return res.status(403).json({ error: '鏃犳潈闄愯闂鍦板尯' });
+        return res.status(403).json({ error: '无权限访问该地区' });
       }
     }
 
@@ -419,11 +419,11 @@ router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Res
         const allowedRows = await dbQuery(scopeIdsQuery);
         const allowedIds = allowedRows.map((row: any) => row.id);
         if (!allowedIds.includes(Number(comparison.region_id))) {
-          return res.status(403).json({ error: '鏃犳潈闄愯闂鍦板尯' });
+          return res.status(403).json({ error: '无权限访问该地区' });
         }
       } catch (e) {
         console.error('Error calculating scope IDs in comparison export:', e);
-        return res.status(403).json({ error: '鏃犳潈闄愯闂鍦板尯' });
+        return res.status(403).json({ error: '无权限访问该地区' });
       }
     }
 
@@ -577,11 +577,11 @@ router.get('/:id/exports', authMiddleware, async (req: AuthRequest, res: Respons
         const allowedRows = await dbQuery(scopeIdsQuery);
         const allowedIds = allowedRows.map((row: any) => row.id);
         if (!allowedIds.includes(Number(comparison.region_id))) {
-          return res.status(403).json({ error: '鏃犳潈闄愯闂鍦板尯' });
+          return res.status(403).json({ error: '无权限访问该地区' });
         }
       } catch (e) {
         console.error('Error calculating scope IDs in comparison exports:', e);
-        return res.status(403).json({ error: '鏃犳潈闄愯闂鍦板尯' });
+        return res.status(403).json({ error: '无权限访问该地区' });
       }
     }
 
