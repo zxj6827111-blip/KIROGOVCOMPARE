@@ -443,12 +443,17 @@ router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
     }
 
     // Get active version_ids for these reports + check parsed_json
-    const versionRows = (await dbQuery(`
+    // Try using integer 1 for is_active since the column might be INTEGER even in Postgres
+    const isActiveCondition = dbType === 'postgres' ? `(rv.is_active = true OR rv.is_active::integer = 1)` : `rv.is_active = 1`;
+    const versionQuery = `
       SELECT r.id as report_id, rv.id as version_id, rv.parsed_json
       FROM reports r
-      JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = ${dbBool(true)}
+      JOIN report_versions rv ON rv.report_id = r.id AND ${isActiveCondition}
       WHERE r.id IN (${reportIds.join(',')})
-    `)) as Array<{ report_id: number; version_id: number; parsed_json: string | null }>;
+    `;
+    console.log('[BatchCheckStatus] Query:', versionQuery.slice(0, 200));
+    const versionRows = (await dbQuery(versionQuery)) as Array<{ report_id: number; version_id: number; parsed_json: string | null }>;
+    console.log('[BatchCheckStatus] Version rows found:', versionRows.length);
 
     const versionMap = new Map(versionRows.map(v => [v.report_id, v.version_id]));
 
