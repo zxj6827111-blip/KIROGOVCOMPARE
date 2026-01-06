@@ -480,7 +480,7 @@ router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
     }
 
     const groupCounts = (await dbQuery(`
-      SELECT report_version_id, group_key, COUNT(*)) as cnt
+      SELECT report_version_id, group_key, COUNT(*) as cnt
       FROM report_consistency_items
       WHERE report_version_id IN (${versionIds.join(',')})
         AND auto_status = 'FAIL'
