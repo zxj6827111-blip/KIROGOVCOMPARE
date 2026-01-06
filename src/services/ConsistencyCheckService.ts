@@ -1,5 +1,6 @@
 import crypto from 'crypto';
-import { ensureSqliteMigrations, querySqlite, sqlValue } from '../config/sqlite';
+import { dbExecute, dbNowExpression, dbQuery, ensureDbMigrations } from '../config/db-llm';
+import { sqlValue } from '../config/sqlite';
 
 // Types for parsed JSON structure
 interface EntityResults {
@@ -992,13 +993,13 @@ export class ConsistencyCheckService {
     /**
      * Run checks and persist to database. Uses upsert to preserve human_status.
      */
-    public runAndPersist(reportVersionId: number, parsedJson: any): { runId: number; items: ConsistencyItem[] } {
-        ensureSqliteMigrations();
+    public async runAndPersist(reportVersionId: number, parsedJson: any): Promise<{ runId: number; items: ConsistencyItem[] }> {
+        ensureDbMigrations();
 
-        // Create a new run record
-        const runResult = querySqlite(`
+        const nowExpr = dbNowExpression();
+        const runResult = await dbQuery(`
       INSERT INTO report_consistency_runs (report_version_id, status, engine_version, created_at)
-      VALUES (${sqlValue(reportVersionId)}, 'running', ${sqlValue(ENGINE_VERSION)}, datetime('now'))
+      VALUES (${sqlValue(reportVersionId)}, 'running', ${sqlValue(ENGINE_VERSION)}, ${nowExpr})
       RETURNING id;
     `);
 
@@ -1013,7 +1014,7 @@ export class ConsistencyCheckService {
         for (const item of items) {
             const evidenceStr = JSON.stringify(item.evidenceJson);
 
-            querySqlite(`
+            await dbExecute(`
         INSERT INTO report_consistency_items (
           run_id, report_version_id, group_key, check_key, fingerprint,
           title, expr, left_value, right_value, delta, tolerance, auto_status,
@@ -1021,7 +1022,7 @@ export class ConsistencyCheckService {
         ) VALUES (
           ${sqlValue(runId)}, ${sqlValue(reportVersionId)}, ${sqlValue(item.groupKey)}, ${sqlValue(item.checkKey)}, ${sqlValue(item.fingerprint)},
           ${sqlValue(item.title)}, ${sqlValue(item.expr)}, ${sqlValue(item.leftValue)}, ${sqlValue(item.rightValue)}, ${sqlValue(item.delta)}, ${sqlValue(item.tolerance)}, ${sqlValue(item.autoStatus)},
-          ${sqlValue(evidenceStr)}, 'pending', datetime('now'), datetime('now')
+          ${sqlValue(evidenceStr)}, 'pending', ${nowExpr}, ${nowExpr}
         )
         ON CONFLICT(report_version_id, fingerprint) DO UPDATE SET
           run_id = excluded.run_id,
@@ -1036,13 +1037,13 @@ export class ConsistencyCheckService {
           evidence_json = excluded.evidence_json,
           human_status = 'pending',
           human_comment = NULL,
-          updated_at = datetime('now');
+          updated_at = ${nowExpr};
       `);
         }
 
         // Delete stale items that were not updated in this run
         // This handles the case where a rule was removed
-        querySqlite(`
+        await dbExecute(`
           DELETE FROM report_consistency_items
           WHERE report_version_id = ${sqlValue(reportVersionId)}
             AND run_id != ${sqlValue(runId)};
@@ -1057,9 +1058,9 @@ export class ConsistencyCheckService {
             total: items.length,
         };
 
-        querySqlite(`
+        await dbExecute(`
       UPDATE report_consistency_runs
-      SET status = 'succeeded', summary_json = ${sqlValue(JSON.stringify(summary))}, finished_at = datetime('now')
+      SET status = 'succeeded', summary_json = ${sqlValue(JSON.stringify(summary))}, finished_at = ${nowExpr}
       WHERE id = ${sqlValue(runId)};
     `);
 

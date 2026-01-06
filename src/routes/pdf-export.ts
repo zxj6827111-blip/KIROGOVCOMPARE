@@ -2,7 +2,8 @@ import express, { Response, Router } from 'express';
 import puppeteer from 'puppeteer';
 import http from 'http';
 import path from 'path';
-import { ensureSqliteMigrations, querySqlite, sqlValue } from '../config/sqlite';
+import { dbQuery, ensureDbMigrations } from '../config/db-llm';
+import { sqlValue } from '../config/sqlite';
 import { authMiddleware, AuthRequest, generateExpiringToken } from '../middleware/auth';
 import { getAllowedRegionIds } from '../utils/dataScope';
 
@@ -80,14 +81,14 @@ router.get('/:id/pdf', authMiddleware, async (req: AuthRequest, res: Response) =
             return res.status(401).json({ error: 'unauthorized' });
         }
 
-        ensureSqliteMigrations();
+        ensureDbMigrations();
 
         const allowedRegionIds = getAllowedRegionIds(req.user);
         if (allowedRegionIds && allowedRegionIds.length === 0) {
             return res.status(403).json({ error: 'forbidden' });
         }
 
-        const comparisonRows = querySqlite(`
+        const comparisonRows = await dbQuery(`
             SELECT c.id, lr.region_id as left_region_id, rr.region_id as right_region_id
             FROM comparisons c
             JOIN reports lr ON c.left_report_id = lr.id

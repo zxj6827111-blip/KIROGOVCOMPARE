@@ -1,16 +1,17 @@
-import express from 'express';
-import { ensureSqliteMigrations, querySqlite, sqlValue } from '../config/sqlite';
+﻿import express from 'express';
+import { dbNowExpression, dbQuery, ensureDbMigrations, parseDbJson } from '../config/db-llm';
+import { sqlValue } from '../config/sqlite';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { getAllowedRegionIds } from '../utils/dataScope';
 
 const router = express.Router();
 router.use(authMiddleware);
 
-function isNotificationAllowed(
+async function isNotificationAllowed(
     notification: { related_version_id?: number; related_job_id?: number; created_by?: number },
     allowedRegionIds: number[] | null,
     userId: number
-): boolean {
+): Promise<boolean> {
     if (!allowedRegionIds) return true;
     if (allowedRegionIds.length === 0) return false;
 
@@ -19,19 +20,19 @@ function isNotificationAllowed(
     }
 
     if (notification.related_version_id) {
-        const row = querySqlite(`
+        const row = (await dbQuery(`
       SELECT 1
       FROM report_versions rv
       JOIN reports r ON rv.report_id = r.id
       WHERE rv.id = ${sqlValue(notification.related_version_id)}
         AND r.region_id IN (${allowedRegionIds.join(',')})
       LIMIT 1;
-    `)[0];
+    `))[0];
         return !!row;
     }
 
     if (notification.related_job_id) {
-        const row = querySqlite(`
+        const row = (await dbQuery(`
       SELECT 1
       FROM jobs j
       JOIN report_versions rv ON j.version_id = rv.id
@@ -39,7 +40,7 @@ function isNotificationAllowed(
       WHERE j.id = ${sqlValue(notification.related_job_id)}
         AND r.region_id IN (${allowedRegionIds.join(',')})
       LIMIT 1;
-    `)[0];
+    `))[0];
         return !!row;
     }
 
@@ -51,9 +52,9 @@ function isNotificationAllowed(
  * List notifications
  * Query params: unread_only (0|1)
  */
-router.get('/notifications', (req, res) => {
+router.get('/notifications', async (req, res) => {
     try {
-        ensureSqliteMigrations();
+        ensureDbMigrations();
 
         const { unread_only } = req.query;
         const authReq = req as AuthRequest;
@@ -87,7 +88,7 @@ router.get('/notifications', (req, res) => {
 
         const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-        const notifications = querySqlite(`
+        const notifications = await dbQuery(`
       SELECT 
         id,
         type,
@@ -116,11 +117,7 @@ router.get('/notifications', (req, res) => {
         // Parse content_json for easier frontend consumption
         const parsedNotifications = notifications.map((n) => {
             let content = {};
-            try {
-                content = JSON.parse(n.content_json);
-            } catch (error) {
-                console.error(`Failed to parse notification ${n.id} content_json:`, error);
-            }
+            content = parseDbJson(n.content_json) || {};
 
             return {
                 id: n.id,
@@ -148,9 +145,9 @@ router.get('/notifications', (req, res) => {
  * POST /api/notifications/:id/read
  * Mark a notification as read
  */
-router.post('/notifications/:id/read', (req, res) => {
+router.post('/notifications/:id/read', async (req, res) => {
     try {
-        ensureSqliteMigrations();
+        ensureDbMigrations();
 
         const notificationId = Number(req.params.id);
         if (Number.isNaN(notificationId)) {
@@ -164,17 +161,17 @@ router.post('/notifications/:id/read', (req, res) => {
         }
 
         // Check if notification exists
-        const notification = querySqlite(`
+        const notification = (await dbQuery(`
       SELECT id, read_at, related_job_id, related_version_id, created_by
       FROM notifications
       WHERE id = ${sqlValue(notificationId)} LIMIT 1;
-    `)[0] as { id: number; read_at?: string; related_job_id?: number; related_version_id?: number; created_by?: number } | undefined;
+    `))[0] as { id: number; read_at?: string; related_job_id?: number; related_version_id?: number; created_by?: number } | undefined;
 
         if (!notification) {
             return res.status(404).json({ error: 'Notification not found' });
         }
 
-        if (user && !isNotificationAllowed(notification, allowedRegionIds, user.id)) {
+        if (user && !(await isNotificationAllowed(notification, allowedRegionIds, user.id))) {
             return res.status(403).json({ error: 'forbidden' });
         }
 
@@ -183,9 +180,9 @@ router.post('/notifications/:id/read', (req, res) => {
         }
 
         // Mark as read
-        querySqlite(`
+        await dbQuery(`
       UPDATE notifications
-      SET read_at = datetime('now')
+      SET read_at = ${dbNowExpression()}
       WHERE id = ${sqlValue(notificationId)};
     `);
 
@@ -200,9 +197,9 @@ router.post('/notifications/:id/read', (req, res) => {
  * POST /api/notifications/read-all
  * Mark all notifications as read
  */
-router.post('/notifications/read-all', (req, res) => {
+router.post('/notifications/read-all', async (req, res) => {
     try {
-        ensureSqliteMigrations();
+        ensureDbMigrations();
 
         const authReq = req as AuthRequest;
         const user = authReq.user;
@@ -232,9 +229,9 @@ router.post('/notifications/read-all', (req, res) => {
       `;
         }
 
-        querySqlite(`
+        await dbQuery(`
       UPDATE notifications
-      SET read_at = datetime('now')
+      SET read_at = ${dbNowExpression()}
       WHERE read_at IS NULL
       ${scopeClause};
     `);
@@ -247,3 +244,5 @@ router.post('/notifications/read-all', (req, res) => {
 });
 
 export default router;
+
+

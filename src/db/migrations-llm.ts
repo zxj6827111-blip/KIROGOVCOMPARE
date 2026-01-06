@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS report_versions (
   file_size INTEGER,
   storage_path TEXT NOT NULL,
   text_path TEXT,
+  raw_text TEXT,
   provider TEXT NOT NULL,
   model TEXT NOT NULL,
   prompt_version TEXT NOT NULL,
@@ -87,6 +88,11 @@ CREATE TABLE IF NOT EXISTS jobs (
   started_at TEXT,
   finished_at TEXT,
   comparison_id INTEGER REFERENCES comparisons(id) ON DELETE SET NULL,
+  export_title TEXT,
+  file_name TEXT,
+  file_path TEXT,
+  file_size INTEGER,
+  batch_id TEXT,
   created_by INTEGER
 );
 
@@ -126,7 +132,7 @@ CREATE TABLE IF NOT EXISTS report_consistency_items (
   run_id INTEGER NOT NULL REFERENCES report_consistency_runs(id) ON DELETE CASCADE,
   report_version_id INTEGER NOT NULL REFERENCES report_versions(id) ON DELETE CASCADE,
   
-  group_key TEXT NOT NULL CHECK(group_key IN ('table2', 'table3', 'table4', 'text')),
+  group_key TEXT NOT NULL CHECK(group_key IN ('table2', 'table3', 'table4', 'text', 'visual', 'structure', 'quality')),
   check_key TEXT NOT NULL,
   fingerprint TEXT NOT NULL,
   
@@ -213,6 +219,7 @@ CREATE TABLE IF NOT EXISTS report_versions (
   file_size BIGINT,
   storage_path TEXT NOT NULL,
   text_path TEXT,
+  raw_text TEXT,
   provider VARCHAR(50) NOT NULL,
   model VARCHAR(100) NOT NULL,
   prompt_version VARCHAR(50) NOT NULL,
@@ -266,6 +273,11 @@ CREATE TABLE IF NOT EXISTS jobs (
   started_at TIMESTAMPTZ,
   finished_at TIMESTAMPTZ,
   comparison_id BIGINT REFERENCES comparisons(id) ON DELETE SET NULL,
+  export_title TEXT,
+  file_name TEXT,
+  file_path TEXT,
+  file_size BIGINT,
+  batch_id TEXT,
   created_by BIGINT
 );
 
@@ -305,7 +317,7 @@ CREATE TABLE IF NOT EXISTS report_consistency_items (
   run_id BIGINT NOT NULL REFERENCES report_consistency_runs(id) ON DELETE CASCADE,
   report_version_id BIGINT NOT NULL REFERENCES report_versions(id) ON DELETE CASCADE,
   
-  group_key VARCHAR(30) NOT NULL CHECK(group_key IN ('table2', 'table3', 'table4', 'text')),
+  group_key VARCHAR(30) NOT NULL CHECK(group_key IN ('table2', 'table3', 'table4', 'text', 'visual', 'structure', 'quality')),
   check_key VARCHAR(100) NOT NULL,
   fingerprint VARCHAR(32) NOT NULL,
   
@@ -372,6 +384,18 @@ CREATE TABLE IF NOT EXISTS admin_users (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   last_login_at TIMESTAMPTZ
 );
+
+ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS raw_text TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS export_title TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS file_name TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS file_path TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS file_size BIGINT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS batch_id TEXT;
+
+ALTER TABLE report_consistency_items DROP CONSTRAINT IF EXISTS report_consistency_items_group_key_check;
+ALTER TABLE report_consistency_items
+  ADD CONSTRAINT report_consistency_items_group_key_check
+  CHECK (group_key IN ('table2', 'table3', 'table4', 'text', 'visual', 'structure', 'quality'));
 `;
 
 export async function runLLMMigrations(): Promise<void> {

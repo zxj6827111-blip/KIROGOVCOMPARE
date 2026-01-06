@@ -3,7 +3,8 @@ import multer from 'multer';
 import fs from 'fs';
 import fsPromises from 'fs/promises';
 import path from 'path';
-import { PROJECT_ROOT, UPLOADS_TMP_DIR, ensureSqliteMigrations, querySqlite, sqlValue } from '../config/sqlite';
+import { dbBool, dbNowExpression, dbQuery, ensureDbMigrations, parseDbJson } from '../config/db-llm';
+import { PROJECT_ROOT, UPLOADS_TMP_DIR, sqlValue } from '../config/sqlite';
 import { reportUploadService } from '../services/ReportUploadService';
 import { ValidationIssue } from '../types/models';
 import { authMiddleware, requirePermission, AuthRequest } from '../middleware/auth';
@@ -30,7 +31,7 @@ const upload = multer({
     if (isPdf || isHtml) {
       cb(null, true);
     } else {
-      cb(new Error('仅支持 PDF 或 HTML 文件'));
+      cb(new Error('仅支�?PDF �?HTML 文件'));
     }
   },
 });
@@ -55,7 +56,7 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
       return res.status(400).json({ error: 'region_id 无效' });
     }
 
-    ensureSqliteMigrations();
+    ensureDbMigrations();
 
     const allowedRegionIds = getAllowedRegionIds(req.user);
     if (allowedRegionIds) {
@@ -76,7 +77,7 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
     const isHtml = file.mimetype === 'text/html' || file.originalname.toLowerCase().endsWith('.html') || file.originalname.toLowerCase().endsWith('.htm');
 
     if (!isPdf && !isHtml) {
-      return res.status(400).json({ error: '仅支持 PDF 或 HTML 文件' });
+      return res.status(400).json({ error: '仅支�?PDF �?HTML 文件' });
     }
 
     // Fix for garbled filenames (UTF-8 bytes interpreted as Latin-1)
@@ -103,14 +104,14 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
     // [New Logic] Check if a report exists and if it is "empty".
     // If so, delete it before uploading, to act as an overwrite and avoid "Report exists" error.
     try {
-      const existingReport = querySqlite(
+      const existingReport = await dbQuery(
         `SELECT id FROM reports WHERE region_id = ${regionId} AND year = ${year} AND unit_name = ${sqlValue(unitName)} LIMIT 1`
       )[0];
 
       if (existingReport) {
         // Check active version
-        const activeVersion = querySqlite(
-          `SELECT parsed_json FROM report_versions WHERE report_id = ${existingReport.id} AND is_active = 1 LIMIT 1`
+        const activeVersion = await dbQuery(
+          `SELECT parsed_json FROM report_versions WHERE report_id = ${existingReport.id} AND is_active = ${dbBool(true)} LIMIT 1`
         )[0];
 
         let hasContent = false;
@@ -152,14 +153,14 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
     });
   } catch (error: any) {
     if (error?.message === 'region_not_found') {
-      return res.status(404).json({ error: 'region 不存在' });
+      return res.status(404).json({ error: 'region 不存�? });
     }
     if (error?.message === 'version_not_created') {
       return res.status(500).json({ error: 'report version 创建失败' });
     }
 
     if (typeof error?.message === 'string' && error.message.includes('UNIQUE constraint failed')) {
-      return res.status(409).json({ error: '记录已存在' });
+      return res.status(409).json({ error: '记录已存�? });
     }
 
     if (error instanceof multer.MulterError) {
@@ -190,7 +191,7 @@ router.post('/reports/text', authMiddleware, requirePermission('upload_reports')
       return res.status(400).json({ error: 'year 无效' });
     }
 
-    ensureSqliteMigrations();
+    ensureDbMigrations();
 
     const allowedRegionIds = getAllowedRegionIds(req.user);
     if (allowedRegionIds) {
@@ -226,7 +227,7 @@ router.post('/reports/text', authMiddleware, requirePermission('upload_reports')
     });
   } catch (error: any) {
     if (error?.message === 'region_not_found') {
-      return res.status(404).json({ error: 'region 不存在' });
+      return res.status(404).json({ error: 'region 不存�? });
     }
     if (error?.message === 'raw_text_empty') {
       return res.status(400).json({ error: 'raw_text 不能为空' });
@@ -240,7 +241,7 @@ router.post('/reports/text', authMiddleware, requirePermission('upload_reports')
   }
 });
 
-router.get('/reports', authMiddleware, (req: AuthRequest, res) => {
+router.get('/reports', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { region_id, year, unit_name } = req.query;
 
@@ -258,7 +259,7 @@ router.get('/reports', authMiddleware, (req: AuthRequest, res) => {
       }
     }
 
-    ensureSqliteMigrations();
+    ensureDbMigrations();
 
     const conditions: string[] = [];
     if (region_id !== undefined) {
@@ -289,7 +290,7 @@ router.get('/reports', authMiddleware, (req: AuthRequest, res) => {
             SELECT id FROM allowed_ids
       `;
       try {
-        const allowedRows = querySqlite(idsQuery);
+        const allowedRows = await dbQuery(idsQuery);
         const allowedIds = allowedRows.map((r: any) => r.id).join(',');
 
         if (allowedIds.length > 0) {
@@ -305,7 +306,7 @@ router.get('/reports', authMiddleware, (req: AuthRequest, res) => {
 
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    const rows = querySqlite(`
+    const rows = await dbQuery(`
       SELECT
         r.id AS report_id,
         r.region_id,
@@ -319,7 +320,7 @@ router.get('/reports', authMiddleware, (req: AuthRequest, res) => {
         (SELECT j.error_code FROM jobs j WHERE j.report_id = r.id ORDER BY j.id DESC LIMIT 1) AS job_error_code,
         (SELECT j.error_message FROM jobs j WHERE j.report_id = r.id ORDER BY j.id DESC LIMIT 1) AS job_error_message
       FROM reports r
-      LEFT JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = 1
+      LEFT JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = ${dbBool(true)}
       ${whereClause}
       ORDER BY r.id DESC;
     `);
@@ -327,18 +328,14 @@ router.get('/reports', authMiddleware, (req: AuthRequest, res) => {
     return res.json({
       data: rows.map((row) => {
         let hasContent = false;
-        if (row.parsed_json && row.parsed_json.trim() !== '' && row.parsed_json.trim() !== '{}') {
-          try {
-            const parsed = JSON.parse(row.parsed_json);
-            if (Array.isArray(parsed.sections) && parsed.sections.length > 0) {
-              hasContent = true;
-            } else if (parsed.tables && typeof parsed.tables === 'object' && Object.keys(parsed.tables).length > 0) {
-              hasContent = true;
-            } else if (parsed.report_type || parsed.basic_info || parsed.year) {
-              hasContent = true;
-            }
-          } catch (e) {
-            hasContent = false;
+        const parsed = parseDbJson(row.parsed_json);
+        if (parsed) {
+          if (Array.isArray(parsed.sections) && parsed.sections.length > 0) {
+            hasContent = true;
+          } else if (parsed.tables && typeof parsed.tables === 'object' && Object.keys(parsed.tables).length > 0) {
+            hasContent = true;
+          } else if (parsed.report_type || parsed.basic_info || parsed.year) {
+            hasContent = true;
           }
         }
 
@@ -368,7 +365,7 @@ router.get('/reports', authMiddleware, (req: AuthRequest, res) => {
 });
 
 // Batch check status endpoint - MUST be before /reports/:id to avoid route conflict
-router.get('/reports/batch-check-status', authMiddleware, (req, res) => {
+router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
   try {
     const reportIdsParam = req.query.report_ids;
     if (!reportIdsParam || typeof reportIdsParam !== 'string') {
@@ -380,14 +377,14 @@ router.get('/reports/batch-check-status', authMiddleware, (req, res) => {
       return res.json({});
     }
 
-    ensureSqliteMigrations();
+    ensureDbMigrations();
 
     const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
     if (allowedRegionIds) {
       if (allowedRegionIds.length === 0) {
         return res.json({});
       }
-      const allowedReportRows = querySqlite(`
+      const allowedReportRows = await dbQuery(`
         SELECT id FROM reports
         WHERE id IN (${reportIds.join(',')})
           AND region_id IN (${allowedRegionIds.join(',')});
@@ -399,10 +396,10 @@ router.get('/reports/batch-check-status', authMiddleware, (req, res) => {
     }
 
     // Get active version_ids for these reports + check parsed_json
-    const versionRows = querySqlite(`
+    const versionRows = await dbQuery(`
       SELECT r.id as report_id, rv.id as version_id, rv.parsed_json
       FROM reports r
-      JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = 1
+      JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = ${dbBool(true)}
       WHERE r.id IN (${reportIds.join(',')})
     `) as Array<{ report_id: number; version_id: number; parsed_json: string | null }>;
 
@@ -412,25 +409,18 @@ router.get('/reports/batch-check-status', authMiddleware, (req, res) => {
     const contentMap = new Map<number, boolean>();
     for (const v of versionRows) {
       let hasContent = false;
-      if (v.parsed_json && v.parsed_json.trim() !== '' && v.parsed_json.trim() !== '{}') {
-        try {
-          const parsed = JSON.parse(v.parsed_json);
-
-
-          // Check for meaningful content:
-          // - 'sections' array with at least one entry (new format)
-          // - 'tables' object with at least one key (old format)
-          // - or other recognized top-level fields
-          if (Array.isArray(parsed.sections) && parsed.sections.length > 0) {
-            hasContent = true;
-          } else if (parsed.tables && typeof parsed.tables === 'object' && Object.keys(parsed.tables).length > 0) {
-            hasContent = true;
-          } else if (parsed.report_type || parsed.basic_info || parsed.year) {
-            hasContent = true;
-          }
-        } catch (e) {
-
-          hasContent = false;
+      const parsed = parseDbJson(v.parsed_json);
+      if (parsed) {
+        // Check for meaningful content:
+        // - 'sections' array with at least one entry (new format)
+        // - 'tables' object with at least one key (old format)
+        // - or other recognized top-level fields
+        if (Array.isArray(parsed.sections) && parsed.sections.length > 0) {
+          hasContent = true;
+        } else if (parsed.tables && typeof parsed.tables === 'object' && Object.keys(parsed.tables).length > 0) {
+          hasContent = true;
+        } else if (parsed.report_type || parsed.basic_info || parsed.year) {
+          hasContent = true;
         }
       }
       contentMap.set(v.report_id, hasContent);
@@ -442,7 +432,7 @@ router.get('/reports/batch-check-status', authMiddleware, (req, res) => {
       return res.json({});
     }
 
-    const groupCounts = querySqlite(`
+    const groupCounts = await dbQuery(`
       SELECT report_version_id, group_key, COUNT(*) as cnt
       FROM report_consistency_items
       WHERE report_version_id IN (${versionIds.join(',')})
@@ -490,16 +480,16 @@ router.get('/reports/batch-check-status', authMiddleware, (req, res) => {
   }
 });
 
-router.get('/reports/:id', authMiddleware, (req, res) => {
+router.get('/reports/:id', authMiddleware, async (req, res) => {
   try {
     const reportId = Number(req.params.id);
     if (!reportId || Number.isNaN(reportId) || !Number.isInteger(reportId) || reportId < 1) {
       return res.status(400).json({ error: 'report_id 无效' });
     }
 
-    ensureSqliteMigrations();
+    ensureDbMigrations();
 
-    const report = querySqlite(`
+    const report = await dbQuery(`
       SELECT
         r.id AS report_id,
         r.region_id,
@@ -518,13 +508,13 @@ router.get('/reports/:id', authMiddleware, (req, res) => {
         rv.created_at
       FROM reports r
       LEFT JOIN regions reg ON reg.id = r.region_id
-      LEFT JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = 1
+      LEFT JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = ${dbBool(true)}
       WHERE r.id = ${sqlValue(reportId)}
       LIMIT 1;
     `)[0];
 
     if (!report) {
-      return res.status(404).json({ error: 'report 不存在' });
+      return res.status(404).json({ error: 'report 不存�? });
     }
 
     const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
@@ -534,7 +524,7 @@ router.get('/reports/:id', authMiddleware, (req, res) => {
       }
     }
 
-    const job = querySqlite(`
+    const job = await dbQuery(`
       SELECT id, status, progress, error_code, error_message
       FROM jobs
       WHERE report_id = ${sqlValue(reportId)}
@@ -545,7 +535,7 @@ router.get('/reports/:id', authMiddleware, (req, res) => {
     let parsedJson: any = null;
     if (report?.parsed_json) {
       try {
-        parsedJson = JSON.parse(report.parsed_json);
+        parsedJson = parseDbJson(report.parsed_json);
       } catch (error) {
         parsedJson = report.parsed_json;
       }
@@ -587,20 +577,20 @@ router.get('/reports/:id', authMiddleware, (req, res) => {
   }
 });
 
-router.post('/reports/:id/parse', authMiddleware, (req, res) => {
+router.post('/reports/:id/parse', authMiddleware, async (req, res) => {
   try {
     const reportId = Number(req.params.id);
     if (!reportId || Number.isNaN(reportId) || !Number.isInteger(reportId) || reportId < 1) {
       return res.status(400).json({ error: 'report_id 无效' });
     }
 
-    ensureSqliteMigrations();
+    ensureDbMigrations();
 
-    const report = querySqlite(`SELECT id, region_id FROM reports WHERE id = ${sqlValue(reportId)} LIMIT 1;`)[0] as
+    const report = (await dbQuery(`SELECT id, region_id FROM reports WHERE id = ${sqlValue(reportId)} LIMIT 1;`))[0] as
       | { id?: number; region_id?: number }
       | undefined;
     if (!report?.id) {
-      return res.status(404).json({ error: 'report 不存在' });
+      return res.status(404).json({ error: 'report 不存�? });
     }
     const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
     if (allowedRegionIds) {
@@ -609,15 +599,15 @@ router.post('/reports/:id/parse', authMiddleware, (req, res) => {
       }
     }
 
-    const version = querySqlite(
-      `SELECT id FROM report_versions WHERE report_id = ${sqlValue(reportId)} AND is_active = 1 ORDER BY id DESC LIMIT 1;`
+    const version = await dbQuery(
+      `SELECT id FROM report_versions WHERE report_id = ${sqlValue(reportId)} AND is_active = ${dbBool(true)} ORDER BY id DESC LIMIT 1;`
     )[0] as { id?: number } | undefined;
 
     if (!version?.id) {
-      return res.status(404).json({ error: 'report_version 不存在' });
+      return res.status(404).json({ error: 'report_version 不存�? });
     }
 
-    const existingJob = querySqlite(
+    const existingJob = await dbQuery(
       `SELECT id FROM jobs WHERE report_id = ${sqlValue(reportId)} AND version_id = ${sqlValue(version.id)} AND kind = 'parse' AND status IN ('queued','running') ORDER BY id DESC LIMIT 1;`
     )[0] as { id?: number } | undefined;
 
@@ -625,7 +615,7 @@ router.post('/reports/:id/parse', authMiddleware, (req, res) => {
       return res.json({ job_id: existingJob.id, reused: true });
     }
 
-    const newJob = querySqlite(
+    const newJob = await dbQuery(
       `INSERT INTO jobs (report_id, version_id, kind, status, progress)
        VALUES (${sqlValue(reportId)}, ${sqlValue(version.id)}, 'parse', 'queued', 0)
        RETURNING id;`
@@ -645,14 +635,14 @@ router.delete('/reports/:id', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'report_id 无效' });
     }
 
-    ensureSqliteMigrations();
+    ensureDbMigrations();
 
-    const existing = querySqlite(`SELECT id, region_id FROM reports WHERE id = ${sqlValue(reportId)} LIMIT 1;`)[0] as
+    const existing = (await dbQuery(`SELECT id, region_id FROM reports WHERE id = ${sqlValue(reportId)} LIMIT 1;`))[0] as
       | { id?: number; region_id?: number }
       | undefined;
 
     if (!existing || !existing.id) {
-      return res.status(404).json({ error: 'report 不存在' });
+      return res.status(404).json({ error: 'report 不存�? });
     }
 
     const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
@@ -663,7 +653,7 @@ router.delete('/reports/:id', authMiddleware, async (req, res) => {
     }
 
     // Best-effort remove stored files first
-    const versions = querySqlite(
+    const versions = await dbQuery(
       `SELECT storage_path, text_path FROM report_versions WHERE report_id = ${sqlValue(reportId)};`
     ) as Array<{ storage_path?: string | null; text_path?: string | null }>;
 
@@ -692,21 +682,21 @@ router.delete('/reports/:id', authMiddleware, async (req, res) => {
     }
 
     // Remove comparisons referencing this report (and their results)
-    const comparisonIds = querySqlite(
+    const comparisonIds = await dbQuery(
       `SELECT id FROM comparisons WHERE left_report_id = ${sqlValue(reportId)} OR right_report_id = ${sqlValue(reportId)};`
     ) as Array<{ id?: number }>;
     const ids = comparisonIds.map((c) => c.id).filter((id): id is number => typeof id === 'number' && id > 0);
     if (ids.length) {
       const inClause = ids.join(',');
-      querySqlite(`DELETE FROM comparison_results WHERE comparison_id IN (${inClause});`);
-      querySqlite(`DELETE FROM comparisons WHERE id IN (${inClause});`);
-      querySqlite(`UPDATE jobs SET comparison_id = NULL WHERE comparison_id IN (${inClause});`);
+      await dbQuery(`DELETE FROM comparison_results WHERE comparison_id IN (${inClause});`);
+      await dbQuery(`DELETE FROM comparisons WHERE id IN (${inClause});`);
+      await dbQuery(`UPDATE jobs SET comparison_id = NULL WHERE comparison_id IN (${inClause});`);
     }
 
     // Remove jobs & versions, then report itself
-    querySqlite(`DELETE FROM jobs WHERE report_id = ${sqlValue(reportId)};`);
-    querySqlite(`DELETE FROM report_versions WHERE report_id = ${sqlValue(reportId)};`);
-    querySqlite(`DELETE FROM reports WHERE id = ${sqlValue(reportId)};`);
+    await dbQuery(`DELETE FROM jobs WHERE report_id = ${sqlValue(reportId)};`);
+    await dbQuery(`DELETE FROM report_versions WHERE report_id = ${sqlValue(reportId)};`);
+    await dbQuery(`DELETE FROM reports WHERE id = ${sqlValue(reportId)};`);
 
     return res.json({ ok: true });
   } catch (error) {
@@ -717,11 +707,11 @@ router.delete('/reports/:id', authMiddleware, async (req, res) => {
 
 /**
  * PATCH /api/reports/:id/parsed-data
- * 更新报告的 parsed_json（手动修正解析错误）
+ * 更新报告�?parsed_json（手动修正解析错误）
  */
 router.patch('/reports/:id/parsed-data', authMiddleware, async (req, res) => {
   try {
-    ensureSqliteMigrations();
+    ensureDbMigrations();
 
     const reportId = parseInt(req.params.id, 10);
     const { parsed_json } = req.body;
@@ -730,7 +720,7 @@ router.patch('/reports/:id/parsed-data', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'parsed_json is required' });
     }
 
-    const reportRow = querySqlite(`
+    const reportRow = await dbQuery(`
       SELECT region_id FROM reports
       WHERE id = ${sqlValue(reportId)}
       LIMIT 1;
@@ -756,11 +746,11 @@ router.patch('/reports/:id/parsed-data', authMiddleware, async (req, res) => {
     }
 
     // 获取 active version
-    const version = querySqlite(`
+    const version = await dbQuery(`
       SELECT rv.id as version_id, r.region_id
       FROM report_versions rv
       JOIN reports r ON r.id = rv.report_id
-      WHERE rv.report_id = ${sqlValue(reportId)} AND rv.is_active = 1
+      WHERE rv.report_id = ${sqlValue(reportId)} AND rv.is_active = ${dbBool(true)}
       LIMIT 1;
     `)[0] as { version_id?: number; region_id?: number } | undefined;
 
@@ -772,7 +762,7 @@ router.patch('/reports/:id/parsed-data', authMiddleware, async (req, res) => {
 
     // 更新 parsed_json
     const jsonString = JSON.stringify(parsedData);
-    querySqlite(`
+    await dbQuery(`
       UPDATE report_versions
       SET parsed_json = ${sqlValue(jsonString)}
       WHERE id = ${sqlValue(versionId)};
@@ -789,7 +779,7 @@ router.patch('/reports/:id/parsed-data', authMiddleware, async (req, res) => {
   }
 });
 
-// 获取报告的一致性校验结果 (从数据库读取)
+// 获取报告的一致性校验结�?(从数据库读取)
 router.get('/reports/:id/checks', authMiddleware, async (req, res) => {
   try {
     const reportId = Number(req.params.id);
@@ -799,12 +789,12 @@ router.get('/reports/:id/checks', authMiddleware, async (req, res) => {
 
     const includeDismissed = req.query.include_dismissed === '1';
 
-    ensureSqliteMigrations();
+    ensureDbMigrations();
 
     // Get the active version
-    const version = querySqlite(`
+    const version = await dbQuery(`
       SELECT id as version_id FROM report_versions
-      WHERE report_id = ${sqlValue(reportId)} AND is_active = 1
+      WHERE report_id = ${sqlValue(reportId)} AND is_active = ${dbBool(true)}
       LIMIT 1;
     `)[0] as { version_id?: number } | undefined;
 
@@ -815,7 +805,7 @@ router.get('/reports/:id/checks', authMiddleware, async (req, res) => {
     const versionId = version.version_id;
 
     // Get latest run
-    const latestRun = querySqlite(`
+    const latestRun = await dbQuery(`
       SELECT id as run_id, status, engine_version, summary_json, created_at, finished_at
       FROM report_consistency_runs
       WHERE report_version_id = ${sqlValue(versionId)}
@@ -842,7 +832,7 @@ router.get('/reports/:id/checks', authMiddleware, async (req, res) => {
     }
 
     // Get items grouped by group_key
-    const items = querySqlite(`
+    const items = await dbQuery(`
       SELECT id, group_key, check_key, fingerprint, title, expr,
              left_value, right_value, delta, tolerance, auto_status,
              evidence_json, human_status, human_comment, created_at, updated_at
@@ -855,12 +845,12 @@ router.get('/reports/:id/checks', authMiddleware, async (req, res) => {
     let runSummary = null;
     if (latestRun?.summary_json) {
       try {
-        runSummary = JSON.parse(latestRun.summary_json);
+        runSummary = parseDbJson(latestRun.summary_json);
       } catch { /* ignore */ }
     }
 
     // Count human statuses
-    const humanCounts = querySqlite(`
+    const humanCounts = await dbQuery(`
       SELECT human_status, COUNT(*) as cnt
       FROM report_consistency_items
       WHERE report_version_id = ${sqlValue(versionId)}
@@ -873,7 +863,7 @@ router.get('/reports/:id/checks', authMiddleware, async (req, res) => {
     }
 
     // Count pending items with FAIL status (active problems)
-    const pendingFailCount = querySqlite(`
+    const pendingFailCount = await dbQuery(`
       SELECT COUNT(*) as cnt
       FROM report_consistency_items
       WHERE report_version_id = ${sqlValue(versionId)}
@@ -887,7 +877,7 @@ router.get('/reports/:id/checks', authMiddleware, async (req, res) => {
       'table2': '表二数据',
       'table3': '表三数据',
       'table4': '表四数据',
-      'text': '正文一致性',
+      'text': '正文一致�?,
       'visual': '表格审计',
       'structure': '结构审计',
       'quality': '语义审计',
@@ -904,9 +894,9 @@ router.get('/reports/:id/checks', authMiddleware, async (req, res) => {
     };
 
     for (const item of items) {
-      let evidence = item.evidence_json;
-      if (typeof evidence === 'string') {
-        try { evidence = JSON.parse(evidence); } catch { /* keep as string */ }
+      let evidence = parseDbJson(item.evidence_json);
+      if (evidence === null) {
+        evidence = item.evidence_json;
       }
 
       const formattedItem = {
@@ -965,7 +955,7 @@ router.get('/reports/:id/checks', authMiddleware, async (req, res) => {
   }
 });
 
-// 运行一致性校验 (入队 checks job)
+// 运行一致性校�?(入队 checks job)
 router.post('/reports/:id/checks/run', authMiddleware, async (req, res) => {
   try {
     const reportId = Number(req.params.id);
@@ -973,14 +963,14 @@ router.post('/reports/:id/checks/run', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'invalid_report_id' });
     }
 
-    ensureSqliteMigrations();
+    ensureDbMigrations();
 
     // Get the active version
-    const version = querySqlite(`
+    const version = await dbQuery(`
       SELECT rv.id as version_id, r.region_id
       FROM report_versions rv
       JOIN reports r ON r.id = rv.report_id
-      WHERE rv.report_id = ${sqlValue(reportId)} AND rv.is_active = 1
+      WHERE rv.report_id = ${sqlValue(reportId)} AND rv.is_active = ${dbBool(true)}
       LIMIT 1;
     `)[0] as { version_id?: number; region_id?: number } | undefined;
 
@@ -998,7 +988,7 @@ router.post('/reports/:id/checks/run', authMiddleware, async (req, res) => {
     const versionId = version.version_id;
 
     // Check for existing queued/running checks job
-    const existingJob = querySqlite(`
+    const existingJob = await dbQuery(`
       SELECT id FROM jobs
       WHERE report_id = ${sqlValue(reportId)} AND version_id = ${sqlValue(versionId)} AND kind = 'checks' AND status IN ('queued', 'running')
       LIMIT 1;
@@ -1009,7 +999,7 @@ router.post('/reports/:id/checks/run', authMiddleware, async (req, res) => {
     }
 
     // Create new checks job
-    const newJob = querySqlite(`
+    const newJob = await dbQuery(`
       INSERT INTO jobs (report_id, version_id, kind, status, progress)
       VALUES (${sqlValue(reportId)}, ${sqlValue(versionId)}, 'checks', 'queued', 0)
       RETURNING id;
@@ -1022,7 +1012,7 @@ router.post('/reports/:id/checks/run', authMiddleware, async (req, res) => {
   }
 });
 
-// 更新校验项的人工状态
+// 更新校验项的人工状�?
 router.patch('/reports/:id/checks/items/:itemId', authMiddleware, async (req, res) => {
   try {
     const reportId = Number(req.params.id);
@@ -1042,10 +1032,10 @@ router.patch('/reports/:id/checks/items/:itemId', authMiddleware, async (req, re
       return res.status(400).json({ error: 'invalid_human_status', message: 'human_status must be one of: pending, confirmed, dismissed' });
     }
 
-    ensureSqliteMigrations();
+    ensureDbMigrations();
 
     // Verify item exists and belongs to this report
-    const item = querySqlite(`
+    const item = await dbQuery(`
       SELECT ci.id, rv.report_id, r.region_id
       FROM report_consistency_items ci
       JOIN report_versions rv ON rv.id = ci.report_version_id
@@ -1071,9 +1061,9 @@ router.patch('/reports/:id/checks/items/:itemId', authMiddleware, async (req, re
 
     // Update the item
     const commentClause = human_comment !== undefined ? `, human_comment = ${sqlValue(human_comment)}` : '';
-    querySqlite(`
+    await dbQuery(`
       UPDATE report_consistency_items
-      SET human_status = ${sqlValue(human_status)}${commentClause}, updated_at = datetime('now')
+      SET human_status = ${sqlValue(human_status)}${commentClause}, updated_at = ${dbNowExpression()}
       WHERE id = ${sqlValue(itemId)};
     `);
 
@@ -1093,16 +1083,16 @@ router.patch('/reports/:id/checks/items/:itemId', authMiddleware, async (req, re
  * DELETE /api/reports/:id
  * Delete a report and all related data (versions, jobs, parses, consistency items)
  */
-router.delete('/reports/:id', authMiddleware, (req, res) => {
+router.delete('/reports/:id', authMiddleware, async (req, res) => {
   try {
-    ensureSqliteMigrations();
+    ensureDbMigrations();
     const reportId = Number(req.params.id);
     if (Number.isNaN(reportId) || reportId < 1) {
       return res.status(400).json({ error: 'invalid_report_id' });
     }
 
     // Check if report exists
-    const report = querySqlite(`SELECT id, region_id FROM reports WHERE id = ${sqlValue(reportId)} LIMIT 1`)[0] as { id?: number; region_id?: number } | undefined;
+    const report = (await dbQuery(`SELECT id, region_id FROM reports WHERE id = ${sqlValue(reportId)} LIMIT 1`))[0] as { id?: number; region_id?: number } | undefined;
     if (!report) {
       return res.status(404).json({ error: 'report_not_found' });
     }
@@ -1115,31 +1105,31 @@ router.delete('/reports/:id', authMiddleware, (req, res) => {
     }
 
     // Get all version IDs for this report
-    const versions = querySqlite(`SELECT id FROM report_versions WHERE report_id = ${sqlValue(reportId)}`) as Array<{ id: number }>;
+    const versions = await dbQuery(`SELECT id FROM report_versions WHERE report_id = ${sqlValue(reportId)}`) as Array<{ id: number }>;
     const versionIds = versions.map(v => v.id);
 
     if (versionIds.length > 0) {
       const versionIdList = versionIds.join(',');
 
       // Delete related jobs
-      querySqlite(`DELETE FROM jobs WHERE version_id IN (${versionIdList})`);
+      await dbQuery(`DELETE FROM jobs WHERE version_id IN (${versionIdList})`);
 
       // Delete related parses
-      querySqlite(`DELETE FROM report_version_parses WHERE report_version_id IN (${versionIdList})`);
+      await dbQuery(`DELETE FROM report_version_parses WHERE report_version_id IN (${versionIdList})`);
 
       // Delete consistency items (if table exists)
       try {
-        querySqlite(`DELETE FROM report_consistency_items WHERE report_version_id IN (${versionIdList})`);
+        await dbQuery(`DELETE FROM report_consistency_items WHERE report_version_id IN (${versionIdList})`);
       } catch (e) {
         // Table might not exist, ignore
       }
 
       // Delete versions
-      querySqlite(`DELETE FROM report_versions WHERE report_id = ${sqlValue(reportId)}`);
+      await dbQuery(`DELETE FROM report_versions WHERE report_id = ${sqlValue(reportId)}`);
     }
 
     // Delete the report itself
-    querySqlite(`DELETE FROM reports WHERE id = ${sqlValue(reportId)}`);
+    await dbQuery(`DELETE FROM reports WHERE id = ${sqlValue(reportId)}`);
 
     console.log(`[Delete Report] Deleted report ${reportId} with ${versionIds.length} versions`);
 
@@ -1155,3 +1145,4 @@ router.delete('/reports/:id', authMiddleware, (req, res) => {
 });
 
 export default router;
+
