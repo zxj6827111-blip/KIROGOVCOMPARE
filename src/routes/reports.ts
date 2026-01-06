@@ -702,6 +702,9 @@ router.delete('/reports/:id', authMiddleware, async (req, res) => {
       if (versionIds.length > 0) {
         const vIds = versionIds.join(',');
         
+        // Delete related notifications FIRST
+        await dbQuery(`DELETE FROM notifications WHERE related_version_id IN (${vIds})`).catch(() => {});
+        
         // Delete consistency runs & items
         await dbQuery(`DELETE FROM report_consistency_run_items WHERE run_id IN (SELECT id FROM report_consistency_runs WHERE report_version_id IN (${vIds}))`).catch(() => {});
         await dbQuery(`DELETE FROM report_consistency_runs WHERE report_version_id IN (${vIds})`).catch(() => {});
@@ -711,7 +714,7 @@ router.delete('/reports/:id', authMiddleware, async (req, res) => {
         await dbQuery(`DELETE FROM report_version_parses WHERE report_version_id IN (${vIds})`).catch(() => {});
       }
     } catch (e) {
-      // Ignore errors if tables don't exist
+      console.warn('Error cleaning up related data:', e);
     }
 
     // Remove jobs & versions, then report itself
