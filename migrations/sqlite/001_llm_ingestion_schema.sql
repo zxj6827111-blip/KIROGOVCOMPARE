@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS report_versions (
   file_size INTEGER,
   storage_path TEXT NOT NULL,
   text_path TEXT,
+  raw_text TEXT,
   provider TEXT NOT NULL,
   model TEXT NOT NULL,
   prompt_version TEXT NOT NULL,
@@ -60,7 +61,12 @@ CREATE TABLE IF NOT EXISTS jobs (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   started_at TEXT,
   finished_at TEXT,
-  comparison_id INTEGER REFERENCES comparisons(id) ON DELETE SET NULL
+  comparison_id INTEGER REFERENCES comparisons(id) ON DELETE SET NULL,
+  export_title TEXT,
+  file_name TEXT,
+  file_path TEXT,
+  file_size INTEGER,
+  batch_id TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_report ON jobs(report_id);
