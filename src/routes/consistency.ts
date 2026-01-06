@@ -1,5 +1,5 @@
 import express from 'express';
-import { dbQuery, dbExecute, dbNowExpression } from '../config/db-llm';
+import { dbQuery, dbExecute, dbNowExpression, dbBool } from '../config/db-llm';
 import { sqlValue } from '../config/sqlite';
 import { consistencyCheckService } from '../services/ConsistencyCheckService';
 
@@ -21,7 +21,7 @@ router.get('/reports/:id/checks', async (req, res) => {
       SELECT rv.id as version_id, rv.parsed_json
       FROM reports r
       JOIN report_versions rv ON r.id = rv.report_id
-      WHERE r.id = ${sqlValue(reportId)} AND rv.is_active = 1
+      WHERE r.id = ${sqlValue(reportId)} AND rv.is_active = ${dbBool(true)}
       ORDER BY rv.created_at DESC
       LIMIT 1
     `);
@@ -154,7 +154,7 @@ router.post('/reports/:id/checks/run', async (req, res) => {
         SELECT rv.id as version_id, rv.parsed_json
         FROM reports r
         JOIN report_versions rv ON r.id = rv.report_id
-        WHERE r.id = ${sqlValue(reportId)} AND rv.is_active = 1
+        WHERE r.id = ${sqlValue(reportId)} AND rv.is_active = ${dbBool(true)}
         LIMIT 1
      `);
      
