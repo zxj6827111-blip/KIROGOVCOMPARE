@@ -100,16 +100,17 @@ async function fixSchema() {
       )
     `);
     
-    console.log('\n📋 Fixing report_consistency_check_runs table...');
-    await createTableIfNotExists(client, 'report_consistency_check_runs', `
-      CREATE TABLE report_consistency_check_runs (
+    console.log('\n📋 Fixing report_consistency_runs table...');
+    await createTableIfNotExists(client, 'report_consistency_runs', `
+      CREATE TABLE report_consistency_runs (
         id SERIAL PRIMARY KEY,
         report_version_id INTEGER NOT NULL,
         engine_version TEXT,
-        total_items INTEGER DEFAULT 0,
-        pass_count INTEGER DEFAULT 0,
-        fail_count INTEGER DEFAULT 0,
-        created_at TIMESTAMP DEFAULT NOW()
+        status TEXT DEFAULT 'pending',
+        summary_json TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        finished_at TIMESTAMP
+      )
       )
     `);
     
