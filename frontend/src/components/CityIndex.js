@@ -138,24 +138,19 @@ function CityIndex({ onSelectReport, onViewComparison }) {
 
     try {
       const reportIds = reportList.map(r => r.report_id || r.id).filter(id => id).join(',');
-      console.log('[DEBUG] fetchCheckStatusForReports: reportIds =', reportIds, 'from list of', reportList.length, 'reports');
       if (!reportIds) {
-        console.log('[DEBUG] fetchCheckStatusForReports: No report IDs found, skipping API call');
         setCheckStatusMap(new Map());
         setCheckStatusLoaded(true);
         return;
       }
-      console.log('[DEBUG] fetchCheckStatusForReports: Calling API /reports/batch-check-status?report_ids=' + reportIds);
       const resp = await apiClient.get(`/reports/batch-check-status?report_ids=${reportIds}`);
       const statusData = resp.data || {};
-      console.log('[DEBUG] fetchCheckStatusForReports: API response =', JSON.stringify(statusData));
 
       // Convert to Map - statusData now contains {total, visual, structure, quality, has_content}
       const statusMap = new Map();
       Object.entries(statusData).forEach(([reportId, counts]) => {
         statusMap.set(Number(reportId), counts);
       });
-      console.log('[DEBUG] fetchCheckStatusForReports: statusMap size =', statusMap.size, 'entries:', Array.from(statusMap.entries()));
 
       setCheckStatusMap(statusMap);
     } catch (err) {
@@ -488,7 +483,6 @@ function CityIndex({ onSelectReport, onViewComparison }) {
                       {(() => {
                         const reportId = Number(r.report_id || r.id);
                         const checkStatus = checkStatusMap.get(reportId);
-                        console.log('[DEBUG RENDER] reportId:', reportId, 'typeof:', typeof reportId, 'checkStatus:', checkStatus, 'mapSize:', checkStatusMap.size);
 
                         if (!checkStatusLoaded && !checkStatus) {
                           return <span className="status-pill loading">加载中...</span>;
