@@ -138,11 +138,14 @@ function CityIndex({ onSelectReport, onViewComparison }) {
 
     try {
       const reportIds = reportList.map(r => r.report_id || r.id).filter(id => id).join(',');
+      console.log('[DEBUG] fetchCheckStatusForReports: reportIds =', reportIds, 'from list of', reportList.length, 'reports');
       if (!reportIds) {
+        console.log('[DEBUG] fetchCheckStatusForReports: No report IDs found, skipping API call');
         setCheckStatusMap(new Map());
         setCheckStatusLoaded(true);
         return;
       }
+      console.log('[DEBUG] fetchCheckStatusForReports: Calling API /reports/batch-check-status?report_ids=' + reportIds);
       const resp = await apiClient.get(`/reports/batch-check-status?report_ids=${reportIds}`);
       const statusData = resp.data || {};
 
