@@ -4,7 +4,7 @@ import { dbQuery, ensureDbMigrations, dbNowExpression } from '../config/db-llm';
 import { sqlValue } from '../config/sqlite';
 import { llmJobRunner } from '../services/LlmJobRunner';
 import { authMiddleware, AuthRequest, requirePermission } from '../middleware/auth';
-import { getAllowedRegionIds } from '../utils/dataScope';
+import { getAllowedRegionIds, getAllowedRegionIdsAsync } from '../utils/dataScope';
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -82,7 +82,7 @@ router.get('/', async (req, res) => {
         conditions.push(`j.kind != 'checks'`);
 
         // DATA SCOPE FILTER
-        const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+        const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
         if (allowedRegionIds) {
             if (allowedRegionIds.length > 0) {
                 conditions.push(`r.region_id IN (${allowedRegionIds.join(',')})`);
@@ -243,7 +243,7 @@ router.get('/:version_id', async (req, res) => {
         if (!version) {
             return res.status(404).json({ error: 'Version not found' });
         }
-        const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+        const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
         if (!isRegionAllowed(version.region_id, allowedRegionIds)) {
             return res.status(403).json({ error: 'forbidden' });
         }
@@ -333,7 +333,7 @@ router.post('/:version_id/cancel', requirePermission('manage_jobs'), async (req,
         if (Number.isNaN(versionId)) {
             return res.status(400).json({ error: 'Invalid version_id' });
         }
-        const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+        const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
         const regionId = await getVersionRegionId(versionId);
         if (regionId === null) {
             return res.status(404).json({ error: 'Version not found' });
@@ -385,7 +385,7 @@ router.post('/:version_id/retry', requirePermission('manage_jobs'), async (req, 
         if (Number.isNaN(versionId)) {
             return res.status(400).json({ error: 'Invalid version_id' });
         }
-        const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+        const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
         const regionId = await getVersionRegionId(versionId);
         if (regionId === null) {
             return res.status(404).json({ error: 'Version not found' });
@@ -572,7 +572,7 @@ router.post('/batch-delete', requirePermission('manage_jobs'), async (req, res) 
             return res.status(400).json({ error: 'Invalid or empty version_ids' });
         }
 
-        const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+        const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
         if (allowedRegionIds) {
             if (allowedRegionIds.length === 0) {
                 return res.status(403).json({ error: 'forbidden' });
@@ -621,7 +621,7 @@ router.delete('/task/:jobId', requirePermission('manage_jobs'), async (req, res)
             return res.status(400).json({ error: 'Invalid job_id' });
         }
 
-        const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+        const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
 
         // 1. Get job details ensuring region permission
         const jobQuery = `
@@ -685,7 +685,7 @@ router.delete('/:version_id', requirePermission('manage_jobs'), async (req, res)
         if (Number.isNaN(versionId)) {
             return res.status(400).json({ error: 'Invalid version_id' });
         }
-        const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+        const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
         const regionId = await getVersionRegionId(versionId);
         if (regionId === null) {
             return res.status(404).json({ error: 'Version not found' });

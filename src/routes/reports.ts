@@ -8,7 +8,7 @@ import { PROJECT_ROOT, UPLOADS_TMP_DIR, sqlValue } from '../config/sqlite';
 import { reportUploadService } from '../services/ReportUploadService';
 import { ValidationIssue } from '../types/models';
 import { authMiddleware, requirePermission, AuthRequest } from '../middleware/auth';
-import { getAllowedRegionIds } from '../utils/dataScope';
+import { getAllowedRegionIds, getAllowedRegionIdsAsync } from '../utils/dataScope';
 
 const router = express.Router();
 
@@ -58,7 +58,7 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
 
     ensureDbMigrations();
 
-    const allowedRegionIds = getAllowedRegionIds(req.user);
+    const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
     if (allowedRegionIds) {
       if (allowedRegionIds.length === 0 || !allowedRegionIds.includes(regionId)) {
         return res.status(403).json({ error: 'forbidden' });
@@ -193,7 +193,7 @@ router.post('/reports/text', authMiddleware, requirePermission('upload_reports')
 
     ensureDbMigrations();
 
-    const allowedRegionIds = getAllowedRegionIds(req.user);
+    const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
     if (allowedRegionIds) {
       if (allowedRegionIds.length === 0 || !allowedRegionIds.includes(regionId)) {
         return res.status(403).json({ error: 'forbidden' });
@@ -426,7 +426,7 @@ router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
 
     ensureDbMigrations();
 
-    const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+    const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
     if (allowedRegionIds) {
       if (allowedRegionIds.length === 0) {
         return res.json({});
@@ -591,7 +591,7 @@ router.get('/reports/:id', authMiddleware, async (req, res) => {
       return res.status(404).json({ error: 'report 不存在' });
     }
 
-    const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+    const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
     if (allowedRegionIds) {
       if (allowedRegionIds.length === 0 || !allowedRegionIds.includes(report.region_id)) {
         return res.status(403).json({ error: 'forbidden' });
@@ -666,7 +666,7 @@ router.post('/reports/:id/parse', authMiddleware, async (req, res) => {
     if (!report?.id) {
       return res.status(404).json({ error: 'report 不存在' });
     }
-    const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+    const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
     if (allowedRegionIds) {
       if (allowedRegionIds.length === 0 || !allowedRegionIds.includes(report.region_id || 0)) {
         return res.status(403).json({ error: 'forbidden' });
@@ -719,7 +719,7 @@ router.delete('/reports/:id', authMiddleware, async (req, res) => {
       return res.status(404).json({ error: 'report 不存在' });
     }
 
-    const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+    const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
     if (allowedRegionIds) {
       if (allowedRegionIds.length === 0 || !allowedRegionIds.includes(existing.region_id || 0)) {
         return res.status(403).json({ error: 'forbidden' });

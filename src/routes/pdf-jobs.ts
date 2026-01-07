@@ -5,7 +5,7 @@ import archiver from 'archiver';
 import { dbExecute, dbQuery, ensureDbMigrations } from '../config/db-llm';
 import { sqlValue, DATA_DIR } from '../config/sqlite';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
-import { getAllowedRegionIds } from '../utils/dataScope';
+import { getAllowedRegionIds, getAllowedRegionIdsAsync } from '../utils/dataScope';
 
 const router: Router = express.Router();
 
@@ -29,7 +29,7 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
         ensureExportsDir();
 
         const { comparison_id, title } = req.body;
-        const allowedRegionIds = getAllowedRegionIds(req.user);
+        const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
 
         if (allowedRegionIds && allowedRegionIds.length === 0) {
             return res.status(403).json({ error: 'forbidden' });
@@ -130,7 +130,7 @@ router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
         }
 
         // DATA SCOPE FILTER
-        const allowedRegionIds = getAllowedRegionIds(req.user);
+        const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
         if (allowedRegionIds) {
             if (allowedRegionIds.length > 0) {
                 conditions.push(`c.region_id IN (${allowedRegionIds.join(',')})`);
@@ -232,7 +232,7 @@ router.get('/:id/download', authMiddleware, async (req: AuthRequest, res: Respon
             return res.status(400).json({ error: 'Invalid job ID' });
         }
 
-        const allowedRegionIds = getAllowedRegionIds(req.user);
+        const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
         if (allowedRegionIds && allowedRegionIds.length === 0) {
             return res.status(403).json({ error: 'forbidden' });
         }
@@ -310,7 +310,7 @@ router.delete('/:id', authMiddleware, async (req: AuthRequest, res: Response) =>
             return res.status(400).json({ error: 'Invalid job ID' });
         }
 
-        const allowedRegionIds = getAllowedRegionIds(req.user);
+        const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
         if (allowedRegionIds && allowedRegionIds.length === 0) {
             return res.status(403).json({ error: 'forbidden' });
         }
@@ -365,7 +365,7 @@ router.post('/:id/regenerate', authMiddleware, async (req: AuthRequest, res: Res
             return res.status(400).json({ error: 'Invalid job ID' });
         }
 
-        const allowedRegionIds = getAllowedRegionIds(req.user);
+        const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
         if (allowedRegionIds && allowedRegionIds.length === 0) {
             return res.status(403).json({ error: 'forbidden' });
         }
@@ -435,7 +435,7 @@ router.post('/batch-download', authMiddleware, async (req: AuthRequest, res: Res
             return res.status(400).json({ error: 'job_ids array is required' });
         }
 
-        const allowedRegionIds = getAllowedRegionIds(req.user);
+        const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
         if (allowedRegionIds && allowedRegionIds.length === 0) {
             return res.status(403).json({ error: 'forbidden' });
         }

@@ -2,7 +2,7 @@
 import { dbNowExpression, dbQuery, ensureDbMigrations, parseDbJson } from '../config/db-llm';
 import { sqlValue } from '../config/sqlite';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
-import { getAllowedRegionIds } from '../utils/dataScope';
+import { getAllowedRegionIds, getAllowedRegionIdsAsync } from '../utils/dataScope';
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -59,7 +59,7 @@ router.get('/notifications', async (req, res) => {
         const { unread_only } = req.query;
         const authReq = req as AuthRequest;
         const user = authReq.user;
-        const allowedRegionIds = getAllowedRegionIds(user);
+        const allowedRegionIds = await getAllowedRegionIdsAsync(user);
         if (allowedRegionIds && allowedRegionIds.length === 0) {
             return res.json({ notifications: [] });
         }
@@ -155,7 +155,7 @@ router.post('/notifications/:id/read', async (req, res) => {
         }
         const authReq = req as AuthRequest;
         const user = authReq.user;
-        const allowedRegionIds = getAllowedRegionIds(user);
+        const allowedRegionIds = await getAllowedRegionIdsAsync(user);
         if (allowedRegionIds && allowedRegionIds.length === 0) {
             return res.status(403).json({ error: 'forbidden' });
         }
@@ -203,7 +203,7 @@ router.post('/notifications/read-all', async (req, res) => {
 
         const authReq = req as AuthRequest;
         const user = authReq.user;
-        const allowedRegionIds = getAllowedRegionIds(user);
+        const allowedRegionIds = await getAllowedRegionIdsAsync(user);
         if (allowedRegionIds && allowedRegionIds.length === 0) {
             return res.status(403).json({ error: 'forbidden' });
         }

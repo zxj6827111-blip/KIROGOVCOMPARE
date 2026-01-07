@@ -5,7 +5,7 @@ import path from 'path';
 import { dbQuery, ensureDbMigrations } from '../config/db-llm';
 import { sqlValue } from '../config/sqlite';
 import { authMiddleware, AuthRequest, generateExpiringToken } from '../middleware/auth';
-import { getAllowedRegionIds } from '../utils/dataScope';
+import { getAllowedRegionIds, getAllowedRegionIdsAsync } from '../utils/dataScope';
 
 const router: Router = express.Router();
 const SERVICE_TOKEN_TTL_MS = 5 * 60 * 1000;
@@ -83,7 +83,7 @@ router.get('/:id/pdf', authMiddleware, async (req: AuthRequest, res: Response) =
 
         ensureDbMigrations();
 
-        const allowedRegionIds = getAllowedRegionIds(req.user);
+        const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
         if (allowedRegionIds && allowedRegionIds.length === 0) {
             return res.status(403).json({ error: 'forbidden' });
         }
