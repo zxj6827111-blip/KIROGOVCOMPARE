@@ -1,3 +1,4 @@
+import pool, { dbType } from '../config/database-llm';
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 
@@ -123,7 +124,7 @@ export function verifyPassword(password: string, storedHash: string): boolean {
  * Authentication middleware
  * Checks for Authorization header with Bearer token
  */
-export function authMiddleware(req: AuthRequest, res: Response, next: NextFunction): void {
+export async function authMiddleware(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   // Allow CI/test mode to bypass authentication
   if (process.env.NODE_ENV === 'test') {
     req.user = {
@@ -153,22 +154,32 @@ export function authMiddleware(req: AuthRequest, res: Response, next: NextFuncti
 
   req.user = decoded;
 
-  // Fetch latest permissions from DB to ensure they are up to date
+  // Fetch latest user info/permissions from DB
   try {
-    const { querySqlite, sqlValue } = require('../config/sqlite');
-    // SECURITY FIX: Use parameterized query to prevent SQL injection
-    const users = querySqlite(`SELECT * FROM admin_users WHERE id = ${sqlValue(decoded.id)}`);
+    let users: any[] = [];
+    if (dbType === 'postgres') {
+       const result = await pool.query('SELECT * FROM admin_users WHERE id = $1', [decoded.id]);
+       users = result.rows;
+    } else {
+       const { querySqlite, sqlValue } = require('../config/sqlite');
+       users = querySqlite(`SELECT * FROM admin_users WHERE id = ${sqlValue(decoded.id)}`);
+    }
     if (users && users.length > 0) {
       const dbUser = users[0];
+      // PostgreSQL jsonb returns objects directly, SQLite returns strings
+      const parseJsonField = (val: any) => {
+        if (!val) return {};
+        if (typeof val === 'object') return val;
+        try { return JSON.parse(val); } catch { return {}; }
+      };
       req.user = {
         ...decoded,
-        permissions: dbUser.permissions ? JSON.parse(dbUser.permissions) : {},
-        dataScope: dbUser.data_scope ? JSON.parse(dbUser.data_scope) : {}
+        permissions: parseJsonField(dbUser.permissions),
+        dataScope: parseJsonField(dbUser.data_scope)
       };
     }
   } catch (error) {
     console.warn('Failed to refresh user permissions from DB during auth:', error);
-    // Proceed with token data (fallback)
   }
 
   next();
@@ -177,7 +188,7 @@ export function authMiddleware(req: AuthRequest, res: Response, next: NextFuncti
 /**
  * Optional auth middleware - doesn't reject, just attaches user if valid
  */
-export function optionalAuthMiddleware(req: AuthRequest, _res: Response, next: NextFunction): void {
+export async function optionalAuthMiddleware(req: AuthRequest, _res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
 
   if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -186,17 +197,28 @@ export function optionalAuthMiddleware(req: AuthRequest, _res: Response, next: N
     if (decoded) {
       req.user = decoded;
 
-      // Fetch latest permissions from DB (same as authMiddleware)
+      // Fetch latest user info/permissions from DB
       try {
-        const { querySqlite, sqlValue } = require('../config/sqlite');
-        // SECURITY FIX: Use parameterized query to prevent SQL injection
-        const users = querySqlite(`SELECT * FROM admin_users WHERE id = ${sqlValue(decoded.id)}`);
+        let users: any[] = [];
+        if (dbType === 'postgres') {
+            const result = await pool.query('SELECT * FROM admin_users WHERE id = $1', [decoded.id]);
+            users = result.rows;
+        } else {
+            const { querySqlite, sqlValue } = require('../config/sqlite');
+            users = querySqlite(`SELECT * FROM admin_users WHERE id = ${sqlValue(decoded.id)}`);
+        }
         if (users && users.length > 0) {
           const dbUser = users[0];
+          // PostgreSQL jsonb returns objects directly, SQLite returns strings
+          const parseJsonField = (val: any) => {
+            if (!val) return {};
+            if (typeof val === 'object') return val;
+            try { return JSON.parse(val); } catch { return {}; }
+          };
           req.user = {
             ...decoded,
-            permissions: dbUser.permissions ? JSON.parse(dbUser.permissions) : {},
-            dataScope: dbUser.data_scope ? JSON.parse(dbUser.data_scope) : {}
+            permissions: parseJsonField(dbUser.permissions),
+            dataScope: parseJsonField(dbUser.data_scope)
           };
         }
       } catch (error) {

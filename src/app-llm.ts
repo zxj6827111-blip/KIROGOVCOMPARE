@@ -82,6 +82,7 @@ export function createLlmApp(): express.Express {
   app.use('/api/comparisons', pdfExportRouter);
   app.use('/api', llmComparisonsRouter);
   app.use('/api', reportsRouter);
+  app.use('/api', require('./routes/consistency').default); // Dynamic import to avoid header change for now, or add import top level
   app.use('/api/auth', authRouter);
   app.use('/api/users', usersRouter);
   app.use('/api/pdf-jobs', pdfJobsRouter);

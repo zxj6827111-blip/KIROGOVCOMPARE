@@ -42,9 +42,24 @@ function formatParams(statement: string, params?: any[]): string {
     });
   } else {
     // SQLite 风格：? 占位符
-    for (const param of params) {
-      const value = sqlValue(param as any);
-      formatted = formatted.replace(/\?/, value);
+    // 使用 split/reduce 安全替换，避免 regex replace 对 value 中特殊字符($)的处理，
+    // 以及避免替换后的 value 中包含 ? 导致后续参数替换错误。
+    const parts = formatted.split('?');
+    if (parts.length - 1 === params.length) {
+      formatted = parts.reduce((acc, part, i) => {
+        if (i < params.length) {
+          return acc + part + sqlValue(params[i]);
+        }
+        return acc + part;
+      }, '');
+    } else {
+      // 参数数量不匹配时回退到旧逻辑（或报错），这里保留尽力替换
+      console.warn(`[formatParams] Warning: Placeholder count (${parts.length - 1}) does not match param count (${params.length})`);
+      for (const param of params) {
+        const value = sqlValue(param as any);
+        // 使用 function 防止 replacement string 中的 $ 被特殊处理
+        formatted = formatted.replace(/\?/, () => value);
+      }
     }
   }
 

@@ -242,7 +242,7 @@ function JobCenter() {
                 // TODO: Add backend support for job_id based deletion
                 const job = jobs.find(j => j.job_id === jobId);
                 if (job) {
-                    await apiClient.delete(`/jobs/${job.version_id}`);
+                    await apiClient.delete(`/jobs/task/${job.job_id}`);
                 }
                 setJobs((prev) => prev.filter((j) => j.job_id !== jobId));
                 setSelectedIds((prev) => prev.filter((id) => id !== jobId));

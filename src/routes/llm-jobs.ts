@@ -1,21 +1,22 @@
 import express, { Request, Response } from 'express';
-import { ensureSqliteMigrations, querySqlite, sqlValue } from '../config/sqlite';
+import { dbQuery, ensureDbMigrations } from '../config/db-llm';
+import { sqlValue } from '../config/sqlite';
 
 const router = express.Router();
 
-router.get('/:id', (req: Request, res: Response) => {
+router.get('/:id', async (req: Request, res: Response) => {
   try {
     const jobId = Number(req.params.id);
     if (!jobId || Number.isNaN(jobId) || !Number.isInteger(jobId) || jobId < 1) {
       return res.status(400).json({ error: 'job_id 无效' });
     }
 
-    ensureSqliteMigrations();
+    ensureDbMigrations();
 
-    const job = querySqlite(
+    const job = (await dbQuery(
       `SELECT id, report_id, version_id, status, created_at, started_at, finished_at, error_code, error_message
        FROM jobs WHERE id = ${sqlValue(jobId)} LIMIT 1;`
-    )[0];
+    ))[0];
 
     if (!job) {
       return res.status(404).json({ error: 'job 不存在' });

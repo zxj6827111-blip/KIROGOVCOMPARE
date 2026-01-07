@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import pool, { dbType } from '../config/database-llm';
+import { dbNowExpression } from '../config/db-llm';
 
 const sqliteSchema = `
 PRAGMA foreign_keys = ON;
@@ -12,8 +13,8 @@ CREATE TABLE IF NOT EXISTS regions (
   province TEXT,
   parent_id INTEGER REFERENCES regions(id) ON DELETE CASCADE,
   level INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (${dbNowExpression()}),
+  updated_at TEXT NOT NULL DEFAULT (${dbNowExpression()})
 );
 
 CREATE TABLE IF NOT EXISTS reports (
@@ -21,8 +22,8 @@ CREATE TABLE IF NOT EXISTS reports (
   region_id INTEGER NOT NULL REFERENCES regions(id),
   year INTEGER NOT NULL,
   unit_name TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (${dbNowExpression()}),
+  updated_at TEXT NOT NULL DEFAULT (${dbNowExpression()}),
   UNIQUE(region_id, year, unit_name)
 );
 
@@ -36,13 +37,15 @@ CREATE TABLE IF NOT EXISTS report_versions (
   file_size INTEGER,
   storage_path TEXT NOT NULL,
   text_path TEXT,
+  raw_text TEXT,
   provider TEXT NOT NULL,
   model TEXT NOT NULL,
   prompt_version TEXT NOT NULL,
   parsed_json TEXT NOT NULL,
   schema_version TEXT NOT NULL DEFAULT 'v1',
   is_active INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (${dbNowExpression()}),
+  updated_at TEXT NOT NULL DEFAULT (${dbNowExpression()}),
   UNIQUE(report_id, file_hash)
 );
 
@@ -56,7 +59,7 @@ CREATE TABLE IF NOT EXISTS comparisons (
   year_b INTEGER NOT NULL,
   left_report_id INTEGER NOT NULL REFERENCES reports(id),
   right_report_id INTEGER NOT NULL REFERENCES reports(id),
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (${dbNowExpression()}),
   UNIQUE(region_id, year_a, year_b)
 );
 
@@ -83,10 +86,15 @@ CREATE TABLE IF NOT EXISTS jobs (
   error_message TEXT,
   retry_count INTEGER NOT NULL DEFAULT 0,
   max_retries INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (${dbNowExpression()}),
   started_at TEXT,
   finished_at TEXT,
   comparison_id INTEGER REFERENCES comparisons(id) ON DELETE SET NULL,
+  export_title TEXT,
+  file_name TEXT,
+  file_path TEXT,
+  file_size INTEGER,
+  batch_id TEXT,
   created_by INTEGER
 );
 
@@ -110,7 +118,7 @@ CREATE TABLE IF NOT EXISTS report_consistency_runs (
   status TEXT NOT NULL CHECK(status IN ('queued', 'running', 'succeeded', 'failed')),
   engine_version TEXT NOT NULL DEFAULT 'v1',
   summary_json TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (${dbNowExpression()}),
   finished_at TEXT
 );
 
@@ -126,7 +134,7 @@ CREATE TABLE IF NOT EXISTS report_consistency_items (
   run_id INTEGER NOT NULL REFERENCES report_consistency_runs(id) ON DELETE CASCADE,
   report_version_id INTEGER NOT NULL REFERENCES report_versions(id) ON DELETE CASCADE,
   
-  group_key TEXT NOT NULL CHECK(group_key IN ('table2', 'table3', 'table4', 'text')),
+  group_key TEXT NOT NULL CHECK(group_key IN ('table2', 'table3', 'table4', 'text', 'visual', 'structure', 'quality')),
   check_key TEXT NOT NULL,
   fingerprint TEXT NOT NULL,
   
@@ -144,8 +152,8 @@ CREATE TABLE IF NOT EXISTS report_consistency_items (
   human_status TEXT NOT NULL DEFAULT 'pending' CHECK(human_status IN ('pending', 'confirmed', 'dismissed')),
   human_comment TEXT,
   
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (${dbNowExpression()}),
+  updated_at TEXT NOT NULL DEFAULT (${dbNowExpression()}),
   
   UNIQUE(report_version_id, fingerprint)
 );
@@ -170,7 +178,7 @@ CREATE TABLE IF NOT EXISTS notifications (
   type TEXT NOT NULL DEFAULT 'upload_complete',
   title TEXT NOT NULL,
   content_json TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (${dbNowExpression()}),
   read_at TEXT,
   related_job_id INTEGER REFERENCES jobs(id),
   related_version_id INTEGER REFERENCES report_versions(id),
@@ -213,13 +221,15 @@ CREATE TABLE IF NOT EXISTS report_versions (
   file_size BIGINT,
   storage_path TEXT NOT NULL,
   text_path TEXT,
+  raw_text TEXT,
   provider VARCHAR(50) NOT NULL,
   model VARCHAR(100) NOT NULL,
   prompt_version VARCHAR(50) NOT NULL,
   parsed_json JSONB NOT NULL,
   schema_version VARCHAR(50) NOT NULL DEFAULT 'v1',
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_report_versions_report_file
@@ -266,6 +276,11 @@ CREATE TABLE IF NOT EXISTS jobs (
   started_at TIMESTAMPTZ,
   finished_at TIMESTAMPTZ,
   comparison_id BIGINT REFERENCES comparisons(id) ON DELETE SET NULL,
+  export_title TEXT,
+  file_name TEXT,
+  file_path TEXT,
+  file_size BIGINT,
+  batch_id TEXT,
   created_by BIGINT
 );
 
@@ -305,7 +320,7 @@ CREATE TABLE IF NOT EXISTS report_consistency_items (
   run_id BIGINT NOT NULL REFERENCES report_consistency_runs(id) ON DELETE CASCADE,
   report_version_id BIGINT NOT NULL REFERENCES report_versions(id) ON DELETE CASCADE,
   
-  group_key VARCHAR(30) NOT NULL CHECK(group_key IN ('table2', 'table3', 'table4', 'text')),
+  group_key VARCHAR(30) NOT NULL CHECK(group_key IN ('table2', 'table3', 'table4', 'text', 'visual', 'structure', 'quality')),
   check_key VARCHAR(100) NOT NULL,
   fingerprint VARCHAR(32) NOT NULL,
   
@@ -356,8 +371,34 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_by BIGINT
 );
 
+
 CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(read_at);
 CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
+
+-- Admin users table
+CREATE TABLE IF NOT EXISTS admin_users (
+  id BIGSERIAL PRIMARY KEY,
+  username VARCHAR(50) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  display_name VARCHAR(100),
+  permissions TEXT DEFAULT '{}',
+  data_scope TEXT DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_login_at TIMESTAMPTZ
+);
+
+ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS raw_text TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS export_title TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS file_name TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS file_path TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS file_size BIGINT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS batch_id TEXT;
+
+ALTER TABLE report_consistency_items DROP CONSTRAINT IF EXISTS report_consistency_items_group_key_check;
+ALTER TABLE report_consistency_items
+  ADD CONSTRAINT report_consistency_items_group_key_check
+  CHECK (group_key IN ('table2', 'table3', 'table4', 'text', 'visual', 'structure', 'quality'));
 `;
 
 export async function runLLMMigrations(): Promise<void> {

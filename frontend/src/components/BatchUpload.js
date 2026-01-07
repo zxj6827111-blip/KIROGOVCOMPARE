@@ -109,12 +109,13 @@ function BatchUpload({ onClose, isEmbedded = false }) {
 
                 rows.forEach(r => {
                     r.children = [];
-                    regionMap.set(r.id, r);
+                    regionMap.set(Number(r.id), r);
                 });
 
                 rows.forEach(r => {
-                    if (r.parent_id && regionMap.has(r.parent_id)) {
-                        regionMap.get(r.parent_id).children.push(r);
+                    const parentIdNum = r.parent_id ? Number(r.parent_id) : null;
+                    if (parentIdNum && regionMap.has(parentIdNum)) {
+                        regionMap.get(parentIdNum).children.push(r);
                     } else {
                         roots.push(r);
                     }
@@ -149,7 +150,7 @@ function BatchUpload({ onClose, isEmbedded = false }) {
     // Build region map for ancestor lookup
     const regionMap = React.useMemo(() => {
         const map = new Map();
-        regions.forEach(r => map.set(r.id, r));
+        regions.forEach(r => map.set(Number(r.id), r));
         return map;
     }, [regions]);
 
@@ -194,8 +195,8 @@ function BatchUpload({ onClose, isEmbedded = false }) {
 
             // 防止死循环 (max depth 10)
             let depth = 0;
-            while (current.parent_id && regionMap.has(current.parent_id) && depth < 10) {
-                const parent = regionMap.get(current.parent_id);
+            while (current.parent_id && regionMap.has(Number(current.parent_id)) && depth < 10) {
+                const parent = regionMap.get(Number(current.parent_id));
                 const parentName = parent.name.replace(/(?:人民政府|办事处|委员会|政府)$/g, '');
 
                 // 如果搜索词中包含了祖先名称 (例如 "沭阳县" 在 "沭阳县教育局" 中)
@@ -232,7 +233,7 @@ function BatchUpload({ onClose, isEmbedded = false }) {
         const path = [region.name];
         let current = region;
         while (current.parent_id) {
-            const parent = regions.find(r => r.id === current.parent_id);
+            const parent = regions.find(r => Number(r.id) === Number(current.parent_id));
             if (parent) {
                 path.unshift(parent.name);
                 current = parent;

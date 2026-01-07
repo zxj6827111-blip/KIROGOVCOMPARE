@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
-import { querySqlite, sqlValue, ensureSqliteMigrations } from '../config/sqlite';
+import { dbBool, dbQuery, ensureDbMigrations, parseDbJson, dbNowExpression } from '../config/db-llm';
+import { sqlValue } from '../config/sqlite';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import pdfExportService from '../services/PdfExportService';
 import path from 'path';
@@ -14,9 +15,9 @@ const router = express.Router();
  * GET /api/comparisons/history
  * Get comparison history list with pagination
  */
-router.get('/history', authMiddleware, (req: AuthRequest, res: Response) => {
+router.get('/history', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    ensureSqliteMigrations();
+    ensureDbMigrations();
 
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize as string) || 20));
@@ -58,7 +59,7 @@ router.get('/history', authMiddleware, (req: AuthRequest, res: Response) => {
         SELECT id FROM allowed_ids
       `;
       try {
-        const allowedRows = querySqlite(scopeIdsQuery);
+        const allowedRows = await dbQuery(scopeIdsQuery);
         const allowedIds = allowedRows.map((row: any) => row.id).join(',');
         if (allowedIds.length > 0) {
           conditions.push(`c.region_id IN (${allowedIds})`);
@@ -74,7 +75,7 @@ router.get('/history', authMiddleware, (req: AuthRequest, res: Response) => {
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     // Get total count
-    const countResult = querySqlite(`
+    const countResult = await dbQuery(`
       SELECT COUNT(*) as total 
       FROM comparisons c 
       LEFT JOIN regions r ON c.region_id = r.id
@@ -83,7 +84,7 @@ router.get('/history', authMiddleware, (req: AuthRequest, res: Response) => {
     const total = countResult?.[0]?.total || 0;
 
     // Get paginated results
-    const comparisons = querySqlite(`
+    const comparisons = await dbQuery(`
       SELECT 
         c.id,
         c.region_id,
@@ -122,7 +123,7 @@ router.get('/history', authMiddleware, (req: AuthRequest, res: Response) => {
     });
   } catch (error) {
     console.error('Error fetching comparison history:', error);
-    res.status(500).json({ error: '获取比对历史失败' });
+    res.status(500).json({ error: '鑾峰彇姣斿鍘嗗彶澶辫触' });
   }
 });
 
@@ -130,20 +131,20 @@ router.get('/history', authMiddleware, (req: AuthRequest, res: Response) => {
  * POST /api/comparisons/create
  * Create a new comparison record
  */
-router.post('/create', authMiddleware, (req: AuthRequest, res: Response) => {
+router.post('/create', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { region_id, year_a, year_b, left_report_id, right_report_id } = req.body;
 
     console.log('Creating comparison:', { region_id, year_a, year_b, left_report_id, right_report_id });
 
     if (!region_id || !year_a || !year_b || !left_report_id || !right_report_id) {
-      return res.status(400).json({ error: '缺少必要参数' });
+      return res.status(400).json({ error: '缂哄皯蹇呰鍙傛暟' });
     }
 
-    ensureSqliteMigrations();
+    ensureDbMigrations();
 
     // Check if comparison already exists
-    const existing = querySqlite(`
+    const existing = await dbQuery(`
       SELECT id FROM comparisons 
       WHERE region_id = ${sqlValue(region_id)} 
         AND year_a = ${sqlValue(year_a)} 
@@ -154,7 +155,7 @@ router.post('/create', authMiddleware, (req: AuthRequest, res: Response) => {
       // Return existing comparison
       return res.json({
         success: true,
-        message: '比对记录已存在',
+        message: '比较已存在',
         comparisonId: existing[0].id
       });
     }
@@ -163,33 +164,33 @@ router.post('/create', authMiddleware, (req: AuthRequest, res: Response) => {
     let similarity = 0;
     let checkStatus: string | null = null;
     try {
-      const leftRes = querySqlite(`SELECT parsed_json FROM report_versions WHERE report_id=${sqlValue(left_report_id)} AND is_active=1`);
-      const rightRes = querySqlite(`SELECT parsed_json FROM report_versions WHERE report_id=${sqlValue(right_report_id)} AND is_active=1`);
+      const leftRes = await dbQuery(`SELECT parsed_json FROM report_versions WHERE report_id=${sqlValue(left_report_id)} AND is_active=${dbBool(true)}`);
+      const rightRes = await dbQuery(`SELECT parsed_json FROM report_versions WHERE report_id=${sqlValue(right_report_id)} AND is_active=${dbBool(true)}`);
 
-      const leftJson = leftRes?.[0]?.parsed_json ? JSON.parse(leftRes[0].parsed_json) : { sections: [] };
-      const rightJson = rightRes?.[0]?.parsed_json ? JSON.parse(rightRes[0].parsed_json) : { sections: [] };
+      const leftJson = parseDbJson(leftRes?.[0]?.parsed_json) || { sections: [] };
+      const rightJson = parseDbJson(rightRes?.[0]?.parsed_json) || { sections: [] };
 
       const metrics = calculateReportMetrics(leftJson, rightJson);
       similarity = metrics.similarity;
       checkStatus = metrics.checkStatus;
 
       // Additionally, check for individual report consistency issues
-      const leftVersionId = querySqlite(`SELECT id FROM report_versions WHERE report_id=${sqlValue(left_report_id)} AND is_active=1`)?.[0]?.id;
-      const rightVersionId = querySqlite(`SELECT id FROM report_versions WHERE report_id=${sqlValue(right_report_id)} AND is_active=1`)?.[0]?.id;
+      const leftVersionId = (await dbQuery(`SELECT id FROM report_versions WHERE report_id=${sqlValue(left_report_id)} AND is_active=${dbBool(true)}`))?.[0]?.id;
+      const rightVersionId = (await dbQuery(`SELECT id FROM report_versions WHERE report_id=${sqlValue(right_report_id)} AND is_active=${dbBool(true)}`))?.[0]?.id;
 
-      const leftIssues = leftVersionId ? querySqlite(`
+      const leftIssues = leftVersionId ? (await dbQuery(`
         SELECT COUNT(*) as cnt FROM report_consistency_items 
         WHERE report_version_id=${sqlValue(leftVersionId)} 
         AND auto_status='FAIL' 
         AND human_status='pending'
-      `)?.[0]?.cnt || 0 : 0;
+      `))?.[0]?.cnt || 0 : 0;
 
-      const rightIssues = rightVersionId ? querySqlite(`
+      const rightIssues = rightVersionId ? (await dbQuery(`
         SELECT COUNT(*) as cnt FROM report_consistency_items 
         WHERE report_version_id=${sqlValue(rightVersionId)} 
         AND auto_status='FAIL' 
         AND human_status='pending'
-      `)?.[0]?.cnt || 0 : 0;
+      `))?.[0]?.cnt || 0 : 0;
 
       // Combine cross-year and intra-report checks
       if (leftIssues > 0 || rightIssues > 0) {
@@ -197,8 +198,8 @@ router.post('/create', authMiddleware, (req: AuthRequest, res: Response) => {
         if (checkStatus && checkStatus.startsWith('异常')) {
           issueDesc.push(checkStatus.replace('异常(', '').replace(')', ''));
         }
-        if (leftIssues > 0) issueDesc.push(`${year_a}年(核验${leftIssues}项)`);
-        if (rightIssues > 0) issueDesc.push(`${year_b}年(核验${rightIssues}项)`);
+        if (leftIssues > 0) issueDesc.push(`${year_a}年校验${leftIssues}项`);
+        if (rightIssues > 0) issueDesc.push(`${year_b}年校验${rightIssues}项`);
         checkStatus = `异常(${issueDesc.join('|')})`;
       } else if (!checkStatus) {
         // No cross-year issues and no intra issues found
@@ -209,13 +210,13 @@ router.post('/create', authMiddleware, (req: AuthRequest, res: Response) => {
     }
 
     // Create comparison record
-    querySqlite(`
+    await dbQuery(`
       INSERT INTO comparisons (region_id, year_a, year_b, left_report_id, right_report_id, similarity, check_status, created_at)
-      VALUES (${sqlValue(region_id)}, ${sqlValue(year_a)}, ${sqlValue(year_b)}, ${sqlValue(left_report_id)}, ${sqlValue(right_report_id)}, ${similarity}, ${checkStatus ? sqlValue(checkStatus) : 'NULL'}, datetime('now'))
+      VALUES (${sqlValue(region_id)}, ${sqlValue(year_a)}, ${sqlValue(year_b)}, ${sqlValue(left_report_id)}, ${sqlValue(right_report_id)}, ${similarity}, ${checkStatus ? sqlValue(checkStatus) : 'NULL'}, ${dbNowExpression()})
     `);
 
     // Get the created comparison
-    const created = querySqlite(`
+    const created = await dbQuery(`
       SELECT id FROM comparisons 
       WHERE region_id = ${sqlValue(region_id)} 
         AND left_report_id = ${sqlValue(left_report_id)} 
@@ -242,17 +243,17 @@ router.post('/create', authMiddleware, (req: AuthRequest, res: Response) => {
  * GET /api/comparisons/:id/result
  * Get comparison result details with both reports' content
  */
-router.get('/:id/result', authMiddleware, (req: AuthRequest, res: Response) => {
+router.get('/:id/result', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const comparisonId = Number(req.params.id);
     if (!comparisonId || Number.isNaN(comparisonId)) {
       return res.status(400).json({ error: '无效的比对ID' });
     }
 
-    ensureSqliteMigrations();
+    ensureDbMigrations();
 
     // Get comparison info
-    const comparisons = querySqlite(`
+    const comparisons = await dbQuery(`
       SELECT c.*, r.name as region_name
       FROM comparisons c
       LEFT JOIN regions r ON c.region_id = r.id
@@ -260,7 +261,7 @@ router.get('/:id/result', authMiddleware, (req: AuthRequest, res: Response) => {
     `);
 
     if (!comparisons || comparisons.length === 0) {
-      return res.status(404).json({ error: '比对记录不存在' });
+      return res.status(404).json({ error: '比较不存在' });
     }
 
     const comparison = comparisons[0];
@@ -278,7 +279,7 @@ router.get('/:id/result', authMiddleware, (req: AuthRequest, res: Response) => {
         SELECT id FROM allowed_ids
       `;
       try {
-        const allowedRows = querySqlite(scopeIdsQuery);
+        const allowedRows = await dbQuery(scopeIdsQuery);
         const allowedIds = allowedRows.map((row: any) => row.id);
         if (!allowedIds.includes(Number(comparison.region_id))) {
           return res.status(403).json({ error: '无权限访问该地区' });
@@ -290,38 +291,30 @@ router.get('/:id/result', authMiddleware, (req: AuthRequest, res: Response) => {
     }
 
     // Get left report parsed content
-    const leftVersions = querySqlite(`
+    const leftVersions = await dbQuery(`
       SELECT rv.parsed_json, rp.year
       FROM report_versions rv
       JOIN reports rp ON rv.report_id = rp.id
-      WHERE rv.report_id = ${sqlValue(comparison.left_report_id)} AND rv.is_active = 1
+      WHERE rv.report_id = ${sqlValue(comparison.left_report_id)} AND rv.is_active = ${dbBool(true)}
     `);
 
     // Get right report parsed content
-    const rightVersions = querySqlite(`
+    const rightVersions = await dbQuery(`
       SELECT rv.parsed_json, rp.year
       FROM report_versions rv
       JOIN reports rp ON rv.report_id = rp.id
-      WHERE rv.report_id = ${sqlValue(comparison.right_report_id)} AND rv.is_active = 1
+      WHERE rv.report_id = ${sqlValue(comparison.right_report_id)} AND rv.is_active = ${dbBool(true)}
     `);
 
     // Get diff result if available
-    const results = querySqlite(`
+    const results = await dbQuery(`
       SELECT cr.diff_json, cr.created_at
       FROM comparison_results cr
       WHERE cr.comparison_id = ${sqlValue(comparisonId)}
     `);
 
     // Parse JSON fields
-    const parseJson = (val: any) => {
-      if (!val) return null;
-      if (typeof val === 'object') return val;
-      try {
-        return JSON.parse(val);
-      } catch {
-        return val;
-      }
-    };
+    const parseJson = (val: any) => parseDbJson(val) ?? val;
 
     const leftContent = leftVersions?.[0] ? parseJson(leftVersions[0].parsed_json) : null;
     const rightContent = rightVersions?.[0] ? parseJson(rightVersions[0].parsed_json) : null;
@@ -351,23 +344,23 @@ router.get('/:id/result', authMiddleware, (req: AuthRequest, res: Response) => {
  * DELETE /api/comparisons/:id
  * Delete a comparison record
  */
-router.delete('/:id', authMiddleware, (req: AuthRequest, res: Response) => {
+router.delete('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const comparisonId = Number(req.params.id);
     if (!comparisonId || Number.isNaN(comparisonId)) {
       return res.status(400).json({ error: '无效的比对ID' });
     }
 
-    ensureSqliteMigrations();
+    ensureDbMigrations();
 
     // Check if exists
-    const existing = querySqlite(`SELECT id FROM comparisons WHERE id = ${sqlValue(comparisonId)}`);
+    const existing = await dbQuery(`SELECT id FROM comparisons WHERE id = ${sqlValue(comparisonId)}`);
     if (!existing || existing.length === 0) {
-      return res.status(404).json({ error: '比对记录不存在' });
+      return res.status(404).json({ error: '比较不存在' });
     }
 
     // Delete (cascade will handle related records)
-    querySqlite(`DELETE FROM comparisons WHERE id = ${sqlValue(comparisonId)}`);
+    await dbQuery(`DELETE FROM comparisons WHERE id = ${sqlValue(comparisonId)}`);
 
     res.json({ success: true, message: '删除成功' });
   } catch (error) {
@@ -389,10 +382,10 @@ router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Res
 
     const { watermark_text, watermark_opacity } = req.body;
 
-    ensureSqliteMigrations();
+    ensureDbMigrations();
 
     // Get comparison details
-    const comparisons = querySqlite(`
+    const comparisons = await dbQuery(`
       SELECT 
         c.id,
         c.region_id,
@@ -405,7 +398,7 @@ router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Res
     `);
 
     if (!comparisons || comparisons.length === 0) {
-      return res.status(404).json({ error: '比对记录不存在' });
+      return res.status(404).json({ error: '比较不存在' });
     }
 
     const comparison = comparisons[0];
@@ -423,7 +416,7 @@ router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Res
         SELECT id FROM allowed_ids
       `;
       try {
-        const allowedRows = querySqlite(scopeIdsQuery);
+        const allowedRows = await dbQuery(scopeIdsQuery);
         const allowedIds = allowedRows.map((row: any) => row.id);
         if (!allowedIds.includes(Number(comparison.region_id))) {
           return res.status(403).json({ error: '无权限访问该地区' });
@@ -435,27 +428,27 @@ router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Res
     }
 
     // Get comparison result for summary
-    const results = querySqlite(`
+    const results = await dbQuery(`
       SELECT diff_json FROM comparison_results WHERE comparison_id = ${sqlValue(comparisonId)}
     `);
 
     // Get left report content
-    const leftVersions = querySqlite(`
+    const leftVersions = await dbQuery(`
       SELECT rv.parsed_json, rp.year
       FROM report_versions rv
       JOIN reports rp ON rv.report_id = rp.id
-      WHERE rv.report_id = ${sqlValue(comparison.left_report_id)} AND rv.is_active = 1
+      WHERE rv.report_id = ${sqlValue(comparison.left_report_id)} AND rv.is_active = ${dbBool(true)}
     `);
-    const leftContent = leftVersions?.[0]?.parsed_json ? JSON.parse(leftVersions[0].parsed_json) : { sections: [] };
+    const leftContent = parseDbJson(leftVersions?.[0]?.parsed_json) || { sections: [] };
 
     // Get right report content
-    const rightVersions = querySqlite(`
+    const rightVersions = await dbQuery(`
       SELECT rv.parsed_json, rp.year
       FROM report_versions rv
       JOIN reports rp ON rv.report_id = rp.id
-      WHERE rv.report_id = ${sqlValue(comparison.right_report_id)} AND rv.is_active = 1
+      WHERE rv.report_id = ${sqlValue(comparison.right_report_id)} AND rv.is_active = ${dbBool(true)}
     `);
-    const rightContent = rightVersions?.[0]?.parsed_json ? JSON.parse(rightVersions[0].parsed_json) : { sections: [] };
+    const rightContent = parseDbJson(rightVersions?.[0]?.parsed_json) || { sections: [] };
 
     // Construct Report Objects
     const reportA = {
@@ -502,7 +495,7 @@ router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Res
     let summary: any = { textRepetition: 0, tableRepetition: 0, overallRepetition: 0, items: [] };
     if (results && results.length > 0 && results[0].diff_json) {
       try {
-        const diffData = JSON.parse(results[0].diff_json);
+        const diffData = parseDbJson(results[0].diff_json);
         if (diffData.summary) summary = diffData.summary;
         // Merge diff tables if available
         if (diffData.sections) {
@@ -525,7 +518,7 @@ router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Res
     const pdfPath = await pdfExportService.generateComparisonPdf({
       comparisonId,
       data: reportData,
-      regionName: comparison.region_name || '未知地区',
+      regionName: comparison.region_name || '鏈煡鍦板尯',
       watermarkText: watermark_text,
       watermarkOpacity: watermark_opacity ? parseFloat(watermark_opacity) : 0.1,
     });
@@ -534,7 +527,7 @@ router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Res
     // const fileSize = pdfExportService.getFileSize(pdfPath); // Method removed
     const fileSize = require('fs').statSync(pdfPath).size;
 
-    querySqlite(`
+    await dbQuery(`
       INSERT INTO comparison_exports (comparison_id, format, file_path, file_size, watermark_text)
       VALUES (${sqlValue(comparisonId)}, 'pdf', ${sqlValue(pdfPath)}, ${sqlValue(fileSize)}, ${watermark_text ? sqlValue(watermark_text) : 'NULL'})
     `);
@@ -551,21 +544,21 @@ router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Res
  * GET /api/comparisons/:id/exports
  * Get export history for a comparison
  */
-router.get('/:id/exports', authMiddleware, (req: AuthRequest, res: Response) => {
+router.get('/:id/exports', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const comparisonId = Number(req.params.id);
     if (!comparisonId || Number.isNaN(comparisonId)) {
       return res.status(400).json({ error: '无效的比对ID' });
     }
 
-    ensureSqliteMigrations();
+    ensureDbMigrations();
 
-    const comparison = querySqlite(`
+    const comparison = (await dbQuery(`
       SELECT region_id FROM comparisons WHERE id = ${sqlValue(comparisonId)}
-    `)[0];
+    `))[0];
 
     if (!comparison) {
-      return res.status(404).json({ error: '比较记录不存在' });
+      return res.status(404).json({ error: '比较不存在' });
     }
 
     // DATA SCOPE CHECK
@@ -581,7 +574,7 @@ router.get('/:id/exports', authMiddleware, (req: AuthRequest, res: Response) => 
         SELECT id FROM allowed_ids
       `;
       try {
-        const allowedRows = querySqlite(scopeIdsQuery);
+        const allowedRows = await dbQuery(scopeIdsQuery);
         const allowedIds = allowedRows.map((row: any) => row.id);
         if (!allowedIds.includes(Number(comparison.region_id))) {
           return res.status(403).json({ error: '无权限访问该地区' });
@@ -592,7 +585,7 @@ router.get('/:id/exports', authMiddleware, (req: AuthRequest, res: Response) => 
       }
     }
 
-    const exports = querySqlite(`
+    const exports = await dbQuery(`
       SELECT id, format, file_size, watermark_text, created_at
       FROM comparison_exports
       WHERE comparison_id = ${sqlValue(comparisonId)}
@@ -607,3 +600,6 @@ router.get('/:id/exports', authMiddleware, (req: AuthRequest, res: Response) => 
 });
 
 export default router;
+
+
+

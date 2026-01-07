@@ -61,11 +61,11 @@ export default function UserManagement() {
         }
     };
 
-    // Derived Selection Options
-    const provinces = useMemo(() => regions.filter(r => r.level === 1), [regions]);
-    const cities = useMemo(() => selectedProvince ? regions.filter(r => r.parent_id === parseInt(selectedProvince)) : [], [regions, selectedProvince]);
-    const districts = useMemo(() => selectedCity ? regions.filter(r => r.parent_id === parseInt(selectedCity)) : [], [regions, selectedCity]);
-    const streets = useMemo(() => selectedDistrict ? regions.filter(r => r.parent_id === parseInt(selectedDistrict)) : [], [regions, selectedDistrict]);
+    // Derived Selection Options - use Number/String coercion for Postgres compatibility
+    const provinces = useMemo(() => regions.filter(r => Number(r.level) === 1), [regions]);
+    const cities = useMemo(() => selectedProvince ? regions.filter(r => String(r.parent_id) === String(selectedProvince)) : [], [regions, selectedProvince]);
+    const districts = useMemo(() => selectedCity ? regions.filter(r => String(r.parent_id) === String(selectedCity)) : [], [regions, selectedCity]);
+    const streets = useMemo(() => selectedDistrict ? regions.filter(r => String(r.parent_id) === String(selectedDistrict)) : [], [regions, selectedDistrict]);
 
     // Handle cascading changes
     const handleProvinceChange = (e) => {
@@ -86,18 +86,38 @@ export default function UserManagement() {
 
     // Add selected region to scope
     const handleAddRegion = () => {
-        // Find the most specific selected region
+        // Find the most specific selected region by finding it in the visible options
         let targetId = selectedStreet || selectedDistrict || selectedCity || selectedProvince;
-        if (!targetId) return;
+        console.log('Adding region, targetId:', targetId, 'type:', typeof targetId);
+        console.log('Regions sample:', regions.slice(0, 3).map(r => ({id: r.id, type: typeof r.id, name: r.name})));
+        
+        if (!targetId) {
+            console.log('No target ID selected');
+            return;
+        }
 
-        const region = regions.find(r => r.id === parseInt(targetId));
-        if (region && !formData.dataScope.regions.includes(region.name)) {
+        // Find region: try both string and number match
+        const targetIdStr = String(targetId);
+        const region = regions.find(r => String(r.id) === targetIdStr);
+        
+        console.log('Found region:', region);
+        
+        if (!region) {
+            console.warn('Region not found for targetId:', targetId);
+            alert('无法找到对应的区域，请刷新页面重试');
+            return;
+        }
+        
+        if (!formData.dataScope.regions.includes(region.name)) {
             setFormData(prev => ({
                 ...prev,
                 dataScope: {
                     regions: [...prev.dataScope.regions, region.name]
                 }
             }));
+            console.log('Region added successfully:', region.name);
+        } else {
+            console.log('Region already exists:', region.name);
         }
         // Reset selection optionally? No, keep for multiple additions
     };

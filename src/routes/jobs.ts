@@ -1,20 +1,22 @@
 import express from 'express';
-import { ensureSqliteMigrations, querySqlite, sqlValue } from '../config/sqlite';
+import fs from 'fs';
+import { dbQuery, ensureDbMigrations, dbNowExpression } from '../config/db-llm';
+import { sqlValue } from '../config/sqlite';
 import { llmJobRunner } from '../services/LlmJobRunner';
 import { authMiddleware, AuthRequest, requirePermission } from '../middleware/auth';
-import { getAllowedRegionIds } from '../utils/dataScope';
+import { getAllowedRegionIds, getAllowedRegionIdsAsync } from '../utils/dataScope';
 
 const router = express.Router();
 router.use(authMiddleware);
 
-function getVersionRegionId(versionId: number): number | null {
-    const row = querySqlite(`
+async function getVersionRegionId(versionId: number): Promise<number | null> {
+    const row = (await dbQuery(`
       SELECT r.region_id
       FROM report_versions rv
       JOIN reports r ON rv.report_id = r.id
       WHERE rv.id = ${sqlValue(versionId)}
       LIMIT 1;
-    `)[0] as { region_id?: number } | undefined;
+    `))[0] as { region_id?: number } | undefined;
     return row?.region_id ?? null;
 }
 
@@ -29,9 +31,9 @@ function isRegionAllowed(regionId: number | null, allowedRegionIds: number[] | n
  * List jobs - each job is a separate record (history mode)
  * Query params: region_id, year, unit_name, status, page, limit
  */
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
     try {
-        ensureSqliteMigrations();
+        ensureDbMigrations();
 
         const { region_id, year, unit_name, status, page, limit } = req.query;
 
@@ -80,7 +82,7 @@ router.get('/', (req, res) => {
         conditions.push(`j.kind != 'checks'`);
 
         // DATA SCOPE FILTER
-        const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+        const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
         if (allowedRegionIds) {
             if (allowedRegionIds.length > 0) {
                 conditions.push(`r.region_id IN (${allowedRegionIds.join(',')})`);
@@ -92,7 +94,7 @@ router.get('/', (req, res) => {
         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
         // Count total for pagination
-        const countResult = querySqlite(`
+        const countResult = await dbQuery(`
           ${recursiveRegionCTE}
           SELECT COUNT(*) as total
           FROM jobs j
@@ -103,7 +105,7 @@ router.get('/', (req, res) => {
         const total = countResult[0]?.total || 0;
 
         // Query jobs as primary table - each job is a separate record
-        const rows = querySqlite(`
+        const rows = await dbQuery(`
           ${recursiveRegionCTE}
           SELECT 
             j.id AS job_id,
@@ -173,7 +175,7 @@ router.get('/', (req, res) => {
                 status: displayStatus,
                 progress: row.progress || 0,
                 step_code: row.step_code || 'QUEUED',
-                step_name: row.step_name || '等待处理',
+                step_name: row.step_name || '绛夊緟澶勭悊',
                 attempt: row.attempt || 1,
                 provider: row.provider,
                 model: row.model,
@@ -205,9 +207,9 @@ router.get('/', (req, res) => {
  * GET /api/jobs/:version_id
  * Get aggregated job details for a specific version
  */
-router.get('/:version_id', (req, res) => {
+router.get('/:version_id', async (req, res) => {
     try {
-        ensureSqliteMigrations();
+        ensureDbMigrations();
 
         const versionId = Number(req.params.version_id);
         if (Number.isNaN(versionId)) {
@@ -215,7 +217,7 @@ router.get('/:version_id', (req, res) => {
         }
 
         // Get version details
-        const version = querySqlite(`
+        const version = (await dbQuery(`
       SELECT 
         rv.id AS version_id,
         rv.report_id,
@@ -228,7 +230,7 @@ router.get('/:version_id', (req, res) => {
       JOIN reports r ON rv.report_id = r.id
       WHERE rv.id = ${sqlValue(versionId)}
       LIMIT 1;
-    `)[0] as {
+    `))[0] as {
             version_id: number;
             report_id: number;
             region_id: number;
@@ -241,13 +243,13 @@ router.get('/:version_id', (req, res) => {
         if (!version) {
             return res.status(404).json({ error: 'Version not found' });
         }
-        const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+        const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
         if (!isRegionAllowed(version.region_id, allowedRegionIds)) {
             return res.status(403).json({ error: 'forbidden' });
         }
 
         // Get all jobs for this version
-        const jobs = querySqlite(`
+        const jobs = await dbQuery(`
       SELECT 
         id,
         kind,
@@ -303,7 +305,7 @@ router.get('/:version_id', (req, res) => {
             status: aggregatedStatus,
             progress: currentJob?.progress || 0,
             step_code: currentJob?.step_code || 'QUEUED',
-            step_name: currentJob?.step_name || '等待处理',
+            step_name: currentJob?.step_name || '绛夊緟澶勭悊',
             attempt: currentJob?.attempt || 1,
             provider: currentJob?.provider,
             model: currentJob?.model,
@@ -325,14 +327,14 @@ router.get('/:version_id', (req, res) => {
  */
 router.post('/:version_id/cancel', requirePermission('manage_jobs'), async (req, res) => {
     try {
-        ensureSqliteMigrations();
+        ensureDbMigrations();
 
         const versionId = Number(req.params.version_id);
         if (Number.isNaN(versionId)) {
             return res.status(400).json({ error: 'Invalid version_id' });
         }
-        const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
-        const regionId = getVersionRegionId(versionId);
+        const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
+        const regionId = await getVersionRegionId(versionId);
         if (regionId === null) {
             return res.status(404).json({ error: 'Version not found' });
         }
@@ -341,7 +343,7 @@ router.post('/:version_id/cancel', requirePermission('manage_jobs'), async (req,
         }
 
         // Get running/queued jobs for this version
-        const jobs = querySqlite(`
+        const jobs = await dbQuery(`
       SELECT id, status
       FROM jobs
       WHERE version_id = ${sqlValue(versionId)}
@@ -375,16 +377,16 @@ router.post('/:version_id/cancel', requirePermission('manage_jobs'), async (req,
  * POST /api/jobs/:version_id/retry
  * Manually retry a failed job
  */
-router.post('/:version_id/retry', requirePermission('manage_jobs'), (req, res) => {
+router.post('/:version_id/retry', requirePermission('manage_jobs'), async (req, res) => {
     try {
-        ensureSqliteMigrations();
+        ensureDbMigrations();
 
         const versionId = Number(req.params.version_id);
         if (Number.isNaN(versionId)) {
             return res.status(400).json({ error: 'Invalid version_id' });
         }
-        const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
-        const regionId = getVersionRegionId(versionId);
+        const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
+        const regionId = await getVersionRegionId(versionId);
         if (regionId === null) {
             return res.status(404).json({ error: 'Version not found' });
         }
@@ -393,7 +395,7 @@ router.post('/:version_id/retry', requirePermission('manage_jobs'), (req, res) =
         }
 
         // Get all jobs for this version
-        const jobs = querySqlite(`
+        const jobs = await dbQuery(`
       SELECT id, status, kind
       FROM jobs
       WHERE version_id = ${sqlValue(versionId)}
@@ -441,10 +443,10 @@ router.post('/:version_id/retry', requirePermission('manage_jobs'), (req, res) =
 
         for (const job of failedJobs) {
             // Get full details to clone
-            const jobDetails = querySqlite(`SELECT * FROM jobs WHERE id = ${sqlValue(job.id)}`)[0] as any;
+            const jobDetails = (await dbQuery(`SELECT * FROM jobs WHERE id = ${sqlValue(job.id)}`))[0] as any;
 
             // Insert NEW job
-            querySqlite(`
+            await dbQuery(`
                 INSERT INTO jobs (
                     report_id, version_id, kind, status, 
                     progress, step_code, step_name, 
@@ -457,7 +459,7 @@ router.post('/:version_id/retry', requirePermission('manage_jobs'), (req, res) =
                     0,
                     'QUEUED',
                     '等待处理',
-                    datetime('now'),
+                    ${dbNowExpression()},
                     0,
                     1
                 )
@@ -501,7 +503,7 @@ function determineVersionStatus(jobs: Array<{ status: string; kind: string }>): 
         // If the last job is 'checks' and it's queued, the user might consider this "Processing" or "Queued"
         // But for consistency with the "Progress" bar (which shows active movement), let's call it queued/processing
         // purely based on the job status.
-        return 'queued'; // The main UI will show "排队中"
+        return 'queued'; // The main UI will show "鎺掗槦涓?
     }
     if (lastJob.status === 'failed') return 'failed';
     if (lastJob.status === 'succeeded') return 'succeeded';
@@ -512,31 +514,31 @@ function determineVersionStatus(jobs: Array<{ status: string; kind: string }>): 
 /**
  * Helper: Delete a specific version and all its related data
  */
-function deleteVersion(versionId: number) {
+async function deleteVersion(versionId: number) {
     // 1. Delete associated jobs
-    querySqlite(`DELETE FROM jobs WHERE version_id = ${sqlValue(versionId)}`);
+    await dbQuery(`DELETE FROM jobs WHERE version_id = ${sqlValue(versionId)}`);
 
     // 2. Delete parse results
-    querySqlite(`DELETE FROM report_version_parses WHERE report_version_id = ${sqlValue(versionId)}`);
+    await dbQuery(`DELETE FROM report_version_parses WHERE report_version_id = ${sqlValue(versionId)}`);
 
     // 3. Delete the version itself
-    querySqlite(`DELETE FROM report_versions WHERE id = ${sqlValue(versionId)}`);
+    await dbQuery(`DELETE FROM report_versions WHERE id = ${sqlValue(versionId)}`);
 }
 
 /**
  * DELETE /api/jobs/all
  * Delete ALL job history and versions
  */
-router.delete('/all', requirePermission('manage_jobs'), (req, res) => {
+router.delete('/all', requirePermission('manage_jobs'), async (req, res) => {
     try {
-        ensureSqliteMigrations();
+        ensureDbMigrations();
 
         // Delete all jobs, parses, and versions
         // We can just truncate/delete from tables directly for speed, but let's be relational?
         // SQLite doesn't strictly support TRUNCATE with cascade the same way, so DELETE is safer.
-        querySqlite('DELETE FROM jobs');
-        querySqlite('DELETE FROM report_version_parses');
-        querySqlite('DELETE FROM report_versions');
+        await dbQuery('DELETE FROM jobs');
+        await dbQuery('DELETE FROM report_version_parses');
+        await dbQuery('DELETE FROM report_versions');
         // Optionally clean reports? No, reports are the "source" (metadata), usually kept?
         // But if versions are gone, reports might be empty shells.
         // For now, only delete the "Task" (Versions + Jobs). 
@@ -556,9 +558,9 @@ router.delete('/all', requirePermission('manage_jobs'), (req, res) => {
  * POST /api/jobs/batch-delete
  * Delete multiple versions
  */
-router.post('/batch-delete', requirePermission('manage_jobs'), (req, res) => {
+router.post('/batch-delete', requirePermission('manage_jobs'), async (req, res) => {
     try {
-        ensureSqliteMigrations();
+        ensureDbMigrations();
         const { version_ids } = req.body;
 
         if (!Array.isArray(version_ids) || version_ids.length === 0) {
@@ -570,12 +572,12 @@ router.post('/batch-delete', requirePermission('manage_jobs'), (req, res) => {
             return res.status(400).json({ error: 'Invalid or empty version_ids' });
         }
 
-        const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
+        const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
         if (allowedRegionIds) {
             if (allowedRegionIds.length === 0) {
                 return res.status(403).json({ error: 'forbidden' });
             }
-            const allowedRows = querySqlite(`
+            const allowedRows = await dbQuery(`
               SELECT rv.id
               FROM report_versions rv
               JOIN reports r ON rv.report_id = r.id
@@ -592,7 +594,7 @@ router.post('/batch-delete', requirePermission('manage_jobs'), (req, res) => {
         for (const id of ids) {
             const vid = Number(id);
             if (!Number.isNaN(vid)) {
-                deleteVersion(vid);
+                await deleteVersion(vid);
                 count++;
             }
         }
@@ -606,18 +608,85 @@ router.post('/batch-delete', requirePermission('manage_jobs'), (req, res) => {
 });
 
 /**
+ * DELETE /api/jobs/task/:jobId
+ * Delete a specific job/task securely.
+ * - If it's a 'pdf_export' job, delete the job row and file.
+ * - If it's a 'parse' job, delete the associated Version (and all its jobs).
+ */
+router.delete('/task/:jobId', requirePermission('manage_jobs'), async (req, res) => {
+    try {
+        ensureDbMigrations();
+        const jobId = Number(req.params.jobId);
+        if (Number.isNaN(jobId)) {
+            return res.status(400).json({ error: 'Invalid job_id' });
+        }
+
+        const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
+
+        // 1. Get job details ensuring region permission
+        const jobQuery = `
+            SELECT j.*, r.region_id 
+            FROM jobs j
+            JOIN reports r ON j.report_id = r.id
+            WHERE j.id = ${sqlValue(jobId)}
+        `;
+        const jobs = await dbQuery(jobQuery) as any[];
+
+        if (jobs.length === 0) {
+            return res.status(404).json({ error: 'Job not found' });
+        }
+        const job = jobs[0];
+
+        // Check permission
+        if (!isRegionAllowed(job.region_id, allowedRegionIds)) {
+            return res.status(403).json({ error: 'forbidden' });
+        }
+
+        if (job.kind === 'pdf_export') {
+            // Simply delete the job row. File cleanup (if needed) can be done here or by worker.
+            // Better to try deleting the file instantly.
+            if (job.file_path && fs.existsSync(job.file_path)) {
+                try {
+                    fs.unlinkSync(job.file_path);
+                } catch (e) {
+                    console.warn('Failed to delete PDF file:', e);
+                }
+            }
+            await dbQuery(`DELETE FROM jobs WHERE id = ${sqlValue(jobId)}`);
+            console.log(`[Delete Task] Deleted PDF job ${jobId}`);
+        } else {
+            // For Parse/Check jobs, we deleting the VERSION is the standard behavior 
+            // because "Task" usually implies the Version in this system context.
+            if (job.version_id) {
+                await deleteVersion(job.version_id);
+                console.log(`[Delete Task] Deleted Version ${job.version_id} via job ${jobId}`);
+            } else {
+                // Orphaned job? Just delete it.
+                await dbQuery(`DELETE FROM jobs WHERE id = ${sqlValue(jobId)}`);
+                console.log(`[Delete Task] Deleted orphan job ${jobId}`);
+            }
+        }
+
+        return res.json({ message: 'Task deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting task:', error);
+        return res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+/**
  * DELETE /api/jobs/:version_id
  * Delete a single version
  */
-router.delete('/:version_id', requirePermission('manage_jobs'), (req, res) => {
+router.delete('/:version_id', requirePermission('manage_jobs'), async (req, res) => {
     try {
-        ensureSqliteMigrations();
+        ensureDbMigrations();
         const versionId = Number(req.params.version_id);
         if (Number.isNaN(versionId)) {
             return res.status(400).json({ error: 'Invalid version_id' });
         }
-        const allowedRegionIds = getAllowedRegionIds((req as AuthRequest).user);
-        const regionId = getVersionRegionId(versionId);
+        const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
+        const regionId = await getVersionRegionId(versionId);
         if (regionId === null) {
             return res.status(404).json({ error: 'Version not found' });
         }
@@ -625,7 +694,7 @@ router.delete('/:version_id', requirePermission('manage_jobs'), (req, res) => {
             return res.status(403).json({ error: 'forbidden' });
         }
 
-        deleteVersion(versionId);
+        await deleteVersion(versionId);
         console.log(`[Delete] Deleted version ${versionId}`);
 
         return res.json({ message: 'Job deleted', version_id: versionId });
@@ -636,3 +705,4 @@ router.delete('/:version_id', requirePermission('manage_jobs'), (req, res) => {
 });
 
 export default router;
+

@@ -4,6 +4,148 @@
 
 ---
 
+## 🔄 从测试服务器迁移到生产服务器
+
+> 本章节适用于已在测试服务器验证完成后，需要迁移到正式生产服务器的场景。
+
+### 第一步：测试服务器备份导出
+
+在 **测试服务器** 上执行：
+
+```bash
+# 创建备份目录
+mkdir -p /opt/kirogovcompare/exports
+cd /opt/kirogovcompare/exports
+
+# 1. 备份 .env 配置文件
+cp /opt/kirogovcompare/.env ./kiro-env-backup.txt
+
+# 2. 备份完整数据库（结构 + 数据）
+PGPASSWORD=admin123 pg_dump -U kiro_app -d gov_report_diff -h localhost > kiro-db-full-$(date +%Y%m%d).sql
+
+# 3. 查看备份文件
+ls -la /opt/kirogovcompare/exports/
+```
+
+使用 FinalShell 或 scp 下载 `/opt/kirogovcompare/exports/` 目录下的文件到本地。
+
+### 第二步：新服务器环境准备
+
+```bash
+# 更新系统
+apt update && apt upgrade -y
+
+# 安装 Node.js 18+
+curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+apt install -y nodejs
+
+# 安装 PostgreSQL
+apt install -y postgresql postgresql-contrib
+systemctl enable postgresql
+systemctl start postgresql
+
+# 安装 Redis
+apt install -y redis-server
+systemctl enable redis-server
+
+# 安装 Nginx
+apt install -y nginx
+systemctl enable nginx
+
+# 安装 PM2
+npm install -g pm2
+
+# 安装 Chrome 依赖（用于 PDF 导出）
+apt install -y fonts-liberation libatk1.0-0 libatk-bridge2.0-0 \
+    libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
+    libxfixes3 libxrandr2 libgbm1 libnss3 libnspr4 libasound2 \
+    libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libatspi2.0-0 \
+    fonts-noto-cjk fonts-noto-cjk-extra
+```
+
+### 第三步：配置 PostgreSQL 数据库
+
+```bash
+sudo -u postgres psql
+```
+
+```sql
+-- 创建用户
+CREATE USER kiro_app WITH PASSWORD 'your_strong_password';
+
+-- 创建数据库
+CREATE DATABASE gov_report_diff OWNER kiro_app;
+
+-- 授权
+GRANT ALL PRIVILEGES ON DATABASE gov_report_diff TO kiro_app;
+
+-- 退出
+\q
+```
+
+导入备份数据：
+
+```bash
+PGPASSWORD=your_strong_password psql -U kiro_app -d gov_report_diff -h localhost < /path/to/kiro-db-full-YYYYMMDD.sql
+```
+
+### 第四步：部署应用代码
+
+```bash
+# 克隆代码
+cd /opt
+git clone https://github.com/your-org/KIROGOVCOMPARE.git kirogovcompare
+cd kirogovcompare
+git checkout fix/cloud-admin-login  # 或 main 分支
+
+# 复制 .env 配置（从备份或手动创建）
+nano .env
+
+# 安装依赖并编译
+npm install
+npm run build
+
+cd frontend
+npm install
+npm run build
+cd ..
+
+# 创建数据目录
+mkdir -p /opt/kirogovcompare/data/uploads
+mkdir -p /opt/kirogovcompare/data/exports
+```
+
+### 第五步：启动服务
+
+```bash
+# 使用 PM2 启动
+pm2 start npm --name kiro-backend -- start
+
+# 保存配置并设置开机自启
+pm2 save
+pm2 startup
+```
+
+### 第六步：验证部署
+
+```bash
+# 检查后端 API
+curl http://localhost:8787/api/regions
+
+# 检查 PM2 状态
+pm2 status
+```
+
+浏览器访问验证：
+- ✅ 首页正常加载
+- ✅ 管理员登录成功
+- ✅ 区域列表显示正确
+- ✅ 报告问题标签正确显示
+- ✅ PDF 导出正常
+- ✅ 用户数据范围过滤正常
+
+---
+
 ## 📋 部署前检查清单
 
 ### 1. 服务器环境要求

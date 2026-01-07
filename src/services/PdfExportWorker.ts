@@ -2,8 +2,44 @@ import puppeteer from 'puppeteer';
 import http from 'http';
 import path from 'path';
 import fs from 'fs';
-import { ensureSqliteMigrations, querySqlite, executeSqlite, sqlValue, DATA_DIR } from '../config/sqlite';
+import pool from '../config/database-llm';
+import { dbNowExpression } from '../config/db-llm';
+import { sqlValue } from '../config/sqlite';
+import { DATA_DIR } from '../config/sqlite';
 import { generateExpiringToken } from '../middleware/auth';
+
+// Helper to execute SQL compatible with both
+async function executeDb(sql: string, params: any[] = []): Promise<void> {
+    if (pool['run']) {
+         // SQLite
+         return new Promise((resolve, reject) => {
+             pool.run(sql, params, (err: any) => {
+                 if(err) reject(err);
+                 else resolve();
+             });
+         });
+    } else {
+        // Postgres
+        await pool.query(sql, params);
+    }
+}
+
+async function queryDb(sql: string, params: any[] = []): Promise<any[]> {
+    if (pool['all']) {
+         // SQLite
+         return new Promise((resolve, reject) => {
+             pool.all(sql, params, (err: any, rows: any[]) => {
+                 if(err) reject(err);
+                 else resolve(rows || []);
+             });
+         });
+    } else {
+        // Postgres
+        const res = await pool.query(sql, params);
+        return res.rows;
+    }
+}
+
 
 // PDF 导出文件存储目录
 const PDF_EXPORTS_DIR = path.join(DATA_DIR, 'exports', 'pdf');
@@ -72,14 +108,31 @@ async function findFrontendUrl(): Promise<string | null> {
         }
     }
 
+    // Check process.env.PORT (backend port)
+    if (process.env.PORT) {
+        const port = Number(process.env.PORT);
+        // Try localhost and 127.0.0.1
+        const urls = [`http://localhost:${port}`, `http://127.0.0.1:${port}`];
+        for (const url of urls) {
+             if (await isUrlAccessible(url)) {
+                console.log(`[PdfExportWorker] Found locally on PORT: ${url}`);
+                return url;
+            }
+        }
+    }
+
     // 检查常用端口
-    const portsToCheck = [3001, 3002, 3000, 3003];
+    const portsToCheck = [80, 8080, 3000, 3001, 3002, 3003];
     for (const port of portsToCheck) {
-        const url = `http://localhost:${port}`;
-        const isAccessible = await isUrlAccessible(url);
-        if (isAccessible) {
-            console.log(`[PdfExportWorker] Found frontend at ${url}`);
-            return url;
+        // Try both localhost and 127.0.0.1 to be safe against IPv6 binding issues
+        const hosts = ['localhost', '127.0.0.1'];
+        for (const host of hosts) {
+            const url = `http://${host}:${port}`;
+            const isAccessible = await isUrlAccessible(url);
+            if (isAccessible) {
+                console.log(`[PdfExportWorker] Found frontend at ${url}`);
+                return url;
+            }
         }
     }
 
@@ -98,16 +151,17 @@ async function processJob(job: {
     console.log(`[PdfExportWorker] Processing job ${job.id} for comparison ${job.comparison_id}`);
 
     let browser = null;
+    const nowExpr = dbNowExpression();
 
     try {
         // 更新状态为 running
-        executeSqlite(`
+        await executeDb(`
       UPDATE jobs SET 
         status = 'running',
         step_code = 'RENDERING',
         step_name = '正在渲染 PDF',
         progress = 10,
-        started_at = datetime('now')
+        started_at = ${nowExpr}
       WHERE id = ${sqlValue(job.id)};
     `);
 
@@ -129,7 +183,7 @@ async function processJob(job: {
             ]
         });
 
-        executeSqlite(`
+        await executeDb(`
       UPDATE jobs SET progress = 20, step_name = '浏览器已启动'
       WHERE id = ${sqlValue(job.id)};
     `);
@@ -154,7 +208,7 @@ async function processJob(job: {
         const logUrl = `${frontendUrl}/print/comparison/${job.comparison_id}`;
         console.log(`[PdfExportWorker] Navigating to ${logUrl} (service token redacted)`);
 
-        executeSqlite(`
+        await executeDb(`
       UPDATE jobs SET progress = 30, step_name = '正在加载页面'
       WHERE id = ${sqlValue(job.id)};
     `);
@@ -165,7 +219,7 @@ async function processJob(job: {
         });
 
         // 等待内容加载
-        executeSqlite(`
+        await executeDb(`
       UPDATE jobs SET progress = 50, step_name = '等待内容渲染'
       WHERE id = ${sqlValue(job.id)};
     `);
@@ -179,7 +233,7 @@ async function processJob(job: {
         // 额外等待确保样式加载
         await new Promise(resolve => setTimeout(resolve, 2000));
 
-        executeSqlite(`
+        await executeDb(`
       UPDATE jobs SET progress = 70, step_name = '正在生成 PDF'
       WHERE id = ${sqlValue(job.id)};
     `);
@@ -206,7 +260,7 @@ async function processJob(job: {
         console.log(`[PdfExportWorker] PDF saved to ${filePath} (${fileSize} bytes)`);
 
         // 更新任务状态为完成
-        executeSqlite(`
+        await executeDb(`
       UPDATE jobs SET 
         status = 'done',
         step_code = 'DONE',
@@ -214,7 +268,7 @@ async function processJob(job: {
         progress = 100,
         file_path = ${sqlValue(filePath)},
         file_size = ${sqlValue(fileSize)},
-        finished_at = datetime('now')
+        finished_at = ${nowExpr}
       WHERE id = ${sqlValue(job.id)};
     `);
 
@@ -224,14 +278,14 @@ async function processJob(job: {
         console.error(`[PdfExportWorker] Job ${job.id} failed:`, error);
 
         // 更新任务状态为失败
-        executeSqlite(`
+        await executeDb(`
       UPDATE jobs SET 
         status = 'failed',
         step_code = 'ERROR',
         step_name = '生成失败',
         progress = 0,
         error_message = ${sqlValue(error.message || 'Unknown error')},
-        finished_at = datetime('now')
+        finished_at = ${nowExpr}
       WHERE id = ${sqlValue(job.id)};
     `);
 
@@ -245,14 +299,12 @@ async function processJob(job: {
 /**
  * 清理过期文件
  */
-function cleanupExpiredFiles(): void {
+async function cleanupExpiredFiles(): Promise<void> {
     try {
-        ensureSqliteMigrations();
-
         const now = Date.now();
 
         // 获取已完成且文件存在的任务
-        const jobs = querySqlite(`
+        const jobs = await queryDb(`
       SELECT id, file_path, finished_at FROM jobs 
       WHERE kind = 'pdf_export' AND status = 'done' AND file_path IS NOT NULL;
     `) as Array<{ id: number; file_path: string; finished_at: string }>;
@@ -275,7 +327,7 @@ function cleanupExpiredFiles(): void {
                 }
 
                 // 清除文件路径（保留任务记录）
-                executeSqlite(`
+                await executeDb(`
           UPDATE jobs SET file_path = NULL, file_size = NULL 
           WHERE id = ${sqlValue(job.id)};
         `);
@@ -295,10 +347,8 @@ async function pollAndProcess(): Promise<void> {
     }
 
     try {
-        ensureSqliteMigrations();
-
         // 获取下一个待处理任务
-        const rows = querySqlite(`
+        const rows = await queryDb(`
       SELECT id, comparison_id, export_title, file_name 
       FROM jobs 
       WHERE kind = 'pdf_export' AND status = 'queued'
@@ -350,12 +400,12 @@ export function startPdfExportWorker(): void {
     // 每小时清理一次过期文件
     const cleanupInterval = setInterval(() => {
         if (isRunning) {
-            cleanupExpiredFiles();
+            void cleanupExpiredFiles();
         }
     }, 60 * 60 * 1000);
 
     // 启动时先清理一次
-    cleanupExpiredFiles();
+    void cleanupExpiredFiles();
 
     console.log('[PdfExportWorker] Started. Polling every 5 seconds.');
 }
@@ -372,3 +422,4 @@ export default {
     startPdfExportWorker,
     stopPdfExportWorker
 };
+

@@ -481,7 +481,7 @@ function CityIndex({ onSelectReport, onViewComparison }) {
                     {/* ZONE 2: Status */}
                     <div className="report-card-status">
                       {(() => {
-                        const reportId = r.report_id || r.id;
+                        const reportId = Number(r.report_id || r.id);
                         const checkStatus = checkStatusMap.get(reportId);
 
                         if (!checkStatusLoaded && !checkStatus) {

@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS report_consistency_items (
   report_version_id INTEGER NOT NULL REFERENCES report_versions(id) ON DELETE CASCADE,
   
   -- 分组和标识
-  group_key TEXT NOT NULL CHECK(group_key IN ('table2', 'table3', 'table4', 'text')),
+  group_key TEXT NOT NULL CHECK(group_key IN ('table2', 'table3', 'table4', 'text', 'visual', 'structure', 'quality')),
   check_key TEXT NOT NULL,  -- 稳定标识: t3_identity_balance, t4_sum_total 等
   fingerprint TEXT NOT NULL,  -- sha256(groupKey:checkKey:expr).substring(0, 16)
   

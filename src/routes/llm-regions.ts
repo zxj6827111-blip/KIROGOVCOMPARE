@@ -167,7 +167,15 @@ router.get('/', authMiddleware, async (req: Request, res: Response) => {
               SELECT DISTINCT id, code, name, province, parent_id, level FROM allowed_tree ORDER BY level, id
             `;
         const result = await pool.query(sql, [filterNames]);
-        res.json({ data: result.rows });
+        // Fix Orphaned Nodes (same as SQLite):
+        // If a node's parent is NOT in the result set, set parent_id to null
+        // This ensures frontend treats them as "roots" and displays them
+        const validIds = new Set(result.rows?.map((r: any) => r.id));
+        const safeRows = result.rows?.map((r: any) => ({
+          ...r,
+          parent_id: (r.parent_id && validIds.has(r.parent_id)) ? r.parent_id : null
+        })) || [];
+        res.json({ data: safeRows });
       } else {
         const result = await pool.query('SELECT id, code, name, province, parent_id, level FROM regions ORDER BY level, id');
         res.json({ data: result.rows });

@@ -201,6 +201,22 @@ export function ensureSqliteMigrations(): void {
     runSqlStatements('ALTER TABLE report_versions ADD COLUMN raw_text TEXT;');
   }
 
+  if (!hasRawText) {
+    runSqlStatements('ALTER TABLE report_versions ADD COLUMN raw_text TEXT;');
+  }
+
+  // 兼容修复：确保 report_versions 有 updated_at 字段
+  const hasUpdatedAt = versionColumns.some((column) => column.name === 'updated_at');
+  if (!hasUpdatedAt) {
+    try {
+      console.log('[sqlite] Auto-migrating: Adding updated_at to report_versions');
+      runSqlStatements('ALTER TABLE report_versions ADD COLUMN updated_at TEXT;');
+      runSqlStatements("UPDATE report_versions SET updated_at = datetime('now');");
+    } catch (e: any) {
+      console.warn('[sqlite] Failed to add updated_at column:', e.message);
+    }
+  }
+
   // 兼容新增字段：jobs 表 PDF 导出相关字段
   const jobColumns = runSqlStatements('PRAGMA table_info(jobs);') as Array<{ name?: string }>;
 
