@@ -1,4 +1,4 @@
-﻿import express from 'express';
+import express from 'express';
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
 import { dbBool, dbQuery, ensureDbMigrations, dbNowExpression } from '../config/db-llm';
 import { sqlValue } from '../config/sqlite';

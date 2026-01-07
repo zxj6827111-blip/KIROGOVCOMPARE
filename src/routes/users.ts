@@ -1,4 +1,4 @@
-﻿import express, { Response } from 'express';
+import express, { Response } from 'express';
 import { dbExecute, dbNowExpression, dbQuery, ensureDbMigrations, parseDbJson } from '../config/db-llm';
 import { sqlValue } from '../config/sqlite';
 import { authMiddleware, requirePermission, AuthRequest, hashPassword } from '../middleware/auth';
