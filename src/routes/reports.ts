@@ -21,7 +21,36 @@ const upload = multer({
   storage: multer.diskStorage({
     destination: tempDir,
     filename: (_req, file, cb) => {
-      cb(null, `${Date.now()}-${file.originalname}`);
+      // Truncate filename if too long to avoid ENAMETOOLONG error
+      // Linux max filename is 255 bytes, but we leave room for timestamp and path
+      const MAX_NAME_BYTES = 100;
+      let safeName = file.originalname;
+      
+      // Get byte length (Chinese chars are 3 bytes each in UTF-8)
+      const byteLength = Buffer.byteLength(safeName, 'utf8');
+      if (byteLength > MAX_NAME_BYTES) {
+        // Find the extension
+        const extMatch = safeName.match(/\.[^.]+$/);
+        const ext = extMatch ? extMatch[0] : '';
+        const nameWithoutExt = safeName.replace(/\.[^.]+$/, '');
+        
+        // Truncate the name part, keeping room for extension
+        let truncated = '';
+        let currentBytes = 0;
+        const maxNamePartBytes = MAX_NAME_BYTES - Buffer.byteLength(ext, 'utf8');
+        
+        for (const char of nameWithoutExt) {
+          const charBytes = Buffer.byteLength(char, 'utf8');
+          if (currentBytes + charBytes > maxNamePartBytes) break;
+          truncated += char;
+          currentBytes += charBytes;
+        }
+        
+        safeName = truncated + ext;
+        console.log(`[Upload] Truncated filename from ${byteLength} to ${Buffer.byteLength(safeName, 'utf8')} bytes`);
+      }
+      
+      cb(null, `${Date.now()}-${safeName}`);
     },
   }),
   fileFilter: (_req, file, cb) => {
