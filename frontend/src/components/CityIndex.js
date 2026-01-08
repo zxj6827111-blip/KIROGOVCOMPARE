@@ -376,6 +376,12 @@ function CityIndex({ onSelectReport, onViewComparison }) {
           <p className="subtitle">全区政府信息公开年报数字化归档与分析总览。</p>
         </div>
         <div className="header-actions">
+          <button className="ghost-btn" onClick={() => {
+            const regionParam = currentParentId ? `?region=${currentParentId}&name=${encodeURIComponent(currentRegion?.name || '')}` : '';
+            window.location.href = `/issues${regionParam}`;
+          }}>
+            <AlertCircle size={16} /> 问题清单
+          </button>
           <button className="ghost-btn" onClick={() => (window.location.href = '/regions')}>
             <MapIcon size={16} /> 区域管理
           </button>
