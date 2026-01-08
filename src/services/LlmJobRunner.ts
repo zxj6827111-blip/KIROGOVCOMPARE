@@ -417,7 +417,7 @@ export class LlmJobRunner {
   private recoverRunningJobs(): void {
     // For PostgreSQL, run async recovery
     if (dbType === 'postgres') {
-      this.recoverRunningJobsAsync().catch(err => 
+      this.recoverRunningJobsAsync().catch(err =>
         console.error('[Recovery] Failed to recover running jobs:', err));
       return;
     }
@@ -510,11 +510,11 @@ export class LlmJobRunner {
         ORDER BY (CASE kind WHEN 'parse' THEN 0 WHEN 'checks' THEN 1 WHEN 'compare' THEN 2 ELSE 9 END) ASC, created_at ASC
         LIMIT 1
         FOR UPDATE SKIP LOCKED`);
-      
+
       if (selectResult.rows.length === 0) {
         return null;
       }
-      
+
       const jobId = selectResult.rows[0].id;
       const updateResult = await pool.query(`
         UPDATE jobs
@@ -526,7 +526,7 @@ export class LlmJobRunner {
         WHERE id = $4
         RETURNING id, report_id, version_id, kind, comparison_id, retry_count, max_retries`,
         [STEPS.PARSING.code, STEPS.PARSING.name, STEPS.PARSING.progress, jobId]);
-      
+
       updatedJobs = updateResult.rows;
     } else {
       updatedJobs = querySqlite(`
@@ -649,6 +649,9 @@ export class LlmJobRunner {
     // Check if we need to generate notification (after all jobs complete)
     if (job.version_id) {
       await this.generateNotificationIfNeeded(job.version_id);
+
+      // Auto-trigger comparison with previous year's report
+      await this.triggerAutoComparison(job.version_id, job.report_id);
     }
   }
 
@@ -726,7 +729,7 @@ export class LlmJobRunner {
         VALUES ($1, $2, NOW())
         ON CONFLICT(comparison_id) DO UPDATE SET diff_json = excluded.diff_json, created_at = excluded.created_at`,
         [job.comparison_id, diffJson]);
-      
+
       await pool.query(`
         UPDATE jobs 
         SET status = 'succeeded', 
@@ -956,6 +959,122 @@ export class LlmJobRunner {
       return { code: String((error as any).code), message };
     }
     return { code: 'LLM_JOB_ERROR', message };
+  }
+
+  /**
+   * Auto-trigger comparison with the previous year's report
+   * Called after checks job completes successfully
+   */
+  private async triggerAutoComparison(versionId: number, reportId: number | null): Promise<void> {
+    if (!reportId) return;
+
+    try {
+      // 1. Get current report info
+      let currentReport: { id: number; region_id: number; year: number } | undefined;
+      if (dbType === 'postgres') {
+        const result = await pool.query(
+          `SELECT id, region_id, year FROM reports WHERE id = $1 LIMIT 1`,
+          [reportId]);
+        currentReport = result.rows[0];
+      } else {
+        currentReport = querySqlite(`
+          SELECT id, region_id, year FROM reports WHERE id = ${sqlValue(reportId)} LIMIT 1;
+        `)[0] as { id: number; region_id: number; year: number } | undefined;
+      }
+
+      if (!currentReport) {
+        console.log(`[AutoCompare] Report ${reportId} not found, skipping auto-comparison`);
+        return;
+      }
+
+      const { region_id, year } = currentReport;
+      const prevYear = year - 1;
+
+      // 2. Find previous year's report for the same region
+      let prevReport: { id: number; version_id: number } | undefined;
+      if (dbType === 'postgres') {
+        const result = await pool.query(`
+          SELECT r.id, rv.id as version_id
+          FROM reports r
+          JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = true
+          WHERE r.region_id = $1 AND r.year = $2
+          LIMIT 1
+        `, [region_id, prevYear]);
+        prevReport = result.rows[0];
+      } else {
+        prevReport = querySqlite(`
+          SELECT r.id, rv.id as version_id
+          FROM reports r
+          JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = 1
+          WHERE r.region_id = ${sqlValue(region_id)} AND r.year = ${sqlValue(prevYear)}
+          LIMIT 1;
+        `)[0] as { id: number; version_id: number } | undefined;
+      }
+
+      if (!prevReport) {
+        console.log(`[AutoCompare] No previous year (${prevYear}) report for region ${region_id}, skipping`);
+        return;
+      }
+
+      // 3. Check if comparison already exists
+      let existingComparison: { id: number } | undefined;
+      if (dbType === 'postgres') {
+        const result = await pool.query(`
+          SELECT id FROM comparisons
+          WHERE region_id = $1 AND year_a = $2 AND year_b = $3
+          LIMIT 1
+        `, [region_id, prevYear, year]);
+        existingComparison = result.rows[0];
+      } else {
+        existingComparison = querySqlite(`
+          SELECT id FROM comparisons
+          WHERE region_id = ${sqlValue(region_id)} AND year_a = ${sqlValue(prevYear)} AND year_b = ${sqlValue(year)}
+          LIMIT 1;
+        `)[0] as { id: number } | undefined;
+      }
+
+      if (existingComparison) {
+        console.log(`[AutoCompare] Comparison already exists (ID: ${existingComparison.id}) for ${region_id} ${prevYear}-${year}`);
+        return;
+      }
+
+      // 4. Create comparison and job
+      console.log(`[AutoCompare] Creating comparison for region ${region_id}: ${prevYear} → ${year}`);
+
+      let comparisonId: number;
+      if (dbType === 'postgres') {
+        const result = await pool.query(`
+          INSERT INTO comparisons (region_id, year_a, year_b, left_report_id, right_report_id, created_at)
+          VALUES ($1, $2, $3, $4, $5, NOW())
+          RETURNING id
+        `, [region_id, prevYear, year, prevReport.id, reportId]);
+        comparisonId = result.rows[0].id;
+      } else {
+        querySqlite(`
+          INSERT INTO comparisons (region_id, year_a, year_b, left_report_id, right_report_id, created_at)
+          VALUES (${sqlValue(region_id)}, ${sqlValue(prevYear)}, ${sqlValue(year)}, ${sqlValue(prevReport.id)}, ${sqlValue(reportId)}, datetime('now'));
+        `);
+        comparisonId = querySqlite(`SELECT last_insert_rowid() as id;`)[0]?.id as number;
+      }
+
+      // 5. Create compare job
+      if (dbType === 'postgres') {
+        await pool.query(`
+          INSERT INTO jobs (report_id, kind, status, progress, comparison_id, step_code, step_name)
+          VALUES ($1, 'compare', 'queued', 0, $2, 'QUEUED', '等待比对')
+        `, [prevReport.id, comparisonId]);
+      } else {
+        querySqlite(`
+          INSERT INTO jobs (report_id, kind, status, progress, comparison_id, step_code, step_name)
+          VALUES (${sqlValue(prevReport.id)}, 'compare', 'queued', 0, ${sqlValue(comparisonId)}, 'QUEUED', '等待比对');
+        `);
+      }
+
+      console.log(`[AutoCompare] Created comparison ${comparisonId} and queued compare job`);
+    } catch (error) {
+      // Don't fail the checks job if auto-comparison fails
+      console.error('[AutoCompare] Failed to trigger auto-comparison:', error);
+    }
   }
 }
 

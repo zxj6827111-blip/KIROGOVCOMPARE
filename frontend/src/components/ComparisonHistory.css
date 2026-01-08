@@ -399,3 +399,353 @@
     cursor: pointer;
     accent-color: #3b82f6;
 }
+
+/* ====== Grouped Card View Styles ====== */
+.comparison-history.grouped-view {
+    padding: 24px;
+}
+
+.grouped-header {
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.grouped-header .header-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.grouped-header .header-left h2 {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 700;
+}
+
+.summary-badges {
+    display: flex;
+    gap: 8px;
+}
+
+.summary-badges .badge {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.badge.total {
+    background: #f3f4f6;
+    color: #4b5563;
+}
+
+.badge.issues {
+    background: #fef2f2;
+    color: #ef4444;
+}
+
+.badge.success {
+    background: #f0fdf4;
+    color: #22c55e;
+}
+
+.grouped-header .header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.filter-tabs {
+    display: flex;
+    background: #f3f4f6;
+    border-radius: 8px;
+    padding: 3px;
+}
+
+.filter-tab {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    border: none;
+    background: transparent;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    color: #6b7280;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.filter-tab.active {
+    background: white;
+    color: #1f2937;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.search-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+}
+
+.search-box input {
+    border: none;
+    outline: none;
+    font-size: 0.9rem;
+    width: 120px;
+}
+
+.search-box svg {
+    color: #9ca3af;
+}
+
+.icon-btn.refresh {
+    padding: 8px;
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    color: #6b7280;
+}
+
+.icon-btn.refresh:hover {
+    background: #f9fafb;
+    color: #3b82f6;
+}
+
+/* Region Groups */
+.region-groups {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.region-group {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+}
+
+.region-group-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 20px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.region-group-header:hover {
+    background: #f9fafb;
+}
+
+.region-group-header.has-issues {
+    border-left: 4px solid #ef4444;
+}
+
+.region-expand {
+    color: #9ca3af;
+}
+
+.region-info {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.region-name {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #1f2937;
+}
+
+.region-count {
+    font-size: 0.85rem;
+    color: #9ca3af;
+}
+
+.region-status .status-badge {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.status-badge.issue {
+    background: #fef2f2;
+    color: #ef4444;
+}
+
+.status-badge.ok {
+    background: #f0fdf4;
+    color: #22c55e;
+}
+
+/* Comparison Cards */
+.comparison-cards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 0 20px 20px 52px;
+    background: #f9fafb;
+    border-top: 1px solid #e5e7eb;
+    padding-top: 16px;
+}
+
+.comparison-card {
+    flex: 0 0 180px;
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+    overflow: hidden;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.comparison-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.comparison-card.has-issue {
+    border: 1px solid #fecaca;
+    background: #fffbeb;
+}
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    background: #f9fafb;
+}
+
+.comparison-card.has-issue .card-header {
+    background: #fef3c7;
+}
+
+.year-range {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #1f2937;
+}
+
+.card-status {
+    display: flex;
+    align-items: center;
+}
+
+.card-status.ok {
+    color: #22c55e;
+}
+
+.card-status.issue {
+    color: #ef4444;
+}
+
+.card-body {
+    padding: 12px;
+}
+
+.card-body .metric {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.metric .label {
+    font-size: 0.8rem;
+    color: #9ca3af;
+}
+
+.metric .value {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #1f2937;
+}
+
+.metric .value.warning {
+    color: #f59e0b;
+}
+
+.issue-detail {
+    font-size: 0.75rem;
+    color: #ef4444;
+    background: #fef2f2;
+    padding: 4px 8px;
+    border-radius: 4px;
+    margin-top: 4px;
+}
+
+.card-footer {
+    display: flex;
+    border-top: 1px solid #e5e7eb;
+}
+
+.card-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 8px;
+    border: none;
+    background: transparent;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.card-btn:not(:last-child) {
+    border-right: 1px solid #e5e7eb;
+}
+
+.card-btn.view {
+    color: #3b82f6;
+}
+
+.card-btn.view:hover {
+    background: #eff6ff;
+}
+
+.card-btn.print {
+    color: #6b7280;
+}
+
+.card-btn.print:hover {
+    background: #f3f4f6;
+}
+
+.card-btn.delete {
+    color: #ef4444;
+}
+
+.card-btn.delete:hover {
+    background: #fef2f2;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .grouped-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .comparison-cards {
+        padding-left: 16px;
+    }
+
+    .comparison-card {
+        flex: 0 0 calc(50% - 6px);
+    }
+}
