@@ -723,12 +723,81 @@ export class LlmJobRunner {
     const diffResult = summarizeDiff(leftParsed, rightParsed);
     const diffJson = JSON.stringify(diffResult);
 
+    // Calculate similarity and check_status from diff result
+    let similarity = 0;
+    let checkStatus = '正常';
+
+    try {
+      // Calculate similarity from diff summary
+      const dr = diffResult as any;
+      if (dr.summary) {
+        similarity = Math.round(dr.summary.overallRepetition || dr.summary.textRepetition || 0);
+      }
+
+      // Check for issues in both reports
+      const checkIssues: string[] = [];
+
+      // Get left version issues
+      let leftIssueCount = 0;
+      let rightIssueCount = 0;
+
+      if (dbType === 'postgres') {
+        const leftResult = await pool.query(`
+          SELECT COUNT(*) as cnt FROM report_consistency_items 
+          WHERE report_version_id = $1 AND auto_status = 'FAIL' AND human_status = 'pending'
+        `, [leftVersion.version_id]);
+        leftIssueCount = leftResult.rows[0]?.cnt || 0;
+
+        const rightResult = await pool.query(`
+          SELECT COUNT(*) as cnt FROM report_consistency_items 
+          WHERE report_version_id = $1 AND auto_status = 'FAIL' AND human_status = 'pending'
+        `, [rightVersion.version_id]);
+        rightIssueCount = rightResult.rows[0]?.cnt || 0;
+      } else {
+        leftIssueCount = querySqlite(`
+          SELECT COUNT(*) as cnt FROM report_consistency_items 
+          WHERE report_version_id = ${sqlValue(leftVersion.version_id)} AND auto_status = 'FAIL' AND human_status = 'pending';
+        `)[0]?.cnt || 0;
+
+        rightIssueCount = querySqlite(`
+          SELECT COUNT(*) as cnt FROM report_consistency_items 
+          WHERE report_version_id = ${sqlValue(rightVersion.version_id)} AND auto_status = 'FAIL' AND human_status = 'pending';
+        `)[0]?.cnt || 0;
+      }
+
+      // Get year info for status message
+      let yearA: number = 0, yearB: number = 0;
+      if (dbType === 'postgres') {
+        const compInfo = await pool.query(`SELECT year_a, year_b FROM comparisons WHERE id = $1`, [job.comparison_id]);
+        yearA = compInfo.rows[0]?.year_a || 0;
+        yearB = compInfo.rows[0]?.year_b || 0;
+      } else {
+        const compInfo = querySqlite(`SELECT year_a, year_b FROM comparisons WHERE id = ${sqlValue(job.comparison_id)};`)[0] as any;
+        yearA = compInfo?.year_a || 0;
+        yearB = compInfo?.year_b || 0;
+      }
+
+      if (leftIssueCount > 0) checkIssues.push(`${yearA}年校验${leftIssueCount}项`);
+      if (rightIssueCount > 0) checkIssues.push(`${yearB}年校验${rightIssueCount}项`);
+
+      if (checkIssues.length > 0) {
+        checkStatus = `异常(${checkIssues.join('|')})`;
+      }
+    } catch (e) {
+      console.error('[Compare] Error calculating metrics:', e);
+    }
+
     if (dbType === 'postgres') {
       await pool.query(`
         INSERT INTO comparison_results (comparison_id, diff_json, created_at)
         VALUES ($1, $2, NOW())
         ON CONFLICT(comparison_id) DO UPDATE SET diff_json = excluded.diff_json, created_at = excluded.created_at`,
         [job.comparison_id, diffJson]);
+
+      // Update comparison with calculated metrics
+      await pool.query(`
+        UPDATE comparisons SET similarity = $1, check_status = $2 WHERE id = $3
+      `, [similarity, checkStatus, job.comparison_id]);
 
       await pool.query(`
         UPDATE jobs 
@@ -745,6 +814,11 @@ export class LlmJobRunner {
         VALUES (${sqlValue(job.comparison_id)}, ${sqlValue(diffJson)}, datetime('now'))
         ON CONFLICT(comparison_id) DO UPDATE SET diff_json = excluded.diff_json, created_at = excluded.created_at;`);
 
+      // Update comparison with calculated metrics
+      querySqlite(`
+        UPDATE comparisons SET similarity = ${sqlValue(similarity)}, check_status = ${sqlValue(checkStatus)} WHERE id = ${sqlValue(job.comparison_id)};
+      `);
+
       querySqlite(`
         UPDATE jobs 
         SET status = 'succeeded', 
@@ -754,6 +828,8 @@ export class LlmJobRunner {
             finished_at = datetime('now') 
         WHERE id = ${sqlValue(job.id)};`);
     }
+
+    console.log(`[Compare] Updated comparison ${job.comparison_id}: similarity=${similarity}%, status=${checkStatus}`);
   }
 
   /**
