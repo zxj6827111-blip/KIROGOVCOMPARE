@@ -25,7 +25,7 @@ const upload = multer({
       // Linux max filename is 255 bytes, but we leave room for timestamp and path
       const MAX_NAME_BYTES = 100;
       let safeName = file.originalname;
-      
+
       // Get byte length (Chinese chars are 3 bytes each in UTF-8)
       const byteLength = Buffer.byteLength(safeName, 'utf8');
       if (byteLength > MAX_NAME_BYTES) {
@@ -33,34 +33,35 @@ const upload = multer({
         const extMatch = safeName.match(/\.[^.]+$/);
         const ext = extMatch ? extMatch[0] : '';
         const nameWithoutExt = safeName.replace(/\.[^.]+$/, '');
-        
+
         // Truncate the name part, keeping room for extension
         let truncated = '';
         let currentBytes = 0;
         const maxNamePartBytes = MAX_NAME_BYTES - Buffer.byteLength(ext, 'utf8');
-        
+
         for (const char of nameWithoutExt) {
           const charBytes = Buffer.byteLength(char, 'utf8');
           if (currentBytes + charBytes > maxNamePartBytes) break;
           truncated += char;
           currentBytes += charBytes;
         }
-        
+
         safeName = truncated + ext;
         console.log(`[Upload] Truncated filename from ${byteLength} to ${Buffer.byteLength(safeName, 'utf8')} bytes`);
       }
-      
+
       cb(null, `${Date.now()}-${safeName}`);
     },
   }),
   fileFilter: (_req, file, cb) => {
     const isPdf = file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf');
     const isHtml = file.mimetype === 'text/html' || file.originalname.toLowerCase().endsWith('.html') || file.originalname.toLowerCase().endsWith('.htm');
+    const isTxt = file.mimetype === 'text/plain' || file.originalname.toLowerCase().endsWith('.txt');
 
-    if (isPdf || isHtml) {
+    if (isPdf || isHtml || isTxt) {
       cb(null, true);
     } else {
-      cb(new Error('仅支持 PDF 或 HTML 文件'));
+      cb(new Error('仅支持 PDF、HTML 或 TXT 文件'));
     }
   },
 });
@@ -104,9 +105,10 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
 
     const isPdf = file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf');
     const isHtml = file.mimetype === 'text/html' || file.originalname.toLowerCase().endsWith('.html') || file.originalname.toLowerCase().endsWith('.htm');
+    const isTxt = file.mimetype === 'text/plain' || file.originalname.toLowerCase().endsWith('.txt');
 
-    if (!isPdf && !isHtml) {
-      return res.status(400).json({ error: '仅支持 PDF 或 HTML 文件' });
+    if (!isPdf && !isHtml && !isTxt) {
+      return res.status(400).json({ error: '仅支持 PDF、HTML 或 TXT 文件' });
     }
 
     // Fix for garbled filenames (UTF-8 bytes interpreted as Latin-1)
@@ -521,7 +523,7 @@ router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
         AND (human_status != 'dismissed' OR human_status IS NULL)
       GROUP BY report_version_id, group_key
     `));
-    
+
     // DEBUG: Log the raw group counts to diagnose "No issues found" bug
     console.log('[BatchCheckStatus] Version IDs:', versionIds);
     // console.log('[BatchCheckStatus] Group counts result:', JSON.stringify(groupCounts));
@@ -550,9 +552,9 @@ router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
     for (const [rid, vid] of versionMap) {
       versionToReport.set(Number(vid), Number(rid));
     }
-    
+
     console.log('[BatchCheckStatus] Group counts:', typedGroupCounts.length, 'items');
-    
+
     for (const gc of typedGroupCounts) {
       // Normalize report_version_id to number for Map lookup
       const vid = Number(gc.report_version_id);
@@ -588,7 +590,7 @@ router.get('/reports/:id', authMiddleware, async (req, res) => {
     }
 
     ensureDbMigrations();
-    
+
     // Use flexible is_active condition for Postgres compatibility
     const isActiveCondition = dbType === 'postgres' ? `(rv.is_active = true OR rv.is_active::integer = 1)` : `rv.is_active = 1`;
 
@@ -791,9 +793,9 @@ router.delete('/reports/:id', authMiddleware, async (req, res) => {
     const ids = comparisonIds.map((c) => c.id).filter((id): id is number => typeof id === 'number' && id > 0);
     if (ids.length) {
       const inClause = ids.join(',');
-      await dbQuery(`DELETE FROM comparison_results WHERE comparison_id IN (${inClause});`).catch(() => {});
-      await dbQuery(`DELETE FROM comparisons WHERE id IN (${inClause});`).catch(() => {});
-      await dbQuery(`UPDATE jobs SET comparison_id = NULL WHERE comparison_id IN (${inClause});`).catch(() => {});
+      await dbQuery(`DELETE FROM comparison_results WHERE comparison_id IN (${inClause});`).catch(() => { });
+      await dbQuery(`DELETE FROM comparisons WHERE id IN (${inClause});`).catch(() => { });
+      await dbQuery(`UPDATE jobs SET comparison_id = NULL WHERE comparison_id IN (${inClause});`).catch(() => { });
     }
 
     // Attempt to delete consistency check related data (if tables exist)
@@ -801,28 +803,28 @@ router.delete('/reports/:id', authMiddleware, async (req, res) => {
       // Get version IDs
       const versions = (await dbQuery(`SELECT id FROM report_versions WHERE report_id = ${sqlValue(reportId)}`)) as Array<{ id: number }>;
       const versionIds = versions.map((v) => v.id);
-      
+
       if (versionIds.length > 0) {
         const vIds = versionIds.join(',');
-        
+
         // Delete related notifications FIRST
-        await dbQuery(`DELETE FROM notifications WHERE related_version_id IN (${vIds})`).catch(() => {});
-        
+        await dbQuery(`DELETE FROM notifications WHERE related_version_id IN (${vIds})`).catch(() => { });
+
         // Delete consistency runs & items
-        await dbQuery(`DELETE FROM report_consistency_run_items WHERE run_id IN (SELECT id FROM report_consistency_runs WHERE report_version_id IN (${vIds}))`).catch(() => {});
-        await dbQuery(`DELETE FROM report_consistency_runs WHERE report_version_id IN (${vIds})`).catch(() => {});
-        await dbQuery(`DELETE FROM report_consistency_items WHERE report_version_id IN (${vIds})`).catch(() => {});
-        
+        await dbQuery(`DELETE FROM report_consistency_run_items WHERE run_id IN (SELECT id FROM report_consistency_runs WHERE report_version_id IN (${vIds}))`).catch(() => { });
+        await dbQuery(`DELETE FROM report_consistency_runs WHERE report_version_id IN (${vIds})`).catch(() => { });
+        await dbQuery(`DELETE FROM report_consistency_items WHERE report_version_id IN (${vIds})`).catch(() => { });
+
         // Delete parses
-        await dbQuery(`DELETE FROM report_version_parses WHERE report_version_id IN (${vIds})`).catch(() => {});
+        await dbQuery(`DELETE FROM report_version_parses WHERE report_version_id IN (${vIds})`).catch(() => { });
       }
     } catch (e) {
       console.warn('Error cleaning up related data:', e);
     }
 
     // Remove jobs & versions, then report itself
-    await dbQuery(`DELETE FROM jobs WHERE report_id = ${sqlValue(reportId)};`).catch(() => {});
-    await dbQuery(`DELETE FROM report_versions WHERE report_id = ${sqlValue(reportId)};`).catch(() => {});
+    await dbQuery(`DELETE FROM jobs WHERE report_id = ${sqlValue(reportId)};`).catch(() => { });
+    await dbQuery(`DELETE FROM report_versions WHERE report_id = ${sqlValue(reportId)};`).catch(() => { });
     await dbQuery(`DELETE FROM reports WHERE id = ${sqlValue(reportId)};`);
 
     return res.json({ ok: true });

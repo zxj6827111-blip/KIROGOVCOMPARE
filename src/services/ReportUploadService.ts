@@ -102,7 +102,7 @@ function resolveProviderAndModel(modelInput?: string): { provider: string; model
 export class ReportUploadService {
   async processUpload(payload: ReportUploadPayload): Promise<ReportUploadResult> {
     ensureStorageDir();
-    
+
     // Only run SQLite migrations if using SQLite
     if (dbType === 'sqlite') {
       ensureSqliteMigrations();
@@ -158,7 +158,8 @@ export class ReportUploadService {
     }
 
     const isHtml = payload.mimeType === 'text/html' || payload.originalName.toLowerCase().endsWith('.html') || payload.originalName.toLowerCase().endsWith('.htm');
-    const extension = isHtml ? '.html' : '.pdf';
+    const isTxt = payload.mimeType === 'text/plain' || payload.originalName.toLowerCase().endsWith('.txt');
+    const extension = isHtml ? '.html' : (isTxt ? '.txt' : '.pdf');
 
     const storageRelativeDir = path.join('data', 'uploads', `${payload.regionId}`, `${payload.year}`);
     const storageRelative = path.join(storageRelativeDir, `${fileHash}${extension}`);
@@ -252,7 +253,7 @@ export class ReportUploadService {
       model: payload.model
     });
     ensureStorageDir();
-    
+
     // Only run SQLite migrations if using SQLite
     if (dbType === 'sqlite') {
       ensureSqliteMigrations();
