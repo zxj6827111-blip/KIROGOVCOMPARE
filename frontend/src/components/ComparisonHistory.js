@@ -34,10 +34,12 @@ function ComparisonHistory() {
   const [treeData, setTreeData] = useState([]);
   const [expandedNodes, setExpandedNodes] = useState(new Set());
   const [viewMode, setViewMode] = useState('tree'); // 'tree' | 'flat'
+  const [isTreeReady, setIsTreeReady] = useState(false); // Prevents flicker
 
   const fetchComparisons = useCallback(async () => {
     setLoading(true);
     setError('');
+    setIsTreeReady(false); // Reset tree ready state
     try {
       const params = new URLSearchParams({
         page: page,
@@ -126,10 +128,12 @@ function ComparisonHistory() {
       // Auto-expand first level
       const firstLevelIds = rootNodes.map(n => n.id);
       setExpandedNodes(new Set(firstLevelIds));
+      setIsTreeReady(true); // Tree is ready, allow rendering
     } catch (err) {
       console.error('Failed to build tree:', err);
       // Fallback to flat view
       setViewMode('flat');
+      setIsTreeReady(true); // Still mark as ready to show flat fallback
     }
   };
 
@@ -491,8 +495,10 @@ function ComparisonHistory() {
               </tr>
             </thead>
             <tbody>
-              {viewMode === 'tree' && treeData.length > 0 ? (
+              {viewMode === 'tree' && isTreeReady && treeData.length > 0 ? (
                 treeData.map(node => renderTreeNode(node, 0))
+              ) : viewMode === 'tree' && !isTreeReady ? (
+                <tr><td colSpan="8" style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>构建层级结构中...</td></tr>
               ) : (
                 comparisons.map((c) => (
                   <tr key={c.id} className={selectedIds.includes(c.id) ? 'selected-row' : ''}>
