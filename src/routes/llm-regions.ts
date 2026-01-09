@@ -313,20 +313,16 @@ router.post('/reorder', authMiddleware, requirePermission('manage_cities'), asyn
     }
 
     if (dbType === 'sqlite') {
-      // Use transaction for batch update
-      await new Promise<void>((resolve, reject) => {
-        pool.serialize(() => {
-          pool.run('BEGIN TRANSACTION');
-          for (const item of orders) {
-            pool.run('UPDATE regions SET sort_order = ?, updated_at = datetime(\'now\') WHERE id = ?',
-              [item.sort_order, item.id]);
-          }
-          pool.run('COMMIT', (err: any) => {
-            if (err) reject(err);
-            else resolve();
-          });
+      // Simple sequential updates for SQLite
+      for (const item of orders) {
+        await new Promise<void>((resolve, reject) => {
+          pool.run('UPDATE regions SET sort_order = ?, updated_at = datetime(\'now\') WHERE id = ?',
+            [item.sort_order, item.id], (err: any) => {
+              if (err) reject(err);
+              else resolve();
+            });
         });
-      });
+      }
     } else {
       // PostgreSQL batch update
       const client = await pool.connect();
