@@ -1126,11 +1126,17 @@ export class LlmJobRunner {
         `, [region_id, prevYear, year, prevReport.id, reportId]);
         comparisonId = result.rows[0].id;
       } else {
-        querySqlite(`
+        // SQLite: Must run INSERT and SELECT last_insert_rowid() in same session!
+        const result = querySqlite(`
           INSERT INTO comparisons (region_id, year_a, year_b, left_report_id, right_report_id, created_at)
           VALUES (${sqlValue(region_id)}, ${sqlValue(prevYear)}, ${sqlValue(year)}, ${sqlValue(prevReport.id)}, ${sqlValue(reportId)}, datetime('now'));
+          SELECT last_insert_rowid() as id;
         `);
-        comparisonId = querySqlite(`SELECT last_insert_rowid() as id;`)[0]?.id as number;
+        comparisonId = result[0]?.id as number;
+        if (!comparisonId) {
+          console.error('[AutoCompare] Failed to get comparison ID after insert');
+          return;
+        }
       }
 
       // 5. Create compare job
