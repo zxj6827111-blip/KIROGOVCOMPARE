@@ -324,20 +324,10 @@ router.post('/reorder', authMiddleware, requirePermission('manage_cities'), asyn
         });
       }
     } else {
-      // PostgreSQL batch update
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
-        for (const item of orders) {
-          await client.query('UPDATE regions SET sort_order = $1, updated_at = NOW() WHERE id = $2',
-            [item.sort_order, item.id]);
-        }
-        await client.query('COMMIT');
-      } catch (e) {
-        await client.query('ROLLBACK');
-        throw e;
-      } finally {
-        client.release();
+      // PostgreSQL: Simple sequential updates (no transaction needed for idempotent updates)
+      for (const item of orders) {
+        await pool.query('UPDATE regions SET sort_order = $1, updated_at = NOW() WHERE id = $2',
+          [item.sort_order, item.id]);
       }
     }
 
