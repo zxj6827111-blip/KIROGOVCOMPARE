@@ -13,8 +13,7 @@ import {
   Download,
   ChevronDown,
   ChevronRight,
-  AlertCircle,
-  CheckCircle
+  AlertCircle
 } from 'lucide-react';
 
 function ComparisonHistory() {
@@ -36,72 +35,60 @@ function ComparisonHistory() {
   const [viewMode, setViewMode] = useState('tree'); // 'tree' | 'flat'
   const [isTreeReady, setIsTreeReady] = useState(false); // Prevents flicker
 
+  // Fetch comparisons and build tree in one go to prevent flicker
   const fetchComparisons = useCallback(async () => {
     setLoading(true);
     setError('');
-    setIsTreeReady(prev => !regionFilter && !yearFilter ? false : prev); // Only reset if no filters (initial load)
+    // Keep isTreeReady=true if likely refreshing, to show stale data instead of loading screen
+    // But if we are searching (changing filters), maybe we SHOULD show loading?
+    // User wants smooth transition. Stale data (old tree) -> New data (new tree).
+    // So we invoke API, prepare everything, then swap.
+    setIsTreeReady(prev => !regionFilter && !yearFilter ? false : prev);
+
     try {
+      // 1. Fetch Comparison Data
       const params = new URLSearchParams({
         page: page,
-        pageSize: 100, // Get more for tree view
+        pageSize: 100,
       });
       if (regionFilter) params.append('region_name', regionFilter);
       if (yearFilter) params.append('year', yearFilter);
 
       const resp = await apiClient.get(`/comparisons/history?${params.toString()}`);
-      const data = resp.data?.data || [];
-      setComparisons(data);
-      setTotalPages(resp.data?.totalPages || 1);
+      const rawComparisons = resp.data?.data || [];
+      const totalPagesVal = resp.data?.totalPages || 1;
 
-      // Build tree structure
-      await buildTree(data);
-    } catch (err) {
-      const message = err.response?.data?.error || err.message || '请求失败';
-      setError(`加载失败：${message}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [page, regionFilter, yearFilter]);
-
-  // Build tree structure from flat comparison list
-  const buildTree = async (comparisons) => {
-    // Get regions hierarchy
-    try {
+      // 2. Fetch Regions for Tree
       const regionsResp = await apiClient.get('/regions');
-      const regions = regionsResp.data?.data || [];
-
-      // Create region lookup map
+      const regionsList = regionsResp.data?.data || [];
       const regionMap = new Map();
-      regions.forEach(r => regionMap.set(r.id, r));
+      regionsList.forEach(r => regionMap.set(r.id, r));
 
-      // Group comparisons by region
+      // 3. Build Tree Structure (Sync)
       const compByRegion = new Map();
-      comparisons.forEach(c => {
+      rawComparisons.forEach(c => {
         if (!compByRegion.has(c.regionId)) {
           compByRegion.set(c.regionId, []);
         }
         compByRegion.get(c.regionId).push(c);
       });
 
-      // Build tree nodes
       const buildNode = (regionId) => {
         const region = regionMap.get(regionId);
         if (!region) return null;
 
         const comps = compByRegion.get(regionId) || [];
-        const children = regions
+        const children = regionsList
           .filter(r => r.parent_id === regionId)
           .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
           .map(r => buildNode(r.id))
           .filter(Boolean);
 
-        // Only include if has comparisons or children with comparisons
         const hasComparisons = comps.length > 0;
         const hasChildComparisons = children.some(c => c.hasComparisons);
 
         if (!hasComparisons && !hasChildComparisons) return null;
 
-        // Count issues
         const issueCount = comps.filter(c => c.checkStatus && c.checkStatus !== '正常').length;
         const childIssueCount = children.reduce((sum, c) => sum + c.totalIssues, 0);
 
@@ -112,50 +99,49 @@ function ComparisonHistory() {
           comparisons: comps,
           children: children,
           hasComparisons: hasComparisons || hasChildComparisons,
-          issueCount: issueCount,
           totalIssues: issueCount + childIssueCount,
           totalComparisons: comps.length + children.reduce((sum, c) => sum + c.totalComparisons, 0)
         };
       };
 
-      // Build from root regions
-      const rootNodes = regions
+      const rootNodes = regionsList
         .filter(r => !r.parent_id || r.parent_id === 0)
         .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
         .map(r => buildNode(r.id))
         .filter(Boolean);
 
+      // 4. ATOMIC UPDATE: Set all states at once
+      setComparisons(rawComparisons);
+      setTotalPages(totalPagesVal);
       setTreeData(rootNodes);
 
-      // Auto-expand: If searching, expand all matched nodes; otherwise just first level
+      // Auto-expand logic
       if (regionFilter && regionFilter.trim()) {
-        // When searching, expand all nodes that have comparisons (matched results)
         const expandedSet = new Set();
         const expandMatchedNodes = (nodes) => {
           nodes.forEach(node => {
-            if (node.totalComparisons > 0) {
-              expandedSet.add(node.id);
-            }
-            if (node.children && node.children.length > 0) {
-              expandMatchedNodes(node.children);
-            }
+            if (node.totalComparisons > 0) expandedSet.add(node.id);
+            if (node.children?.length > 0) expandMatchedNodes(node.children);
           });
         };
         expandMatchedNodes(rootNodes);
         setExpandedNodes(expandedSet);
       } else {
-        // Default: only expand first level
         const firstLevelIds = rootNodes.map(n => n.id);
         setExpandedNodes(new Set(firstLevelIds));
       }
-      setIsTreeReady(true); // Tree is ready, allow rendering
+
+      setIsTreeReady(true);
     } catch (err) {
-      console.error('Failed to build tree:', err);
-      // Fallback to flat view
+      console.error('Failed to fetch/build:', err);
+      const message = err.response?.data?.error || err.message || '加载失败';
+      setError(`加载失败：${message}`);
+      // Fallback
       setViewMode('flat');
-      setIsTreeReady(true); // Still mark as ready to show flat fallback
+    } finally {
+      setLoading(false);
     }
-  };
+  }, [page, regionFilter, yearFilter]);
 
   useEffect(() => {
     fetchComparisons();
