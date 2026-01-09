@@ -143,9 +143,11 @@ function ComparisonHistory() {
     }
   }, [page, regionFilter, yearFilter]);
 
+  // 初始加载：只在组件首次挂载时执行
   useEffect(() => {
     fetchComparisons();
-  }, [fetchComparisons]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const toggleNode = (nodeId) => {
     setExpandedNodes(prev => {
