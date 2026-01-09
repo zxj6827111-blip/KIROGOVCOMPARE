@@ -18,7 +18,7 @@ import {
 
 function ComparisonHistory() {
   const [comparisons, setComparisons] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true); // 初始为 true，避免首次渲染显示空状态
   const [error, setError] = useState('');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
