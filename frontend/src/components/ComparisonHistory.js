@@ -52,7 +52,7 @@ function ComparisonHistory() {
       setTotalPages(resp.data?.totalPages || 1);
 
       // Build tree structure
-      buildTree(data);
+      await buildTree(data);
     } catch (err) {
       const message = err.response?.data?.error || err.message || '请求失败';
       setError(`加载失败：${message}`);
