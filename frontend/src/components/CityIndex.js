@@ -172,7 +172,7 @@ function CityIndex({ onSelectReport, onViewComparison }) {
       if (!byParent.has(pid)) byParent.set(pid, []);
       byParent.get(pid).push(r);
     });
-    byParent.forEach((arr) => arr.sort((a, b) => (a.level || 1) - (b.level || 1) || a.name.localeCompare(b.name)));
+    byParent.forEach((arr) => arr.sort((a, b) => (a.level || 1) - (b.level || 1) || (a.sort_order || 0) - (b.sort_order || 0)));
     return byParent;
   }, [regions]);
 

@@ -91,6 +91,7 @@ function ComparisonHistory() {
         const comps = compByRegion.get(regionId) || [];
         const children = regions
           .filter(r => r.parent_id === regionId)
+          .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
           .map(r => buildNode(r.id))
           .filter(Boolean);
 
@@ -120,6 +121,7 @@ function ComparisonHistory() {
       // Build from root regions
       const rootNodes = regions
         .filter(r => !r.parent_id || r.parent_id === 0)
+        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
         .map(r => buildNode(r.id))
         .filter(Boolean);
 
