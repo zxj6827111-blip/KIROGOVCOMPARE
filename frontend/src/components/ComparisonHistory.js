@@ -39,7 +39,7 @@ function ComparisonHistory() {
   const fetchComparisons = useCallback(async () => {
     setLoading(true);
     setError('');
-    setIsTreeReady(false); // Reset tree ready state
+    setIsTreeReady(prev => !regionFilter && !yearFilter ? false : prev); // Only reset if no filters (initial load)
     try {
       const params = new URLSearchParams({
         page: page,
@@ -127,9 +127,27 @@ function ComparisonHistory() {
 
       setTreeData(rootNodes);
 
-      // Auto-expand first level
-      const firstLevelIds = rootNodes.map(n => n.id);
-      setExpandedNodes(new Set(firstLevelIds));
+      // Auto-expand: If searching, expand all matched nodes; otherwise just first level
+      if (regionFilter && regionFilter.trim()) {
+        // When searching, expand all nodes that have comparisons (matched results)
+        const expandedSet = new Set();
+        const expandMatchedNodes = (nodes) => {
+          nodes.forEach(node => {
+            if (node.totalComparisons > 0) {
+              expandedSet.add(node.id);
+            }
+            if (node.children && node.children.length > 0) {
+              expandMatchedNodes(node.children);
+            }
+          });
+        };
+        expandMatchedNodes(rootNodes);
+        setExpandedNodes(expandedSet);
+      } else {
+        // Default: only expand first level
+        const firstLevelIds = rootNodes.map(n => n.id);
+        setExpandedNodes(new Set(firstLevelIds));
+      }
       setIsTreeReady(true); // Tree is ready, allow rendering
     } catch (err) {
       console.error('Failed to build tree:', err);
