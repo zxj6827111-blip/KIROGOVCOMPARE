@@ -604,7 +604,7 @@ function CityIndex({ onSelectReport, onViewComparison }) {
                       </div>
                       <h3 className="city-name">{region.name}</h3>
                       <div className="city-count">
-                        <span className="count-number">{total}</span>
+                        <span className={`count-number ${total === 0 ? 'count-zero' : ''}`}>{total}</span>
                         <span className="count-label">份报告（含下级）</span>
                       </div>
                       {directReports > 0 && (

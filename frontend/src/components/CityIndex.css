@@ -307,6 +307,10 @@
   color: #1f2937;
 }
 
+.count-number.count-zero {
+  color: #dc2626;
+}
+
 .count-label {
   font-size: 12px;
   color: #6b7280;

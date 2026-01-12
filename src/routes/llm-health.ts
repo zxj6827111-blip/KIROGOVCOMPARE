@@ -34,22 +34,24 @@ router.get('/health', async (_req: Request, res: Response) => {
 router.get('/public-stats', async (_req: Request, res: Response) => {
   try {
     let reportsCount = 0;
-    let regionsCount = 0;
+    let regionsWithReportsCount = 0;
 
     if (dbType === 'postgres') {
       const reportsResult = await pool.query('SELECT COUNT(*) as cnt FROM reports');
-      const regionsResult = await pool.query('SELECT COUNT(*) as cnt FROM regions');
+      // 统计有报告的区域数量（去重）
+      const regionsResult = await pool.query('SELECT COUNT(DISTINCT region_id) as cnt FROM reports');
       reportsCount = parseInt(reportsResult.rows[0]?.cnt) || 0;
-      regionsCount = parseInt(regionsResult.rows[0]?.cnt) || 0;
+      regionsWithReportsCount = parseInt(regionsResult.rows[0]?.cnt) || 0;
     } else {
       const { querySqlite } = require('../config/sqlite');
       reportsCount = querySqlite('SELECT COUNT(*) as cnt FROM reports')[0]?.cnt || 0;
-      regionsCount = querySqlite('SELECT COUNT(*) as cnt FROM regions')[0]?.cnt || 0;
+      // 统计有报告的区域数量（去重）
+      regionsWithReportsCount = querySqlite('SELECT COUNT(DISTINCT region_id) as cnt FROM reports')[0]?.cnt || 0;
     }
 
     res.json({
       reports: reportsCount,
-      regions: regionsCount
+      regions: regionsWithReportsCount
     });
   } catch (error) {
     console.error('Stats check failed:', error);
