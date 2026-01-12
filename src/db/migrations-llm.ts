@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS regions (
   province TEXT,
   parent_id INTEGER REFERENCES regions(id) ON DELETE CASCADE,
   level INTEGER NOT NULL DEFAULT 0,
+  sort_order INTEGER,
   created_at TEXT NOT NULL DEFAULT (${dbNowExpression()}),
   updated_at TEXT NOT NULL DEFAULT (${dbNowExpression()})
 );
@@ -59,6 +60,8 @@ CREATE TABLE IF NOT EXISTS comparisons (
   year_b INTEGER NOT NULL,
   left_report_id INTEGER NOT NULL REFERENCES reports(id),
   right_report_id INTEGER NOT NULL REFERENCES reports(id),
+  similarity INTEGER,
+  check_status TEXT,
   created_at TEXT NOT NULL DEFAULT (${dbNowExpression()}),
   UNIQUE(region_id, year_a, year_b)
 );
@@ -197,6 +200,7 @@ CREATE TABLE IF NOT EXISTS regions (
   province VARCHAR(255),
   parent_id BIGINT REFERENCES regions(id) ON DELETE CASCADE,
   level INTEGER NOT NULL DEFAULT 0,
+  sort_order INTEGER,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -245,6 +249,8 @@ CREATE TABLE IF NOT EXISTS comparisons (
   year_b INTEGER NOT NULL,
   left_report_id BIGINT NOT NULL REFERENCES reports(id),
   right_report_id BIGINT NOT NULL REFERENCES reports(id),
+  similarity INTEGER,
+  check_status VARCHAR(50),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(region_id, year_a, year_b)
 );
@@ -399,6 +405,10 @@ ALTER TABLE report_consistency_items DROP CONSTRAINT IF EXISTS report_consistenc
 ALTER TABLE report_consistency_items
   ADD CONSTRAINT report_consistency_items_group_key_check
   CHECK (group_key IN ('table2', 'table3', 'table4', 'text', 'visual', 'structure', 'quality'));
+
+ALTER TABLE regions ADD COLUMN IF NOT EXISTS sort_order INTEGER;
+ALTER TABLE comparisons ADD COLUMN IF NOT EXISTS similarity INTEGER;
+ALTER TABLE comparisons ADD COLUMN IF NOT EXISTS check_status VARCHAR(50);
 `;
 
 export async function runLLMMigrations(): Promise<void> {
