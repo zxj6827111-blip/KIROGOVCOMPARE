@@ -196,11 +196,26 @@ function RegionsManager() {
   }, [selectionPath]);
 
   // --- Helpers ---
-  const isDepartment = (name) => {
+  // 判断是否为部门：名称优先（名称以区县后缀结尾一定是区县），否则用 level 字段判断
+  const isDepartment = (region) => {
+    if (!region) return false;
+    const name = typeof region === 'string' ? region : region.name;
     if (!name) return false;
+
+    // 1. 名称优先：如果名称以行政区划后缀结尾，一定是区县（非部门）
     const regionSuffixes = ["省", "市", "区", "县", "乡", "镇", "街道"];
-    const isRegion = regionSuffixes.some(s => name.endsWith(s));
-    return !isRegion;
+    const isRegionByName = regionSuffixes.some(s => name.endsWith(s));
+    if (isRegionByName) {
+      return false; // 名称匹配行政区划，不是部门
+    }
+
+    // 2. 名称不匹配时，用 level 字段判断：level=3 表示部门，level=2 表示区县
+    if (typeof region === 'object' && region.level !== undefined && region.level !== null) {
+      return region.level === 3;
+    }
+
+    // 3. 兜底：名称不以区县后缀结尾且没有 level 字段，视为部门
+    return true;
   };
 
   const getChildren = (parentId) => {
@@ -268,7 +283,7 @@ function RegionsManager() {
   // --- Change Category (Department <-> District) ---
   const handleChangeCategory = async (e, item) => {
     e.stopPropagation();
-    const isDept = isDepartment(item.name);
+    const isDept = isDepartment(item);
     // If currently a department (level 3), move to district (level 2)
     // If currently a district (level 2), move to department (level 3)
     const newLevel = isDept ? 2 : 3;
@@ -341,9 +356,9 @@ function RegionsManager() {
 
     // Subsequent Columns based on path
     selectionPath.forEach((selectedRegion, index) => {
-      if (!isDepartment(selectedRegion.name)) {
+      if (!isDepartment(selectedRegion)) {
         const children = getChildren(selectedRegion.id);
-        if (children.length > 0 || !isDepartment(selectedRegion.name)) {
+        if (children.length > 0 || !isDepartment(selectedRegion)) {
           cols.push({
             id: selectedRegion.id,
             items: children,
@@ -358,12 +373,12 @@ function RegionsManager() {
   }, [regions, selectionPath]);
 
   const lastSelected = selectionPath[selectionPath.length - 1];
-  const showDetailPanel = lastSelected && isDepartment(lastSelected.name);
+  const showDetailPanel = lastSelected && isDepartment(lastSelected);
 
   // --- Render Helper for List Items ---
   const renderColumnItem = (item, colIndex, activeItem, siblings) => {
     const isActive = activeItem?.id === item.id;
-    const isDept = isDepartment(item.name);
+    const isDept = isDepartment(item);
     const count = reportCountMap.get(String(item.id)) || 0;
     const itemIndex = siblings.findIndex(s => s.id === item.id);
     const isFirst = itemIndex === 0;
@@ -463,8 +478,8 @@ function RegionsManager() {
         {columnsToRender.map((col, colIndex) => {
           const activeItem = selectionPath[colIndex];
 
-          const adminItems = col.items.filter(i => !isDepartment(i.name));
-          const deptItems = col.items.filter(i => isDepartment(i.name));
+          const adminItems = col.items.filter(i => !isDepartment(i));
+          const deptItems = col.items.filter(i => isDepartment(i));
 
           return (
             <div key={col.id} className="miller-column">
