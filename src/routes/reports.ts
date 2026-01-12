@@ -273,6 +273,8 @@ router.post('/reports/text', authMiddleware, requirePermission('upload_reports')
 });
 
 router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('upload_reports'), async (req: AuthRequest, res) => {
+  const crypto = require('crypto');
+
   try {
     const reportId = Number(req.params.id);
     const { parsed_json } = req.body;
@@ -285,34 +287,158 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
       return res.status(400).json({ error: 'Invalid parsed_json format' });
     }
 
-    // 1. Find the latest active version for this report
-    const versions = await dbQuery(
-      `SELECT id FROM report_versions 
+    // 0. Region scope check: verify user has access to this report's region
+    const reportRows = await dbQuery(
+      `SELECT region_id FROM reports WHERE id = ${dbType === 'postgres' ? '$1' : '?'}`,
+      [reportId]
+    );
+    if (reportRows.length === 0) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+    const reportRegionId = reportRows[0].region_id;
+
+    // Check user's dataScope
+    const user = req.user;
+    if (user?.dataScope?.regions && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
+      // User has region restrictions - need to verify access
+      const { getAllowedRegionIdsAsync } = require('../utils/dataScope');
+      const allowedIds = await getAllowedRegionIdsAsync(user);
+      if (allowedIds && !allowedIds.includes(reportRegionId)) {
+        return res.status(403).json({ error: 'Access denied: report region not in your data scope' });
+      }
+    }
+
+    // 1. Find the current active version with all fields for copying
+    const activeVersions = await dbQuery(
+      `SELECT * FROM report_versions 
        WHERE report_id = ${dbType === 'postgres' ? '$1' : '?'} 
-       AND is_active = ${dbBool(true)} 
+       AND (is_active = ${dbBool(true)} OR is_active = 1)
        ORDER BY created_at DESC LIMIT 1`,
       [reportId]
     );
 
-    if (versions.length === 0) {
+    if (activeVersions.length === 0) {
       return res.status(404).json({ error: 'No active version found for this report' });
     }
 
-    const versionId = versions[0].id;
+    const active = activeVersions[0];
+    const oldVersionId = active.id;
     const jsonStr = JSON.stringify(parsed_json);
 
-    // 2. Update the version's parsed_json
-    await dbQuery(
-      `UPDATE report_versions 
-       SET parsed_json = ${dbType === 'postgres' ? '$1' : '?'}, 
-           updated_at = ${dbNowExpression()} 
-       WHERE id = ${dbType === 'postgres' ? '$2' : '?'}`,
-      [jsonStr, versionId]
+    // 2. Calculate idempotent file_hash
+    const editHash = crypto.createHash('sha256').update(jsonStr, 'utf8').digest('hex');
+    const newFileHash = crypto.createHash('sha256')
+      .update(`${active.file_hash || ''}:manual_edit:${editHash}`, 'utf8')
+      .digest('hex');
+
+    // 3. Check if version with this hash already exists (idempotency)
+    const existingVersions = await dbQuery(
+      `SELECT id FROM report_versions 
+       WHERE report_id = ${dbType === 'postgres' ? '$1' : '?'} 
+       AND file_hash = ${dbType === 'postgres' ? '$2' : '?'}`,
+      [reportId, newFileHash]
     );
 
-    console.log(`[ParsedDataParams] Updated parsed_json for report ${reportId} (version ${versionId})`);
+    let newVersionId: number;
+    let reused = false;
 
-    return res.json({ success: true, version_id: versionId });
+    if (existingVersions.length > 0) {
+      // Idempotent hit: reuse existing version
+      newVersionId = existingVersions[0].id;
+      reused = true;
+
+      // Deactivate all versions, then activate the existing one
+      await dbQuery(
+        `UPDATE report_versions 
+         SET is_active = ${dbBool(false)}, updated_at = ${dbNowExpression()} 
+         WHERE report_id = ${dbType === 'postgres' ? '$1' : '?'}`,
+        [reportId]
+      );
+      await dbQuery(
+        `UPDATE report_versions 
+         SET is_active = ${dbBool(true)}, updated_at = ${dbNowExpression()} 
+         WHERE id = ${dbType === 'postgres' ? '$1' : '?'}`,
+        [newVersionId]
+      );
+
+      console.log(`[ParsedData] Reused existing version ${newVersionId} for report ${reportId}`);
+    } else {
+      // Create new version
+      // Deactivate all current versions
+      await dbQuery(
+        `UPDATE report_versions 
+         SET is_active = ${dbBool(false)}, updated_at = ${dbNowExpression()} 
+         WHERE report_id = ${dbType === 'postgres' ? '$1' : '?'}`,
+        [reportId]
+      );
+
+      // Build file name for the new version
+      const baseFileName = active.file_name || 'report';
+      const newFileName = baseFileName.includes('(手工修订)')
+        ? baseFileName
+        : `${baseFileName.substring(0, 100)} (手工修订)`;
+
+      // Insert new version
+      if (dbType === 'postgres') {
+        const insertResult = await dbQuery(
+          `INSERT INTO report_versions 
+           (report_id, file_name, file_hash, file_size, storage_path, text_path, raw_text,
+            provider, model, prompt_version, schema_version, parsed_json, is_active, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
+           RETURNING id`,
+          [
+            reportId,
+            newFileName,
+            newFileHash,
+            active.file_size || 0,
+            active.storage_path || '',
+            active.text_path || '',
+            active.raw_text || '',
+            active.provider || 'manual',
+            active.model || 'manual',
+            'manual_edit',
+            active.schema_version || 'v1',
+            jsonStr,
+            true
+          ]
+        );
+        newVersionId = insertResult[0].id;
+      } else {
+        // SQLite: INSERT then get last_insert_rowid
+        await dbQuery(
+          `INSERT INTO report_versions 
+           (report_id, file_name, file_hash, file_size, storage_path, text_path, raw_text,
+            provider, model, prompt_version, schema_version, parsed_json, is_active, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+          [
+            reportId,
+            newFileName,
+            newFileHash,
+            active.file_size || 0,
+            active.storage_path || '',
+            active.text_path || '',
+            active.raw_text || '',
+            active.provider || 'manual',
+            active.model || 'manual',
+            'manual_edit',
+            active.schema_version || 'v1',
+            jsonStr,
+            1
+          ]
+        );
+        const lastIdResult = await dbQuery('SELECT last_insert_rowid() as id', []);
+        newVersionId = lastIdResult[0]?.id;
+      }
+
+      console.log(`[ParsedData] Created new version ${newVersionId} for report ${reportId} (old: ${oldVersionId})`);
+    }
+
+    return res.json({
+      success: true,
+      old_version_id: oldVersionId,
+      new_version_id: newVersionId,
+      reused
+    });
   } catch (error) {
     console.error('Error updating parsed data:', error);
     return res.status(500).json({ error: 'Internal server error' });
@@ -678,6 +804,123 @@ router.get('/reports/:id', authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching report detail:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get version history for a report
+router.get('/reports/:id/versions', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const reportId = Number(req.params.id);
+    if (!reportId || isNaN(reportId)) {
+      return res.status(400).json({ error: 'Invalid report ID' });
+    }
+
+    // Region scope check
+    const reportRows = await dbQuery(
+      `SELECT region_id FROM reports WHERE id = ${dbType === 'postgres' ? '$1' : '?'}`,
+      [reportId]
+    );
+    if (reportRows.length === 0) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+    const reportRegionId = reportRows[0].region_id;
+
+    const user = req.user;
+    if (user?.dataScope?.regions && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
+      const { getAllowedRegionIdsAsync } = require('../utils/dataScope');
+      const allowedIds = await getAllowedRegionIdsAsync(user);
+      if (allowedIds && !allowedIds.includes(reportRegionId)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
+
+    // Get all versions for this report
+    const versions = await dbQuery(
+      `SELECT id, file_name, file_hash, prompt_version, is_active, created_at, updated_at
+       FROM report_versions
+       WHERE report_id = ${dbType === 'postgres' ? '$1' : '?'}
+       ORDER BY created_at DESC`,
+      [reportId]
+    );
+
+    return res.json({
+      data: versions.map(v => ({
+        id: v.id,
+        file_name: v.file_name,
+        file_hash: v.file_hash,
+        prompt_version: v.prompt_version,
+        is_active: v.is_active === true || v.is_active === 1,
+        created_at: v.created_at,
+        updated_at: v.updated_at
+      }))
+    });
+  } catch (error) {
+    console.error('Error fetching versions:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Activate a specific version
+router.post('/reports/:id/versions/:versionId/activate', authMiddleware, requirePermission('upload_reports'), async (req: AuthRequest, res) => {
+  try {
+    const reportId = Number(req.params.id);
+    const versionId = Number(req.params.versionId);
+
+    if (!reportId || isNaN(reportId) || !versionId || isNaN(versionId)) {
+      return res.status(400).json({ error: 'Invalid report or version ID' });
+    }
+
+    // Region scope check
+    const reportRows = await dbQuery(
+      `SELECT region_id FROM reports WHERE id = ${dbType === 'postgres' ? '$1' : '?'}`,
+      [reportId]
+    );
+    if (reportRows.length === 0) {
+      return res.status(404).json({ error: 'Report not found' });
+    }
+    const reportRegionId = reportRows[0].region_id;
+
+    const user = req.user;
+    if (user?.dataScope?.regions && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
+      const { getAllowedRegionIdsAsync } = require('../utils/dataScope');
+      const allowedIds = await getAllowedRegionIdsAsync(user);
+      if (allowedIds && !allowedIds.includes(reportRegionId)) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
+
+    // Verify the version belongs to this report
+    const versionRows = await dbQuery(
+      `SELECT id FROM report_versions 
+       WHERE id = ${dbType === 'postgres' ? '$1' : '?'} 
+       AND report_id = ${dbType === 'postgres' ? '$2' : '?'}`,
+      [versionId, reportId]
+    );
+    if (versionRows.length === 0) {
+      return res.status(404).json({ error: 'Version not found for this report' });
+    }
+
+    // Deactivate all versions for this report
+    await dbQuery(
+      `UPDATE report_versions 
+       SET is_active = ${dbBool(false)}, updated_at = ${dbNowExpression()} 
+       WHERE report_id = ${dbType === 'postgres' ? '$1' : '?'}`,
+      [reportId]
+    );
+
+    // Activate the specified version
+    await dbQuery(
+      `UPDATE report_versions 
+       SET is_active = ${dbBool(true)}, updated_at = ${dbNowExpression()} 
+       WHERE id = ${dbType === 'postgres' ? '$1' : '?'}`,
+      [versionId]
+    );
+
+    console.log(`[Versions] Activated version ${versionId} for report ${reportId}`);
+    return res.json({ success: true, activated_version_id: versionId });
+  } catch (error) {
+    console.error('Error activating version:', error);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

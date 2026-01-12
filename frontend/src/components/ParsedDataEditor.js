@@ -70,13 +70,19 @@ const ParsedDataEditor = ({ reportId, versionId, parsedJson, onSave, onCancel })
     setError('');
 
     try {
-      await apiClient.patch(
+      const response = await apiClient.patch(
         `/reports/${reportId}/parsed-data`,
         { parsed_json: editedData }
       );
 
-      alert('保存成功！建议重新运行一致性校验。');
-      onSave(editedData);
+      const { new_version_id, old_version_id, reused } = response.data;
+
+      const message = reused
+        ? '保存成功（复用已有版本，无需重复创建）。建议重新运行一致性校验。'
+        : '保存成功，已生成新版本（旧版本已保留）。建议重新运行一致性校验。';
+
+      alert(message);
+      onSave({ parsedJson: editedData, newVersionId: new_version_id, oldVersionId: old_version_id, reused });
     } catch (err) {
       setError(err.response?.data?.error || err.message || '保存失败');
     } finally {
