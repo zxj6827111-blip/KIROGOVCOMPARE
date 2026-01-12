@@ -172,7 +172,7 @@ function CityIndex({ onSelectReport, onViewComparison }) {
       if (!byParent.has(pid)) byParent.set(pid, []);
       byParent.get(pid).push(r);
     });
-    byParent.forEach((arr) => arr.sort((a, b) => (a.level || 1) - (b.level || 1) || a.name.localeCompare(b.name)));
+    byParent.forEach((arr) => arr.sort((a, b) => (a.level || 1) - (b.level || 1) || (a.sort_order || 0) - (b.sort_order || 0)));
     return byParent;
   }, [regions]);
 
@@ -376,6 +376,12 @@ function CityIndex({ onSelectReport, onViewComparison }) {
           <p className="subtitle">全区政府信息公开年报数字化归档与分析总览。</p>
         </div>
         <div className="header-actions">
+          <button className="ghost-btn" onClick={() => {
+            const regionParam = currentParentId ? `?region=${currentParentId}&name=${encodeURIComponent(currentRegion?.name || '')}` : '';
+            window.location.href = `/issues${regionParam}`;
+          }}>
+            <AlertCircle size={16} /> 问题清单
+          </button>
           <button className="ghost-btn" onClick={() => (window.location.href = '/regions')}>
             <MapIcon size={16} /> 区域管理
           </button>

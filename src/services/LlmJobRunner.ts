@@ -417,7 +417,7 @@ export class LlmJobRunner {
   private recoverRunningJobs(): void {
     // For PostgreSQL, run async recovery
     if (dbType === 'postgres') {
-      this.recoverRunningJobsAsync().catch(err => 
+      this.recoverRunningJobsAsync().catch(err =>
         console.error('[Recovery] Failed to recover running jobs:', err));
       return;
     }
@@ -510,11 +510,11 @@ export class LlmJobRunner {
         ORDER BY (CASE kind WHEN 'parse' THEN 0 WHEN 'checks' THEN 1 WHEN 'compare' THEN 2 ELSE 9 END) ASC, created_at ASC
         LIMIT 1
         FOR UPDATE SKIP LOCKED`);
-      
+
       if (selectResult.rows.length === 0) {
         return null;
       }
-      
+
       const jobId = selectResult.rows[0].id;
       const updateResult = await pool.query(`
         UPDATE jobs
@@ -526,7 +526,7 @@ export class LlmJobRunner {
         WHERE id = $4
         RETURNING id, report_id, version_id, kind, comparison_id, retry_count, max_retries`,
         [STEPS.PARSING.code, STEPS.PARSING.name, STEPS.PARSING.progress, jobId]);
-      
+
       updatedJobs = updateResult.rows;
     } else {
       updatedJobs = querySqlite(`
@@ -649,6 +649,9 @@ export class LlmJobRunner {
     // Check if we need to generate notification (after all jobs complete)
     if (job.version_id) {
       await this.generateNotificationIfNeeded(job.version_id);
+
+      // Auto-trigger comparison with previous year's report
+      await this.triggerAutoComparison(job.version_id, job.report_id);
     }
   }
 
@@ -720,13 +723,82 @@ export class LlmJobRunner {
     const diffResult = summarizeDiff(leftParsed, rightParsed);
     const diffJson = JSON.stringify(diffResult);
 
+    // Calculate similarity and check_status from diff result
+    let similarity = 0;
+    let checkStatus = '正常';
+
+    try {
+      // Calculate similarity from diff summary
+      const dr = diffResult as any;
+      if (dr.summary) {
+        similarity = Math.round(dr.summary.overallRepetition || dr.summary.textRepetition || 0);
+      }
+
+      // Check for issues in both reports
+      const checkIssues: string[] = [];
+
+      // Get left version issues
+      let leftIssueCount = 0;
+      let rightIssueCount = 0;
+
+      if (dbType === 'postgres') {
+        const leftResult = await pool.query(`
+          SELECT COUNT(*) as cnt FROM report_consistency_items 
+          WHERE report_version_id = $1 AND auto_status = 'FAIL' AND human_status = 'pending'
+        `, [leftVersion.version_id]);
+        leftIssueCount = leftResult.rows[0]?.cnt || 0;
+
+        const rightResult = await pool.query(`
+          SELECT COUNT(*) as cnt FROM report_consistency_items 
+          WHERE report_version_id = $1 AND auto_status = 'FAIL' AND human_status = 'pending'
+        `, [rightVersion.version_id]);
+        rightIssueCount = rightResult.rows[0]?.cnt || 0;
+      } else {
+        leftIssueCount = querySqlite(`
+          SELECT COUNT(*) as cnt FROM report_consistency_items 
+          WHERE report_version_id = ${sqlValue(leftVersion.version_id)} AND auto_status = 'FAIL' AND human_status = 'pending';
+        `)[0]?.cnt || 0;
+
+        rightIssueCount = querySqlite(`
+          SELECT COUNT(*) as cnt FROM report_consistency_items 
+          WHERE report_version_id = ${sqlValue(rightVersion.version_id)} AND auto_status = 'FAIL' AND human_status = 'pending';
+        `)[0]?.cnt || 0;
+      }
+
+      // Get year info for status message
+      let yearA: number = 0, yearB: number = 0;
+      if (dbType === 'postgres') {
+        const compInfo = await pool.query(`SELECT year_a, year_b FROM comparisons WHERE id = $1`, [job.comparison_id]);
+        yearA = compInfo.rows[0]?.year_a || 0;
+        yearB = compInfo.rows[0]?.year_b || 0;
+      } else {
+        const compInfo = querySqlite(`SELECT year_a, year_b FROM comparisons WHERE id = ${sqlValue(job.comparison_id)};`)[0] as any;
+        yearA = compInfo?.year_a || 0;
+        yearB = compInfo?.year_b || 0;
+      }
+
+      if (leftIssueCount > 0) checkIssues.push(`${yearA}年校验${leftIssueCount}项`);
+      if (rightIssueCount > 0) checkIssues.push(`${yearB}年校验${rightIssueCount}项`);
+
+      if (checkIssues.length > 0) {
+        checkStatus = `异常(${checkIssues.join('|')})`;
+      }
+    } catch (e) {
+      console.error('[Compare] Error calculating metrics:', e);
+    }
+
     if (dbType === 'postgres') {
       await pool.query(`
         INSERT INTO comparison_results (comparison_id, diff_json, created_at)
         VALUES ($1, $2, NOW())
         ON CONFLICT(comparison_id) DO UPDATE SET diff_json = excluded.diff_json, created_at = excluded.created_at`,
         [job.comparison_id, diffJson]);
-      
+
+      // Update comparison with calculated metrics
+      await pool.query(`
+        UPDATE comparisons SET similarity = $1, check_status = $2 WHERE id = $3
+      `, [similarity, checkStatus, job.comparison_id]);
+
       await pool.query(`
         UPDATE jobs 
         SET status = 'succeeded', 
@@ -742,6 +814,11 @@ export class LlmJobRunner {
         VALUES (${sqlValue(job.comparison_id)}, ${sqlValue(diffJson)}, datetime('now'))
         ON CONFLICT(comparison_id) DO UPDATE SET diff_json = excluded.diff_json, created_at = excluded.created_at;`);
 
+      // Update comparison with calculated metrics
+      querySqlite(`
+        UPDATE comparisons SET similarity = ${sqlValue(similarity)}, check_status = ${sqlValue(checkStatus)} WHERE id = ${sqlValue(job.comparison_id)};
+      `);
+
       querySqlite(`
         UPDATE jobs 
         SET status = 'succeeded', 
@@ -751,6 +828,8 @@ export class LlmJobRunner {
             finished_at = datetime('now') 
         WHERE id = ${sqlValue(job.id)};`);
     }
+
+    console.log(`[Compare] Updated comparison ${job.comparison_id}: similarity=${similarity}%, status=${checkStatus}`);
   }
 
   /**
@@ -956,6 +1035,128 @@ export class LlmJobRunner {
       return { code: String((error as any).code), message };
     }
     return { code: 'LLM_JOB_ERROR', message };
+  }
+
+  /**
+   * Auto-trigger comparison with the previous year's report
+   * Called after checks job completes successfully
+   */
+  private async triggerAutoComparison(versionId: number, reportId: number | null): Promise<void> {
+    if (!reportId) return;
+
+    try {
+      // 1. Get current report info
+      let currentReport: { id: number; region_id: number; year: number } | undefined;
+      if (dbType === 'postgres') {
+        const result = await pool.query(
+          `SELECT id, region_id, year FROM reports WHERE id = $1 LIMIT 1`,
+          [reportId]);
+        currentReport = result.rows[0];
+      } else {
+        currentReport = querySqlite(`
+          SELECT id, region_id, year FROM reports WHERE id = ${sqlValue(reportId)} LIMIT 1;
+        `)[0] as { id: number; region_id: number; year: number } | undefined;
+      }
+
+      if (!currentReport) {
+        console.log(`[AutoCompare] Report ${reportId} not found, skipping auto-comparison`);
+        return;
+      }
+
+      const { region_id, year } = currentReport;
+      const prevYear = year - 1;
+
+      // 2. Find previous year's report for the same region
+      let prevReport: { id: number; version_id: number } | undefined;
+      if (dbType === 'postgres') {
+        const result = await pool.query(`
+          SELECT r.id, rv.id as version_id
+          FROM reports r
+          JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = true
+          WHERE r.region_id = $1 AND r.year = $2
+          LIMIT 1
+        `, [region_id, prevYear]);
+        prevReport = result.rows[0];
+      } else {
+        prevReport = querySqlite(`
+          SELECT r.id, rv.id as version_id
+          FROM reports r
+          JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = 1
+          WHERE r.region_id = ${sqlValue(region_id)} AND r.year = ${sqlValue(prevYear)}
+          LIMIT 1;
+        `)[0] as { id: number; version_id: number } | undefined;
+      }
+
+      if (!prevReport) {
+        console.log(`[AutoCompare] No previous year (${prevYear}) report for region ${region_id}, skipping`);
+        return;
+      }
+
+      // 3. Check if comparison already exists
+      let existingComparison: { id: number } | undefined;
+      if (dbType === 'postgres') {
+        const result = await pool.query(`
+          SELECT id FROM comparisons
+          WHERE region_id = $1 AND year_a = $2 AND year_b = $3
+          LIMIT 1
+        `, [region_id, prevYear, year]);
+        existingComparison = result.rows[0];
+      } else {
+        existingComparison = querySqlite(`
+          SELECT id FROM comparisons
+          WHERE region_id = ${sqlValue(region_id)} AND year_a = ${sqlValue(prevYear)} AND year_b = ${sqlValue(year)}
+          LIMIT 1;
+        `)[0] as { id: number } | undefined;
+      }
+
+      if (existingComparison) {
+        console.log(`[AutoCompare] Comparison already exists (ID: ${existingComparison.id}) for ${region_id} ${prevYear}-${year}`);
+        return;
+      }
+
+      // 4. Create comparison and job
+      console.log(`[AutoCompare] Creating comparison for region ${region_id}: ${prevYear} → ${year}`);
+
+      let comparisonId: number;
+      if (dbType === 'postgres') {
+        const result = await pool.query(`
+          INSERT INTO comparisons (region_id, year_a, year_b, left_report_id, right_report_id, created_at)
+          VALUES ($1, $2, $3, $4, $5, NOW())
+          RETURNING id
+        `, [region_id, prevYear, year, prevReport.id, reportId]);
+        comparisonId = result.rows[0].id;
+      } else {
+        // SQLite: Must run INSERT and SELECT last_insert_rowid() in same session!
+        const result = querySqlite(`
+          INSERT INTO comparisons (region_id, year_a, year_b, left_report_id, right_report_id, created_at)
+          VALUES (${sqlValue(region_id)}, ${sqlValue(prevYear)}, ${sqlValue(year)}, ${sqlValue(prevReport.id)}, ${sqlValue(reportId)}, datetime('now'));
+          SELECT last_insert_rowid() as id;
+        `);
+        comparisonId = result[0]?.id as number;
+        if (!comparisonId) {
+          console.error('[AutoCompare] Failed to get comparison ID after insert');
+          return;
+        }
+      }
+
+      // 5. Create compare job
+      if (dbType === 'postgres') {
+        await pool.query(`
+          INSERT INTO jobs (report_id, kind, status, progress, comparison_id, step_code, step_name)
+          VALUES ($1, 'compare', 'queued', 0, $2, 'QUEUED', '等待比对')
+        `, [prevReport.id, comparisonId]);
+      } else {
+        querySqlite(`
+          INSERT INTO jobs (report_id, kind, status, progress, comparison_id, step_code, step_name)
+          VALUES (${sqlValue(prevReport.id)}, 'compare', 'queued', 0, ${sqlValue(comparisonId)}, 'QUEUED', '等待比对');
+        `);
+      }
+
+      console.log(`[AutoCompare] Created comparison ${comparisonId} and queued compare job`);
+    } catch (error) {
+      // Don't fail the checks job if auto-comparison fails
+      console.error('[AutoCompare] Failed to trigger auto-comparison:', error);
+    }
   }
 }
 

@@ -55,9 +55,25 @@ router.post('/', authMiddleware, requirePermission('manage_cities'), async (req:
 
     const levelValue = level;
 
+    // Get max sort_order for new region
+    let maxSortOrder = 0;
+    if (dbType === 'sqlite') {
+      const maxResult = await new Promise<any>((resolve, reject) => {
+        pool.get('SELECT MAX(sort_order) as max_order FROM regions', [], (err: any, row: any) => {
+          if (err) reject(err);
+          else resolve(row);
+        });
+      });
+      maxSortOrder = maxResult?.max_order || 0;
+    } else {
+      const maxResult = await pool.query('SELECT MAX(sort_order) as max_order FROM regions');
+      maxSortOrder = maxResult.rows[0]?.max_order || 0;
+    }
+    const newSortOrder = maxSortOrder + 1;
+
     // 统一使用 $n 占位符，sqlite 也会被格式化函数替换
-    const insertSql = 'INSERT INTO regions (code, name, province, parent_id, level) VALUES ($1, $2, $3, $4, $5)';
-    const params = [code, name, province || null, parent_id ? Number(parent_id) : null, levelValue];
+    const insertSql = 'INSERT INTO regions (code, name, province, parent_id, level, sort_order) VALUES ($1, $2, $3, $4, $5, $6)';
+    const params = [code, name, province || null, parent_id ? Number(parent_id) : null, levelValue, newSortOrder];
 
     if (dbType === 'sqlite') {
       await new Promise<void>((resolve, reject) => {
@@ -67,7 +83,7 @@ router.post('/', authMiddleware, requirePermission('manage_cities'), async (req:
         });
       });
 
-      const inserted = await pool.query('SELECT id, code, name, province, parent_id, level FROM regions WHERE code = $1', [code]);
+      const inserted = await pool.query('SELECT id, code, name, province, parent_id, level, sort_order FROM regions WHERE code = $1', [code]);
       const region = inserted.rows?.[0];
 
       res.status(201).json(
@@ -82,7 +98,7 @@ router.post('/', authMiddleware, requirePermission('manage_cities'), async (req:
       );
     } else {
       const result = await pool.query(
-        `${insertSql} RETURNING id, code, name, province, parent_id, level`,
+        `${insertSql} RETURNING id, code, name, province, parent_id, level, sort_order`,
         params
       );
 
@@ -125,7 +141,7 @@ router.get('/', authMiddleware, async (req: Request, res: Response) => {
                 FROM regions r 
                 JOIN allowed_tree d ON r.parent_id = d.id
               )
-              SELECT DISTINCT id, code, name, province, parent_id, level FROM allowed_tree ORDER BY level, id
+              SELECT DISTINCT id, code, name, province, parent_id, level, sort_order FROM allowed_tree ORDER BY level, sort_order, id
             `;
           pool.all(sql, filterNames, (err: any, rows: any[]) => {
             if (err) reject(err);
@@ -142,7 +158,7 @@ router.get('/', authMiddleware, async (req: Request, res: Response) => {
             }
           });
         } else {
-          pool.all('SELECT id, code, name, province, parent_id, level FROM regions ORDER BY level, id', (err: any, rows: any[]) => {
+          pool.all('SELECT id, code, name, province, parent_id, level, sort_order FROM regions ORDER BY level, sort_order, id', (err: any, rows: any[]) => {
             if (err) reject(err);
             else resolve(rows || []);
           });
@@ -164,7 +180,7 @@ router.get('/', authMiddleware, async (req: Request, res: Response) => {
                 FROM regions r 
                 JOIN allowed_tree d ON r.parent_id = d.id
               )
-              SELECT DISTINCT id, code, name, province, parent_id, level FROM allowed_tree ORDER BY level, id
+              SELECT DISTINCT id, code, name, province, parent_id, level, sort_order FROM allowed_tree ORDER BY level, sort_order, id
             `;
         const result = await pool.query(sql, [filterNames]);
         // Fix Orphaned Nodes (same as SQLite):
@@ -177,7 +193,7 @@ router.get('/', authMiddleware, async (req: Request, res: Response) => {
         })) || [];
         res.json({ data: safeRows });
       } else {
-        const result = await pool.query('SELECT id, code, name, province, parent_id, level FROM regions ORDER BY level, id');
+        const result = await pool.query('SELECT id, code, name, province, parent_id, level, sort_order FROM regions ORDER BY level, sort_order, id');
         res.json({ data: result.rows });
       }
     }
@@ -194,7 +210,7 @@ router.get('/:id', authMiddleware, async (req: Request, res: Response) => {
 
     if (dbType === 'sqlite') {
       const row = await new Promise<any>((resolve, reject) => {
-        pool.get('SELECT id, code, name, province, parent_id, level FROM regions WHERE id = ?', [id], (err: any, row: any) => {
+        pool.get('SELECT id, code, name, province, parent_id, level, sort_order FROM regions WHERE id = ?', [id], (err: any, row: any) => {
           if (err) reject(err);
           else resolve(row);
         });
@@ -206,7 +222,7 @@ router.get('/:id', authMiddleware, async (req: Request, res: Response) => {
 
       res.json(row);
     } else {
-      const result = await pool.query('SELECT id, code, name, province, parent_id, level FROM regions WHERE id = $1', [id]);
+      const result = await pool.query('SELECT id, code, name, province, parent_id, level, sort_order FROM regions WHERE id = $1', [id]);
 
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'Region not found' });
@@ -216,6 +232,108 @@ router.get('/:id', authMiddleware, async (req: Request, res: Response) => {
     }
   } catch (error) {
     console.error('Error fetching region:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// PUT /api/regions/:id - 修改区域（名称、排序等）
+router.put('/:id', authMiddleware, requirePermission('manage_cities'), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name, sort_order } = req.body;
+
+    if (!name && sort_order === undefined) {
+      return res.status(400).json({ error: 'At least one field (name or sort_order) is required' });
+    }
+
+    // Build update query dynamically
+    const updates: string[] = [];
+    const params: any[] = [];
+    let paramIndex = 1;
+
+    if (name) {
+      updates.push(`name = ${dbType === 'sqlite' ? '?' : `$${paramIndex++}`}`);
+      params.push(name);
+    }
+    if (sort_order !== undefined) {
+      updates.push(`sort_order = ${dbType === 'sqlite' ? '?' : `$${paramIndex++}`}`);
+      params.push(sort_order);
+    }
+    updates.push(`updated_at = ${dbType === 'sqlite' ? "datetime('now')" : 'NOW()'}`);
+
+    const updateSql = `UPDATE regions SET ${updates.join(', ')} WHERE id = ${dbType === 'sqlite' ? '?' : `$${paramIndex}`}`;
+    params.push(id);
+
+    if (dbType === 'sqlite') {
+      await new Promise<void>((resolve, reject) => {
+        pool.run(updateSql, params, function (this: any, err: any) {
+          if (err) reject(err);
+          else if (this.changes === 0) reject(new Error('Region not found'));
+          else resolve();
+        });
+      });
+
+      const updated = await new Promise<any>((resolve, reject) => {
+        pool.get('SELECT id, code, name, province, parent_id, level, sort_order FROM regions WHERE id = ?', [id], (err: any, row: any) => {
+          if (err) reject(err);
+          else resolve(row);
+        });
+      });
+
+      res.json(updated);
+    } else {
+      const result = await pool.query(
+        `${updateSql} RETURNING id, code, name, province, parent_id, level, sort_order`,
+        params
+      );
+
+      if (result.rows.length === 0) {
+        return res.status(404).json({ error: 'Region not found' });
+      }
+
+      res.json(result.rows[0]);
+    }
+  } catch (error: any) {
+    console.error('Error updating region:', error);
+    if (error.message === 'Region not found') {
+      return res.status(404).json({ error: 'Region not found' });
+    }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/regions/reorder - 批量更新排序
+router.post('/reorder', authMiddleware, requirePermission('manage_cities'), async (req: Request, res: Response) => {
+  try {
+    const { orders } = req.body;
+    // orders: [{ id: number, sort_order: number }, ...]
+
+    if (!Array.isArray(orders) || orders.length === 0) {
+      return res.status(400).json({ error: 'orders array is required' });
+    }
+
+    if (dbType === 'sqlite') {
+      // Simple sequential updates for SQLite
+      for (const item of orders) {
+        await new Promise<void>((resolve, reject) => {
+          pool.run('UPDATE regions SET sort_order = ?, updated_at = datetime(\'now\') WHERE id = ?',
+            [item.sort_order, item.id], (err: any) => {
+              if (err) reject(err);
+              else resolve();
+            });
+        });
+      }
+    } else {
+      // PostgreSQL: Simple sequential updates (no transaction needed for idempotent updates)
+      for (const item of orders) {
+        await pool.query('UPDATE regions SET sort_order = $1, updated_at = NOW() WHERE id = $2',
+          [item.sort_order, item.id]);
+      }
+    }
+
+    res.json({ success: true, updated: orders.length });
+  } catch (error) {
+    console.error('Error reordering regions:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

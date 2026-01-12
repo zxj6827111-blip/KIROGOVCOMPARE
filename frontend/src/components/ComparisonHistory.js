@@ -10,55 +10,161 @@ import {
   Eye,
   Printer,
   Trash2,
-  Download
+  Download,
+  ChevronDown,
+  ChevronRight,
+  AlertCircle
 } from 'lucide-react';
 
 function ComparisonHistory() {
   const [comparisons, setComparisons] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true); // 初始为 true，避免首次渲染显示空状态
   const [error, setError] = useState('');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [exporting, setExporting] = useState(null);
-  const [showWatermarkModal, setShowWatermarkModal] = useState(null);
-  const [watermarkText, setWatermarkText] = useState('');
   const [selectedComparisonId, setSelectedComparisonId] = useState(null);
 
   const [regionFilter, setRegionFilter] = useState('');
   const [yearFilter, setYearFilter] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
+  const [showIssuesOnly, setShowIssuesOnly] = useState(false); // Filter for issues only
 
+  // Tree structure state
+  const [treeData, setTreeData] = useState([]);
+  const [expandedNodes, setExpandedNodes] = useState(new Set());
+  const [viewMode, setViewMode] = useState('tree'); // 'tree' | 'flat'
+  const [isTreeReady, setIsTreeReady] = useState(false); // Prevents flicker
+
+  // Fetch comparisons and build tree in one go to prevent flicker
   const fetchComparisons = useCallback(async () => {
     setLoading(true);
     setError('');
+    // Keep isTreeReady=true if likely refreshing, to show stale data instead of loading screen
+    // But if we are searching (changing filters), maybe we SHOULD show loading?
+    // User wants smooth transition. Stale data (old tree) -> New data (new tree).
+    // So we invoke API, prepare everything, then swap.
+    setIsTreeReady(prev => !regionFilter && !yearFilter ? false : prev);
+
     try {
+      // 1. Fetch Comparison Data
       const params = new URLSearchParams({
         page: page,
-        pageSize: 20,
+        pageSize: 100,
       });
       if (regionFilter) params.append('region_name', regionFilter);
       if (yearFilter) params.append('year', yearFilter);
 
       const resp = await apiClient.get(`/comparisons/history?${params.toString()}`);
-      setComparisons(resp.data?.data || []);
-      setTotalPages(resp.data?.totalPages || 1);
+      const rawComparisons = resp.data?.data || [];
+      const totalPagesVal = resp.data?.totalPages || 1;
+
+      // 2. Fetch Regions for Tree
+      const regionsResp = await apiClient.get('/regions');
+      const regionsList = regionsResp.data?.data || [];
+      const regionMap = new Map();
+      regionsList.forEach(r => regionMap.set(r.id, r));
+
+      // 3. Build Tree Structure (Sync)
+      const compByRegion = new Map();
+      rawComparisons.forEach(c => {
+        if (!compByRegion.has(c.regionId)) {
+          compByRegion.set(c.regionId, []);
+        }
+        compByRegion.get(c.regionId).push(c);
+      });
+
+      const buildNode = (regionId) => {
+        const region = regionMap.get(regionId);
+        if (!region) return null;
+
+        const comps = compByRegion.get(regionId) || [];
+        const children = regionsList
+          .filter(r => r.parent_id === regionId)
+          .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+          .map(r => buildNode(r.id))
+          .filter(Boolean);
+
+        const hasComparisons = comps.length > 0;
+        const hasChildComparisons = children.some(c => c.hasComparisons);
+
+        if (!hasComparisons && !hasChildComparisons) return null;
+
+        const issueCount = comps.filter(c => c.checkStatus && c.checkStatus !== '正常').length;
+        const childIssueCount = children.reduce((sum, c) => sum + c.totalIssues, 0);
+
+        return {
+          id: regionId,
+          name: region.name,
+          level: region.level,
+          comparisons: comps,
+          children: children,
+          hasComparisons: hasComparisons || hasChildComparisons,
+          totalIssues: issueCount + childIssueCount,
+          totalComparisons: comps.length + children.reduce((sum, c) => sum + c.totalComparisons, 0)
+        };
+      };
+
+      const rootNodes = regionsList
+        .filter(r => !r.parent_id || r.parent_id === 0)
+        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+        .map(r => buildNode(r.id))
+        .filter(Boolean);
+
+      // 4. ATOMIC UPDATE: Set all states at once
+      setComparisons(rawComparisons);
+      setTotalPages(totalPagesVal);
+      setTreeData(rootNodes);
+
+      // Auto-expand logic
+      if (regionFilter && regionFilter.trim()) {
+        const expandedSet = new Set();
+        const expandMatchedNodes = (nodes) => {
+          nodes.forEach(node => {
+            if (node.totalComparisons > 0) expandedSet.add(node.id);
+            if (node.children?.length > 0) expandMatchedNodes(node.children);
+          });
+        };
+        expandMatchedNodes(rootNodes);
+        setExpandedNodes(expandedSet);
+      } else {
+        const firstLevelIds = rootNodes.map(n => n.id);
+        setExpandedNodes(new Set(firstLevelIds));
+      }
+
+      setIsTreeReady(true);
     } catch (err) {
-      const message = err.response?.data?.error || err.message || '请求失败';
+      console.error('Failed to fetch/build:', err);
+      const message = err.response?.data?.error || err.message || '加载失败';
       setError(`加载失败：${message}`);
+      // Fallback
+      setViewMode('flat');
     } finally {
       setLoading(false);
     }
   }, [page, regionFilter, yearFilter]);
 
+  // 初始加载：只在组件首次挂载时执行
   useEffect(() => {
     fetchComparisons();
-  }, [fetchComparisons]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const toggleNode = (nodeId) => {
+    setExpandedNodes(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(nodeId)) {
+        newSet.delete(nodeId);
+      } else {
+        newSet.add(nodeId);
+      }
+      return newSet;
+    });
+  };
 
   const handleDelete = async (id) => {
     if (!window.confirm('确定要删除这条比对记录吗？')) return;
     try {
       await apiClient.delete(`/comparisons/${id}`);
-      // Refresh list
       fetchComparisons();
     } catch (err) {
       const message = err.response?.data?.error || err.message || '删除失败';
@@ -80,7 +186,6 @@ function ComparisonHistory() {
   };
 
   const handleExportPdf = async (id, title) => {
-    // Create async PDF export job instead of synchronous download
     try {
       const response = await apiClient.post('/pdf-jobs', {
         comparison_id: id,
@@ -88,7 +193,6 @@ function ComparisonHistory() {
       });
 
       if (response.data?.success) {
-        // Show success message with option to go to Job Center
         const goToJobCenter = window.confirm(
           `PDF 导出任务已创建！\n\n任务名称：${response.data.export_title}\n\n点击"确定"前往任务中心查看进度，或点击"取消"继续浏览。`
         );
@@ -117,7 +221,7 @@ function ComparisonHistory() {
     }
   };
 
-  // Batch download - creates PDF export jobs for all selected
+  // Batch download
   const handleBatchDownload = async () => {
     if (selectedIds.length === 0) {
       alert('请先选择要导出的记录');
@@ -179,6 +283,112 @@ function ComparisonHistory() {
     }
   };
 
+  // Render tree node with its comparisons
+  const renderTreeNode = (node, depth = 0) => {
+    const isExpanded = expandedNodes.has(node.id);
+    const hasChildren = node.children && node.children.length > 0;
+
+    // Apply showIssuesOnly filter
+    const filteredComps = showIssuesOnly
+      ? (node.comparisons || []).filter(c => c.checkStatus && c.checkStatus !== '正常')
+      : (node.comparisons || []);
+    const hasComps = filteredComps.length > 0;
+
+    // When filtering by issues, skip nodes with no issues
+    if (showIssuesOnly && node.totalIssues === 0) return null;
+
+    return (
+      <React.Fragment key={node.id}>
+        {/* Region Header Row */}
+        <tr className={`region-header-row level-${node.level}`} onClick={() => toggleNode(node.id)}>
+          <td colSpan="8">
+            <div className="region-header-content" style={{ paddingLeft: depth * 24 }}>
+              <span className="expand-icon">
+                {(hasChildren || hasComps) && (isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />)}
+              </span>
+              <span className="region-name">{node.name}</span>
+              <span className="region-stats">
+                <span className="stat-badge">{node.totalComparisons} 份比对</span>
+                {node.totalIssues > 0 && (
+                  <span className="stat-badge issue">
+                    <AlertCircle size={12} /> {node.totalIssues} 份异常
+                  </span>
+                )}
+              </span>
+            </div>
+          </td>
+        </tr>
+
+        {/* Comparisons under this region */}
+        {isExpanded && hasComps && filteredComps.map(c => (
+          <tr key={c.id} className={`comparison-row level-${node.level} ${selectedIds.includes(c.id) ? 'selected-row' : ''}`}>
+            <td style={{ paddingLeft: (depth + 1) * 24 }}>
+              <input
+                type="checkbox"
+                checked={selectedIds.includes(c.id)}
+                onChange={() => toggleSelect(c.id)}
+                onClick={e => e.stopPropagation()}
+              />
+            </td>
+            <td className="cell-region">
+              <span className="sub-region-name">{c.regionName || node.name}</span>
+            </td>
+            <td className="cell-year">{c.yearA}</td>
+            <td className="cell-year">{c.yearB}</td>
+            <td className="cell-date">{formatDate(c.createdAt)}</td>
+            <td className="cell-similarity">
+              {c.similarity != null ? (
+                <span className={`similarity-value ${c.similarity > 80 ? 'high' : c.similarity > 60 ? 'medium' : 'low'}`}>
+                  {c.similarity}%
+                </span>
+              ) : <span className="text-gray-400">-</span>}
+            </td>
+            <td className="cell-status">
+              {c.checkStatus?.startsWith('异常') ? (
+                <span className="status-badge issue">{c.checkStatus}</span>
+              ) : c.checkStatus === '正常' ? (
+                <span className="status-badge ok">正常</span>
+              ) : (
+                <span className="text-gray-400">-</span>
+              )}
+            </td>
+            <td className="cell-actions">
+              <div className="actions">
+                <button
+                  className="icon-btn view"
+                  onClick={() => handleViewDetail(c)}
+                  title="查看详情"
+                >
+                  <Eye size={16} />
+                  <span>查看</span>
+                </button>
+                <button
+                  className="icon-btn print"
+                  onClick={() => handleExportPdf(c.id, `${c.regionName || node.name} ${c.yearA}-${c.yearB} 年报对比`)}
+                  title="打印导出"
+                >
+                  <Printer size={16} />
+                  <span>打印</span>
+                </button>
+                <button
+                  className="icon-btn delete"
+                  onClick={() => handleDelete(c.id)}
+                  title="删除记录"
+                >
+                  <Trash2 size={16} />
+                  <span>删除</span>
+                </button>
+              </div>
+            </td>
+          </tr>
+        ))}
+
+        {/* Child regions */}
+        {isExpanded && hasChildren && node.children.map(child => renderTreeNode(child, depth + 1))}
+      </React.Fragment>
+    );
+  };
+
   // If a comparison is selected, show the detail view
   if (selectedComparisonId) {
     return (
@@ -220,6 +430,14 @@ function ComparisonHistory() {
           >
             <Search size={16} /> 查询
           </button>
+          <button
+            onClick={() => setShowIssuesOnly(!showIssuesOnly)}
+            className={`filter-toggle-btn ${showIssuesOnly ? 'active' : ''}`}
+            title={showIssuesOnly ? '显示全部' : '只看问题'}
+          >
+            <AlertCircle size={16} />
+            {showIssuesOnly ? '显示全部' : '只看问题'}
+          </button>
         </div>
 
         <div className="header-actions" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -240,6 +458,19 @@ function ComparisonHistory() {
         </div>
       </div>
 
+      {/* Summary Stats */}
+      {!loading && comparisons.length > 0 && (
+        <div className="summary-bar">
+          <span className="summary-item">
+            共 <strong>{comparisons.length}</strong> 份比对记录
+          </span>
+          <span className="summary-item issue">
+            <AlertCircle size={14} />
+            <strong>{comparisons.filter(c => c.checkStatus && c.checkStatus !== '正常').length}</strong> 份存在问题
+          </span>
+        </div>
+      )}
+
       {error && <div className="alert error">{error}</div>}
 
       {loading && comparisons.length === 0 ? (
@@ -247,11 +478,11 @@ function ComparisonHistory() {
       ) : comparisons.length === 0 ? (
         <div className="empty-state">
           <p>暂无比对记录</p>
-          <p className="hint">在年报汇总页面选择两份报告进行比对后，结果将显示在这里。</p>
+          <p className="hint">上传年报后，系统将自动生成与上一年的比对报告。</p>
         </div>
       ) : (
         <>
-          <table className="history-table">
+          <table className="history-table tree-table">
             <thead>
               <tr>
                 <th style={{ width: '40px' }}>
@@ -272,57 +503,63 @@ function ComparisonHistory() {
               </tr>
             </thead>
             <tbody>
-              {comparisons.map((c) => (
-                <tr key={c.id} className={selectedIds.includes(c.id) ? 'selected-row' : ''}>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.includes(c.id)}
-                      onChange={() => toggleSelect(c.id)}
-                    />
-                  </td>
-                  <td>{c.regionName || '未知'}</td>
-                  <td>{c.yearA}</td>
-                  <td>{c.yearB}</td>
-                  <td>{formatDate(c.createdAt)}</td>
-                  <td>
-                    {c.similarity != null ? <span className="font-bold">{c.similarity}%</span> : <span className="text-gray-400">-</span>}
-                  </td>
-                  <td>
-                    {c.checkStatus?.startsWith('异常') ? <span className="text-red-600 font-bold">{c.checkStatus}</span> :
-                      c.checkStatus === '正常' ? <span className="text-green-600">正常</span> :
-                        <span className="text-gray-400">-</span>}
-                  </td>
-                  <td>
-                    <div className="actions">
-                      <button
-                        className="icon-btn view"
-                        onClick={() => handleViewDetail(c)}
-                        title="查看详情"
-                      >
-                        <Eye size={16} />
-                        <span>查看</span>
-                      </button>
-                      <button
-                        className="icon-btn print"
-                        onClick={() => handleExportPdf(c.id, `${c.regionName || '未知地区'} ${c.yearA}-${c.yearB} 年报对比`)}
-                        title="打印导出"
-                      >
-                        <Printer size={16} />
-                        <span>打印</span>
-                      </button>
-                      <button
-                        className="icon-btn delete"
-                        onClick={() => handleDelete(c.id)}
-                        title="删除记录"
-                      >
-                        <Trash2 size={16} />
-                        <span>删除</span>
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {viewMode === 'tree' && isTreeReady && treeData.length > 0 ? (
+                treeData.map(node => renderTreeNode(node, 0))
+              ) : viewMode === 'tree' && !isTreeReady ? (
+                <tr><td colSpan="8" style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>构建层级结构中...</td></tr>
+              ) : (
+                comparisons.map((c) => (
+                  <tr key={c.id} className={selectedIds.includes(c.id) ? 'selected-row' : ''}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(c.id)}
+                        onChange={() => toggleSelect(c.id)}
+                      />
+                    </td>
+                    <td>{c.regionName || '未知'}</td>
+                    <td>{c.yearA}</td>
+                    <td>{c.yearB}</td>
+                    <td>{formatDate(c.createdAt)}</td>
+                    <td>
+                      {c.similarity != null ? <span className="font-bold">{c.similarity}%</span> : <span className="text-gray-400">-</span>}
+                    </td>
+                    <td>
+                      {c.checkStatus?.startsWith('异常') ? <span className="text-red-600 font-bold">{c.checkStatus}</span> :
+                        c.checkStatus === '正常' ? <span className="text-green-600">正常</span> :
+                          <span className="text-gray-400">-</span>}
+                    </td>
+                    <td>
+                      <div className="actions">
+                        <button
+                          className="icon-btn view"
+                          onClick={() => handleViewDetail(c)}
+                          title="查看详情"
+                        >
+                          <Eye size={16} />
+                          <span>查看</span>
+                        </button>
+                        <button
+                          className="icon-btn print"
+                          onClick={() => handleExportPdf(c.id, `${c.regionName || '未知地区'} ${c.yearA}-${c.yearB} 年报对比`)}
+                          title="打印导出"
+                        >
+                          <Printer size={16} />
+                          <span>打印</span>
+                        </button>
+                        <button
+                          className="icon-btn delete"
+                          onClick={() => handleDelete(c.id)}
+                          title="删除记录"
+                        >
+                          <Trash2 size={16} />
+                          <span>删除</span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
 
@@ -344,36 +581,8 @@ function ComparisonHistory() {
             </div>
           )}
         </>
-      )
-      }
-
-      {/* Watermark Modal */}
-      {
-        showWatermarkModal && (
-          <div className="modal-overlay" onClick={() => setShowWatermarkModal(null)}>
-            <div className="modal" onClick={e => e.stopPropagation()}>
-              <h3>导出文档</h3>
-              <p>请输入水印文字（可选）：</p>
-              <input
-                type="text"
-                value={watermarkText}
-                onChange={e => setWatermarkText(e.target.value)}
-                placeholder="例如：公司名称"
-                className="watermark-input"
-              />
-              <div className="modal-actions">
-                <button onClick={() => setShowWatermarkModal(null)} className="cancel-btn">
-                  取消
-                </button>
-                <button onClick={() => handleExportPdf(showWatermarkModal)} className="confirm-btn">
-                  导出
-                </button>
-              </div>
-            </div>
-          </div>
-        )
-      }
-    </div >
+      )}
+    </div>
   );
 }
 

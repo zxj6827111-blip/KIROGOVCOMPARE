@@ -128,6 +128,125 @@ router.get('/history', authMiddleware, async (req: AuthRequest, res: Response) =
 });
 
 /**
+ * GET /api/comparisons/grouped
+ * Get comparisons grouped by region for card-style display
+ */
+router.get('/grouped', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    ensureDbMigrations();
+
+    const hasIssuesOnly = req.query.hasIssuesOnly === 'true';
+    const regionId = req.query.region_id ? Number(req.query.region_id) : undefined;
+
+    // Build conditions
+    const conditions: string[] = [];
+    if (hasIssuesOnly) {
+      conditions.push(`(c.check_status IS NOT NULL AND c.check_status != '正常')`);
+    }
+    if (regionId) {
+      conditions.push(`c.region_id = ${sqlValue(regionId)}`);
+    }
+
+    // DATA SCOPE FILTER
+    const user = req.user;
+    if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
+      const scopeNames = user.dataScope.regions.map((n: string) => `'${n.replace(/'/g, "''")}'`).join(',');
+      const scopeIdsQuery = `
+        WITH RECURSIVE allowed_ids AS (
+            SELECT id FROM regions WHERE name IN (${scopeNames})
+            UNION ALL
+            SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
+        )
+        SELECT id FROM allowed_ids
+      `;
+      try {
+        const allowedRows = await dbQuery(scopeIdsQuery);
+        const allowedIds = allowedRows.map((row: any) => row.id).join(',');
+        if (allowedIds.length > 0) {
+          conditions.push(`c.region_id IN (${allowedIds})`);
+        } else {
+          conditions.push('1=0');
+        }
+      } catch (e) {
+        console.error('Error calculating scope IDs in grouped:', e);
+        conditions.push('1=0');
+      }
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // Get all comparisons with region info
+    const comparisons = await dbQuery(`
+      SELECT 
+        c.id,
+        c.region_id,
+        c.year_a,
+        c.year_b,
+        c.similarity,
+        c.check_status,
+        c.created_at,
+        r.name as region_name,
+        r.level as region_level
+      FROM comparisons c
+      LEFT JOIN regions r ON c.region_id = r.id
+      ${whereClause}
+      ORDER BY r.name ASC, c.year_b DESC, c.year_a DESC
+    `);
+
+    // Group by region
+    const regionMap = new Map<number, any>();
+    for (const c of comparisons) {
+      const rid = c.region_id;
+      if (!regionMap.has(rid)) {
+        regionMap.set(rid, {
+          region_id: rid,
+          region_name: c.region_name || '未知地区',
+          region_level: c.region_level,
+          total_comparisons: 0,
+          with_issues: 0,
+          comparisons: []
+        });
+      }
+      const region = regionMap.get(rid)!;
+      region.total_comparisons++;
+
+      const hasIssue = c.check_status && c.check_status !== '正常';
+      if (hasIssue) region.with_issues++;
+
+      region.comparisons.push({
+        id: c.id,
+        year_a: c.year_a,
+        year_b: c.year_b,
+        similarity: c.similarity,
+        check_status: c.check_status,
+        has_issue: hasIssue,
+        created_at: c.created_at
+      });
+    }
+
+    // Convert to array and sort by issue count
+    const regions = Array.from(regionMap.values());
+    regions.sort((a, b) => b.with_issues - a.with_issues || b.total_comparisons - a.total_comparisons);
+
+    // Calculate totals
+    const totalComparisons = comparisons.length;
+    const totalWithIssues = comparisons.filter((c: any) => c.check_status && c.check_status !== '正常').length;
+
+    res.json({
+      data: {
+        total_comparisons: totalComparisons,
+        total_with_issues: totalWithIssues,
+        region_count: regions.length,
+        regions
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching grouped comparisons:', error);
+    res.status(500).json({ error: '获取分组比对失败' });
+  }
+});
+
+/**
  * POST /api/comparisons/create
  * Create a new comparison record
  */

@@ -13,9 +13,10 @@ import UserManagement from './components/UserManagement';
 
 import JobCenter from './components/JobCenter';
 import JobDetail from './components/JobDetail';
+import IssueList from './components/IssueList';
 import NotificationCenter from './components/NotificationCenter';
 import { apiClient, API_BASE_URL, isAuthenticated, getCurrentUser, logout } from './apiClient';
-import { Map, UploadCloud, ListTodo, PieChart, GitCompare, User } from 'lucide-react';
+import { Map, UploadCloud, ListTodo, PieChart, GitCompare, User, AlertCircle } from 'lucide-react';
 
 function App() {
   const [currentPath, setCurrentPath] = useState(`${window.location.pathname}${window.location.search}`);
@@ -111,6 +112,18 @@ function App() {
       return <ReportDetail reportId={reportId} onBack={() => window.history.back()} />;
     }
     if (pathname === '/history') return <ComparisonHistory />;
+    if (pathname === '/issues' || pathname.startsWith('/issues')) {
+      // Extract region ID from query params if present
+      const params = new URLSearchParams(window.location.search);
+      const regionId = params.get('region');
+      const regionName = params.get('name');
+      return <IssueList
+        regionId={regionId}
+        regionName={regionName}
+        onBack={() => navigate('/catalog')}
+        onSelectReport={(reportId) => navigate(`/catalog/reports/${reportId}`)}
+      />;
+    }
     if (pathname.startsWith('/comparison/')) {
       // Extract ID from /comparison/:id
       const parts = pathname.split('/');

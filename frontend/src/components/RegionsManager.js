@@ -12,7 +12,10 @@ import {
   Upload,
   X,
   Download,
-  AlertTriangle
+  AlertTriangle,
+  Edit2,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 
 function RegionsManager() {
@@ -34,6 +37,11 @@ function RegionsManager() {
   const [batchFile, setBatchFile] = useState(null);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState({ percentage: 0, current: 0, total: 0, message: '' });
+
+  // Edit Region State
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingRegion, setEditingRegion] = useState(null);
+  const [editName, setEditName] = useState('');
 
   // Confirm Dialog State
   const [confirmDialog, setConfirmDialog] = useState({
@@ -197,13 +205,13 @@ function RegionsManager() {
   const getChildren = (parentId) => {
     return regions
       .filter(r => r.parent_id === parentId)
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
   };
 
   const getRootRegions = () => {
     return regions
       .filter(r => !r.parent_id || r.level === 1)
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
   };
 
   // --- Handlers ---
@@ -233,6 +241,67 @@ function RegionsManager() {
       fetchData(); // Refresh list
     } catch (err) {
       alert('添加失败: ' + (err.response?.data?.error || err.message));
+    }
+  };
+
+  // --- Edit Region ---
+  const handleEditClick = (e, region) => {
+    e.stopPropagation();
+    setEditingRegion(region);
+    setEditName(region.name);
+    setShowEditModal(true);
+  };
+
+  const confirmEditRegion = async () => {
+    if (!editName.trim() || !editingRegion) return;
+    try {
+      await apiClient.put(`/regions/${editingRegion.id}`, { name: editName });
+      setShowEditModal(false);
+      setEditingRegion(null);
+      fetchData();
+    } catch (err) {
+      alert('修改失败: ' + (err.response?.data?.error || err.message));
+    }
+  };
+
+  // --- Move Up/Down ---
+  const handleMoveUp = async (e, item, siblings) => {
+    e.stopPropagation();
+    const currentIndex = siblings.findIndex(s => s.id === item.id);
+    if (currentIndex <= 0) return; // Already at top
+
+    const prevItem = siblings[currentIndex - 1];
+    // Swap sort_order
+    const orders = [
+      { id: item.id, sort_order: prevItem.sort_order || currentIndex - 1 },
+      { id: prevItem.id, sort_order: item.sort_order || currentIndex }
+    ];
+
+    try {
+      await apiClient.post('/regions/reorder', { orders });
+      fetchData();
+    } catch (err) {
+      alert('排序失败: ' + (err.response?.data?.error || err.message));
+    }
+  };
+
+  const handleMoveDown = async (e, item, siblings) => {
+    e.stopPropagation();
+    const currentIndex = siblings.findIndex(s => s.id === item.id);
+    if (currentIndex >= siblings.length - 1) return; // Already at bottom
+
+    const nextItem = siblings[currentIndex + 1];
+    // Swap sort_order
+    const orders = [
+      { id: item.id, sort_order: nextItem.sort_order || currentIndex + 1 },
+      { id: nextItem.id, sort_order: item.sort_order || currentIndex }
+    ];
+
+    try {
+      await apiClient.post('/regions/reorder', { orders });
+      fetchData();
+    } catch (err) {
+      alert('排序失败: ' + (err.response?.data?.error || err.message));
     }
   };
 
@@ -270,10 +339,13 @@ function RegionsManager() {
   const showDetailPanel = lastSelected && isDepartment(lastSelected.name);
 
   // --- Render Helper for List Items ---
-  const renderColumnItem = (item, colIndex, activeItem) => {
+  const renderColumnItem = (item, colIndex, activeItem, siblings) => {
     const isActive = activeItem?.id === item.id;
     const isDept = isDepartment(item.name);
     const count = reportCountMap.get(String(item.id)) || 0;
+    const itemIndex = siblings.findIndex(s => s.id === item.id);
+    const isFirst = itemIndex === 0;
+    const isLast = itemIndex === siblings.length - 1;
 
     return (
       <div
@@ -286,13 +358,37 @@ function RegionsManager() {
           <span className="truncate font-medium">{item.name}</span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
+          {/* Sort buttons */}
           <button
-            className="p-1 hover:bg-red-100 rounded text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity mr-1"
+            className={`p-1 hover:bg-blue-100 rounded text-gray-400 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity ${isFirst ? 'invisible' : ''}`}
+            onClick={(e) => handleMoveUp(e, item, siblings)}
+            title="上移"
+          >
+            <ArrowUp size={12} />
+          </button>
+          <button
+            className={`p-1 hover:bg-blue-100 rounded text-gray-400 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity ${isLast ? 'invisible' : ''}`}
+            onClick={(e) => handleMoveDown(e, item, siblings)}
+            title="下移"
+          >
+            <ArrowDown size={12} />
+          </button>
+          {/* Edit button */}
+          <button
+            className="p-1 hover:bg-blue-100 rounded text-gray-400 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity"
+            onClick={(e) => handleEditClick(e, item)}
+            title="编辑名称"
+          >
+            <Edit2 size={12} />
+          </button>
+          {/* Delete button */}
+          <button
+            className="p-1 hover:bg-red-100 rounded text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
             onClick={(e) => handleDeleteRegion(e, item)}
             title="删除区域"
           >
-            <Trash2 size={14} />
+            <Trash2 size={12} />
           </button>
           {count > 0 && (
             <span className={`text-xs px-1.5 rounded-full ${isActive ? 'bg-white/20' : 'bg-gray-100 text-gray-500'}`}>
@@ -353,7 +449,7 @@ function RegionsManager() {
                     <div className="sticky top-0 z-10 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-400 border-b border-slate-100 uppercase flex items-center gap-2 backdrop-blur-sm bg-opacity-90">
                       <MapSizeIconFallback /> 行政区划
                     </div>
-                    {adminItems.map(item => renderColumnItem(item, colIndex, activeItem))}
+                    {adminItems.map(item => renderColumnItem(item, colIndex, activeItem, adminItems))}
                   </>
                 )}
 
@@ -363,7 +459,7 @@ function RegionsManager() {
                     <div className="sticky top-0 z-10 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-400 border-b border-slate-100 uppercase flex items-center gap-2 backdrop-blur-sm bg-opacity-90 mt-0">
                       <Building2 size={12} /> 直属部门
                     </div>
-                    {deptItems.map(item => renderColumnItem(item, colIndex, activeItem))}
+                    {deptItems.map(item => renderColumnItem(item, colIndex, activeItem, deptItems))}
                   </>
                 )}
               </div>
@@ -434,6 +530,38 @@ function RegionsManager() {
                 onClick={confirmAddRegion}
               >
                 确认添加
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Region Modal */}
+      {showEditModal && editingRegion && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg p-6 w-96 shadow-xl animate-in fade-in zoom-in duration-200">
+            <h3 className="text-lg font-bold mb-4">修改区域名称</h3>
+            <input
+              autoFocus
+              type="text"
+              placeholder="请输入新名称"
+              className="w-full border border-gray-300 rounded p-2 mb-4 focus:ring-2 focus:ring-blue-500 outline-none"
+              value={editName}
+              onChange={e => setEditName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && confirmEditRegion()}
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded"
+                onClick={() => { setShowEditModal(false); setEditingRegion(null); }}
+              >
+                取消
+              </button>
+              <button
+                className="px-4 py-2 text-sm bg-blue-600 text-white hover:bg-blue-700 rounded"
+                onClick={confirmEditRegion}
+              >
+                确认修改
               </button>
             </div>
           </div>
