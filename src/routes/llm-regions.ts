@@ -236,14 +236,22 @@ router.get('/:id', authMiddleware, async (req: Request, res: Response) => {
   }
 });
 
-// PUT /api/regions/:id - 修改区域（名称、排序等）
+// PUT /api/regions/:id - 修改区域（名称、排序、分类等级等）
 router.put('/:id', authMiddleware, requirePermission('manage_cities'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, sort_order } = req.body;
+    const { name, sort_order, level } = req.body;
 
-    if (!name && sort_order === undefined) {
-      return res.status(400).json({ error: 'At least one field (name or sort_order) is required' });
+    if (!name && sort_order === undefined && level === undefined) {
+      return res.status(400).json({ error: 'At least one field (name, sort_order, or level) is required' });
+    }
+
+    // Validate level if provided
+    if (level !== undefined) {
+      const levelNum = Number(level);
+      if (!Number.isFinite(levelNum) || levelNum < 1 || levelNum > 4) {
+        return res.status(400).json({ error: 'Level must be between 1 and 4' });
+      }
     }
 
     // Build update query dynamically
@@ -258,6 +266,10 @@ router.put('/:id', authMiddleware, requirePermission('manage_cities'), async (re
     if (sort_order !== undefined) {
       updates.push(`sort_order = ${dbType === 'sqlite' ? '?' : `$${paramIndex++}`}`);
       params.push(sort_order);
+    }
+    if (level !== undefined) {
+      updates.push(`level = ${dbType === 'sqlite' ? '?' : `$${paramIndex++}`}`);
+      params.push(Number(level));
     }
     updates.push(`updated_at = ${dbType === 'sqlite' ? "datetime('now')" : 'NOW()'}`);
 

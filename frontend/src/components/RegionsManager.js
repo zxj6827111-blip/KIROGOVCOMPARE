@@ -15,7 +15,8 @@ import {
   AlertTriangle,
   Edit2,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  ArrowRightLeft
 } from 'lucide-react';
 
 function RegionsManager() {
@@ -264,6 +265,27 @@ function RegionsManager() {
     }
   };
 
+  // --- Change Category (Department <-> District) ---
+  const handleChangeCategory = async (e, item) => {
+    e.stopPropagation();
+    const isDept = isDepartment(item.name);
+    // If currently a department (level 3), move to district (level 2)
+    // If currently a district (level 2), move to department (level 3)
+    const newLevel = isDept ? 2 : 3;
+    const actionName = isDept ? '区县' : '部门';
+
+    if (!window.confirm(`确定要将「${item.name}」移动到「${actionName}」分类吗？`)) {
+      return;
+    }
+
+    try {
+      await apiClient.put(`/regions/${item.id}`, { level: newLevel });
+      fetchData();
+    } catch (err) {
+      alert('移动失败: ' + (err.response?.data?.error || err.message));
+    }
+  };
+
   // --- Move Up/Down ---
   const handleMoveUp = async (e, item, siblings) => {
     e.stopPropagation();
@@ -382,6 +404,16 @@ function RegionsManager() {
           >
             <Edit2 size={12} />
           </button>
+          {/* Change Category button - only show for items with parent */}
+          {item.parent_id && (
+            <button
+              className="p-1 hover:bg-orange-100 rounded text-gray-400 hover:text-orange-500 opacity-0 group-hover:opacity-100 transition-opacity"
+              onClick={(e) => handleChangeCategory(e, item)}
+              title={isDept ? "移动到区县" : "移动到部门"}
+            >
+              <ArrowRightLeft size={12} />
+            </button>
+          )}
           {/* Delete button */}
           <button
             className="p-1 hover:bg-red-100 rounded text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
