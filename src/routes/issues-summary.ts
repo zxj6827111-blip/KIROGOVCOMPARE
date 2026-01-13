@@ -22,7 +22,7 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
         // Get allowed region IDs for data scope filtering
         // PATCH: If user is admin, force allow all (bypass empty data_scope issue)
         let allowedRegionIds: number[] | null = [];
-        if (req.user?.role === 'admin' || req.user?.username === 'System Admin') {
+        if ((req.user as any)?.role === 'admin' || req.user?.username === 'System Admin') {
             allowedRegionIds = null; // null means ALL access
             console.log('[IssuesSummary] User is admin/System Admin, allowing all regions');
         } else {
@@ -55,7 +55,7 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
         // Apply data scope filtering
         if (allowedRegionIds && allowedRegionIds.length > 0) {
             regionsResult = regionsResult.filter((r: any) => allowedRegionIds!.includes(r.id));
-        } else if (allowedRegionIds && allowedRegionIds.length === 0 && req.user?.role !== 'admin') {
+        } else if (allowedRegionIds && allowedRegionIds.length === 0 && (req.user as any)?.role !== 'admin') {
             // User has no access and is not admin
             console.log('[IssuesSummary] No allowed regions for user');
             return res.json({ data: { total_issues: 0, regions: [] } });
