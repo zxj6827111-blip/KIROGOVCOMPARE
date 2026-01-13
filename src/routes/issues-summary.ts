@@ -67,8 +67,8 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
             return res.json({ data: { total_issues: 0, regions: [] } });
         }
 
-        const regionIds = regionsResult.map((r: any) => r.id);
-        const regionMap = new Map(regionsResult.map((r: any) => [r.id, r]));
+        const regionIds = regionsResult.map((r: any) => String(r.id));
+        const regionMap = new Map(regionsResult.map((r: any) => [String(r.id), r]));
 
         console.log(`[IssuesSummary] Region IDs count: ${regionIds.length}`);
         console.log(`[IssuesSummary] Current dbType: ${dbType}`);
@@ -118,8 +118,8 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
         console.log(`[IssuesSummary] Total consistency items fetched: ${itemsResult.length}`);
 
         // Perform counting in JS
-        const issuesByVersion = new Map<number, number>();
-        const issueBreakdown = new Map<number, { visual: number; structure: number; quality: number }>();
+        const issuesByVersion = new Map<string, number>();
+        const issueBreakdown = new Map<string, { visual: number; structure: number; quality: number }>();
 
         let debugFailCount = 0;
 
@@ -131,7 +131,7 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
             const isDismissed = (item.human_status === 'dismissed');
 
             if (isFail && !isDismissed) {
-                const vid = item.report_version_id;
+                const vid = String(item.report_version_id);
                 issuesByVersion.set(vid, (issuesByVersion.get(vid) || 0) + 1);
                 debugFailCount++;
 
@@ -153,13 +153,13 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
 
         // Assign counts back to reports
         reportsResult.forEach((r: any) => {
-            r.issue_count = issuesByVersion.get(r.version_id) || 0;
+            r.issue_count = issuesByVersion.get(String(r.version_id)) || 0;
         });
 
         // Group reports by region
-        const regionReportsMap = new Map<number, any[]>();
+        const regionReportsMap = new Map<string, any[]>();
         for (const report of reportsResult) {
-            const rId = Number(report.region_id);
+            const rId = String(report.region_id);
             // Only verify region exists in our filtered map (if we filtered)
             // If we skipped IN clause, some regions might not be in our initial map if we didn't fetch ALL regions initially
             // But usually for 'admin' we fetched all regions.
@@ -168,7 +168,7 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
                 regionReportsMap.set(rId, []);
             }
 
-            const breakdown = issueBreakdown.get(Number(report.version_id)) || { visual: 0, structure: 0, quality: 0 };
+            const breakdown = issueBreakdown.get(String(report.version_id)) || { visual: 0, structure: 0, quality: 0 };
 
             regionReportsMap.get(rId)!.push({
                 report_id: report.report_id,
@@ -200,7 +200,7 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
             // Only include regions that have reports to show
             if (reports.length > 0) {
                 regions.push({
-                    region_id: rId,
+                    region_id: Number(rId),
                     region_name: region.name,
                     region_level: region.level,
                     total_issues: regionIssues,
