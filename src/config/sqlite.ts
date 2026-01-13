@@ -190,6 +190,10 @@ export function ensureSqliteMigrations(): void {
   if (!hasUnitName) {
     runSqlStatements('ALTER TABLE reports ADD COLUMN unit_name TEXT;');
   }
+  const hasActiveVersionId = reportColumns.some((column) => column.name === 'active_version_id');
+  if (!hasActiveVersionId) {
+    runSqlStatements('ALTER TABLE reports ADD COLUMN active_version_id INTEGER;');
+  }
 
   // 以前版本曾引入 deleted_at 软删除字段；当前版本使用硬删除。
   // 不强制新增该字段，保持旧库兼容即可。
@@ -203,6 +207,43 @@ export function ensureSqliteMigrations(): void {
 
   if (!hasRawText) {
     runSqlStatements('ALTER TABLE report_versions ADD COLUMN raw_text TEXT;');
+  }
+
+  const hasParentVersionId = versionColumns.some((column) => column.name === 'parent_version_id');
+  if (!hasParentVersionId) {
+    runSqlStatements('ALTER TABLE report_versions ADD COLUMN parent_version_id INTEGER;');
+  }
+
+  const hasVersionType = versionColumns.some((column) => column.name === 'version_type');
+  if (!hasVersionType) {
+    runSqlStatements("ALTER TABLE report_versions ADD COLUMN version_type TEXT DEFAULT 'original_parse';");
+    runSqlStatements("UPDATE report_versions SET version_type = 'original_parse' WHERE version_type IS NULL;");
+  }
+
+  const hasChangeReason = versionColumns.some((column) => column.name === 'change_reason');
+  if (!hasChangeReason) {
+    runSqlStatements('ALTER TABLE report_versions ADD COLUMN change_reason TEXT;');
+  }
+
+  const hasChangedFieldsSummary = versionColumns.some((column) => column.name === 'changed_fields_summary');
+  if (!hasChangedFieldsSummary) {
+    runSqlStatements('ALTER TABLE report_versions ADD COLUMN changed_fields_summary TEXT;');
+  }
+
+  const hasState = versionColumns.some((column) => column.name === 'state');
+  if (!hasState) {
+    runSqlStatements("ALTER TABLE report_versions ADD COLUMN state TEXT DEFAULT 'parsed';");
+    runSqlStatements("UPDATE report_versions SET state = 'parsed' WHERE state IS NULL;");
+  }
+
+  const hasCreatedBy = versionColumns.some((column) => column.name === 'created_by');
+  if (!hasCreatedBy) {
+    runSqlStatements('ALTER TABLE report_versions ADD COLUMN created_by INTEGER;');
+  }
+
+  const hasIngestionBatchId = versionColumns.some((column) => column.name === 'ingestion_batch_id');
+  if (!hasIngestionBatchId) {
+    runSqlStatements('ALTER TABLE report_versions ADD COLUMN ingestion_batch_id INTEGER;');
   }
 
   // 兼容修复：确保 report_versions 有 updated_at 字段
@@ -219,6 +260,57 @@ export function ensureSqliteMigrations(): void {
 
   // 兼容新增字段：jobs 表 PDF 导出相关字段
   const jobColumns = runSqlStatements('PRAGMA table_info(jobs);') as Array<{ name?: string }>;
+  const hasStepCode = jobColumns.some((column) => column.name === 'step_code');
+  if (!hasStepCode) {
+    try {
+      runSqlStatements("ALTER TABLE jobs ADD COLUMN step_code TEXT DEFAULT 'QUEUED';");
+      runSqlStatements("UPDATE jobs SET step_code = 'QUEUED' WHERE step_code IS NULL;");
+    } catch (e) { }
+  }
+
+  const hasStepName = jobColumns.some((column) => column.name === 'step_name');
+  if (!hasStepName) {
+    try {
+      runSqlStatements("ALTER TABLE jobs ADD COLUMN step_name TEXT DEFAULT '等待处理';");
+      runSqlStatements("UPDATE jobs SET step_name = '等待处理' WHERE step_name IS NULL;");
+    } catch (e) { }
+  }
+
+  const hasAttempt = jobColumns.some((column) => column.name === 'attempt');
+  if (!hasAttempt) {
+    try {
+      runSqlStatements('ALTER TABLE jobs ADD COLUMN attempt INTEGER DEFAULT 1;');
+      runSqlStatements('UPDATE jobs SET attempt = 1 WHERE attempt IS NULL;');
+    } catch (e) { }
+  }
+
+  const hasProvider = jobColumns.some((column) => column.name === 'provider');
+  if (!hasProvider) {
+    try {
+      runSqlStatements('ALTER TABLE jobs ADD COLUMN provider TEXT;');
+    } catch (e) { }
+  }
+
+  const hasModel = jobColumns.some((column) => column.name === 'model');
+  if (!hasModel) {
+    try {
+      runSqlStatements('ALTER TABLE jobs ADD COLUMN model TEXT;');
+    } catch (e) { }
+  }
+
+  const hasCreatedByJob = jobColumns.some((column) => column.name === 'created_by');
+  if (!hasCreatedByJob) {
+    try {
+      runSqlStatements('ALTER TABLE jobs ADD COLUMN created_by INTEGER;');
+    } catch (e) { }
+  }
+
+  const hasIngestionBatchJob = jobColumns.some((column) => column.name === 'ingestion_batch_id');
+  if (!hasIngestionBatchJob) {
+    try {
+      runSqlStatements('ALTER TABLE jobs ADD COLUMN ingestion_batch_id INTEGER;');
+    } catch (e) { }
+  }
 
   // file_path: 生成的 PDF 文件路径
   const hasFilePath = jobColumns.some((column) => column.name === 'file_path');
@@ -251,6 +343,20 @@ export function ensureSqliteMigrations(): void {
       runSqlStatements('ALTER TABLE jobs ADD COLUMN export_title TEXT;');
     } catch (e) { }
   }
+
+  try {
+    runSqlStatements(`
+      UPDATE reports
+      SET active_version_id = (
+        SELECT id
+        FROM report_versions rv
+        WHERE rv.report_id = reports.id AND rv.is_active = 1
+        ORDER BY rv.created_at DESC
+        LIMIT 1
+      )
+      WHERE active_version_id IS NULL;
+    `);
+  } catch (e) { }
 
   migrationsRan = true;
 }

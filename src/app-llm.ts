@@ -13,6 +13,7 @@ import pdfJobsRouter from './routes/pdf-jobs';
 import authRouter from './routes/auth';
 import usersRouter from './routes/users';
 import issuesSummaryRouter from './routes/issues-summary';
+import dataCenterRouter from './routes/data-center';
 import { createRateLimiter, createRedisStore } from './middleware/rateLimit';
 import { redactSensitive } from './utils/logRedactor';
 
@@ -85,6 +86,7 @@ export function createLlmApp(): express.Express {
   app.use('/api', reportsRouter);
   app.use('/api', require('./routes/consistency').default); // Dynamic import to avoid header change for now, or add import top level
   app.use('/api', issuesSummaryRouter); // Issues summary API
+  app.use('/api', dataCenterRouter);
   app.use('/api/auth', authRouter);
   app.use('/api/users', usersRouter);
   app.use('/api/pdf-jobs', pdfJobsRouter);

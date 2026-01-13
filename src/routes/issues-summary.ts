@@ -1,5 +1,5 @@
 import express from 'express';
-import { dbQuery, dbBool, dbType } from '../config/db-llm';
+import { dbQuery, dbType } from '../config/db-llm';
 import { sqlValue } from '../config/sqlite';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
@@ -91,7 +91,7 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
             r.unit_name,
             rv.id as version_id
           FROM reports r
-          INNER JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = ${dbBool(true)}
+          INNER JOIN report_versions rv ON rv.id = r.active_version_id
           ${whereClause}
           ORDER BY r.region_id, r.year DESC
         `;

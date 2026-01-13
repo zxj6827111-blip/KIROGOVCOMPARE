@@ -1,0 +1,201 @@
+{
+  "tables": {
+    "reports": {
+      "columns": [
+        { "name": "id", "type": "BIGSERIAL", "nullable": false },
+        { "name": "region_id", "type": "BIGINT", "nullable": false },
+        { "name": "year", "type": "INTEGER", "nullable": false },
+        { "name": "unit_name", "type": "VARCHAR", "nullable": false },
+        { "name": "active_version_id", "type": "BIGINT", "nullable": true },
+        { "name": "created_at", "type": "TIMESTAMPTZ", "nullable": false },
+        { "name": "updated_at", "type": "TIMESTAMPTZ", "nullable": false }
+      ],
+      "unique_constraints": [
+        ["region_id", "year", "unit_name"]
+      ]
+    },
+    "report_versions": {
+      "columns": [
+        { "name": "id", "type": "BIGSERIAL", "nullable": false },
+        { "name": "report_id", "type": "BIGINT", "nullable": false },
+        { "name": "file_name", "type": "VARCHAR", "nullable": false },
+        { "name": "file_hash", "type": "VARCHAR", "nullable": false },
+        { "name": "file_size", "type": "BIGINT", "nullable": true },
+        { "name": "storage_path", "type": "TEXT", "nullable": false },
+        { "name": "text_path", "type": "TEXT", "nullable": true },
+        { "name": "raw_text", "type": "TEXT", "nullable": true },
+        { "name": "provider", "type": "VARCHAR", "nullable": false },
+        { "name": "model", "type": "VARCHAR", "nullable": false },
+        { "name": "prompt_version", "type": "VARCHAR", "nullable": false },
+        { "name": "parsed_json", "type": "JSONB", "nullable": false },
+        { "name": "schema_version", "type": "VARCHAR", "nullable": false },
+        { "name": "is_active", "type": "BOOLEAN", "nullable": false },
+        { "name": "parent_version_id", "type": "BIGINT", "nullable": true },
+        { "name": "version_type", "type": "TEXT", "nullable": false },
+        { "name": "change_reason", "type": "TEXT", "nullable": true },
+        { "name": "changed_fields_summary", "type": "TEXT", "nullable": true },
+        { "name": "state", "type": "TEXT", "nullable": false },
+        { "name": "created_by", "type": "BIGINT", "nullable": true },
+        { "name": "ingestion_batch_id", "type": "BIGINT", "nullable": true },
+        { "name": "created_at", "type": "TIMESTAMPTZ", "nullable": false },
+        { "name": "updated_at", "type": "TIMESTAMPTZ", "nullable": false }
+      ],
+      "unique_constraints": [
+        ["report_id", "file_hash"]
+      ]
+    },
+    "jobs": {
+      "columns": [
+        { "name": "id", "type": "BIGSERIAL", "nullable": false },
+        { "name": "report_id", "type": "BIGINT", "nullable": false },
+        { "name": "version_id", "type": "BIGINT", "nullable": true },
+        { "name": "kind", "type": "VARCHAR", "nullable": false },
+        { "name": "status", "type": "VARCHAR", "nullable": false },
+        { "name": "progress", "type": "INTEGER", "nullable": false },
+        { "name": "step_code", "type": "VARCHAR", "nullable": true },
+        { "name": "step_name", "type": "VARCHAR", "nullable": true },
+        { "name": "attempt", "type": "INTEGER", "nullable": true },
+        { "name": "provider", "type": "VARCHAR", "nullable": true },
+        { "name": "model", "type": "VARCHAR", "nullable": true },
+        { "name": "error_code", "type": "VARCHAR", "nullable": true },
+        { "name": "error_message", "type": "TEXT", "nullable": true },
+        { "name": "retry_count", "type": "INTEGER", "nullable": false },
+        { "name": "max_retries", "type": "INTEGER", "nullable": false },
+        { "name": "created_at", "type": "TIMESTAMPTZ", "nullable": false },
+        { "name": "started_at", "type": "TIMESTAMPTZ", "nullable": true },
+        { "name": "finished_at", "type": "TIMESTAMPTZ", "nullable": true },
+        { "name": "comparison_id", "type": "BIGINT", "nullable": true },
+        { "name": "export_title", "type": "TEXT", "nullable": true },
+        { "name": "file_name", "type": "TEXT", "nullable": true },
+        { "name": "file_path", "type": "TEXT", "nullable": true },
+        { "name": "file_size", "type": "BIGINT", "nullable": true },
+        { "name": "batch_id", "type": "TEXT", "nullable": true },
+        { "name": "created_by", "type": "BIGINT", "nullable": true },
+        { "name": "ingestion_batch_id", "type": "BIGINT", "nullable": true }
+      ]
+    },
+    "ingestion_batches": {
+      "columns": [
+        { "name": "id", "type": "BIGSERIAL", "nullable": false },
+        { "name": "batch_uuid", "type": "UUID", "nullable": false },
+        { "name": "created_by", "type": "BIGINT", "nullable": true },
+        { "name": "created_at", "type": "TIMESTAMPTZ", "nullable": true },
+        { "name": "source", "type": "TEXT", "nullable": true },
+        { "name": "note", "type": "TEXT", "nullable": true },
+        { "name": "report_count", "type": "INTEGER", "nullable": true },
+        { "name": "success_count", "type": "INTEGER", "nullable": true },
+        { "name": "fail_count", "type": "INTEGER", "nullable": true },
+        { "name": "status", "type": "TEXT", "nullable": true },
+        { "name": "completed_at", "type": "TIMESTAMPTZ", "nullable": true }
+      ],
+      "unique_constraints": [
+        ["batch_uuid"]
+      ]
+    },
+    "metric_dictionary": {
+      "columns": [
+        { "name": "id", "type": "SERIAL", "nullable": false },
+        { "name": "metric_key", "type": "TEXT", "nullable": false },
+        { "name": "version", "type": "INTEGER", "nullable": false },
+        { "name": "display_name", "type": "TEXT", "nullable": false },
+        { "name": "description", "type": "TEXT", "nullable": true },
+        { "name": "unit", "type": "TEXT", "nullable": true },
+        { "name": "aggregatable", "type": "BOOLEAN", "nullable": true },
+        { "name": "formula_sql_or_expr", "type": "TEXT", "nullable": true },
+        { "name": "source_table", "type": "TEXT", "nullable": false, "checks": ["source_table IN ('facts', 'derived')"] },
+        { "name": "source_column", "type": "TEXT", "nullable": true },
+        { "name": "dims_supported", "type": "TEXT", "nullable": true },
+        { "name": "drilldown_source", "type": "TEXT", "nullable": true, "checks": ["drilldown_source IS NULL OR drilldown_source = 'cells'"] },
+        { "name": "caveats", "type": "TEXT", "nullable": true },
+        { "name": "interpretation_template", "type": "TEXT", "nullable": true },
+        { "name": "effective_from", "type": "DATE", "nullable": true },
+        { "name": "deprecated_at", "type": "TIMESTAMPTZ", "nullable": true },
+        { "name": "superseded_by", "type": "TEXT", "nullable": true },
+        { "name": "created_at", "type": "TIMESTAMPTZ", "nullable": true },
+        { "name": "updated_at", "type": "TIMESTAMPTZ", "nullable": true }
+      ],
+      "unique_constraints": [
+        ["metric_key", "version"]
+      ],
+      "behavioral_constraints": [
+        {
+          "name": "unique_active_version",
+          "description": "Each metric_key can have at most one row with deprecated_at IS NULL",
+          "implementation": "partial unique index"
+        }
+      ]
+    },
+    "cells": {
+      "columns": [
+        { "name": "id", "type": "SERIAL", "nullable": false },
+        { "name": "version_id", "type": "BIGINT", "nullable": false },
+        { "name": "table_id", "type": "TEXT", "nullable": false },
+        { "name": "row_key", "type": "TEXT", "nullable": false },
+        { "name": "col_key", "type": "TEXT", "nullable": false },
+        { "name": "cell_ref", "type": "TEXT", "nullable": false },
+        { "name": "value_raw", "type": "TEXT", "nullable": true },
+        { "name": "value_num", "type": "NUMERIC", "nullable": true },
+        { "name": "value_semantic", "type": "TEXT", "nullable": false, "checks": ["value_semantic IN ('ZERO', 'EMPTY', 'NA', 'TEXT', 'NUMERIC')"] },
+        { "name": "normalized_value", "type": "TEXT", "nullable": true },
+        { "name": "page_number", "type": "INTEGER", "nullable": true },
+        { "name": "bbox_json", "type": "TEXT", "nullable": true },
+        { "name": "confidence", "type": "REAL", "nullable": true },
+        { "name": "created_at", "type": "TIMESTAMPTZ", "nullable": true }
+      ],
+      "unique_constraints": [
+        ["version_id", "cell_ref"]
+      ]
+    },
+    "fact_active_disclosure": {
+      "columns": [
+        { "name": "id", "type": "SERIAL", "nullable": false },
+        { "name": "report_id", "type": "BIGINT", "nullable": false },
+        { "name": "version_id", "type": "BIGINT", "nullable": false },
+        { "name": "category", "type": "TEXT", "nullable": false },
+        { "name": "made_count", "type": "INTEGER", "nullable": true },
+        { "name": "repealed_count", "type": "INTEGER", "nullable": true },
+        { "name": "valid_count", "type": "INTEGER", "nullable": true },
+        { "name": "processed_count", "type": "INTEGER", "nullable": true },
+        { "name": "amount", "type": "NUMERIC", "nullable": true },
+        { "name": "created_at", "type": "TIMESTAMPTZ", "nullable": true }
+      ]
+    },
+    "fact_application": {
+      "columns": [
+        { "name": "id", "type": "SERIAL", "nullable": false },
+        { "name": "report_id", "type": "BIGINT", "nullable": false },
+        { "name": "version_id", "type": "BIGINT", "nullable": false },
+        { "name": "applicant_type", "type": "TEXT", "nullable": false },
+        { "name": "response_type", "type": "TEXT", "nullable": false },
+        { "name": "count", "type": "INTEGER", "nullable": true },
+        { "name": "created_at", "type": "TIMESTAMPTZ", "nullable": true }
+      ]
+    },
+    "fact_legal_proceeding": {
+      "columns": [
+        { "name": "id", "type": "SERIAL", "nullable": false },
+        { "name": "report_id", "type": "BIGINT", "nullable": false },
+        { "name": "version_id", "type": "BIGINT", "nullable": false },
+        { "name": "case_type", "type": "TEXT", "nullable": false },
+        { "name": "result_type", "type": "TEXT", "nullable": false },
+        { "name": "count", "type": "INTEGER", "nullable": true },
+        { "name": "created_at", "type": "TIMESTAMPTZ", "nullable": true }
+      ]
+    },
+    "quality_issues": {
+      "columns": [
+        { "name": "id", "type": "SERIAL", "nullable": false },
+        { "name": "report_id", "type": "BIGINT", "nullable": false },
+        { "name": "version_id", "type": "BIGINT", "nullable": false },
+        { "name": "rule_code", "type": "TEXT", "nullable": false },
+        { "name": "severity", "type": "TEXT", "nullable": false },
+        { "name": "description", "type": "TEXT", "nullable": false },
+        { "name": "cell_ref", "type": "TEXT", "nullable": true },
+        { "name": "auto_status", "type": "TEXT", "nullable": false },
+        { "name": "human_status", "type": "TEXT", "nullable": false },
+        { "name": "created_at", "type": "TIMESTAMPTZ", "nullable": true },
+        { "name": "updated_at", "type": "TIMESTAMPTZ", "nullable": true }
+      ]
+    }
+  }
+}

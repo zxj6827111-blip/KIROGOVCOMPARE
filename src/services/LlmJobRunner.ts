@@ -5,6 +5,7 @@ import { LlmParseResult, LlmProvider, LlmProviderError } from './LlmProvider';
 import { createLlmProvider } from './LlmProviderFactory';
 import { summarizeDiff } from '../utils/jsonDiff';
 import { consistencyCheckService } from './ConsistencyCheckService';
+import { materializeReportVersion } from './MaterializeService';
 import axios from 'axios';
 
 interface QueuedJob {
@@ -24,6 +25,7 @@ const STEPS = {
   RECEIVED: { code: 'RECEIVED', name: '已接收并保存文件', progress: 10 },
   ENQUEUED: { code: 'ENQUEUED', name: '已入库并创建解析任务', progress: 20 },
   PARSING: { code: 'PARSING', name: 'AI 解析中', progress: 50 },
+  MATERIALIZE: { code: 'MATERIALIZE', name: '结构化入库', progress: 70 },
   POSTPROCESS: { code: 'POSTPROCESS', name: '结果校验与入库', progress: 80 },
   DONE: { code: 'DONE', name: '完成', progress: 100 },
   QUEUED: { code: 'QUEUED', name: '等待处理', progress: 0 },
@@ -66,6 +68,8 @@ export class LlmJobRunner {
     try {
       if (job.kind === 'compare') {
         await this.processCompareJob(job);
+      } else if (job.kind === 'materialize') {
+        await this.processMaterializeJob(job);
       } else if (job.kind === 'checks') {
         await this.processChecksJob(job);
       } else {
@@ -375,32 +379,45 @@ export class LlmJobRunner {
         WHERE id = ${sqlValue(job.id)};`);
     }
 
-    // Enqueue checks job if not already queued/running
+    // Enqueue materialize job if not already queued/running
     if (job.version_id && job.report_id) {
-      let existingChecksJob: { id?: number } | undefined;
+      let existingMaterializeJob: { id?: number } | undefined;
       if (dbType === 'postgres') {
         const result = await pool.query(
-          `SELECT id FROM jobs WHERE report_id = $1 AND version_id = $2 AND kind = 'checks' AND status IN ('queued', 'running') LIMIT 1`,
+          `SELECT id FROM jobs WHERE report_id = $1 AND version_id = $2 AND kind = 'materialize' AND status IN ('queued', 'running') LIMIT 1`,
           [job.report_id, job.version_id]);
-        existingChecksJob = result.rows[0];
+        existingMaterializeJob = result.rows[0];
       } else {
-        existingChecksJob = querySqlite(
-          `SELECT id FROM jobs WHERE report_id = ${sqlValue(job.report_id)} AND version_id = ${sqlValue(job.version_id)} AND kind = 'checks' AND status IN ('queued', 'running') LIMIT 1;`
+        existingMaterializeJob = querySqlite(
+          `SELECT id FROM jobs WHERE report_id = ${sqlValue(job.report_id)} AND version_id = ${sqlValue(job.version_id)} AND kind = 'materialize' AND status IN ('queued', 'running') LIMIT 1;`
         )[0] as { id?: number } | undefined;
       }
 
-      if (!existingChecksJob?.id) {
+      if (!existingMaterializeJob?.id) {
+        let ingestionBatchId: number | null = null;
+        if (dbType === 'postgres') {
+          const result = await pool.query(
+            `SELECT ingestion_batch_id FROM report_versions WHERE id = $1 LIMIT 1`,
+            [job.version_id]
+          );
+          ingestionBatchId = result.rows[0]?.ingestion_batch_id ?? null;
+        } else {
+          ingestionBatchId = querySqlite(
+            `SELECT ingestion_batch_id FROM report_versions WHERE id = ${sqlValue(job.version_id)} LIMIT 1;`
+          )[0]?.ingestion_batch_id ?? null;
+        }
+
         if (dbType === 'postgres') {
           await pool.query(
-            `INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, max_retries) 
-             VALUES ($1, $2, 'checks', 'queued', 60, $3, '等待校验', 1)`,
-            [job.report_id, job.version_id, STEPS.POSTPROCESS.code]);
+            `INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, max_retries, ingestion_batch_id) 
+             VALUES ($1, $2, 'materialize', 'queued', 60, $3, $4, 1, $5)`,
+            [job.report_id, job.version_id, STEPS.MATERIALIZE.code, STEPS.MATERIALIZE.name, ingestionBatchId]);
         } else {
           querySqlite(
-            `INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, max_retries) 
-             VALUES (${sqlValue(job.report_id)}, ${sqlValue(job.version_id)}, 'checks', 'queued', 60, ${sqlValue(STEPS.POSTPROCESS.code)}, ${sqlValue('等待校验')}, 1);`);
+            `INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, max_retries, ingestion_batch_id) 
+             VALUES (${sqlValue(job.report_id)}, ${sqlValue(job.version_id)}, 'materialize', 'queued', 60, ${sqlValue(STEPS.MATERIALIZE.code)}, ${sqlValue(STEPS.MATERIALIZE.name)}, 1, ${sqlValue(ingestionBatchId)});`);
         }
-        console.log(`[Job ${job.id}] Enqueued checks job for version ${job.version_id}`);
+        console.log(`[Job ${job.id}] Enqueued materialize job for version ${job.version_id}`);
       }
     }
 
@@ -507,7 +524,7 @@ export class LlmJobRunner {
       const selectResult = await pool.query(`
         SELECT id FROM jobs 
         WHERE status = 'queued' AND kind != 'pdf_export'
-        ORDER BY (CASE kind WHEN 'parse' THEN 0 WHEN 'checks' THEN 1 WHEN 'compare' THEN 2 ELSE 9 END) ASC, created_at ASC
+        ORDER BY (CASE kind WHEN 'parse' THEN 0 WHEN 'materialize' THEN 1 WHEN 'checks' THEN 2 WHEN 'compare' THEN 3 ELSE 9 END) ASC, created_at ASC
         LIMIT 1
         FOR UPDATE SKIP LOCKED`);
 
@@ -540,7 +557,7 @@ export class LlmJobRunner {
           SELECT id
           FROM jobs
           WHERE status = 'queued' AND kind != 'pdf_export'
-          ORDER BY (CASE kind WHEN 'parse' THEN 0 WHEN 'checks' THEN 1 WHEN 'compare' THEN 2 ELSE 9 END) ASC, created_at ASC
+          ORDER BY (CASE kind WHEN 'parse' THEN 0 WHEN 'materialize' THEN 1 WHEN 'checks' THEN 2 WHEN 'compare' THEN 3 ELSE 9 END) ASC, created_at ASC
           LIMIT 1
         )
         RETURNING id, report_id, version_id, kind, comparison_id, retry_count, max_retries;`);
@@ -588,6 +605,103 @@ export class LlmJobRunner {
       comparison_id: jobRow.comparison_id ?? null,
       max_retries: 1, // FORCE FIX: Ensure max_retries is always 1
     } as QueuedJob;
+  }
+
+  private async processMaterializeJob(job: QueuedJob): Promise<void> {
+    if (!job.version_id || !job.report_id) {
+      throw new Error('Materialize job missing version_id or report_id');
+    }
+
+    let version: { id?: number; parsed_json?: string } | undefined;
+    if (dbType === 'postgres') {
+      const result = await pool.query(
+        `SELECT id, parsed_json FROM report_versions WHERE id = $1 LIMIT 1`,
+        [job.version_id]
+      );
+      version = result.rows[0];
+    } else {
+      version = querySqlite(`
+        SELECT id, parsed_json FROM report_versions WHERE id = ${sqlValue(job.version_id)} LIMIT 1;
+      `)[0] as { id?: number; parsed_json?: string } | undefined;
+    }
+
+    if (!version?.id) {
+      throw new Error('Version not found');
+    }
+
+    if (!version.parsed_json) {
+      throw new LlmProviderError('parsed_json is empty, cannot materialize', 'PARSED_JSON_EMPTY');
+    }
+
+    await materializeReportVersion({
+      reportId: job.report_id,
+      versionId: job.version_id,
+      parsedJson: version.parsed_json,
+    });
+
+    if (dbType === 'postgres') {
+      await pool.query(
+        `UPDATE jobs
+         SET status = 'succeeded',
+             progress = $1,
+             step_code = $2,
+             step_name = $3,
+             finished_at = NOW()
+         WHERE id = $4`,
+        [STEPS.DONE.progress, STEPS.DONE.code, STEPS.DONE.name, job.id]
+      );
+    } else {
+      querySqlite(
+        `UPDATE jobs
+         SET status = 'succeeded',
+             progress = ${STEPS.DONE.progress},
+             step_code = ${sqlValue(STEPS.DONE.code)},
+             step_name = ${sqlValue(STEPS.DONE.name)},
+             finished_at = datetime('now')
+         WHERE id = ${sqlValue(job.id)};`
+      );
+    }
+
+    let existingChecksJob: { id?: number } | undefined;
+    if (dbType === 'postgres') {
+      const result = await pool.query(
+        `SELECT id FROM jobs WHERE report_id = $1 AND version_id = $2 AND kind = 'checks' AND status IN ('queued', 'running') LIMIT 1`,
+        [job.report_id, job.version_id]
+      );
+      existingChecksJob = result.rows[0];
+    } else {
+      existingChecksJob = querySqlite(
+        `SELECT id FROM jobs WHERE report_id = ${sqlValue(job.report_id)} AND version_id = ${sqlValue(job.version_id)} AND kind = 'checks' AND status IN ('queued', 'running') LIMIT 1;`
+      )[0] as { id?: number } | undefined;
+    }
+
+    if (!existingChecksJob?.id) {
+      let ingestionBatchId: number | null = null;
+      if (dbType === 'postgres') {
+        const result = await pool.query(
+          `SELECT ingestion_batch_id FROM report_versions WHERE id = $1 LIMIT 1`,
+          [job.version_id]
+        );
+        ingestionBatchId = result.rows[0]?.ingestion_batch_id ?? null;
+      } else {
+        ingestionBatchId = querySqlite(
+          `SELECT ingestion_batch_id FROM report_versions WHERE id = ${sqlValue(job.version_id)} LIMIT 1;`
+        )[0]?.ingestion_batch_id ?? null;
+      }
+
+      if (dbType === 'postgres') {
+        await pool.query(
+          `INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, max_retries, ingestion_batch_id)
+           VALUES ($1, $2, 'checks', 'queued', 60, $3, $4, 1, $5)`,
+          [job.report_id, job.version_id, STEPS.POSTPROCESS.code, '等待校验', ingestionBatchId]
+        );
+      } else {
+        querySqlite(
+          `INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, max_retries, ingestion_batch_id)
+           VALUES (${sqlValue(job.report_id)}, ${sqlValue(job.version_id)}, 'checks', 'queued', 60, ${sqlValue(STEPS.POSTPROCESS.code)}, ${sqlValue('等待校验')}, 1, ${sqlValue(ingestionBatchId)});`
+        );
+      }
+    }
   }
 
   private async processChecksJob(job: QueuedJob): Promise<void> {
@@ -682,23 +796,35 @@ export class LlmJobRunner {
     let rightVersion: any;
     if (dbType === 'postgres') {
       const leftResult = await pool.query(
-        `SELECT id as version_id, parsed_json FROM report_versions WHERE report_id = $1 AND is_active = true LIMIT 1`,
-        [comparison.left_report_id]);
+        `SELECT rv.id as version_id, rv.parsed_json
+         FROM reports r
+         JOIN report_versions rv ON rv.id = r.active_version_id
+         WHERE r.id = $1
+         LIMIT 1`,
+        [comparison.left_report_id]
+      );
       leftVersion = leftResult.rows[0];
       const rightResult = await pool.query(
-        `SELECT id as version_id, parsed_json FROM report_versions WHERE report_id = $1 AND is_active = true LIMIT 1`,
-        [comparison.right_report_id]);
+        `SELECT rv.id as version_id, rv.parsed_json
+         FROM reports r
+         JOIN report_versions rv ON rv.id = r.active_version_id
+         WHERE r.id = $1
+         LIMIT 1`,
+        [comparison.right_report_id]
+      );
       rightVersion = rightResult.rows[0];
     } else {
       leftVersion = querySqlite(`
-        SELECT id as version_id, parsed_json
-        FROM report_versions
-        WHERE report_id = ${sqlValue(comparison.left_report_id)} AND is_active = 1
+        SELECT rv.id as version_id, rv.parsed_json
+        FROM reports r
+        JOIN report_versions rv ON rv.id = r.active_version_id
+        WHERE r.id = ${sqlValue(comparison.left_report_id)}
         LIMIT 1;`)[0];
       rightVersion = querySqlite(`
-        SELECT id as version_id, parsed_json
-        FROM report_versions
-        WHERE report_id = ${sqlValue(comparison.right_report_id)} AND is_active = 1
+        SELECT rv.id as version_id, rv.parsed_json
+        FROM reports r
+        JOIN report_versions rv ON rv.id = r.active_version_id
+        WHERE r.id = ${sqlValue(comparison.right_report_id)}
         LIMIT 1;`)[0];
     }
 
@@ -1070,19 +1196,17 @@ export class LlmJobRunner {
       let prevReport: { id: number; version_id: number } | undefined;
       if (dbType === 'postgres') {
         const result = await pool.query(`
-          SELECT r.id, rv.id as version_id
+          SELECT r.id, r.active_version_id as version_id
           FROM reports r
-          JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = true
-          WHERE r.region_id = $1 AND r.year = $2
+          WHERE r.region_id = $1 AND r.year = $2 AND r.active_version_id IS NOT NULL
           LIMIT 1
         `, [region_id, prevYear]);
         prevReport = result.rows[0];
       } else {
         prevReport = querySqlite(`
-          SELECT r.id, rv.id as version_id
+          SELECT r.id, r.active_version_id as version_id
           FROM reports r
-          JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = 1
-          WHERE r.region_id = ${sqlValue(region_id)} AND r.year = ${sqlValue(prevYear)}
+          WHERE r.region_id = ${sqlValue(region_id)} AND r.year = ${sqlValue(prevYear)} AND r.active_version_id IS NOT NULL
           LIMIT 1;
         `)[0] as { id: number; version_id: number } | undefined;
       }

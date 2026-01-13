@@ -8,7 +8,7 @@ CREATE TABLE reports_new (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   region_id INTEGER NOT NULL REFERENCES regions(id),
   year INTEGER NOT NULL,
-  unit_name TEXT,
+  unit_name TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(region_id, year, unit_name)

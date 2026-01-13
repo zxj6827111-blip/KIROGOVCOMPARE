@@ -14,7 +14,7 @@ export interface ReportUploadPayload {
   mimeType: string;
   size: number;
   model?: string;
-  batchId?: string; // Optional batch ID for grouping batch uploads
+  batchUuid?: string; // Optional batch UUID for grouping batch uploads
 }
 
 export interface ReportTextUploadPayload {
@@ -23,6 +23,7 @@ export interface ReportTextUploadPayload {
   unitName?: string | null;
   rawText: string;
   model?: string;
+  batchUuid?: string;
 }
 
 export interface ReportUploadResult {
@@ -99,6 +100,41 @@ function resolveProviderAndModel(modelInput?: string): { provider: string; model
   return { provider: defaultProvider, model: modelInput };
 }
 
+async function resolveIngestionBatchId(batchUuid?: string, createdBy?: number | null): Promise<number | null> {
+  if (!batchUuid) {
+    return null;
+  }
+
+  if (dbType === 'postgres') {
+    const existing = await pool.query('SELECT id FROM ingestion_batches WHERE batch_uuid = $1 LIMIT 1', [batchUuid]);
+    if (existing.rows[0]?.id) {
+      return existing.rows[0].id as number;
+    }
+    const inserted = await pool.query(
+      `INSERT INTO ingestion_batches (batch_uuid, created_by, source, status)
+       VALUES ($1, $2, 'upload', 'processing')
+       RETURNING id`,
+      [batchUuid, createdBy ?? null]
+    );
+    return inserted.rows[0]?.id ?? null;
+  }
+
+  const existing = querySqlite(
+    `SELECT id FROM ingestion_batches WHERE batch_uuid = ${sqlValue(batchUuid)} LIMIT 1;`
+  )[0];
+  if (existing?.id) {
+    return existing.id as number;
+  }
+  querySqlite(
+    `INSERT INTO ingestion_batches (batch_uuid, created_by, source, status)
+     VALUES (${sqlValue(batchUuid)}, ${sqlValue(createdBy ?? null)}, 'upload', 'processing');`
+  );
+  const inserted = querySqlite(
+    `SELECT id FROM ingestion_batches WHERE batch_uuid = ${sqlValue(batchUuid)} LIMIT 1;`
+  )[0];
+  return inserted?.id ?? null;
+}
+
 export class ReportUploadService {
   async processUpload(payload: ReportUploadPayload): Promise<ReportUploadResult> {
     ensureStorageDir();
@@ -124,6 +160,7 @@ export class ReportUploadService {
     const fileHash = await calculateFileHash(payload.tempFilePath);
     const unitName = payload.unitName ? String(payload.unitName).trim() : '';
     const updatedAtExpr = getUpdatedAtExpression();
+    const ingestionBatchId = await resolveIngestionBatchId(payload.batchUuid, null);
 
     // Insert or update report
     let report: any;
@@ -167,7 +204,7 @@ export class ReportUploadService {
     let reusedVersion = false;
 
     if (!existingVersion) {
-      // Deactivate old versions
+      // Deactivate old versions (compatibility)
       if (dbType === 'postgres') {
         await pool.query('UPDATE report_versions SET is_active = false WHERE report_id = $1 AND is_active = true', [report.id]);
       } else {
@@ -180,20 +217,23 @@ export class ReportUploadService {
         const result = await pool.query(
           `INSERT INTO report_versions (
             report_id, file_name, file_hash, file_size, storage_path, text_path,
-            provider, model, prompt_version, parsed_json, schema_version, is_active, raw_text
-          ) VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, 'v1', '{}', 'v1', true, NULL)
+            provider, model, prompt_version, parsed_json, schema_version, is_active, raw_text,
+            version_type, parent_version_id, state, ingestion_batch_id
+          ) VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, 'v1', '{}', 'v1', true, NULL, 'original_parse', NULL, 'parsed', $8)
           RETURNING id`,
-          [report.id, payload.originalName, fileHash, payload.size, storageRelative, provider, model]
+          [report.id, payload.originalName, fileHash, payload.size, storageRelative, provider, model, ingestionBatchId]
         );
         version = result.rows[0];
       } else {
         version = querySqlite(
           `INSERT INTO report_versions (
             report_id, file_name, file_hash, file_size, storage_path, text_path,
-            provider, model, prompt_version, parsed_json, schema_version, is_active, raw_text
+            provider, model, prompt_version, parsed_json, schema_version, is_active, raw_text,
+            version_type, parent_version_id, state, ingestion_batch_id
           ) VALUES (
             ${sqlValue(report.id)}, ${sqlValue(payload.originalName)}, ${sqlValue(fileHash)}, ${sqlValue(payload.size)}, ${sqlValue(storageRelative)}, NULL,
-            ${sqlValue(provider)}, ${sqlValue(model)}, 'v1', '{}', 'v1', 1, NULL
+            ${sqlValue(provider)}, ${sqlValue(model)}, 'v1', '{}', 'v1', 1, NULL,
+            'original_parse', NULL, 'parsed', ${sqlValue(ingestionBatchId)}
           ) RETURNING id;`
         )[0];
       }
@@ -207,19 +247,45 @@ export class ReportUploadService {
       throw new Error('version_not_created');
     }
 
+    // Update active pointer for the report
+    if (dbType === 'postgres') {
+      await pool.query(
+        `UPDATE reports SET active_version_id = $1, updated_at = NOW() WHERE id = $2`,
+        [versionId, report.id]
+      );
+      await pool.query(
+        `UPDATE report_versions SET is_active = false WHERE report_id = $1 AND id != $2`,
+        [report.id, versionId]
+      );
+      await pool.query(
+        `UPDATE report_versions SET is_active = true WHERE id = $1`,
+        [versionId]
+      );
+    } else {
+      querySqlite(
+        `UPDATE reports SET active_version_id = ${sqlValue(versionId)}, updated_at = ${updatedAtExpr} WHERE id = ${sqlValue(report.id)};`
+      );
+      querySqlite(
+        `UPDATE report_versions SET is_active = 0 WHERE report_id = ${sqlValue(report.id)} AND id != ${sqlValue(versionId)};`
+      );
+      querySqlite(
+        `UPDATE report_versions SET is_active = 1 WHERE id = ${sqlValue(versionId)};`
+      );
+    }
+
     // Always create a new job record for each upload (history mode)
     let newJob: any;
     if (dbType === 'postgres') {
       const result = await pool.query(
-        `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model, batch_id)
+        `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model, ingestion_batch_id)
          VALUES ($1, $2, 'parse', 'queued', 0, $3, $4, $5) RETURNING id`,
-        [report.id, versionId, provider, model, payload.batchId || null]
+        [report.id, versionId, provider, model, ingestionBatchId]
       );
       newJob = result.rows[0];
     } else {
       newJob = querySqlite(
-        `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model, batch_id)
-         VALUES (${sqlValue(report.id)}, ${sqlValue(versionId)}, 'parse', 'queued', 0, ${sqlValue(provider)}, ${sqlValue(model)}, ${sqlValue(payload.batchId)}) RETURNING id;`
+        `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model, ingestion_batch_id)
+         VALUES (${sqlValue(report.id)}, ${sqlValue(versionId)}, 'parse', 'queued', 0, ${sqlValue(provider)}, ${sqlValue(model)}, ${sqlValue(ingestionBatchId)}) RETURNING id;`
       )[0];
     }
     const jobId = newJob.id;
@@ -281,6 +347,7 @@ export class ReportUploadService {
     const unitName = payload.unitName ? String(payload.unitName).trim() : '';
     const fileHash = crypto.createHash('sha256').update(rawText, 'utf8').digest('hex');
     const updatedAtExpr = getUpdatedAtExpression();
+    const ingestionBatchId = await resolveIngestionBatchId(payload.batchUuid, null);
 
     // Insert or update report
     let report: any;
@@ -341,20 +408,23 @@ export class ReportUploadService {
         const result = await pool.query(
           `INSERT INTO report_versions (
             report_id, file_name, file_hash, file_size, storage_path, text_path,
-            provider, model, prompt_version, parsed_json, schema_version, is_active, raw_text
-          ) VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, 'v1', $8, 'v1', true, $9)
+            provider, model, prompt_version, parsed_json, schema_version, is_active, raw_text,
+            version_type, parent_version_id, state, ingestion_batch_id
+          ) VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, 'v1', $8, 'v1', true, $9, 'original_parse', NULL, 'parsed', $10)
           RETURNING id`,
-          [report.id, fileName, fileHash, fileSize, storageRelative, provider, model, JSON.stringify(parsedJson), rawText]
+          [report.id, fileName, fileHash, fileSize, storageRelative, provider, model, JSON.stringify(parsedJson), rawText, ingestionBatchId]
         );
         version = result.rows[0];
       } else {
         version = querySqlite(
           `INSERT INTO report_versions (
             report_id, file_name, file_hash, file_size, storage_path, text_path,
-            provider, model, prompt_version, parsed_json, schema_version, is_active, raw_text
+            provider, model, prompt_version, parsed_json, schema_version, is_active, raw_text,
+            version_type, parent_version_id, state, ingestion_batch_id
           ) VALUES (
             ${sqlValue(report.id)}, ${sqlValue(fileName)}, ${sqlValue(fileHash)}, ${sqlValue(fileSize)}, ${sqlValue(storageRelative)}, NULL,
-            ${sqlValue(provider)}, ${sqlValue(model)}, 'v1', ${sqlValue(JSON.stringify(parsedJson))}, 'v1', 1, ${sqlValue(rawText)}
+            ${sqlValue(provider)}, ${sqlValue(model)}, 'v1', ${sqlValue(JSON.stringify(parsedJson))}, 'v1', 1, ${sqlValue(rawText)},
+            'original_parse', NULL, 'parsed', ${sqlValue(ingestionBatchId)}
           ) RETURNING id;`
         )[0];
       }
@@ -368,19 +438,44 @@ export class ReportUploadService {
       throw new Error('version_not_created');
     }
 
+    if (dbType === 'postgres') {
+      await pool.query(
+        `UPDATE reports SET active_version_id = $1, updated_at = NOW() WHERE id = $2`,
+        [versionId, report.id]
+      );
+      await pool.query(
+        `UPDATE report_versions SET is_active = false WHERE report_id = $1 AND id != $2`,
+        [report.id, versionId]
+      );
+      await pool.query(
+        `UPDATE report_versions SET is_active = true WHERE id = $1`,
+        [versionId]
+      );
+    } else {
+      querySqlite(
+        `UPDATE reports SET active_version_id = ${sqlValue(versionId)}, updated_at = ${updatedAtExpr} WHERE id = ${sqlValue(report.id)};`
+      );
+      querySqlite(
+        `UPDATE report_versions SET is_active = 0 WHERE report_id = ${sqlValue(report.id)} AND id != ${sqlValue(versionId)};`
+      );
+      querySqlite(
+        `UPDATE report_versions SET is_active = 1 WHERE id = ${sqlValue(versionId)};`
+      );
+    }
+
     // Always create a new job record for each upload (history mode)
     let newJob: any;
     if (dbType === 'postgres') {
       const result = await pool.query(
-        `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model)
-         VALUES ($1, $2, 'parse', 'queued', 0, $3, $4) RETURNING id`,
-        [report.id, versionId, provider, model]
+        `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model, ingestion_batch_id)
+         VALUES ($1, $2, 'parse', 'queued', 0, $3, $4, $5) RETURNING id`,
+        [report.id, versionId, provider, model, ingestionBatchId]
       );
       newJob = result.rows[0];
     } else {
       newJob = querySqlite(
-        `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model)
-         VALUES (${sqlValue(report.id)}, ${sqlValue(versionId)}, 'parse', 'queued', 0, ${sqlValue(provider)}, ${sqlValue(model)}) RETURNING id;`
+        `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model, ingestion_batch_id)
+         VALUES (${sqlValue(report.id)}, ${sqlValue(versionId)}, 'parse', 'queued', 0, ${sqlValue(provider)}, ${sqlValue(model)}, ${sqlValue(ingestionBatchId)}) RETURNING id;`
       )[0];
     }
     const jobId = newJob.id;

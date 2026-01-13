@@ -39,6 +39,12 @@ jobs:
       - name: Scan for hidden control characters
         run: python3 scripts/check_control_chars.py
 
+      - name: Scan sqlite migrations for forbidden keywords
+        run: node scripts/scan_sqlite_migrations.js
+
+      - name: Compare schema snapshots (pg vs sqlite)
+        run: node scripts/compare_schema_snapshots.js
+
       - name: Install backend dependencies
         run: npm ci
 

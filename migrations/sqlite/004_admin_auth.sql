@@ -6,9 +6,9 @@ CREATE TABLE IF NOT EXISTS admin_users (
   username VARCHAR(50) UNIQUE NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
   display_name VARCHAR(100),
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  last_login_at DATETIME
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  last_login_at TEXT
 );
 
 -- Default admin user (password: admin123)
@@ -21,8 +21,8 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
   token_hash VARCHAR(64) NOT NULL,
-  expires_at DATETIME NOT NULL,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  expires_at TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (user_id) REFERENCES admin_users(id) ON DELETE CASCADE
 );
 
