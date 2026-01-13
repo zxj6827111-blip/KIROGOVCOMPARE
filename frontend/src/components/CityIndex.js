@@ -404,7 +404,7 @@ function CityIndex({ onSelectReport, onViewComparison }) {
             </div>
             <div className="summary-card" style={{ background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: 'var(--shadow-sm)', flex: 1, display: 'flex', flexDirection: 'column' }}>
               <span style={{ fontSize: '13px', color: 'var(--color-text-secondary)', fontWeight: 600, textTransform: 'uppercase' }}>覆盖区域</span>
-              <span style={{ fontSize: '36px', fontWeight: 800, color: 'var(--category-purple)', marginTop: '8px' }}>{regions.length}</span>
+              <span style={{ fontSize: '36px', fontWeight: 800, color: 'var(--category-purple)', marginTop: '8px' }}>{new Set(reports.map(r => r.region_id)).size}</span>
             </div>
             <div className="summary-card" style={{ background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: 'var(--shadow-sm)', flex: 1, display: 'flex', flexDirection: 'column' }}>
               <span style={{ fontSize: '13px', color: 'var(--color-text-secondary)', fontWeight: 600, textTransform: 'uppercase' }}>最新更新</span>

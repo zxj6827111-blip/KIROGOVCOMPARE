@@ -17,6 +17,9 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const [highlightCells, setHighlightCells] = useState([]); // 勾稽问题单元格路径
   const [highlightTexts, setHighlightTexts] = useState([]); // 勾稽问题文本
   const [qualityIssues, setQualityIssues] = useState({}); // 质量审计问题 { sec5: [...], sec6: [...] }
+  const [showVersionHistory, setShowVersionHistory] = useState(false); // 版本历史折叠
+  const [versionHistory, setVersionHistory] = useState(null); // 历史版本列表数据
+  const [versionsLoading, setVersionsLoading] = useState(false);
 
   const handleBack = () => {
     if (onBack) return onBack();
@@ -178,16 +181,21 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     }
   };
 
-  const handleSaveEdit = (newData) => {
+  const handleSaveEdit = (saveData) => {
+    // Support both old format (direct data) and new format (object with parsedJson/newVersionId)
+    const parsedJson = saveData?.parsedJson ?? saveData;
+    const newVersionId = saveData?.newVersionId;
+
     setReport({
       ...report,
       active_version: {
         ...report.active_version,
-        parsed_json: newData
+        parsed_json: parsedJson,
+        version_id: newVersionId ?? report.active_version?.version_id
       }
     });
     setEditingData(null);
-    alert('数据已更新到本地，请刷新页面确认');
+    // No need to alert here - ParsedDataEditor already shows alert
   };
 
   const handleCancelEdit = () => {
@@ -492,6 +500,103 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                     </div>
                   ) : (
                     <p className="meta">暂无生效版本</p>
+                  )}
+                </section>
+
+                {/* 折叠式版本历史 */}
+                <section className="section">
+                  <div
+                    className="version-history-header"
+                    style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}
+                    onClick={async () => {
+                      const newShow = !showVersionHistory;
+                      setShowVersionHistory(newShow);
+                      // 懒加载：第一次展开时才加载
+                      if (newShow && !versionHistory) {
+                        setVersionsLoading(true);
+                        try {
+                          const resp = await apiClient.get(`/reports/${reportId}/versions`);
+                          setVersionHistory(resp.data?.data || []);
+                        } catch (err) {
+                          console.error('Failed to fetch version history:', err);
+                          setVersionHistory([]);
+                        } finally {
+                          setVersionsLoading(false);
+                        }
+                      }
+                    }}
+                  >
+                    <span style={{ marginRight: '8px' }}>{showVersionHistory ? '▼' : '▶'}</span>
+                    <h3 style={{ margin: 0 }}>历史版本 {versionHistory ? `(${versionHistory.length})` : ''}</h3>
+                  </div>
+                  {showVersionHistory && (
+                    <div className="version-history-content" style={{ marginTop: '12px' }}>
+                      {versionsLoading ? (
+                        <p>加载中...</p>
+                      ) : versionHistory && versionHistory.length > 0 ? (
+                        <div className="versions-list" style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                          {versionHistory.map(v => (
+                            <div
+                              key={v.id}
+                              className="version-item"
+                              style={{
+                                padding: '10px',
+                                marginBottom: '8px',
+                                borderRadius: '6px',
+                                background: v.is_active ? '#1a3a2a' : '#1e1e1e',
+                                border: v.is_active ? '1px solid #2ecc71' : '1px solid #333'
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div>
+                                  <span style={{ fontWeight: 'bold', color: v.is_active ? '#2ecc71' : '#ccc' }}>
+                                    #{v.id} {v.is_active && '✓ 当前'}
+                                  </span>
+                                  <span style={{ marginLeft: '10px', color: '#888', fontSize: '12px' }}>
+                                    {v.prompt_version || 'v1'}
+                                  </span>
+                                </div>
+                                <span style={{ color: '#888', fontSize: '12px' }}>
+                                  {new Date(v.created_at).toLocaleString()}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                                {v.file_name}
+                              </div>
+                              {!v.is_active && (
+                                <button
+                                  style={{
+                                    marginTop: '8px',
+                                    padding: '4px 12px',
+                                    fontSize: '12px',
+                                    background: '#2c3e50',
+                                    color: '#fff',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer'
+                                  }}
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    if (!window.confirm(`确认将版本 #${v.id} 设为当前版本？`)) return;
+                                    try {
+                                      await apiClient.post(`/reports/${reportId}/versions/${v.id}/activate`);
+                                      alert('版本切换成功，页面将刷新');
+                                      window.location.reload();
+                                    } catch (err) {
+                                      alert('切换失败：' + (err.response?.data?.error || err.message));
+                                    }
+                                  }}
+                                >
+                                  设为当前
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="meta">无历史版本</p>
+                      )}
+                    </div>
                   )}
                 </section>
               </>
