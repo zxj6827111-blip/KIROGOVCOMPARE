@@ -20,7 +20,15 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
         }
 
         // Get allowed region IDs for data scope filtering
-        const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
+        // PATCH: If user is admin, force allow all (bypass empty data_scope issue)
+        let allowedRegionIds: number[] | null = [];
+        if (req.user?.role === 'admin' || req.user?.username === 'System Admin') {
+            allowedRegionIds = null; // null means ALL access
+            console.log('[IssuesSummary] User is admin/System Admin, allowing all regions');
+        } else {
+            allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
+            console.log(`[IssuesSummary] User ${req.user?.username} allowed regions count: ${allowedRegionIds?.length}`);
+        }
 
         // Build recursive CTE to get all descendant regions
         let regionFilter = '';
@@ -36,28 +44,32 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
         SELECT id, name, level FROM region_tree
       `;
         } else {
-            // Get all regions at top level and their descendants
-            regionFilter = `
-        SELECT id, name, level FROM regions
-      `;
+            // Get all regions
+            regionFilter = `SELECT id, name, level FROM regions`;
         }
 
         // Get all regions in scope
         let regionsResult = await dbQuery(regionFilter);
+        console.log(`[IssuesSummary] Total regions found: ${regionsResult.length}`);
 
-        // Apply data scope filtering if user has restricted access
+        // Apply data scope filtering
         if (allowedRegionIds && allowedRegionIds.length > 0) {
-            regionsResult = regionsResult.filter((r: any) => allowedRegionIds.includes(r.id));
-        } else if (allowedRegionIds && allowedRegionIds.length === 0) {
-            // User has no access
+            regionsResult = regionsResult.filter((r: any) => allowedRegionIds!.includes(r.id));
+        } else if (allowedRegionIds && allowedRegionIds.length === 0 && req.user?.role !== 'admin') {
+            // User has no access and is not admin
+            console.log('[IssuesSummary] No allowed regions for user');
             return res.json({ data: { total_issues: 0, regions: [] } });
         }
+
+        console.log(`[IssuesSummary] Filtered regions count: ${regionsResult.length}`);
 
         if (regionsResult.length === 0) {
             return res.json({ data: { total_issues: 0, regions: [] } });
         }
 
         const regionIds = regionsResult.map((r: any) => r.id);
+        // Ensure regionIds is not empty to avoid SQL error
+        if (regionIds.length === 0) return res.json({ data: { total_issues: 0, regions: [] } });
         const regionMap = new Map(regionsResult.map((r: any) => [r.id, r]));
 
         // Get all reports for these regions with their active versions and issue counts
