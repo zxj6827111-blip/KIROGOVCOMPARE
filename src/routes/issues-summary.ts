@@ -87,7 +87,7 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
         COALESCE(
           (SELECT COUNT(*) FROM report_consistency_items rci 
            WHERE rci.report_version_id = rv.id 
-           AND rci.auto_status = 'FAIL'
+           AND (UPPER(rci.auto_status) = 'FAIL' OR UPPER(rci.status) = 'FAIL')
            AND (rci.human_status != 'dismissed' OR rci.human_status IS NULL)
           ), 0
         ) as issue_count
