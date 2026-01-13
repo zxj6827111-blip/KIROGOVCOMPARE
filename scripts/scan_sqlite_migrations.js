@@ -2,17 +2,24 @@ const fs = require('fs');
 const path = require('path');
 
 const MIGRATIONS_DIR = path.join(__dirname, '..', 'migrations', 'sqlite');
+const FORBIDDEN_KEYWORDS_PATH = path.join(__dirname, '..', 'migrations', 'sqlite_forbidden_keywords.json');
 
-const FORBIDDEN = [
-  { label: 'SERIAL', pattern: /\bSERIAL\b/i },
-  { label: 'BIGSERIAL', pattern: /\bBIGSERIAL\b/i },
-  { label: 'UUID', pattern: /\bUUID\b/i },
-  { label: 'JSONB', pattern: /\bJSONB\b/i },
-  { label: 'JSON', pattern: /\bJSON\b/i },
-  { label: 'TIMESTAMP', pattern: /\bTIMESTAMP\b/i },
-  { label: 'TIMESTAMPTZ', pattern: /\bTIMESTAMPTZ\b/i },
-  { label: 'CURRENT_TIMESTAMP', pattern: /\bCURRENT_TIMESTAMP\b/i },
-];
+function loadForbiddenKeywords() {
+  if (!fs.existsSync(FORBIDDEN_KEYWORDS_PATH)) {
+    throw new Error(`[scan] Forbidden keywords file not found: ${FORBIDDEN_KEYWORDS_PATH}`);
+  }
+  const raw = fs.readFileSync(FORBIDDEN_KEYWORDS_PATH, 'utf8');
+  const parsed = JSON.parse(raw);
+  if (!parsed || !Array.isArray(parsed.keywords)) {
+    throw new Error(`[scan] Invalid forbidden keywords format: ${FORBIDDEN_KEYWORDS_PATH}`);
+  }
+  return parsed.keywords.map((entry) => ({
+    label: entry.label,
+    pattern: new RegExp(entry.pattern, entry.flags || ''),
+  }));
+}
+
+const FORBIDDEN = loadForbiddenKeywords();
 
 function stripComments(sql) {
   let cleaned = sql.replace(/--.*$/gm, '');
