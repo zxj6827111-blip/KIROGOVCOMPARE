@@ -72,6 +72,10 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
         if (regionIds.length === 0) return res.json({ data: { total_issues: 0, regions: [] } });
         const regionMap = new Map(regionsResult.map((r: any) => [r.id, r]));
 
+        console.log(`[IssuesSummary] Region IDs count: ${regionIds.length}`);
+        console.log(`[IssuesSummary] Current dbType: ${dbType}`);
+        console.log(`[IssuesSummary] dbBool(true): ${dbBool(true)}`);
+
         // Get all reports for these regions with their active versions and issue counts
         const reportsQuery = `
       SELECT 
@@ -93,7 +97,12 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
       ORDER BY r.region_id, r.year DESC
     `;
 
+        // Log query preview (beware very long logs)
+        console.log(`[IssuesSummary] SQL Query Preview: ${reportsQuery.substring(0, 300)}... (truncated)`);
+        console.log(`[IssuesSummary] SQL WHERE region_id IN: (${regionIds.slice(0, 5).join(',')}, ...)`);
+
         const reportsResult = await dbQuery(reportsQuery);
+        console.log(`[IssuesSummary] Reports found in database: ${reportsResult.length}`);
 
         // Get detailed issue breakdown for reports with issues
         const reportsWithIssues = reportsResult.filter((r: any) => Number(r.issue_count) > 0);
