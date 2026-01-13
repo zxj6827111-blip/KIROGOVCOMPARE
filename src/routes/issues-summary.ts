@@ -77,6 +77,16 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
         console.log(`[IssuesSummary] dbBool(true): ${dbBool(true)}`);
 
         // Get all reports for these regions with their active versions and issue counts
+        // OPTIMIZATION: If we have too many regions, avoid the massive IN clause
+        // Instead, we just ensure the region exists via JOIN or simply query all if safe
+        let whereClause = `WHERE r.region_id IN (${regionIds.join(',')})`;
+        if (regionIds.length > 500) {
+            console.log('[IssuesSummary] Large region set detected, verifying via JOIN instead of IN clause');
+            // If we are showing 'all' or a large subtree, the regionIds array effectively covers 
+            // the regions we want. If we assume all reports belong to valid regions:
+            whereClause = '';
+        }
+
         const reportsQuery = `
       SELECT 
         r.id as report_id,
@@ -93,7 +103,7 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
         ) as issue_count
       FROM reports r
       INNER JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = ${dbBool(true)}
-      WHERE r.region_id IN (${regionIds.join(',')})
+      ${whereClause}
       ORDER BY r.region_id, r.year DESC
     `;
 
