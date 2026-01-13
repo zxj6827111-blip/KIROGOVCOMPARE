@@ -1,5 +1,5 @@
 import express from 'express';
-import { dbQuery, dbBool } from '../config/db-llm';
+import { dbQuery, dbBool, dbType } from '../config/db-llm';
 import { sqlValue } from '../config/sqlite';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
@@ -76,7 +76,7 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
           ), 0
         ) as issue_count
       FROM reports r
-      INNER JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = ${dbBool(true)}
+      INNER JOIN report_versions rv ON rv.report_id = r.id AND ${(dbType === 'postgres' ? `(rv.is_active = true OR rv.is_active::integer = 1)` : `rv.is_active = 1`)}
       WHERE r.region_id IN (${regionIds.join(',')})
       ORDER BY r.region_id, r.year DESC
     `;
