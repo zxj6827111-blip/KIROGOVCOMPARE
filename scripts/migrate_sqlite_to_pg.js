@@ -5,7 +5,12 @@ const fs = require('fs');
 require('dotenv').config();
 
 // 配置
-const SQLITE_DB_PATH = (process.env.SQLITE_DB_PATH || path.join(__dirname, '../data/gov-reports-llm.db')).trim();
+// 优先使用环境变量；否则默认使用当前项目实际的 SQLite 路径 data/llm_ingestion.db
+// 若旧版路径 data/gov-reports-llm.db 仍存在，则作为向后兼容的后备。
+const explicitSqlitePath = (process.env.SQLITE_DB_PATH || '').trim();
+const defaultSqlitePath = path.join(__dirname, '../data/llm_ingestion.db');
+const legacySqlitePath = path.join(__dirname, '../data/gov-reports-llm.db');
+const SQLITE_DB_PATH = explicitSqlitePath || (fs.existsSync(defaultSqlitePath) ? defaultSqlitePath : legacySqlitePath);
 const BATCH_SIZE = 100;
 
 // PostgreSQL 连接

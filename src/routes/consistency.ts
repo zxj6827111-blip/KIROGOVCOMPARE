@@ -5,6 +5,82 @@ import { consistencyCheckService } from '../services/ConsistencyCheckService';
 
 const router = express.Router();
 
+async function refreshComparisonStatusForReport(reportId: number): Promise<void> {
+  const comparisons = await dbQuery(`
+    SELECT id, year_a, year_b, left_report_id, right_report_id
+    FROM comparisons
+    WHERE left_report_id = ${sqlValue(reportId)} OR right_report_id = ${sqlValue(reportId)}
+  `);
+
+  if (!comparisons || comparisons.length === 0) {
+    return;
+  }
+
+  const reportIds = Array.from(
+    new Set(comparisons.flatMap((c: any) => [c.left_report_id, c.right_report_id]).filter(Boolean))
+  );
+
+  if (reportIds.length === 0) {
+    return;
+  }
+
+  const versionRows = await dbQuery(`
+    SELECT id, report_id
+    FROM report_versions
+    WHERE report_id IN (${reportIds.join(',')}) AND is_active = ${dbBool(true)}
+    ORDER BY id DESC
+  `);
+
+  const versionMap = new Map<string, number>();
+  for (const row of versionRows) {
+    const rid = String(row.report_id);
+    if (!versionMap.has(rid)) {
+      versionMap.set(rid, Number(row.id));
+    }
+  }
+
+  const versionIds = Array.from(versionMap.values());
+  const countsMap = new Map<number, number>();
+
+  if (versionIds.length > 0) {
+    const countRows = await dbQuery(`
+      SELECT report_version_id, COUNT(*) as cnt
+      FROM report_consistency_items
+      WHERE report_version_id IN (${versionIds.join(',')})
+        AND auto_status = 'FAIL'
+        AND human_status = 'pending'
+      GROUP BY report_version_id
+    `);
+
+    for (const row of countRows) {
+      countsMap.set(Number(row.report_version_id), Number(row.cnt));
+    }
+  }
+
+  for (const comparison of comparisons) {
+    const leftVid = versionMap.get(String(comparison.left_report_id));
+    const rightVid = versionMap.get(String(comparison.right_report_id));
+    const leftCount = leftVid ? (countsMap.get(leftVid) || 0) : 0;
+    const rightCount = rightVid ? (countsMap.get(rightVid) || 0) : 0;
+
+    const issueParts: string[] = [];
+    if (leftCount > 0) {
+      issueParts.push(`${comparison.year_a}年校验${leftCount}项`);
+    }
+    if (rightCount > 0) {
+      issueParts.push(`${comparison.year_b}年校验${rightCount}项`);
+    }
+
+    const checkStatus = issueParts.length > 0 ? `异常(${issueParts.join('|')})` : '正常';
+
+    await dbExecute(`
+      UPDATE comparisons
+      SET check_status = ${sqlValue(checkStatus)}
+      WHERE id = ${sqlValue(comparison.id)}
+    `);
+  }
+}
+
 /**
  * GET /reports/:id/checks - Get consistency checks for a report
  */
@@ -200,7 +276,31 @@ router.patch('/reports/:id/checks/items/:itemId', async (req, res) => {
              updated_at = ${dbNowExpression()}
          WHERE id = ${sqlValue(itemId)}
        `);
-       
+
+       try {
+         const itemRows = await dbQuery(`
+           SELECT report_version_id
+           FROM report_consistency_items
+           WHERE id = ${sqlValue(itemId)}
+           LIMIT 1
+         `);
+         const reportVersionId = itemRows?.[0]?.report_version_id;
+         if (reportVersionId) {
+           const reportRows = await dbQuery(`
+             SELECT report_id
+             FROM report_versions
+             WHERE id = ${sqlValue(reportVersionId)}
+             LIMIT 1
+           `);
+           const reportId = reportRows?.[0]?.report_id;
+           if (reportId) {
+             await refreshComparisonStatusForReport(Number(reportId));
+           }
+         }
+       } catch (refreshError) {
+         console.warn('[Consistency] Failed to refresh comparison status:', refreshError);
+       }
+
        res.json({ success: true });
    } catch (err: any) {
        console.error('Error updating check item:', err);
