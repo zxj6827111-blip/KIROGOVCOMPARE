@@ -12,6 +12,7 @@ const router = express.Router();
 router.post('/login', async (req: Request, res: Response) => {
   try {
     const { username, password } = req.body;
+    console.log('[Auth] Login attempt:', { username, body: req.body });
 
     if (!username || !password) {
       return res.status(400).json({ error: '请输入用户名和密码' });
@@ -38,13 +39,16 @@ router.post('/login', async (req: Request, res: Response) => {
     }
 
     if (!users || users.length === 0) {
+      console.log('[Auth] User not found:', username);
       return res.status(401).json({ error: '用户名或密码错误' });
     }
 
     const user = users[0];
 
     // Verify password
-    if (!verifyPassword(password, user.password_hash)) {
+    const isMatch = verifyPassword(password, user.password_hash);
+    console.log('[Auth] Password match result:', isMatch);
+    if (!isMatch) {
       return res.status(401).json({ error: '用户名或密码错误' });
     }
 
@@ -117,10 +121,10 @@ router.post('/reset-default-password', async (req: Request, res: Response) => {
 
     let users: any[] = [];
     if (dbType === 'postgres') {
-       const result = await pool.query('SELECT id, username, password_hash FROM admin_users WHERE username = $1', [username]);
-       users = result.rows;
+      const result = await pool.query('SELECT id, username, password_hash FROM admin_users WHERE username = $1', [username]);
+      users = result.rows;
     } else {
-       users = querySqlite(`
+      users = querySqlite(`
         SELECT id, username, password_hash
         FROM admin_users 
         WHERE username = ${sqlValue(username)}
@@ -145,11 +149,11 @@ router.post('/reset-default-password', async (req: Request, res: Response) => {
 
     // Hash the new password with PBKDF2
     const newHash = hashPassword(newPassword);
-    
+
     if (dbType === 'postgres') {
-       await pool.query('UPDATE admin_users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [newHash, user.id]);
+      await pool.query('UPDATE admin_users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [newHash, user.id]);
     } else {
-       querySqlite(`
+      querySqlite(`
         UPDATE admin_users 
         SET password_hash = ${sqlValue(newHash)}, updated_at = datetime('now') 
         WHERE id = ${sqlValue(user.id)}
@@ -175,10 +179,10 @@ router.get('/me', authMiddleware, async (req: AuthRequest, res: Response) => {
 
     let users: any[] = [];
     if (dbType === 'postgres') {
-       const result = await pool.query('SELECT id, username, display_name, created_at, last_login_at FROM admin_users WHERE id = $1', [req.user.id]);
-       users = result.rows;
+      const result = await pool.query('SELECT id, username, display_name, created_at, last_login_at FROM admin_users WHERE id = $1', [req.user.id]);
+      users = result.rows;
     } else {
-       users = querySqlite(`
+      users = querySqlite(`
         SELECT id, username, display_name, created_at, last_login_at 
         FROM admin_users 
         WHERE id = ${sqlValue(req.user.id)}
@@ -227,10 +231,10 @@ router.post('/change-password', authMiddleware, async (req: AuthRequest, res: Re
     // Get current password hash
     let users: any[] = [];
     if (dbType === 'postgres') {
-       const result = await pool.query('SELECT password_hash FROM admin_users WHERE id = $1', [req.user.id]);
-       users = result.rows;
+      const result = await pool.query('SELECT password_hash FROM admin_users WHERE id = $1', [req.user.id]);
+      users = result.rows;
     } else {
-       users = querySqlite(`
+      users = querySqlite(`
         SELECT password_hash 
         FROM admin_users 
         WHERE id = ${sqlValue(req.user.id)}
@@ -248,11 +252,11 @@ router.post('/change-password', authMiddleware, async (req: AuthRequest, res: Re
 
     // Hash new password and update
     const newHash = hashPassword(newPassword);
-    
+
     if (dbType === 'postgres') {
-       await pool.query('UPDATE admin_users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [newHash, req.user.id]);
+      await pool.query('UPDATE admin_users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [newHash, req.user.id]);
     } else {
-       querySqlite(`
+      querySqlite(`
         UPDATE admin_users 
         SET password_hash = ${sqlValue(newHash)}, updated_at = datetime('now') 
         WHERE id = ${sqlValue(req.user.id)}
