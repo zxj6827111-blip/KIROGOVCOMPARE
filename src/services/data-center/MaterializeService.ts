@@ -1,5 +1,5 @@
 
-import pool from '../../config/database-llm';
+import pool, { dbType } from '../../config/database-llm';
 
 export interface MaterializeResult {
     factsCreated: number;
@@ -13,10 +13,13 @@ export class MaterializeService {
      * Materialize a report version from JSON to relational tables.
      */
     async materializeVersion(versionId: number): Promise<MaterializeResult> {
-        const client = typeof (pool as any).connect === 'function' ? await (pool as any).connect() : pool;
-        const release = typeof (client as any).release === 'function' ? () => (client as any).release() : null;
+        const useTransaction = dbType === 'postgres' && typeof (pool as any).connect === 'function';
+        const client = useTransaction ? await (pool as any).connect() : pool;
+        const release = useTransaction && typeof (client as any).release === 'function' ? () => (client as any).release() : null;
         try {
-            await client.query('BEGIN');
+            if (useTransaction) {
+                await client.query('BEGIN');
+            }
 
             // 1. Get version and report info
             const versionResult = await client.query(
@@ -67,10 +70,14 @@ export class MaterializeService {
                 }
             }
 
-            await client.query('COMMIT');
+            if (useTransaction) {
+                await client.query('COMMIT');
+            }
             return { factsCreated: factsCount, cellsCreated: cellsCount, success: true };
         } catch (error: any) {
-            await client.query('ROLLBACK');
+            if (useTransaction) {
+                await client.query('ROLLBACK');
+            }
             console.error(`[Materialize] Error materializing version ${versionId}:`, error);
             return { factsCreated: 0, cellsCreated: 0, success: false, error: error.message };
         } finally {
