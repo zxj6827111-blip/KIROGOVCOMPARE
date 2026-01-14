@@ -1,5 +1,5 @@
 import express, { Request, Response } from 'express';
-import { dbBool, dbQuery, ensureDbMigrations, parseDbJson, dbNowExpression } from '../config/db-llm';
+import { dbQuery, ensureDbMigrations, parseDbJson, dbNowExpression } from '../config/db-llm';
 import { sqlValue } from '../config/sqlite';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import pdfExportService from '../services/PdfExportService';
@@ -283,8 +283,18 @@ router.post('/create', authMiddleware, async (req: AuthRequest, res: Response) =
     let similarity = 0;
     let checkStatus: string | null = null;
     try {
-      const leftRes = await dbQuery(`SELECT parsed_json FROM report_versions WHERE report_id=${sqlValue(left_report_id)} AND is_active=${dbBool(true)}`);
-      const rightRes = await dbQuery(`SELECT parsed_json FROM report_versions WHERE report_id=${sqlValue(right_report_id)} AND is_active=${dbBool(true)}`);
+      const leftRes = await dbQuery(`
+        SELECT rv.parsed_json
+        FROM reports r
+        JOIN report_versions rv ON rv.id = r.active_version_id
+        WHERE r.id = ${sqlValue(left_report_id)}
+      `);
+      const rightRes = await dbQuery(`
+        SELECT rv.parsed_json
+        FROM reports r
+        JOIN report_versions rv ON rv.id = r.active_version_id
+        WHERE r.id = ${sqlValue(right_report_id)}
+      `);
 
       const leftJson = parseDbJson(leftRes?.[0]?.parsed_json) || { sections: [] };
       const rightJson = parseDbJson(rightRes?.[0]?.parsed_json) || { sections: [] };
@@ -294,8 +304,8 @@ router.post('/create', authMiddleware, async (req: AuthRequest, res: Response) =
       checkStatus = metrics.checkStatus;
 
       // Additionally, check for individual report consistency issues
-      const leftVersionId = (await dbQuery(`SELECT id FROM report_versions WHERE report_id=${sqlValue(left_report_id)} AND is_active=${dbBool(true)}`))?.[0]?.id;
-      const rightVersionId = (await dbQuery(`SELECT id FROM report_versions WHERE report_id=${sqlValue(right_report_id)} AND is_active=${dbBool(true)}`))?.[0]?.id;
+      const leftVersionId = (await dbQuery(`SELECT active_version_id as id FROM reports WHERE id=${sqlValue(left_report_id)}`))?.[0]?.id;
+      const rightVersionId = (await dbQuery(`SELECT active_version_id as id FROM reports WHERE id=${sqlValue(right_report_id)}`))?.[0]?.id;
 
       const leftIssues = leftVersionId ? (await dbQuery(`
         SELECT COUNT(*) as cnt FROM report_consistency_items 
@@ -412,17 +422,17 @@ router.get('/:id/result', authMiddleware, async (req: AuthRequest, res: Response
     // Get left report parsed content
     const leftVersions = await dbQuery(`
       SELECT rv.parsed_json, rp.year
-      FROM report_versions rv
-      JOIN reports rp ON rv.report_id = rp.id
-      WHERE rv.report_id = ${sqlValue(comparison.left_report_id)} AND rv.is_active = ${dbBool(true)}
+      FROM reports rp
+      JOIN report_versions rv ON rv.id = rp.active_version_id
+      WHERE rp.id = ${sqlValue(comparison.left_report_id)}
     `);
 
     // Get right report parsed content
     const rightVersions = await dbQuery(`
       SELECT rv.parsed_json, rp.year
-      FROM report_versions rv
-      JOIN reports rp ON rv.report_id = rp.id
-      WHERE rv.report_id = ${sqlValue(comparison.right_report_id)} AND rv.is_active = ${dbBool(true)}
+      FROM reports rp
+      JOIN report_versions rv ON rv.id = rp.active_version_id
+      WHERE rp.id = ${sqlValue(comparison.right_report_id)}
     `);
 
     // Get diff result if available
@@ -554,18 +564,18 @@ router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Res
     // Get left report content
     const leftVersions = await dbQuery(`
       SELECT rv.parsed_json, rp.year
-      FROM report_versions rv
-      JOIN reports rp ON rv.report_id = rp.id
-      WHERE rv.report_id = ${sqlValue(comparison.left_report_id)} AND rv.is_active = ${dbBool(true)}
+      FROM reports rp
+      JOIN report_versions rv ON rv.id = rp.active_version_id
+      WHERE rp.id = ${sqlValue(comparison.left_report_id)}
     `);
     const leftContent = parseDbJson(leftVersions?.[0]?.parsed_json) || { sections: [] };
 
     // Get right report content
     const rightVersions = await dbQuery(`
       SELECT rv.parsed_json, rp.year
-      FROM report_versions rv
-      JOIN reports rp ON rv.report_id = rp.id
-      WHERE rv.report_id = ${sqlValue(comparison.right_report_id)} AND rv.is_active = ${dbBool(true)}
+      FROM reports rp
+      JOIN report_versions rv ON rv.id = rp.active_version_id
+      WHERE rp.id = ${sqlValue(comparison.right_report_id)}
     `);
     const rightContent = parseDbJson(rightVersions?.[0]?.parsed_json) || { sections: [] };
 
@@ -719,6 +729,3 @@ router.get('/:id/exports', authMiddleware, async (req: AuthRequest, res: Respons
 });
 
 export default router;
-
-
-

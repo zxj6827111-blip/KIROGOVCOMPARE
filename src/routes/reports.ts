@@ -76,7 +76,7 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
     const unitName = typeof unitNameRaw === 'string' && unitNameRaw.trim() ? unitNameRaw.trim() : null;
     const file = req.file;
     const model = req.body.model;
-    const batchId = req.body.batch_id; // Extract batch_id from request
+    const batchUuid = req.body.batch_uuid ?? req.body.batch_id; // Extract batch_uuid from request (fallback to legacy batch_id)
 
     if (!req.user) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -142,7 +142,11 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
       if (existingReport) {
         // Check active version
         const activeVersion = (await dbQuery(
-          `SELECT parsed_json FROM report_versions WHERE report_id = ${existingReport.id} AND is_active = ${dbBool(true)} LIMIT 1`
+          `SELECT rv.parsed_json
+           FROM reports r
+           JOIN report_versions rv ON rv.id = r.active_version_id
+           WHERE r.id = ${existingReport.id}
+           LIMIT 1`
         ))[0];
 
         let hasContent = false;
@@ -167,7 +171,7 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
       mimeType: file.mimetype,
       size: file.size,
       model,
-      batchId, // Pass batch_id to service
+      batchUuid, // Pass batch_uuid to service
     });
 
     // FIX: Always return 201 for successful upload, even if version is reused
@@ -213,6 +217,7 @@ router.post('/reports/text', authMiddleware, requirePermission('upload_reports')
     const year = Number(req.body?.year);
     const unitNameRaw = req.body?.unit_name ?? req.body?.unitName;
     const rawTextRaw = req.body?.raw_text ?? req.body?.rawText;
+    const batchUuid = req.body?.batch_uuid ?? req.body?.batch_id;
 
     if (!regionId || Number.isNaN(regionId) || !Number.isInteger(regionId)) {
       return res.status(400).json({ error: 'region_id 无效' });
@@ -244,6 +249,7 @@ router.post('/reports/text', authMiddleware, requirePermission('upload_reports')
       unitName,
       rawText,
       model: req.body.model,
+      batchUuid,
     });
 
     const statusCode = result.reusedVersion ? 409 : 201;
@@ -310,10 +316,11 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
 
     // 1. Find the current active version with all fields for copying
     const activeVersions = await dbQuery(
-      `SELECT * FROM report_versions 
-       WHERE report_id = ${dbType === 'postgres' ? '$1' : '?'} 
-       AND (is_active = ${dbBool(true)} OR is_active = 1)
-       ORDER BY created_at DESC LIMIT 1`,
+      `SELECT rv.*
+       FROM reports r
+       JOIN report_versions rv ON rv.id = r.active_version_id
+       WHERE r.id = ${dbType === 'postgres' ? '$1' : '?'}
+       LIMIT 1`,
       [reportId]
     );
 
@@ -347,16 +354,22 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
       newVersionId = existingVersions[0].id;
       reused = true;
 
-      // Deactivate all versions, then activate the existing one
       await dbQuery(
-        `UPDATE report_versions 
-         SET is_active = ${dbBool(false)}, updated_at = ${dbNowExpression()} 
-         WHERE report_id = ${dbType === 'postgres' ? '$1' : '?'}`,
-        [reportId]
+        `UPDATE reports
+         SET active_version_id = ${dbType === 'postgres' ? '$1' : '?'},
+             updated_at = ${dbNowExpression()}
+         WHERE id = ${dbType === 'postgres' ? '$2' : '?'}`,
+        [newVersionId, reportId]
       );
       await dbQuery(
-        `UPDATE report_versions 
-         SET is_active = ${dbBool(true)}, updated_at = ${dbNowExpression()} 
+        `UPDATE report_versions
+         SET is_active = ${dbBool(false)}, updated_at = ${dbNowExpression()}
+         WHERE report_id = ${dbType === 'postgres' ? '$1' : '?'} AND id != ${dbType === 'postgres' ? '$2' : '?'}`,
+        [reportId, newVersionId]
+      );
+      await dbQuery(
+        `UPDATE report_versions
+         SET is_active = ${dbBool(true)}, updated_at = ${dbNowExpression()}
          WHERE id = ${dbType === 'postgres' ? '$1' : '?'}`,
         [newVersionId]
       );
@@ -364,14 +377,6 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
       console.log(`[ParsedData] Reused existing version ${newVersionId} for report ${reportId}`);
     } else {
       // Create new version
-      // Deactivate all current versions
-      await dbQuery(
-        `UPDATE report_versions 
-         SET is_active = ${dbBool(false)}, updated_at = ${dbNowExpression()} 
-         WHERE report_id = ${dbType === 'postgres' ? '$1' : '?'}`,
-        [reportId]
-      );
-
       // Build file name for the new version
       const baseFileName = active.file_name || 'report';
       const newFileName = baseFileName.includes('(手工修订)')
@@ -383,8 +388,9 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
         const insertResult = await dbQuery(
           `INSERT INTO report_versions 
            (report_id, file_name, file_hash, file_size, storage_path, text_path, raw_text,
-            provider, model, prompt_version, schema_version, parsed_json, is_active, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
+            provider, model, prompt_version, schema_version, parsed_json, is_active, created_at, updated_at,
+            version_type, parent_version_id, state, ingestion_batch_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW(), 'manual_correct', $14, 'manual_corrected', $15)
            RETURNING id`,
           [
             reportId,
@@ -399,7 +405,9 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
             'manual_edit',
             active.schema_version || 'v1',
             jsonStr,
-            true
+            true,
+            oldVersionId,
+            active.ingestion_batch_id ?? null
           ]
         );
         newVersionId = insertResult[0].id;
@@ -408,8 +416,9 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
         await dbQuery(
           `INSERT INTO report_versions 
            (report_id, file_name, file_hash, file_size, storage_path, text_path, raw_text,
-            provider, model, prompt_version, schema_version, parsed_json, is_active, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+            provider, model, prompt_version, schema_version, parsed_json, is_active, created_at, updated_at,
+            version_type, parent_version_id, state, ingestion_batch_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), 'manual_correct', ?, 'manual_corrected', ?)`,
           [
             reportId,
             newFileName,
@@ -423,15 +432,43 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
             'manual_edit',
             active.schema_version || 'v1',
             jsonStr,
-            1
+            1,
+            oldVersionId,
+            active.ingestion_batch_id ?? null
           ]
         );
-        const lastIdResult = await dbQuery('SELECT last_insert_rowid() as id', []);
+        const lastIdResult = await dbQuery(
+          `SELECT id FROM report_versions WHERE report_id = ? AND file_hash = ? ORDER BY id DESC LIMIT 1`,
+          [reportId, newFileHash]
+        );
         newVersionId = lastIdResult[0]?.id;
+        if (!newVersionId) {
+          throw new Error('sqlite_version_insert_failed');
+        }
       }
 
       console.log(`[ParsedData] Created new version ${newVersionId} for report ${reportId} (old: ${oldVersionId})`);
     }
+
+    await dbQuery(
+      `UPDATE reports
+       SET active_version_id = ${dbType === 'postgres' ? '$1' : '?'},
+           updated_at = ${dbNowExpression()}
+       WHERE id = ${dbType === 'postgres' ? '$2' : '?'}`,
+      [newVersionId, reportId]
+    );
+    await dbQuery(
+      `UPDATE report_versions
+       SET is_active = ${dbBool(false)}, updated_at = ${dbNowExpression()}
+       WHERE report_id = ${dbType === 'postgres' ? '$1' : '?'} AND id != ${dbType === 'postgres' ? '$2' : '?'}`,
+      [reportId, newVersionId]
+    );
+    await dbQuery(
+      `UPDATE report_versions
+       SET is_active = ${dbBool(true)}, updated_at = ${dbNowExpression()}
+       WHERE id = ${dbType === 'postgres' ? '$1' : '?'}`,
+      [newVersionId]
+    );
 
     return res.json({
       success: true,
@@ -524,7 +561,7 @@ router.get('/reports', authMiddleware, async (req: AuthRequest, res) => {
         (SELECT j.error_code FROM jobs j WHERE j.report_id = r.id ORDER BY j.id DESC LIMIT 1) AS job_error_code,
         (SELECT j.error_message FROM jobs j WHERE j.report_id = r.id ORDER BY j.id DESC LIMIT 1) AS job_error_message
       FROM reports r
-      LEFT JOIN report_versions rv ON rv.report_id = r.id AND rv.is_active = ${dbBool(true)}
+      LEFT JOIN report_versions rv ON rv.id = r.active_version_id
       ${whereClause}
       ORDER BY r.id DESC;
     `));
@@ -600,12 +637,10 @@ router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
     }
 
     // Get active version_ids for these reports + check parsed_json
-    // Try using integer 1 for is_active since the column might be INTEGER even in Postgres
-    const isActiveCondition = dbType === 'postgres' ? `(rv.is_active = true OR rv.is_active::integer = 1)` : `rv.is_active = 1`;
     const versionQuery = `
       SELECT r.id as report_id, rv.id as version_id, rv.parsed_json
       FROM reports r
-      JOIN report_versions rv ON rv.report_id = r.id AND ${isActiveCondition}
+      JOIN report_versions rv ON rv.id = r.active_version_id
       WHERE r.id IN (${reportIds.join(',')})
     `;
     console.log('[BatchCheckStatus] Query:', versionQuery.slice(0, 200));
@@ -717,9 +752,6 @@ router.get('/reports/:id', authMiddleware, async (req, res) => {
 
     ensureDbMigrations();
 
-    // Use flexible is_active condition for Postgres compatibility
-    const isActiveCondition = dbType === 'postgres' ? `(rv.is_active = true OR rv.is_active::integer = 1)` : `rv.is_active = 1`;
-
     const report = (await dbQuery(`
       SELECT
         r.id AS report_id,
@@ -739,7 +771,7 @@ router.get('/reports/:id', authMiddleware, async (req, res) => {
         rv.created_at
       FROM reports r
       LEFT JOIN regions reg ON reg.id = r.region_id
-      LEFT JOIN report_versions rv ON rv.report_id = r.id AND ${isActiveCondition}
+      LEFT JOIN report_versions rv ON rv.id = r.active_version_id
       WHERE r.id = ${sqlValue(reportId)}
       LIMIT 1;
     `))[0];
@@ -835,9 +867,15 @@ router.get('/reports/:id/versions', authMiddleware, async (req: AuthRequest, res
       }
     }
 
+    const activeRow = await dbQuery(
+      `SELECT active_version_id FROM reports WHERE id = ${dbType === 'postgres' ? '$1' : '?'}`,
+      [reportId]
+    );
+    const activeVersionId = activeRow[0]?.active_version_id ?? null;
+
     // Get all versions for this report
     const versions = await dbQuery(
-      `SELECT id, file_name, file_hash, prompt_version, is_active, created_at, updated_at
+      `SELECT id, file_name, file_hash, prompt_version, created_at, updated_at
        FROM report_versions
        WHERE report_id = ${dbType === 'postgres' ? '$1' : '?'}
        ORDER BY created_at DESC`,
@@ -850,7 +888,7 @@ router.get('/reports/:id/versions', authMiddleware, async (req: AuthRequest, res
         file_name: v.file_name,
         file_hash: v.file_hash,
         prompt_version: v.prompt_version,
-        is_active: v.is_active === true || v.is_active === 1,
+        is_active: v.id === activeVersionId,
         created_at: v.created_at,
         updated_at: v.updated_at
       }))
@@ -901,18 +939,24 @@ router.post('/reports/:id/versions/:versionId/activate', authMiddleware, require
       return res.status(404).json({ error: 'Version not found for this report' });
     }
 
-    // Deactivate all versions for this report
     await dbQuery(
-      `UPDATE report_versions 
-       SET is_active = ${dbBool(false)}, updated_at = ${dbNowExpression()} 
-       WHERE report_id = ${dbType === 'postgres' ? '$1' : '?'}`,
-      [reportId]
+      `UPDATE reports
+       SET active_version_id = ${dbType === 'postgres' ? '$1' : '?'},
+           updated_at = ${dbNowExpression()}
+       WHERE id = ${dbType === 'postgres' ? '$2' : '?'}`,
+      [versionId, reportId]
     );
 
-    // Activate the specified version
     await dbQuery(
-      `UPDATE report_versions 
-       SET is_active = ${dbBool(true)}, updated_at = ${dbNowExpression()} 
+      `UPDATE report_versions
+       SET is_active = ${dbBool(false)}, updated_at = ${dbNowExpression()}
+       WHERE report_id = ${dbType === 'postgres' ? '$1' : '?'} AND id != ${dbType === 'postgres' ? '$2' : '?'}`,
+      [reportId, versionId]
+    );
+
+    await dbQuery(
+      `UPDATE report_versions
+       SET is_active = ${dbBool(true)}, updated_at = ${dbNowExpression()}
        WHERE id = ${dbType === 'postgres' ? '$1' : '?'}`,
       [versionId]
     );
@@ -948,7 +992,7 @@ router.post('/reports/:id/parse', authMiddleware, async (req, res) => {
     }
 
     const version = (await dbQuery(
-      `SELECT id FROM report_versions WHERE report_id = ${sqlValue(reportId)} AND is_active = ${dbBool(true)} ORDER BY id DESC LIMIT 1;`
+      `SELECT active_version_id as id FROM reports WHERE id = ${sqlValue(reportId)} LIMIT 1;`
     ))[0] as { id?: number } | undefined;
 
     if (!version?.id) {
@@ -963,9 +1007,13 @@ router.post('/reports/:id/parse', authMiddleware, async (req, res) => {
       return res.json({ job_id: existingJob.id, reused: true });
     }
 
+    const ingestionBatch = (await dbQuery(
+      `SELECT ingestion_batch_id FROM report_versions WHERE id = ${sqlValue(version.id)} LIMIT 1;`
+    ))[0] as { ingestion_batch_id?: number | null } | undefined;
+
     const newJob = (await dbQuery(
-      `INSERT INTO jobs (report_id, version_id, kind, status, progress)
-       VALUES (${sqlValue(reportId)}, ${sqlValue(version.id)}, 'parse', 'queued', 0)
+      `INSERT INTO jobs (report_id, version_id, kind, status, progress, ingestion_batch_id)
+       VALUES (${sqlValue(reportId)}, ${sqlValue(version.id)}, 'parse', 'queued', 0, ${sqlValue(ingestionBatch?.ingestion_batch_id ?? null)})
        RETURNING id;`
     ))[0] as { id?: number } | undefined;
 
@@ -1078,4 +1126,3 @@ router.delete('/reports/:id', authMiddleware, async (req, res) => {
 });
 
 export default router;
-

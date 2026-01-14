@@ -1,5 +1,5 @@
 import express from 'express';
-import { dbQuery, dbExecute, dbNowExpression, dbBool } from '../config/db-llm';
+import { dbQuery, dbExecute, dbNowExpression } from '../config/db-llm';
 import { sqlValue } from '../config/sqlite';
 import { consistencyCheckService } from '../services/ConsistencyCheckService';
 
@@ -25,17 +25,18 @@ async function refreshComparisonStatusForReport(reportId: number): Promise<void>
   }
 
   const versionRows = await dbQuery(`
-    SELECT id, report_id
-    FROM report_versions
-    WHERE report_id IN (${reportIds.join(',')}) AND is_active = ${dbBool(true)}
-    ORDER BY id DESC
+    SELECT r.id as report_id, rv.id as version_id
+    FROM reports r
+    JOIN report_versions rv ON rv.id = r.active_version_id
+    WHERE r.id IN (${reportIds.join(',')})
+    ORDER BY rv.id DESC
   `);
 
   const versionMap = new Map<string, number>();
   for (const row of versionRows) {
     const rid = String(row.report_id);
     if (!versionMap.has(rid)) {
-      versionMap.set(rid, Number(row.id));
+      versionMap.set(rid, Number(row.version_id));
     }
   }
 
@@ -96,9 +97,8 @@ router.get('/reports/:id/checks', async (req, res) => {
     const reportRes = await dbQuery(`
       SELECT rv.id as version_id, rv.parsed_json
       FROM reports r
-      JOIN report_versions rv ON r.id = rv.report_id
-      WHERE r.id = ${sqlValue(reportId)} AND rv.is_active = ${dbBool(true)}
-      ORDER BY rv.created_at DESC
+      JOIN report_versions rv ON rv.id = r.active_version_id
+      WHERE r.id = ${sqlValue(reportId)}
       LIMIT 1
     `);
 
@@ -229,8 +229,8 @@ router.post('/reports/:id/checks/run', async (req, res) => {
      const reportRes = await dbQuery(`
         SELECT rv.id as version_id, rv.parsed_json
         FROM reports r
-        JOIN report_versions rv ON r.id = rv.report_id
-        WHERE r.id = ${sqlValue(reportId)} AND rv.is_active = ${dbBool(true)}
+        JOIN report_versions rv ON rv.id = r.active_version_id
+        WHERE r.id = ${sqlValue(reportId)}
         LIMIT 1
      `);
      

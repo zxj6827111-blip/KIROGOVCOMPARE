@@ -62,11 +62,17 @@ describe('Regression smoke (login/tasks/notifications/export)', () => {
     querySqlite(`
       INSERT OR IGNORE INTO report_versions (
         id, report_id, file_name, file_hash, file_size, storage_path,
-        provider, model, prompt_version, parsed_json, schema_version, is_active
+        provider, model, prompt_version, parsed_json, schema_version, is_active, version_type, state
       )
       VALUES
-        (1, 1, 'report-2022.pdf', 'hash-2022', 123, 'storage/report-2022.pdf', 'manual', 'n/a', 'v1', '{}', 'v1', 1),
-        (2, 2, 'report-2023.pdf', 'hash-2023', 123, 'storage/report-2023.pdf', 'manual', 'n/a', 'v1', '{}', 'v1', 1);
+        (1, 1, 'report-2022.pdf', 'hash-2022', 123, 'storage/report-2022.pdf', 'manual', 'n/a', 'v1', '{}', 'v1', 1, 'original_parse', 'parsed'),
+        (2, 2, 'report-2023.pdf', 'hash-2023', 123, 'storage/report-2023.pdf', 'manual', 'n/a', 'v1', '{}', 'v1', 1, 'original_parse', 'parsed');
+    `);
+
+    querySqlite(`
+      UPDATE reports
+      SET active_version_id = CASE id WHEN 1 THEN 1 WHEN 2 THEN 2 END
+      WHERE id IN (1, 2);
     `);
 
     querySqlite(`

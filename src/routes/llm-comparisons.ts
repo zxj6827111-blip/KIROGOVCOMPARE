@@ -1,6 +1,6 @@
 import express from 'express';
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
-import { dbBool, dbQuery, ensureDbMigrations, dbNowExpression } from '../config/db-llm';
+import { dbQuery, ensureDbMigrations, dbNowExpression } from '../config/db-llm';
 import { sqlValue } from '../config/sqlite';
 import { authMiddleware } from '../middleware/auth';
 
@@ -59,9 +59,10 @@ async function buildLatestJob(comparisonId: number): Promise<any> {
 
 async function fetchParsedVersion(reportId: number): Promise<ParsedVersion | undefined> {
   const version = (await dbQuery(`
-    SELECT id as version_id, parsed_json
-    FROM report_versions
-    WHERE report_id = ${sqlValue(reportId)} AND is_active = ${dbBool(true)}
+    SELECT rv.id as version_id, rv.parsed_json
+    FROM reports r
+    JOIN report_versions rv ON rv.id = r.active_version_id
+    WHERE r.id = ${sqlValue(reportId)}
     LIMIT 1;
   `))[0];
 
@@ -676,4 +677,3 @@ router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
 });
 
 export default router;
-

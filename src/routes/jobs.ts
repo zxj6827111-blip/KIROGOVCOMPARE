@@ -450,7 +450,7 @@ router.post('/:version_id/retry', requirePermission('manage_jobs'), async (req, 
                 INSERT INTO jobs (
                     report_id, version_id, kind, status, 
                     progress, step_code, step_name, 
-                    created_at, retry_count, max_retries
+                    created_at, retry_count, max_retries, ingestion_batch_id
                 ) VALUES (
                     ${sqlValue(jobDetails.report_id)},
                     ${sqlValue(jobDetails.version_id)},
@@ -461,7 +461,8 @@ router.post('/:version_id/retry', requirePermission('manage_jobs'), async (req, 
                     '等待处理',
                     ${dbNowExpression()},
                     0,
-                    1
+                    1,
+                    ${sqlValue(jobDetails.ingestion_batch_id ?? null)}
                 )
             `);
             retryCount++;
@@ -705,4 +706,3 @@ router.delete('/:version_id', requirePermission('manage_jobs'), async (req, res)
 });
 
 export default router;
-

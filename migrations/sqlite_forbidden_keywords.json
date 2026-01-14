@@ -1,0 +1,13 @@
+{
+  "keywords": [
+    { "label": "SERIAL", "pattern": "\\bSERIAL\\b", "flags": "i" },
+    { "label": "BIGSERIAL", "pattern": "\\bBIGSERIAL\\b", "flags": "i" },
+    { "label": "UUID", "pattern": "\\bUUID\\b", "flags": "i" },
+    { "label": "JSONB", "pattern": "\\bJSONB\\b", "flags": "i" },
+    { "label": "JSON", "pattern": "\\bJSON\\b", "flags": "i" },
+    { "label": "TIMESTAMP", "pattern": "\\bTIMESTAMP\\b", "flags": "i" },
+    { "label": "TIMESTAMPTZ", "pattern": "\\bTIMESTAMPTZ\\b", "flags": "i" },
+    { "label": "CURRENT_TIMESTAMP", "pattern": "\\bCURRENT_TIMESTAMP\\b", "flags": "i" },
+    { "label": "NOW()", "pattern": "\\bNOW\\s*\\(\\s*\\)", "flags": "i" }
+  ]
+}

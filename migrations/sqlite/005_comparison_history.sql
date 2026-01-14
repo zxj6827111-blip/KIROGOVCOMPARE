@@ -9,11 +9,11 @@
 CREATE TABLE IF NOT EXISTS comparison_exports (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   comparison_id INTEGER NOT NULL,
-  format VARCHAR(20) NOT NULL CHECK (format IN ('pdf', 'docx', 'json')),
+  format VARCHAR(20) NOT NULL CHECK (format IN ('pdf', 'docx')),
   file_path TEXT NOT NULL,
   file_size INTEGER,
   watermark_text VARCHAR(255),
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (comparison_id) REFERENCES comparisons(id) ON DELETE CASCADE
 );
 

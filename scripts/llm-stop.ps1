@@ -9,21 +9,35 @@ $pidFile = Join-Path $root ".llm-$Port.pid"
 if (-not (Test-Path $pidFile)) {
   Write-Host "PID file not found: $pidFile" -ForegroundColor Yellow
   Write-Host "Tip: find port owner via: npm run ports:llm" -ForegroundColor Yellow
-  exit 1
+  exit 0
 }
 
 $procId = Get-Content $pidFile | Select-Object -First 1
 if (-not $procId) {
   Write-Host "Empty PID file: $pidFile" -ForegroundColor Yellow
-  exit 1
+  Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+  exit 0
 }
 
 Write-Host "Stopping PID $procId (port $Port)..."
 try {
-  taskkill /PID $procId /F | Out-Null
-  Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
-  Write-Host "Stopped." -ForegroundColor Green
-} catch {
-  Write-Host "Failed to stop PID $procId. You may need to run PowerShell as Administrator." -ForegroundColor Red
-  throw
+  $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
+  if ($proc) {
+    taskkill /PID $procId /F 2>&1 | Out-Null
+    Start-Sleep -Milliseconds 200
+    $stillRunning = Get-Process -Id $procId -ErrorAction SilentlyContinue
+    if ($stillRunning) {
+      Write-Host "Error: PID $procId is still running." -ForegroundColor Red
+      exit 1
+    }
+    Write-Host "Stopped." -ForegroundColor Green
+  }
+  else {
+    Write-Host "Process $procId not found (already stopped)." -ForegroundColor Yellow
+  }
 }
+catch {
+  Write-Host "Warning: Could not stop PID $procId - may already be stopped." -ForegroundColor Yellow
+}
+Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+
