@@ -437,8 +437,14 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
             active.ingestion_batch_id ?? null
           ]
         );
-        const lastIdResult = await dbQuery('SELECT last_insert_rowid() as id', []);
+        const lastIdResult = await dbQuery(
+          `SELECT id FROM report_versions WHERE report_id = ? AND file_hash = ? ORDER BY id DESC LIMIT 1`,
+          [reportId, newFileHash]
+        );
         newVersionId = lastIdResult[0]?.id;
+        if (!newVersionId) {
+          throw new Error('sqlite_version_insert_failed');
+        }
       }
 
       console.log(`[ParsedData] Created new version ${newVersionId} for report ${reportId} (old: ${oldVersionId})`);

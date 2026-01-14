@@ -13,12 +13,8 @@ const TABLE_MAP: Record<string, string> = {
   legal_proceeding: 'fact_legal_proceeding',
 };
 
-function getTableName(tableName: string): string {
-  const mapped = TABLE_MAP[tableName];
-  if (!mapped) {
-    throw new Error(`Invalid tableName: ${tableName}`);
-  }
-  return mapped;
+function getTableName(tableName: string): string | null {
+  return TABLE_MAP[tableName] ?? null;
 }
 
 router.get('/v2/batches', async (_req, res) => {
@@ -130,6 +126,9 @@ router.get('/v2/reports/:reportId/facts/:tableName', async (req, res) => {
     }
 
     const tableName = getTableName(req.params.tableName);
+    if (!tableName) {
+      return res.status(400).json({ error: 'Invalid tableName' });
+    }
 
     const report = (await dbQuery(
       `SELECT active_version_id FROM reports WHERE id = ${dbType === 'postgres' ? '$1' : '?'} LIMIT 1`,
