@@ -362,6 +362,134 @@ ALTER TABLE report_consistency_items
 ALTER TABLE regions ADD COLUMN IF NOT EXISTS sort_order INTEGER;
 ALTER TABLE comparisons ADD COLUMN IF NOT EXISTS similarity INTEGER;
 ALTER TABLE comparisons ADD COLUMN IF NOT EXISTS check_status VARCHAR(50);
+
+-- Data Center Phase 1 tables (Postgres)
+CREATE TABLE IF NOT EXISTS metric_dictionary (
+  id BIGSERIAL PRIMARY KEY,
+  metric_key VARCHAR(255) NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  display_name VARCHAR(255) NOT NULL,
+  description TEXT,
+  unit VARCHAR(50),
+  aggregatable BOOLEAN DEFAULT TRUE,
+  formula_sql_or_expr TEXT,
+  source_table VARCHAR(32) NOT NULL CHECK (source_table IN ('facts', 'derived')),
+  source_column VARCHAR(255),
+  dims_supported TEXT,
+  drilldown_source VARCHAR(32) DEFAULT NULL CHECK (drilldown_source IS NULL OR drilldown_source = 'cells'),
+  caveats TEXT,
+  interpretation_template TEXT,
+  effective_from TIMESTAMPTZ,
+  deprecated_at TIMESTAMPTZ,
+  superseded_by VARCHAR(255),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(metric_key, version)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_metric_dict_active_unique
+  ON metric_dictionary(metric_key)
+  WHERE deprecated_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS cells (
+  id BIGSERIAL PRIMARY KEY,
+  version_id BIGINT NOT NULL REFERENCES report_versions(id),
+  table_id TEXT NOT NULL,
+  row_key TEXT NOT NULL,
+  col_key TEXT NOT NULL,
+  cell_ref TEXT NOT NULL,
+  value_raw TEXT,
+  value_num NUMERIC,
+  value_semantic TEXT NOT NULL DEFAULT 'TEXT' CHECK (value_semantic IN ('ZERO', 'EMPTY', 'NA', 'TEXT', 'NUMERIC')),
+  normalized_value TEXT,
+  page_number INTEGER,
+  bbox_json TEXT,
+  confidence REAL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(version_id, cell_ref)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cells_version ON cells(version_id);
+CREATE INDEX IF NOT EXISTS idx_cells_table ON cells(version_id, table_id);
+
+CREATE TABLE IF NOT EXISTS fact_active_disclosure (
+  id BIGSERIAL PRIMARY KEY,
+  report_id BIGINT NOT NULL REFERENCES reports(id),
+  version_id BIGINT NOT NULL REFERENCES report_versions(id),
+  category TEXT NOT NULL,
+  made_count INTEGER,
+  repealed_count INTEGER,
+  valid_count INTEGER,
+  processed_count INTEGER,
+  amount NUMERIC,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_fact_active_disclosure_version ON fact_active_disclosure(version_id);
+
+CREATE TABLE IF NOT EXISTS fact_application (
+  id BIGSERIAL PRIMARY KEY,
+  report_id BIGINT NOT NULL REFERENCES reports(id),
+  version_id BIGINT NOT NULL REFERENCES report_versions(id),
+  applicant_type TEXT NOT NULL,
+  response_type TEXT NOT NULL,
+  count INTEGER,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_fact_application_version ON fact_application(version_id);
+
+CREATE TABLE IF NOT EXISTS fact_legal_proceeding (
+  id BIGSERIAL PRIMARY KEY,
+  report_id BIGINT NOT NULL REFERENCES reports(id),
+  version_id BIGINT NOT NULL REFERENCES report_versions(id),
+  case_type TEXT NOT NULL,
+  result_type TEXT NOT NULL,
+  count INTEGER,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_fact_legal_proceeding_version ON fact_legal_proceeding(version_id);
+
+CREATE TABLE IF NOT EXISTS quality_issues (
+  id BIGSERIAL PRIMARY KEY,
+  report_id BIGINT NOT NULL REFERENCES reports(id),
+  version_id BIGINT NOT NULL REFERENCES report_versions(id),
+  rule_code TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  description TEXT NOT NULL,
+  cell_ref TEXT,
+  auto_status TEXT NOT NULL DEFAULT 'open',
+  human_status TEXT NOT NULL DEFAULT 'pending',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_quality_issues_version ON quality_issues(version_id);
+
+INSERT INTO metric_dictionary (
+  metric_key,
+  version,
+  display_name,
+  description,
+  unit,
+  aggregatable,
+  source_table,
+  source_column,
+  drilldown_source,
+  caveats
+) VALUES
+  ('active_disclosure_total', 1, 'Active disclosure total', 'Total active disclosure items', 'count', TRUE, 'facts', 'made_count', 'cells', NULL),
+  ('active_disclosure_valid', 1, 'Active disclosure valid', 'Valid active disclosure items', 'count', TRUE, 'facts', 'valid_count', 'cells', NULL),
+  ('application_received_total', 1, 'Applications received', 'Total new applications received', 'count', TRUE, 'facts', 'count', 'cells', NULL),
+  ('application_carried_over', 1, 'Applications carried over', 'Applications carried over from prior year', 'count', TRUE, 'facts', 'count', 'cells', NULL),
+  ('application_granted', 1, 'Applications granted', 'Applications granted', 'count', TRUE, 'facts', 'count', 'cells', NULL),
+  ('application_partial_grant', 1, 'Applications partially granted', 'Applications partially granted', 'count', TRUE, 'facts', 'count', 'cells', NULL),
+  ('application_denied_total', 1, 'Applications denied', 'Applications denied total', 'count', TRUE, 'facts', 'count', 'cells', NULL),
+  ('application_total_processed', 1, 'Applications processed', 'Total applications processed', 'count', TRUE, 'facts', 'count', 'cells', NULL),
+  ('legal_review_total', 1, 'Legal review total', 'Total legal review cases', 'count', TRUE, 'facts', 'count', 'cells', NULL),
+  ('legal_litigation_total', 1, 'Legal litigation total', 'Total legal litigation cases', 'count', TRUE, 'facts', 'count', 'cells', NULL)
+ON CONFLICT DO NOTHING;
 `;
 
 // ============================================================================
@@ -430,7 +558,13 @@ async function runSqliteMigrationsFromFiles(): Promise<void> {
       console.log('[SQLite Migrations] Applied: ' + file);
     } catch (err: any) {
       const errMsg = (err.message || '') + (err.stderr || '');
-      throw new Error('[SQLite Migration Error] Failed in ' + file + ': ' + errMsg);
+      // Tolerate "already exists" or "duplicate column" errors for existing databases
+      if (errMsg.includes('already exists') || errMsg.includes('duplicate column name')) {
+        console.log('[SQLite Migrations] Partial apply (existing objects): ' + file);
+        recordMigration(file, checksum);
+      } else {
+        throw new Error('[SQLite Migration Error] Failed in ' + file + ': ' + errMsg);
+      }
     }
   }
 }
