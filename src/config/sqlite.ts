@@ -130,6 +130,10 @@ export function ensureSqliteMigrations(): void {
     return;
   }
 
+  // [MODIFIED] Redundant migration logic removed.
+  // Migrations are now handled by src/db/migrations-llm.ts with proper checksum verification.
+  // The code below is disabled to prevent double execution and 'table already exists' errors.
+  /*
   const migrationsDir = path.join(PROJECT_ROOT, 'migrations', 'sqlite');
   if (!fs.existsSync(migrationsDir)) {
     migrationsRan = true;
@@ -154,6 +158,7 @@ export function ensureSqliteMigrations(): void {
       }
     }
   }
+  */
 
   const columns = runSqlStatements('PRAGMA table_info(jobs);') as Array<{ name?: string }>;
 
