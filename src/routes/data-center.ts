@@ -17,6 +17,88 @@ function getTableName(tableName: string): string | null {
   return TABLE_MAP[tableName] ?? null;
 }
 
+router.get('/v2/reports', async (req, res) => {
+  try {
+    const year = typeof req.query.year === 'string' ? req.query.year.trim() : '';
+    const unitName = typeof req.query.unit_name === 'string' ? req.query.unit_name.trim() : '';
+    const status = typeof req.query.status === 'string' ? req.query.status.trim() : '';
+
+    const conditions: string[] = [];
+    if (year) {
+      const yearNum = Number(year);
+      if (!Number.isInteger(yearNum)) {
+        return res.status(400).json({ error: 'Invalid year' });
+      }
+      conditions.push(`r.year = ${sqlValue(yearNum)}`);
+    }
+
+    if (unitName) {
+      conditions.push(`r.unit_name LIKE ${sqlValue(`%${unitName}%`)}`);
+    }
+
+    const materializeStatusQuery = `(SELECT j.status FROM jobs j WHERE j.report_id = r.id AND j.kind = 'materialize' ORDER BY j.id DESC LIMIT 1)`;
+    const materializeJobIdQuery = `(SELECT j.id FROM jobs j WHERE j.report_id = r.id AND j.kind = 'materialize' ORDER BY j.id DESC LIMIT 1)`;
+
+    if (status) {
+      if (status === 'none') {
+        conditions.push(`${materializeJobIdQuery} IS NULL`);
+      } else {
+        conditions.push(`${materializeStatusQuery} = ${sqlValue(status)}`);
+      }
+    }
+
+    const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const rows = await dbQuery(`
+      SELECT
+        r.id AS report_id,
+        r.region_id,
+        reg.name AS region_name,
+        r.unit_name,
+        r.year,
+        rv.id AS active_version_id,
+        rv.created_at AS active_version_created_at,
+        ${materializeJobIdQuery} AS materialize_job_id,
+        ${materializeStatusQuery} AS materialize_status,
+        (SELECT j.progress FROM jobs j WHERE j.report_id = r.id AND j.kind = 'materialize' ORDER BY j.id DESC LIMIT 1) AS materialize_progress,
+        (SELECT j.finished_at FROM jobs j WHERE j.report_id = r.id AND j.kind = 'materialize' ORDER BY j.id DESC LIMIT 1) AS materialize_finished_at
+      FROM reports r
+      LEFT JOIN regions reg ON reg.id = r.region_id
+      LEFT JOIN report_versions rv ON rv.id = r.active_version_id
+      ${whereClause}
+      ORDER BY r.id DESC
+      LIMIT 200;
+    `);
+
+    return res.json({
+      data: rows.map((row: any) => ({
+        report_id: row.report_id,
+        region_id: row.region_id,
+        region_name: row.region_name,
+        unit_name: row.unit_name,
+        year: row.year,
+        active_version: row.active_version_id
+          ? {
+            version_id: row.active_version_id,
+            created_at: row.active_version_created_at,
+          }
+          : null,
+        materialize_job: row.materialize_job_id
+          ? {
+            job_id: row.materialize_job_id,
+            status: row.materialize_status,
+            progress: row.materialize_progress,
+            finished_at: row.materialize_finished_at,
+          }
+          : null,
+      })),
+    });
+  } catch (error) {
+    console.error('[DataCenter] Failed to list reports:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.get('/v2/batches', async (_req, res) => {
   try {
     const batches = await dbQuery(`
@@ -166,6 +248,10 @@ router.get('/v2/reports/:reportId/cells', async (req, res) => {
     }
 
     const tableId = typeof req.query.table_id === 'string' ? req.query.table_id : null;
+    const rowKey = typeof req.query.row_key === 'string' ? req.query.row_key : null;
+    const colKey = typeof req.query.col_key === 'string' ? req.query.col_key : null;
+    const limitParam = typeof req.query.limit === 'string' ? Number(req.query.limit) : 200;
+    const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(Math.floor(limitParam), 1000) : 200;
 
     const report = (await dbQuery(
       `SELECT active_version_id FROM reports WHERE id = ${dbType === 'postgres' ? '$1' : '?'} LIMIT 1`,
@@ -177,13 +263,18 @@ router.get('/v2/reports/:reportId/cells', async (req, res) => {
     }
 
     const whereTable = tableId ? `AND table_id = ${sqlValue(tableId)}` : '';
+    const whereRow = rowKey ? `AND row_key = ${sqlValue(rowKey)}` : '';
+    const whereCol = colKey ? `AND col_key = ${sqlValue(colKey)}` : '';
 
     const cells = await dbQuery(`
       SELECT *
       FROM cells
       WHERE version_id = ${sqlValue(report.active_version_id)}
       ${whereTable}
+      ${whereRow}
+      ${whereCol}
       ORDER BY id ASC
+      LIMIT ${sqlValue(limit)}
     `);
 
     return res.json({
@@ -192,6 +283,75 @@ router.get('/v2/reports/:reportId/cells', async (req, res) => {
     });
   } catch (error) {
     console.error('[DataCenter] Failed to fetch cells:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/v2/reports/:reportId/quality-issues', async (req, res) => {
+  try {
+    const reportId = Number(req.params.reportId);
+    if (!reportId || Number.isNaN(reportId)) {
+      return res.status(400).json({ error: 'Invalid reportId' });
+    }
+
+    const report = (await dbQuery(
+      `SELECT active_version_id FROM reports WHERE id = ${dbType === 'postgres' ? '$1' : '?'} LIMIT 1`,
+      [reportId]
+    ))[0];
+
+    if (!report?.active_version_id) {
+      return res.status(404).json({ error: 'Active version not found' });
+    }
+
+    const issues = await dbQuery(`
+      SELECT *
+      FROM quality_issues
+      WHERE report_id = ${sqlValue(reportId)}
+        AND version_id = ${sqlValue(report.active_version_id)}
+      ORDER BY created_at DESC, id DESC
+    `);
+
+    return res.json({
+      data: issues,
+      version_id: report.active_version_id,
+    });
+  } catch (error) {
+    console.error('[DataCenter] Failed to fetch quality issues:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/v2/reports/:reportId/quality-flags', async (req, res) => {
+  try {
+    const reportId = Number(req.params.reportId);
+    if (!reportId || Number.isNaN(reportId)) {
+      return res.status(400).json({ error: 'Invalid reportId' });
+    }
+
+    const report = (await dbQuery(
+      `SELECT active_version_id FROM reports WHERE id = ${dbType === 'postgres' ? '$1' : '?'} LIMIT 1`,
+      [reportId]
+    ))[0];
+
+    if (!report?.active_version_id) {
+      return res.status(404).json({ error: 'Active version not found' });
+    }
+
+    const flags = await dbQuery(`
+      SELECT severity, rule_code, COUNT(*) AS count
+      FROM quality_issues
+      WHERE report_id = ${sqlValue(reportId)}
+        AND version_id = ${sqlValue(report.active_version_id)}
+      GROUP BY severity, rule_code
+      ORDER BY count DESC
+    `);
+
+    return res.json({
+      data: flags,
+      version_id: report.active_version_id,
+    });
+  } catch (error) {
+    console.error('[DataCenter] Failed to fetch quality flags:', error);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

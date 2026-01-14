@@ -15,8 +15,10 @@ import JobCenter from './components/JobCenter';
 import JobDetail from './components/JobDetail';
 import IssueList from './components/IssueList';
 import NotificationCenter from './components/NotificationCenter';
+import DataCenterReportsList from './components/datacenter/DataCenterReportsList';
+import DataCenterReportDetail from './components/datacenter/DataCenterReportDetail';
 import { apiClient, API_BASE_URL, isAuthenticated, getCurrentUser, logout } from './apiClient';
-import { Map, UploadCloud, ListTodo, PieChart, GitCompare, User, AlertCircle } from 'lucide-react';
+import { Map, UploadCloud, ListTodo, PieChart, GitCompare, User, AlertCircle, Database } from 'lucide-react';
 
 function App() {
   const [currentPath, setCurrentPath] = useState(`${window.location.pathname}${window.location.search}`);
@@ -91,6 +93,13 @@ function App() {
     if (pathname === '/upload') return <UploadReport />;
     if (pathname === '/jobs' || pathname === '/jobs/') return <JobCenter />;
     if (pathname === '/admin/users') return <UserManagement />;
+    if (pathname === '/datacenter') {
+      return <DataCenterReportsList onSelectReport={(reportId) => navigate(`/datacenter/reports/${reportId}`)} />;
+    }
+    if (pathname.startsWith('/datacenter/reports/')) {
+      const reportId = pathname.split('/').pop();
+      return <DataCenterReportDetail reportId={reportId} onBack={() => navigate('/datacenter')} />;
+    }
     if (pathname.startsWith('/jobs/')) {
       const versionId = pathname.split('/').pop();
       // Validate versionId
@@ -211,6 +220,14 @@ function App() {
         >
           <PieChart size={20} className="nav-icon" />
           <span>年报汇总</span>
+        </button>
+        <button
+          type="button"
+          className={`nav-btn ${isNavActive('/datacenter') ? 'active' : ''}`}
+          onClick={() => navigate('/datacenter')}
+        >
+          <Database size={20} className="nav-icon" />
+          <span>Data Center</span>
         </button>
         <button
           type="button"
