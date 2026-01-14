@@ -2,7 +2,7 @@ import express from 'express';
 import { dbQuery, dbType } from '../config/db-llm';
 import { sqlValue } from '../config/sqlite';
 import { authMiddleware } from '../middleware/auth';
-import ReportFactoryService from '../services/ReportFactoryService';
+import ReportFactoryService from '../services/report-factory/ReportFactoryService';
 
 const router = express.Router();
 
@@ -365,10 +365,10 @@ router.get('/v2/reports/:reportId/report', async (req, res) => {
     }
 
     const formatParam = typeof req.query.format === 'string' ? req.query.format.trim().toLowerCase() : 'md';
-    const format = formatParam === 'html' ? 'html' : 'md';
-    if (formatParam && formatParam !== 'md' && formatParam !== 'html') {
+    if (formatParam !== 'md' && formatParam !== 'html') {
       return res.status(400).json({ error: 'Invalid format' });
     }
+    const format = formatParam as 'md' | 'html';
 
     const versionParam = typeof req.query.version === 'string' ? req.query.version.trim() : 'active';
     let versionId: number | undefined;
@@ -398,6 +398,9 @@ router.get('/v2/reports/:reportId/report', async (req, res) => {
     }
     return res.send(content);
   } catch (error: any) {
+    if (error?.statusCode === 400) {
+      return res.status(400).json({ error: error.message || 'Bad request' });
+    }
     if (error?.statusCode === 404) {
       return res.status(404).json({ error: error.message || 'Not found' });
     }
