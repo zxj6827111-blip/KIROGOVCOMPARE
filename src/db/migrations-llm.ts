@@ -135,6 +135,18 @@ CREATE TABLE IF NOT EXISTS reports (
 
 CREATE INDEX IF NOT EXISTS idx_reports_region_year ON reports(region_id, year);
 
+CREATE TABLE IF NOT EXISTS users (
+  id BIGSERIAL PRIMARY KEY,
+  username VARCHAR(50) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  display_name VARCHAR(100),
+  permissions TEXT DEFAULT '{}',
+  data_scope TEXT DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_login_at TIMESTAMPTZ
+);
+
 CREATE TABLE IF NOT EXISTS ingestion_batches (
   id BIGSERIAL PRIMARY KEY,
   batch_uuid UUID NOT NULL UNIQUE,
