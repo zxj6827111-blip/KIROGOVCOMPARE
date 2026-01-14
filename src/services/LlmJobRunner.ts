@@ -5,7 +5,8 @@ import { LlmParseResult, LlmProvider, LlmProviderError } from './LlmProvider';
 import { createLlmProvider } from './LlmProviderFactory';
 import { summarizeDiff } from '../utils/jsonDiff';
 import { consistencyCheckService } from './ConsistencyCheckService';
-import { materializeReportVersion } from './MaterializeService';
+import { materializeService } from './data-center/MaterializeService';
+import { ingestionBatchService } from './data-center/IngestionBatchService';
 import axios from 'axios';
 
 interface QueuedJob {
@@ -18,6 +19,7 @@ interface QueuedJob {
   storage_path?: string;
   file_hash?: string;
   comparison_id?: number | null;
+  ingestion_batch_id?: number | null;
 }
 
 // 5-step progress tracking (Chinese)
@@ -633,11 +635,16 @@ export class LlmJobRunner {
       throw new LlmProviderError('parsed_json is empty, cannot materialize', 'PARSED_JSON_EMPTY');
     }
 
-    await materializeReportVersion({
-      reportId: job.report_id,
-      versionId: job.version_id,
-      parsedJson: version.parsed_json,
-    });
+    const result = await materializeService.materializeVersion(job.version_id);
+
+    if (!result.success) {
+      throw new Error(`Materialization failed: ${result.error}`);
+    }
+
+    // Update batch stats if applicable
+    if (job.ingestion_batch_id) {
+      await ingestionBatchService.updateBatchStats(Number(job.ingestion_batch_id));
+    }
 
     if (dbType === 'postgres') {
       await pool.query(

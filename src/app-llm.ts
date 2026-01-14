@@ -77,6 +77,8 @@ export function createLlmApp(): express.Express {
     });
   });
 
+  app.use('/api/auth', authRouter);
+  app.use('/api/users', usersRouter);
   app.use('/api/regions', regionsImportRouter);
   app.use('/api/regions', llmRegionsRouter);
   app.use('/api/jobs', llmJobsRouter);
@@ -84,11 +86,9 @@ export function createLlmApp(): express.Express {
   app.use('/api/comparisons', pdfExportRouter);
   app.use('/api', llmComparisonsRouter);
   app.use('/api', reportsRouter);
-  app.use('/api', require('./routes/consistency').default); // Dynamic import to avoid header change for now, or add import top level
-  app.use('/api', issuesSummaryRouter); // Issues summary API
+  app.use('/api', require('./routes/consistency').default);
+  app.use('/api', issuesSummaryRouter);
   app.use('/api', dataCenterRouter);
-  app.use('/api/auth', authRouter);
-  app.use('/api/users', usersRouter);
   app.use('/api/pdf-jobs', pdfJobsRouter);
 
   app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
