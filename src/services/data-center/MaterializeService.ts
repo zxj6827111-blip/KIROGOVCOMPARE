@@ -13,7 +13,8 @@ export class MaterializeService {
      * Materialize a report version from JSON to relational tables.
      */
     async materializeVersion(versionId: number): Promise<MaterializeResult> {
-        const client = await pool.connect();
+        const client = typeof (pool as any).connect === 'function' ? await (pool as any).connect() : pool;
+        const release = typeof (client as any).release === 'function' ? () => (client as any).release() : null;
         try {
             await client.query('BEGIN');
 
@@ -73,7 +74,7 @@ export class MaterializeService {
             console.error(`[Materialize] Error materializing version ${versionId}:`, error);
             return { factsCreated: 0, cellsCreated: 0, success: false, error: error.message };
         } finally {
-            client.release();
+            release?.();
         }
     }
 
