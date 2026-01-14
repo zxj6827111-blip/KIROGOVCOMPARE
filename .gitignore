@@ -11,6 +11,9 @@ coverage/
 data/
 *.db
 logs/
+.llm-*.pid
+.tmp_*
+llm-*.log*
 check_db*.js
 *.patch
 *.rej
