@@ -30,6 +30,11 @@
   border: 1px solid #e2e8f0;
 }
 
+.detail-actions {
+  display: flex;
+  align-items: flex-start;
+}
+
 .detail-meta .label {
   display: block;
   font-size: 12px;
@@ -216,6 +221,17 @@
 .cells-row {
   padding: 6px 0;
   border-bottom: 1px dashed #e2e8f0;
+}
+
+.report-preview {
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 16px;
+  border-radius: 12px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  max-height: 320px;
+  overflow: auto;
 }
 
 .empty {

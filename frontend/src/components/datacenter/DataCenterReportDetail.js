@@ -25,6 +25,9 @@ function DataCenterReportDetail({ reportId, onBack }) {
   const [cells, setCells] = useState([]);
   const [cellFilters, setCellFilters] = useState({ tableId: '', rowKey: '', colKey: '' });
   const [loadingCells, setLoadingCells] = useState(false);
+  const [reportMarkdown, setReportMarkdown] = useState('');
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -107,6 +110,25 @@ function DataCenterReportDetail({ reportId, onBack }) {
     setTimeout(() => loadCells(), 0);
   };
 
+  const handleGenerateReport = async () => {
+    if (!reportId) return;
+    setReportLoading(true);
+    setReportError('');
+    try {
+      const response = await apiClient.get(`/v2/reports/${reportId}/report`, {
+        params: { format: 'md', includeEvidence: true },
+        responseType: 'text',
+      });
+      setReportMarkdown(response.data || '');
+    } catch (err) {
+      console.error('Failed to generate report', err);
+      const message = err?.response?.data?.error || '生成报告失败';
+      setReportError(message);
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="datacenter-detail">
@@ -147,6 +169,11 @@ function DataCenterReportDetail({ reportId, onBack }) {
             <span className="label">最新任务</span>
             <strong>{report?.latest_job?.status || '—'}</strong>
           </div>
+        </div>
+        <div className="detail-actions">
+          <button type="button" className="primary" onClick={handleGenerateReport} disabled={reportLoading}>
+            {reportLoading ? '生成中...' : '生成报告'}
+          </button>
         </div>
       </div>
 
@@ -277,6 +304,18 @@ function DataCenterReportDetail({ reportId, onBack }) {
             </div>
           )}
         </div>
+      </section>
+
+      <section className="detail-section">
+        <div className="section-header">
+          <h3>报告预览</h3>
+          <p>Markdown 预览（支持复制/下载）</p>
+        </div>
+        {reportError && <p className="error">{reportError}</p>}
+        {!reportError && !reportMarkdown && <p className="empty">暂无报告内容</p>}
+        {reportMarkdown && (
+          <pre className="report-preview">{reportMarkdown}</pre>
+        )}
       </section>
     </div>
   );
