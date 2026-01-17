@@ -3,6 +3,7 @@ import { dbQuery, dbType } from '../config/db-llm';
 import { sqlValue } from '../config/sqlite';
 import { authMiddleware } from '../middleware/auth';
 import ReportFactoryService from '../services/report-factory/ReportFactoryService';
+import DerivedMetricsService from '../services/DerivedMetricsService';
 
 const router = express.Router();
 
@@ -14,8 +15,76 @@ const TABLE_MAP: Record<string, string> = {
   legal_proceeding: 'fact_legal_proceeding',
 };
 
+type EvidenceItem = {
+  table: string;
+  row: string;
+  col: string;
+  value_snippet: string;
+  version_id: number;
+  cell_ref: string;
+};
+
 function getTableName(tableName: string): string | null {
   return TABLE_MAP[tableName] ?? null;
+}
+
+function buildValueSnippet(value: any): string {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  const text = String(value);
+  return text.length > 80 ? `${text.slice(0, 77)}...` : text;
+}
+
+function buildEvidenceItem(table: string, row: string, col: string, value: any, versionId: number): EvidenceItem {
+  const cellRef = `${table}:${row}:${col}`;
+  return {
+    table,
+    row,
+    col,
+    value_snippet: buildValueSnippet(value),
+    version_id: versionId,
+    cell_ref: cellRef,
+  };
+}
+
+function buildEvidenceForFact(tableKey: string, row: any, versionId: number): EvidenceItem[] {
+  if (tableKey === 'active_disclosure') {
+    const rowKey = String(row.category || '');
+    if (!rowKey) {
+      return [];
+    }
+    const mapping: Record<string, string> = {
+      made_count: 'made',
+      repealed_count: 'repealed',
+      valid_count: 'valid',
+      processed_count: 'processed',
+      amount: 'amount',
+    };
+    return Object.entries(mapping).map(([field, colKey]) =>
+      buildEvidenceItem(tableKey, rowKey, colKey, row[field], versionId)
+    );
+  }
+
+  if (tableKey === 'application') {
+    const rowKey = String(row.response_type || '');
+    const colKey = String(row.applicant_type || '');
+    if (!rowKey || !colKey) {
+      return [];
+    }
+    return [buildEvidenceItem(tableKey, rowKey, colKey, row.count, versionId)];
+  }
+
+  if (tableKey === 'legal_proceeding') {
+    const rowKey = String(row.case_type || '');
+    const colKey = String(row.result_type || '');
+    if (!rowKey || !colKey) {
+      return [];
+    }
+    return [buildEvidenceItem(tableKey, rowKey, colKey, row.count, versionId)];
+  }
+
+  return [];
 }
 
 router.get('/v2/reports', async (req, res) => {
@@ -231,7 +300,10 @@ router.get('/v2/reports/:reportId/facts/:tableName', async (req, res) => {
     `);
 
     return res.json({
-      data: facts,
+      data: facts.map((row: any) => ({
+        ...row,
+        evidence: buildEvidenceForFact(req.params.tableName, row, report.active_version_id),
+      })),
       version_id: report.active_version_id,
       table: req.params.tableName,
     });
@@ -423,6 +495,170 @@ router.get('/v2/metrics', async (_req, res) => {
     return res.json({ data: metrics });
   } catch (error) {
     console.error('[DataCenter] Failed to fetch metrics:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/v2/derived/run', async (req, res) => {
+  try {
+    const yearParam = typeof req.query.year === 'string' ? Number(req.query.year) : undefined;
+    const regionParam = typeof req.query.region_id === 'string' ? Number(req.query.region_id) : undefined;
+
+    if (yearParam !== undefined && (!Number.isFinite(yearParam) || !Number.isInteger(yearParam))) {
+      return res.status(400).json({ error: 'Invalid year' });
+    }
+    if (regionParam !== undefined && (!Number.isFinite(regionParam) || regionParam <= 0)) {
+      return res.status(400).json({ error: 'Invalid region_id' });
+    }
+
+    const result = await DerivedMetricsService.run({
+      year: yearParam,
+      regionId: regionParam,
+    });
+
+    return res.json({ data: result });
+  } catch (error) {
+    console.error('[DataCenter] Failed to run derived aggregation:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/v2/dashboard/kpis', async (req, res) => {
+  try {
+    const yearParam = typeof req.query.year === 'string' ? Number(req.query.year) : undefined;
+    const regionParam = typeof req.query.region_id === 'string' ? Number(req.query.region_id) : undefined;
+
+    if (yearParam !== undefined && (!Number.isFinite(yearParam) || !Number.isInteger(yearParam))) {
+      return res.status(400).json({ error: 'Invalid year' });
+    }
+    if (regionParam !== undefined && (!Number.isFinite(regionParam) || regionParam <= 0)) {
+      return res.status(400).json({ error: 'Invalid region_id' });
+    }
+
+    const filters: string[] = [];
+    if (yearParam !== undefined) {
+      filters.push(`year = ${sqlValue(yearParam)}`);
+    }
+    if (regionParam !== undefined) {
+      filters.push(`region_id = ${sqlValue(regionParam)}`);
+    }
+    const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+
+    const rows = await dbQuery(`
+      SELECT
+        SUM(report_count) as report_count,
+        SUM(active_report_count) as active_report_count,
+        SUM(materialize_succeeded) as materialize_succeeded,
+        SUM(quality_issue_count_total) as quality_issue_count_total,
+        AVG(derived_risk_avg) as derived_risk_avg
+      FROM derived_region_year_metrics
+      ${whereClause}
+    `);
+
+    const metrics = rows[0] || {};
+    const reportCount = Number(metrics.report_count || 0);
+    const activeReportCount = Number(metrics.active_report_count || 0);
+    const materializeSucceeded = Number(metrics.materialize_succeeded || 0);
+    const materializeSuccessRate = activeReportCount > 0 ? Number((materializeSucceeded / activeReportCount).toFixed(4)) : 0;
+
+    return res.json({
+      data: {
+        report_count: reportCount,
+        active_report_count: activeReportCount,
+        materialize_success_rate: materializeSuccessRate,
+        quality_issue_count_total: Number(metrics.quality_issue_count_total || 0),
+        derived_risk_avg: Number(metrics.derived_risk_avg || 0),
+      },
+    });
+  } catch (error) {
+    console.error('[DataCenter] Failed to fetch dashboard KPIs:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/v2/dashboard/trends', async (req, res) => {
+  try {
+    const regionParam = typeof req.query.region_id === 'string' ? Number(req.query.region_id) : undefined;
+    const unitParam = typeof req.query.unit_id === 'string' ? Number(req.query.unit_id) : undefined;
+
+    if (regionParam !== undefined && (!Number.isFinite(regionParam) || regionParam <= 0)) {
+      return res.status(400).json({ error: 'Invalid region_id' });
+    }
+    if (unitParam !== undefined && (!Number.isFinite(unitParam) || unitParam <= 0)) {
+      return res.status(400).json({ error: 'Invalid unit_id' });
+    }
+
+    if (unitParam !== undefined) {
+      const rows = await dbQuery(`
+        SELECT year, derived_risk_score, quality_issue_count_total, application_total, legal_total
+        FROM derived_unit_year_metrics
+        WHERE report_id = ${sqlValue(unitParam)}
+        ORDER BY year ASC
+      `);
+      return res.json({ data: rows });
+    }
+
+    const filters: string[] = [];
+    if (regionParam !== undefined) {
+      filters.push(`region_id = ${sqlValue(regionParam)}`);
+    }
+    const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+
+    const rows = await dbQuery(`
+      SELECT year, derived_risk_avg, quality_issue_count_total, application_total, legal_total
+      FROM derived_region_year_metrics
+      ${whereClause}
+      ORDER BY year ASC
+    `);
+    return res.json({ data: rows });
+  } catch (error) {
+    console.error('[DataCenter] Failed to fetch dashboard trends:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/v2/dashboard/rankings', async (req, res) => {
+  try {
+    const yearParam = typeof req.query.year === 'string' ? Number(req.query.year) : undefined;
+    const regionParam = typeof req.query.region_id === 'string' ? Number(req.query.region_id) : undefined;
+    const byParam = typeof req.query.by === 'string' ? req.query.by.trim() : 'risk';
+
+    if (!['risk', 'issues', 'application'].includes(byParam)) {
+      return res.status(400).json({ error: 'Invalid by' });
+    }
+    if (yearParam !== undefined && (!Number.isFinite(yearParam) || !Number.isInteger(yearParam))) {
+      return res.status(400).json({ error: 'Invalid year' });
+    }
+    if (regionParam !== undefined && (!Number.isFinite(regionParam) || regionParam <= 0)) {
+      return res.status(400).json({ error: 'Invalid region_id' });
+    }
+
+    const filters: string[] = [];
+    if (yearParam !== undefined) {
+      filters.push(`year = ${sqlValue(yearParam)}`);
+    }
+    if (regionParam !== undefined) {
+      filters.push(`region_id = ${sqlValue(regionParam)}`);
+    }
+    const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
+
+    const orderBy = (() => {
+      if (byParam === 'issues') return 'quality_issue_count_total DESC';
+      if (byParam === 'application') return 'application_total DESC';
+      return 'derived_risk_score DESC';
+    })();
+
+    const rows = await dbQuery(`
+      SELECT report_id, unit_name, region_id, year, derived_risk_score, quality_issue_count_total, application_total
+      FROM derived_unit_year_metrics
+      ${whereClause}
+      ORDER BY ${orderBy}, report_id ASC
+      LIMIT 10
+    `);
+
+    return res.json({ data: rows });
+  } catch (error) {
+    console.error('[DataCenter] Failed to fetch dashboard rankings:', error);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

@@ -8,7 +8,7 @@ dotenv.config();
 
 console.log(`[Config] Initializing DB with DATABASE_TYPE=${process.env.DATABASE_TYPE || 'undefined (defaulting to sqlite)'}`);
 
-const dbType = process.env.DATABASE_TYPE || 'sqlite';
+const dbType = process.env.DATABASE_TYPE || 'postgres';
 
 // ⛔ SECURITY: Prevent silent fallback to SQLite when Postgres is expected
 if (dbType === 'postgres') {
