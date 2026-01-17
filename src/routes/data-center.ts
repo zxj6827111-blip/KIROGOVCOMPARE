@@ -15,8 +15,76 @@ const TABLE_MAP: Record<string, string> = {
   legal_proceeding: 'fact_legal_proceeding',
 };
 
+type EvidenceItem = {
+  table: string;
+  row: string;
+  col: string;
+  value_snippet: string;
+  version_id: number;
+  cell_ref: string;
+};
+
 function getTableName(tableName: string): string | null {
   return TABLE_MAP[tableName] ?? null;
+}
+
+function buildValueSnippet(value: any): string {
+  if (value === null || value === undefined) {
+    return '';
+  }
+  const text = String(value);
+  return text.length > 80 ? `${text.slice(0, 77)}...` : text;
+}
+
+function buildEvidenceItem(table: string, row: string, col: string, value: any, versionId: number): EvidenceItem {
+  const cellRef = `${table}:${row}:${col}`;
+  return {
+    table,
+    row,
+    col,
+    value_snippet: buildValueSnippet(value),
+    version_id: versionId,
+    cell_ref: cellRef,
+  };
+}
+
+function buildEvidenceForFact(tableKey: string, row: any, versionId: number): EvidenceItem[] {
+  if (tableKey === 'active_disclosure') {
+    const rowKey = String(row.category || '');
+    if (!rowKey) {
+      return [];
+    }
+    const mapping: Record<string, string> = {
+      made_count: 'made',
+      repealed_count: 'repealed',
+      valid_count: 'valid',
+      processed_count: 'processed',
+      amount: 'amount',
+    };
+    return Object.entries(mapping).map(([field, colKey]) =>
+      buildEvidenceItem(tableKey, rowKey, colKey, row[field], versionId)
+    );
+  }
+
+  if (tableKey === 'application') {
+    const rowKey = String(row.response_type || '');
+    const colKey = String(row.applicant_type || '');
+    if (!rowKey || !colKey) {
+      return [];
+    }
+    return [buildEvidenceItem(tableKey, rowKey, colKey, row.count, versionId)];
+  }
+
+  if (tableKey === 'legal_proceeding') {
+    const rowKey = String(row.case_type || '');
+    const colKey = String(row.result_type || '');
+    if (!rowKey || !colKey) {
+      return [];
+    }
+    return [buildEvidenceItem(tableKey, rowKey, colKey, row.count, versionId)];
+  }
+
+  return [];
 }
 
 router.get('/v2/reports', async (req, res) => {
@@ -232,7 +300,10 @@ router.get('/v2/reports/:reportId/facts/:tableName', async (req, res) => {
     `);
 
     return res.json({
-      data: facts,
+      data: facts.map((row: any) => ({
+        ...row,
+        evidence: buildEvidenceForFact(req.params.tableName, row, report.active_version_id),
+      })),
       version_id: report.active_version_id,
       table: req.params.tableName,
     });

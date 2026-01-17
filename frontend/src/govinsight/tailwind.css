@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Manual reset for dashboard elements only, since preflight is disabled */
+.gov-dashboard-root *,
+.gov-dashboard-root ::before,
+.gov-dashboard-root ::after {
+    box-sizing: border-box;
+    border-width: 0;
+    border-style: solid;
+    border-color: #e5e7eb;
+}
+
+.gov-dashboard-root {
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
+    tab-size: 4;
+}
+
+/* Re-enable some defaults that preflight usually handles */
+.gov-dashboard-root button {
+    cursor: pointer;
+}

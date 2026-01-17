@@ -135,6 +135,18 @@ CREATE TABLE IF NOT EXISTS reports (
 
 CREATE INDEX IF NOT EXISTS idx_reports_region_year ON reports(region_id, year);
 
+CREATE TABLE IF NOT EXISTS users (
+  id BIGSERIAL PRIMARY KEY,
+  username VARCHAR(50) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  display_name VARCHAR(100),
+  permissions TEXT DEFAULT '{}',
+  data_scope TEXT DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_login_at TIMESTAMPTZ
+);
+
 CREATE TABLE IF NOT EXISTS ingestion_batches (
   id BIGSERIAL PRIMARY KEY,
   batch_uuid UUID NOT NULL UNIQUE,
@@ -425,6 +437,7 @@ CREATE TABLE IF NOT EXISTS fact_active_disclosure (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_fact_active_disclosure_report_version ON fact_active_disclosure(report_id, version_id);
 CREATE INDEX IF NOT EXISTS idx_fact_active_disclosure_version ON fact_active_disclosure(version_id);
 
 CREATE TABLE IF NOT EXISTS fact_application (
@@ -437,6 +450,7 @@ CREATE TABLE IF NOT EXISTS fact_application (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_fact_application_report_version ON fact_application(report_id, version_id);
 CREATE INDEX IF NOT EXISTS idx_fact_application_version ON fact_application(version_id);
 
 CREATE TABLE IF NOT EXISTS fact_legal_proceeding (
@@ -449,6 +463,7 @@ CREATE TABLE IF NOT EXISTS fact_legal_proceeding (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_fact_legal_proceeding_report_version ON fact_legal_proceeding(report_id, version_id);
 CREATE INDEX IF NOT EXISTS idx_fact_legal_proceeding_version ON fact_legal_proceeding(version_id);
 
 CREATE TABLE IF NOT EXISTS quality_issues (
@@ -531,16 +546,105 @@ INSERT INTO metric_dictionary (
   ('application_total_processed', 1, 'Applications processed', 'Total applications processed', 'count', TRUE, 'facts', 'count', 'cells', NULL),
   ('legal_review_total', 1, 'Legal review total', 'Total legal review cases', 'count', TRUE, 'facts', 'count', 'cells', NULL),
   ('legal_litigation_total', 1, 'Legal litigation total', 'Total legal litigation cases', 'count', TRUE, 'facts', 'count', 'cells', NULL),
-  ('quality_issue_count_total', 1, 'Quality issues total', 'Total number of quality issues per unit/year', 'count', TRUE, 'derived', 'quality_issue_count_total', NULL),
-  ('quality_issue_count_high', 1, 'Quality issues high', 'High severity quality issues per unit/year', 'count', TRUE, 'derived', 'quality_issue_count_high', NULL),
-  ('quality_issue_count_medium', 1, 'Quality issues medium', 'Medium severity quality issues per unit/year', 'count', TRUE, 'derived', 'quality_issue_count_medium', NULL),
-  ('quality_issue_count_low', 1, 'Quality issues low', 'Low severity quality issues per unit/year', 'count', TRUE, 'derived', 'quality_issue_count_low', NULL),
-  ('application_total', 1, 'Applications received', 'Total new applications received (response_type=new_received)', 'count', TRUE, 'derived', 'application_total', NULL),
-  ('legal_total', 1, 'Legal proceedings total', 'Total legal review + litigation cases (result_type=total)', 'count', TRUE, 'derived', 'legal_total', NULL),
-  ('materialize_succeeded', 1, 'Materialize succeeded', 'Materialize job succeeded (1) per unit/year', 'count', TRUE, 'derived', 'materialize_succeeded', NULL),
-  ('active_report_count', 1, 'Active report count', 'Reports with active_version per unit/year', 'count', TRUE, 'derived', 'active_report_count', NULL),
-  ('derived_risk_score', 1, 'Derived risk score', 'Risk score = high*3 + medium*2 + low*1 + missing_fact_tables*1 + materialize_failed*2', 'score', TRUE, 'derived', 'derived_risk_score', 'missing_fact_tables counts any fact table with zero rows; materialize_failed applies when latest materialize job not in done/succeeded/success')
+  ('quality_issue_count_total', 1, 'Quality issues total', 'Total number of quality issues per unit/year', 'count', TRUE, 'derived', 'quality_issue_count_total', NULL, NULL),
+  ('quality_issue_count_high', 1, 'Quality issues high', 'High severity quality issues per unit/year', 'count', TRUE, 'derived', 'quality_issue_count_high', NULL, NULL),
+  ('quality_issue_count_medium', 1, 'Quality issues medium', 'Medium severity quality issues per unit/year', 'count', TRUE, 'derived', 'quality_issue_count_medium', NULL, NULL),
+  ('quality_issue_count_low', 1, 'Quality issues low', 'Low severity quality issues per unit/year', 'count', TRUE, 'derived', 'quality_issue_count_low', NULL, NULL),
+  ('application_total', 1, 'Applications received', 'Total new applications received (response_type=new_received)', 'count', TRUE, 'derived', 'application_total', NULL, NULL),
+  ('legal_total', 1, 'Legal proceedings total', 'Total legal review + litigation cases (result_type=total)', 'count', TRUE, 'derived', 'legal_total', NULL, NULL),
+  ('materialize_succeeded', 1, 'Materialize succeeded', 'Materialize job succeeded (1) per unit/year', 'count', TRUE, 'derived', 'materialize_succeeded', NULL, NULL),
+  ('active_report_count', 1, 'Active report count', 'Reports with active_version per unit/year', 'count', TRUE, 'derived', 'active_report_count', NULL, NULL),
+  ('derived_risk_score', 1, 'Derived risk score', 'Risk score = high*3 + medium*2 + low*1 + missing_fact_tables*1 + materialize_failed*2', 'score', TRUE, 'derived', 'derived_risk_score', NULL, 'missing_fact_tables counts any fact table with zero rows, materialize_failed applies when latest materialize job not in done/succeeded/success')
 ON CONFLICT DO NOTHING;
+
+-- GovInsight VIEW: gov_open_annual_stats
+-- 政务公开智慧治理大屏数据聚合视图
+DROP VIEW IF EXISTS gov_open_annual_stats;
+CREATE VIEW gov_open_annual_stats AS
+WITH
+base AS (
+  SELECT
+    r.id AS report_id,
+    r.region_id,
+    reg.name AS org_name,
+    CASE WHEN reg.parent_id IS NULL THEN 'city' ELSE 'district' END AS org_type,
+    reg.parent_id,
+    r.year,
+    r.active_version_id AS version_id
+  FROM reports r
+  LEFT JOIN regions reg ON reg.id = r.region_id
+  WHERE r.active_version_id IS NOT NULL
+),
+active_disclosure_pivot AS (
+  SELECT
+    fad.report_id,
+    fad.version_id,
+    SUM(CASE WHEN fad.category = '规章' THEN fad.made_count ELSE 0 END) AS reg_published,
+    SUM(CASE WHEN fad.category = '规章' THEN fad.valid_count ELSE 0 END) AS reg_active,
+    SUM(CASE WHEN fad.category = '规范性文件' THEN fad.made_count ELSE 0 END) AS doc_published,
+    SUM(CASE WHEN fad.category = '规范性文件' THEN fad.valid_count ELSE 0 END) AS doc_active,
+    SUM(CASE WHEN fad.category = '行政许可' THEN COALESCE(fad.processed_count, 0) ELSE 0 END) AS action_licensing,
+    SUM(CASE WHEN fad.category = '行政处罚' THEN COALESCE(fad.processed_count, 0) ELSE 0 END) AS action_punishment
+  FROM fact_active_disclosure fad
+  GROUP BY fad.report_id, fad.version_id
+),
+application_pivot AS (
+  SELECT
+    fa.report_id,
+    fa.version_id,
+    SUM(CASE WHEN fa.response_type = 'new_received' THEN fa.count ELSE 0 END) AS app_new,
+    SUM(CASE WHEN fa.response_type = 'carried_over' THEN fa.count ELSE 0 END) AS app_carried_over,
+    SUM(CASE WHEN fa.applicant_type = 'natural_person' THEN fa.count ELSE 0 END) AS source_natural,
+    SUM(CASE WHEN fa.response_type IN ('granted', 'public') THEN fa.count ELSE 0 END) AS outcome_public,
+    SUM(CASE WHEN fa.response_type IN ('partial_grant', 'partial') THEN fa.count ELSE 0 END) AS outcome_partial,
+    SUM(CASE WHEN fa.response_type IN ('unable_to_provide', 'unable') THEN fa.count ELSE 0 END) AS outcome_unable,
+    SUM(CASE WHEN fa.response_type IN ('denied', 'not_open') THEN fa.count ELSE 0 END) AS outcome_not_open,
+    SUM(CASE WHEN fa.response_type IN ('ignored', 'other') THEN fa.count ELSE 0 END) AS outcome_ignore,
+    SUM(CASE WHEN fa.response_type = 'carried_forward' THEN fa.count ELSE 0 END) AS app_carried_forward
+  FROM fact_application fa
+  GROUP BY fa.report_id, fa.version_id
+),
+legal_pivot AS (
+  SELECT
+    flp.report_id,
+    flp.version_id,
+    SUM(CASE WHEN flp.case_type = 'reconsideration' AND flp.result_type = 'total' THEN flp.count ELSE 0 END) AS rev_total,
+    SUM(CASE WHEN flp.case_type = 'reconsideration' AND flp.result_type = 'corrected' THEN flp.count ELSE 0 END) AS rev_corrected,
+    SUM(CASE WHEN flp.case_type = 'litigation' AND flp.result_type = 'total' THEN flp.count ELSE 0 END) AS lit_total,
+    SUM(CASE WHEN flp.case_type = 'litigation' AND flp.result_type = 'corrected' THEN flp.count ELSE 0 END) AS lit_corrected
+  FROM fact_legal_proceeding flp
+  GROUP BY flp.report_id, flp.version_id
+)
+SELECT
+  CONCAT('report_', b.report_id) AS id,
+  b.year,
+  CONCAT(b.org_type, '_', b.region_id) AS org_id,
+  b.org_name,
+  b.org_type,
+  CASE WHEN b.parent_id IS NULL THEN NULL ELSE CONCAT('city_', b.parent_id) END AS parent_id,
+  COALESCE(ad.reg_published, 0) AS reg_published,
+  COALESCE(ad.reg_active, 0) AS reg_active,
+  COALESCE(ad.doc_published, 0) AS doc_published,
+  COALESCE(ad.doc_active, 0) AS doc_active,
+  COALESCE(ad.action_licensing, 0) AS action_licensing,
+  COALESCE(ad.action_punishment, 0) AS action_punishment,
+  COALESCE(ap.app_new, 0) AS app_new,
+  COALESCE(ap.app_carried_over, 0) AS app_carried_over,
+  COALESCE(ap.source_natural, 0) AS source_natural,
+  COALESCE(ap.outcome_public, 0) AS outcome_public,
+  COALESCE(ap.outcome_partial, 0) AS outcome_partial,
+  COALESCE(ap.outcome_unable, 0) AS outcome_unable,
+  COALESCE(ap.outcome_not_open, 0) AS outcome_not_open,
+  COALESCE(ap.outcome_ignore, 0) AS outcome_ignore,
+  COALESCE(ap.app_carried_forward, 0) AS app_carried_forward,
+  COALESCE(lp.rev_total, 0) AS rev_total,
+  COALESCE(lp.rev_corrected, 0) AS rev_corrected,
+  COALESCE(lp.lit_total, 0) AS lit_total,
+  COALESCE(lp.lit_corrected, 0) AS lit_corrected
+FROM base b
+LEFT JOIN active_disclosure_pivot ad ON ad.report_id = b.report_id AND ad.version_id = b.version_id
+LEFT JOIN application_pivot ap ON ap.report_id = b.report_id AND ap.version_id = b.version_id
+LEFT JOIN legal_pivot lp ON lp.report_id = b.report_id AND lp.version_id = b.version_id;
 `;
 
 // ============================================================================

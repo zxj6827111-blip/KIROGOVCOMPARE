@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import './App.css';
 import Login from './components/Login';
 import UploadReport from './components/UploadReport';
-import BatchUpload from './components/BatchUpload';
+
 import ReportDetail from './components/ReportDetail';
 import CityIndex from './components/CityIndex';
 import RegionsManager from './components/RegionsManager';
@@ -14,17 +14,18 @@ import UserManagement from './components/UserManagement';
 import JobCenter from './components/JobCenter';
 import JobDetail from './components/JobDetail';
 import IssueList from './components/IssueList';
-import NotificationCenter from './components/NotificationCenter';
+
 import DataCenterReportsList from './components/datacenter/DataCenterReportsList';
 import DataCenterReportDetail from './components/datacenter/DataCenterReportDetail';
-import { apiClient, API_BASE_URL, isAuthenticated, getCurrentUser, logout } from './apiClient';
-import { Map, UploadCloud, ListTodo, PieChart, GitCompare, User, AlertCircle, Database } from 'lucide-react';
+import { API_BASE_URL, isAuthenticated, getCurrentUser, logout } from './apiClient';
+import { Map, UploadCloud, ListTodo, PieChart, GitCompare, User, Activity } from 'lucide-react';
+import GovInsightModule from './govinsight/DashboardApp';
 
 function App() {
   const [currentPath, setCurrentPath] = useState(`${window.location.pathname}${window.location.search}`);
   const [user, setUser] = useState(() => getCurrentUser());
   const [authChecked, setAuthChecked] = useState(false);
-  const [showBatchUpload, setShowBatchUpload] = useState(false);
+
 
   // Check auth on mount
   useEffect(() => {
@@ -89,6 +90,9 @@ function App() {
   }
 
   const renderContent = () => {
+    if (pathname === '/govinsight' || pathname.startsWith('/govinsight')) {
+      return <GovInsightModule />;
+    }
     if (pathname === '/regions') return <RegionsManager />;
     if (pathname === '/upload') return <UploadReport />;
     if (pathname === '/jobs' || pathname === '/jobs/') return <JobCenter />;
@@ -221,14 +225,14 @@ function App() {
           <PieChart size={20} className="nav-icon" />
           <span>年报汇总</span>
         </button>
-        <button
+        {/* <button
           type="button"
           className={`nav-btn ${isNavActive('/datacenter') ? 'active' : ''}`}
           onClick={() => navigate('/datacenter')}
         >
           <Database size={20} className="nav-icon" />
           <span>Data Center</span>
-        </button>
+        </button> */}
         <button
           type="button"
           className={`nav-btn ${isNavActive('/history') ? 'active' : ''}`}
@@ -244,6 +248,14 @@ function App() {
         >
           <ListTodo size={20} className="nav-icon" />
           <span>任务中心</span>
+        </button>
+        <button
+          type="button"
+          className={`nav-btn ${isNavActive('/govinsight') ? 'active' : ''}`}
+          onClick={() => navigate('/govinsight')}
+        >
+          <Activity size={20} className="nav-icon" />
+          <span>智慧治理</span>
         </button>
       </nav>
 
