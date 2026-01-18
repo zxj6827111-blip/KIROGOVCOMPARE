@@ -48,6 +48,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [regionTree, setRegionTree] = useState<EntityProfile[]>([]);
   const [currentEntity, setCurrentEntity] = useState<EntityProfile | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isInitLoading, setIsInitLoading] = useState(true);
 
   // Cascader State
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -59,6 +60,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   // Initial Load
   useEffect(() => {
     const init = async () => {
+      setIsInitLoading(true);
       try {
         const rawOrgs = await fetchOrgs();
         const orgs = rawOrgs.filter(o => o.name && !o.name.includes('Test') && !o.name.includes('RF'));
@@ -75,6 +77,8 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         console.error('Failed to load orgs', err);
         setRegionTree([]);
         setCurrentEntity(null);
+      } finally {
+        setIsInitLoading(false);
       }
     };
     init();
@@ -89,7 +93,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         setIsLoading(false);
       });
     }
-  }, [currentEntity]);
+  }, [currentEntity?.id]);
 
   // Close menu on click outside
   useEffect(() => {
@@ -172,12 +176,26 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     </div>
   );
 
-  if (!currentEntity) {
+  if (isInitLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-slate-50">
         <div className="text-center">
           <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-slate-500 text-sm">正在加载政务数据...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentEntity) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-50">
+        <div className="text-center p-8 bg-white rounded-lg shadow-sm border border-slate-200">
+          <Building2 className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+          <h3 className="text-lg font-medium text-slate-900 mb-2">暂无政务数据</h3>
+          <p className="text-slate-500 text-sm max-w-xs mx-auto">
+            系统中似乎没有任何行政区划数据。请联系管理员导入或同步数据。
+          </p>
         </div>
       </div>
     );

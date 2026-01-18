@@ -30,7 +30,7 @@ export function createLlmApp(): express.Express {
   const allowedOrigins = configuredCorsOrigins.length > 0 ? configuredCorsOrigins : defaultCorsOrigins;
   const allowAnyOrigin = allowedOrigins.includes('*');
   const rateLimitWindowMs = Number(process.env.RATE_LIMIT_WINDOW_MS || 60_000);
-  const rateLimitMax = Number(process.env.RATE_LIMIT_MAX || 300);
+  const rateLimitMax = Number(process.env.RATE_LIMIT_MAX || 10000);
   const rateLimitStore = (process.env.RATE_LIMIT_STORE || 'memory').toLowerCase();
   const useRedis = rateLimitStore === 'redis';
   const store = useRedis ? createRedisStore() : undefined;

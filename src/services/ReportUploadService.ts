@@ -139,6 +139,29 @@ export class ReportUploadService {
   async processUpload(payload: ReportUploadPayload): Promise<ReportUploadResult> {
     ensureStorageDir();
 
+    // Truncate originalName to avoid DB column size limit (VARCHAR(255))
+    // We reserve space for timestamp prefix (14 chars) and extension
+    let safeName = payload.originalName;
+    if (Buffer.byteLength(safeName, 'utf8') > 200) {
+      const extMatch = safeName.match(/\.[^.]+$/);
+      const ext = extMatch ? extMatch[0] : '';
+      const nameWithoutExt = safeName.replace(/\.[^.]+$/, '');
+
+      let truncated = '';
+      let currentBytes = 0;
+      const maxBytes = 200; // Safe limit
+
+      for (const char of nameWithoutExt) {
+        const charBytes = Buffer.byteLength(char, 'utf8');
+        if (currentBytes + charBytes > maxBytes) break;
+        truncated += char;
+        currentBytes += charBytes;
+      }
+      safeName = truncated + ext;
+      console.log(`[ReportUpload] Truncated filename to ${safeName}`);
+    }
+    const finalPayload = { ...payload, originalName: safeName };
+
     // Only run SQLite migrations if using SQLite
     if (dbType === 'sqlite') {
       ensureSqliteMigrations();
@@ -194,8 +217,8 @@ export class ReportUploadService {
       )[0];
     }
 
-    const isHtml = payload.mimeType === 'text/html' || payload.originalName.toLowerCase().endsWith('.html') || payload.originalName.toLowerCase().endsWith('.htm');
-    const isTxt = payload.mimeType === 'text/plain' || payload.originalName.toLowerCase().endsWith('.txt');
+    const isHtml = payload.mimeType === 'text/html' || safeName.toLowerCase().endsWith('.html') || safeName.toLowerCase().endsWith('.htm');
+    const isTxt = payload.mimeType === 'text/plain' || safeName.toLowerCase().endsWith('.txt');
     const extension = isHtml ? '.html' : (isTxt ? '.txt' : '.pdf');
 
     const storageRelativeDir = path.join('data', 'uploads', `${payload.regionId}`, `${payload.year}`);
@@ -221,7 +244,7 @@ export class ReportUploadService {
             version_type, parent_version_id, state, ingestion_batch_id
           ) VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, 'v1', '{}', 'v1', true, NULL, 'original_parse', NULL, 'parsed', $8)
           RETURNING id`,
-          [report.id, payload.originalName, fileHash, payload.size, storageRelative, provider, model, ingestionBatchId]
+          [report.id, safeName, fileHash, payload.size, storageRelative, provider, model, ingestionBatchId]
         );
         version = result.rows[0];
       } else {
@@ -231,7 +254,7 @@ export class ReportUploadService {
             provider, model, prompt_version, parsed_json, schema_version, is_active, raw_text,
             version_type, parent_version_id, state, ingestion_batch_id
           ) VALUES (
-            ${sqlValue(report.id)}, ${sqlValue(payload.originalName)}, ${sqlValue(fileHash)}, ${sqlValue(payload.size)}, ${sqlValue(storageRelative)}, NULL,
+            ${sqlValue(report.id)}, ${sqlValue(safeName)}, ${sqlValue(fileHash)}, ${sqlValue(payload.size)}, ${sqlValue(storageRelative)}, NULL,
             ${sqlValue(provider)}, ${sqlValue(model)}, 'v1', '{}', 'v1', 1, NULL,
             'original_parse', NULL, 'parsed', ${sqlValue(ingestionBatchId)}
           ) RETURNING id;`

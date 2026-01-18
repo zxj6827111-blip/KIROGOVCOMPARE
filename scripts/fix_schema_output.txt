@@ -1,0 +1,8 @@
+ALTER TABLE
+ALTER TABLE
+UPDATE 0
+ reports_with_active_version 
+-----------------------------
+                         193
+(1 ÐÐ¼ÇÂ¼)
+

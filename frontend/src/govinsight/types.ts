@@ -66,6 +66,7 @@ export interface EntityProfile {
   data: AnnualData[];
   children?: EntityProfile[]; // For hierarchical navigation
   parentPath?: string[]; // Helper for breadcrumbs e.g. ["江苏省", "南京市"]
+  parent_id?: string | null;
 }
 
 // --- API TYPES (from backend) ---
