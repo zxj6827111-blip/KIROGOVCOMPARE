@@ -1078,15 +1078,50 @@ router.delete('/reports/:id', authMiddleware, async (req, res) => {
     }
 
     // Remove comparisons referencing this report (and their results)
-    const comparisonIds = (await dbQuery(
-      `SELECT id FROM comparisons WHERE left_report_id = ${sqlValue(reportId)} OR right_report_id = ${sqlValue(reportId)};`
-    )) as Array<{ id?: number }>;
-    const ids = comparisonIds.map((c) => c.id).filter((id): id is number => typeof id === 'number' && id > 0);
-    if (ids.length) {
-      const inClause = ids.join(',');
-      await dbQuery(`DELETE FROM comparison_results WHERE comparison_id IN (${inClause});`).catch(() => { });
-      await dbQuery(`DELETE FROM comparisons WHERE id IN (${inClause});`).catch(() => { });
-      await dbQuery(`UPDATE jobs SET comparison_id = NULL WHERE comparison_id IN (${inClause});`).catch(() => { });
+    console.log(`[Delete] Checking comparisons for report ${reportId}`);
+    const comparisonQuery = `SELECT id FROM comparisons WHERE left_report_id = ${sqlValue(reportId)} OR right_report_id = ${sqlValue(reportId)};`;
+    console.log(`[Delete] Comparison Query: ${comparisonQuery}`);
+
+    const comparisonRows = (await dbQuery(comparisonQuery)) as Array<{ id?: number; ID?: number }>;
+
+    // Ensure we handle both lowercase and uppercase 'id' (Postgres vs others) 
+    const idsToClean = comparisonRows.map((c) => Number(c.id || c.ID)).filter((id) => !isNaN(id) && id > 0);
+    console.log(`[Delete] IDs to clean:`, idsToClean);
+
+    if (idsToClean.length) {
+      const inClause = idsToClean.join(',');
+      console.log(`[Delete] Processing comparison cleanup for: ${inClause}`);
+
+      // 1. Unlink jobs first
+      try {
+        const unlinkSql = `UPDATE jobs SET comparison_id = NULL WHERE comparison_id IN (${inClause});`;
+        await dbQuery(unlinkSql);
+      } catch (e: any) {
+        console.warn('[Delete] Failed to unlink jobs from comparisons:', e.message);
+      }
+
+      // 2. Delete dependent results
+      try {
+        await dbQuery(`DELETE FROM comparison_results WHERE comparison_id IN (${inClause});`);
+      } catch (e: any) {
+        console.warn('[Delete] Failed to delete comparison_results:', e.message);
+      }
+
+      // 3. Delete exports if table exists
+      try {
+        await dbQuery(`DELETE FROM comparison_exports WHERE comparison_id IN (${inClause});`);
+      } catch (e) {
+        // Table might not exist in all environments, ignore
+      }
+
+      // 4. Finally delete the comparisons
+      try {
+        await dbQuery(`DELETE FROM comparisons WHERE id IN (${inClause});`);
+      } catch (e: any) {
+        console.error('[Delete] Failed to delete comparisons:', e.message);
+      }
+    } else {
+      console.log('[Delete] No comparisons found to clean up.');
     }
 
     // Attempt to delete consistency check related data (if tables exist)
@@ -1098,30 +1133,53 @@ router.delete('/reports/:id', authMiddleware, async (req, res) => {
       if (versionIds.length > 0) {
         const vIds = versionIds.join(',');
 
-        // Delete related notifications FIRST
-        await dbQuery(`DELETE FROM notifications WHERE related_version_id IN (${vIds})`).catch(() => { });
+        // 1. Delete standard Data Center facts (Project Phase 1)
+        await dbQuery(`DELETE FROM fact_active_disclosure WHERE report_id = ${sqlValue(reportId)}`).catch((e) => console.warn('[Delete] Ignore facts AD err:', e.message));
+        await dbQuery(`DELETE FROM fact_application WHERE report_id = ${sqlValue(reportId)}`).catch((e) => console.warn('[Delete] Ignore facts App err:', e.message));
+        await dbQuery(`DELETE FROM fact_legal_proceeding WHERE report_id = ${sqlValue(reportId)}`).catch((e) => console.warn('[Delete] Ignore facts Legal err:', e.message));
+        await dbQuery(`DELETE FROM quality_issues WHERE report_id = ${sqlValue(reportId)}`).catch((e) => console.warn('[Delete] Ignore quality issues err:', e.message));
 
-        // Delete consistency runs & items
-        await dbQuery(`DELETE FROM report_consistency_run_items WHERE run_id IN (SELECT id FROM report_consistency_runs WHERE report_version_id IN (${vIds}))`).catch(() => { });
-        await dbQuery(`DELETE FROM report_consistency_runs WHERE report_version_id IN (${vIds})`).catch(() => { });
-        await dbQuery(`DELETE FROM report_consistency_items WHERE report_version_id IN (${vIds})`).catch(() => { });
+        // Cells only reference version_id
+        await dbQuery(`DELETE FROM cells WHERE version_id IN (${vIds})`).catch((e) => console.warn('[Delete] Ignore cells err:', e.message));
+
+        // 2. Delete consistency check data
+        await dbQuery(`DELETE FROM notifications WHERE related_version_id IN (${vIds})`).catch((e) => console.warn('[Delete] Ignore notifications err:', e.message));
+        await dbQuery(`DELETE FROM report_consistency_run_items WHERE run_id IN (SELECT id FROM report_consistency_runs WHERE report_version_id IN (${vIds}))`).catch((e) => console.warn('[Delete] Ignore runs items err:', e.message));
+        await dbQuery(`DELETE FROM report_consistency_runs WHERE report_version_id IN (${vIds})`).catch((e) => console.warn('[Delete] Ignore runs err:', e.message));
+        await dbQuery(`DELETE FROM report_consistency_items WHERE report_version_id IN (${vIds})`).catch((e) => console.warn('[Delete] Ignore items err:', e.message));
 
         // Delete parses
-        await dbQuery(`DELETE FROM report_version_parses WHERE report_version_id IN (${vIds})`).catch(() => { });
+        await dbQuery(`DELETE FROM report_version_parses WHERE report_version_id IN (${vIds})`).catch((e) => console.warn('[Delete] Ignore parses err:', e.message));
       }
     } catch (e) {
       console.warn('Error cleaning up related data:', e);
     }
 
     // Remove jobs & versions, then report itself
-    await dbQuery(`DELETE FROM jobs WHERE report_id = ${sqlValue(reportId)};`).catch(() => { });
-    await dbQuery(`DELETE FROM report_versions WHERE report_id = ${sqlValue(reportId)};`).catch(() => { });
-    await dbQuery(`DELETE FROM reports WHERE id = ${sqlValue(reportId)};`);
+    try {
+      await dbQuery(`DELETE FROM jobs WHERE report_id = ${sqlValue(reportId)};`);
+    } catch (e: any) {
+      console.error('[REPORT_DELETE_DEBUG] Failed to delete jobs:', e.message);
+    }
+
+    try {
+      await dbQuery(`DELETE FROM report_versions WHERE report_id = ${sqlValue(reportId)};`);
+    } catch (e: any) {
+      console.error('[REPORT_DELETE_DEBUG] Failed to delete versions:', e.message);
+    }
+
+    try {
+      await dbQuery(`DELETE FROM reports WHERE id = ${sqlValue(reportId)};`);
+    } catch (e: any) {
+      console.error('[REPORT_DELETE_DEBUG] Failed to delete report:', e.message);
+      throw e; // Rethrow to hit the main catch block
+    }
 
     return res.json({ ok: true });
-  } catch (error) {
-    console.error('Error deleting report:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+  } catch (error: any) {
+    console.error('[REPORT_DELETE_DEBUG] Full Delete Error:', error);
+    // Return the actual error message to the user for better debugging
+    return res.status(500).json({ error: `Internal server error: ${error.message}` });
   }
 });
 
