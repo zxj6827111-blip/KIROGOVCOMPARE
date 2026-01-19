@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './UploadReport.css';
 import { apiClient } from '../apiClient';
 import BatchUpload from './BatchUpload';
+import RegionCascader from './RegionCascader';
 import {
   FileText,
   FolderOpen,
@@ -578,17 +579,11 @@ function UploadReport() {
 
             <div className="form-section">
               <label>所属区域 <span className="label-hint">(自动匹配或手动选择)</span></label>
-              <select
+              <RegionCascader
+                regions={regions}
                 value={regionId}
-                onChange={(e) => setRegionId(e.target.value)}
-              >
-                <option value="">-- 请选择 --</option>
-                {regions.map(r => (
-                  <option key={r.id} value={r.id}>
-                    {getRegionPath(r.id) || r.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setRegionId(val)}
+              />
             </div>
 
             {/* Messages */}
