@@ -1,5 +1,4 @@
-import { dbQuery, dbType, dbNowExpression } from '../../config/db-llm';
-import { sqlValue } from '../../config/sqlite';
+import pool from '../../config/database-llm';
 import {
   CATEGORY_ACTIONS,
   CATEGORY_LABELS,
@@ -267,13 +266,14 @@ export class ReportFactoryService {
   static async generate(options: ReportFactoryOptions): Promise<string> {
     const reportId = options.reportId;
 
-    const report = (await dbQuery(
+    const reportRes = await pool.query(
       `SELECT id, unit_name, year, active_version_id
        FROM reports
-       WHERE id = ${dbType === 'postgres' ? '$1' : '?'}
+       WHERE id = $1
        LIMIT 1`,
       [reportId]
-    ))[0] as ReportRow | undefined;
+    );
+    const report = reportRes.rows[0] as ReportRow | undefined;
 
     if (!report) {
       const err: any = new Error('Report not found');
@@ -290,12 +290,13 @@ export class ReportFactoryService {
       }
       versionId = report.active_version_id;
     } else {
-      const version = (await dbQuery(
+      const versionRes = await pool.query(
         `SELECT id, report_id FROM report_versions
-         WHERE id = ${dbType === 'postgres' ? '$1' : '?'}
+         WHERE id = $1
          LIMIT 1`,
         [versionId]
-      ))[0] as ReportVersionRow | undefined;
+      );
+      const version = versionRes.rows[0] as ReportVersionRow | undefined;
       if (!version || version.report_id !== reportId) {
         const err: any = new Error('Version not found');
         err.statusCode = 404;
@@ -307,78 +308,91 @@ export class ReportFactoryService {
     const applicationTable = ensureTableAllowed('application');
     const legalTable = ensureTableAllowed('legal_proceeding');
 
-    const [activeDisclosure, applications, legalProceedings, issues, metricDefs, materializeJob] = await Promise.all([
-      dbQuery(
+    // Note: Parameterized usage with table names works only if we are sure table names are safe.
+    // ensureTableAllowed checks against a const list, so it's safe to string interpolate table names.
+    // However, values must be parameterized.
+
+    const [activeDisclosureRes, applicationsRes, legalProceedingsRes, issuesRes, metricDefsRes, materializeJobRes] = await Promise.all([
+      pool.query(
         `SELECT id, category, made_count, repealed_count, valid_count, processed_count, amount
          FROM ${activeDisclosureTable}
-         WHERE report_id = ${sqlValue(reportId)}
-           AND version_id = ${sqlValue(versionId)}
-         ORDER BY id ASC`
-      ) as Promise<FactActiveDisclosureRow[]>,
-      dbQuery(
+         WHERE report_id = $1 AND version_id = $2
+         ORDER BY id ASC`, [reportId, versionId]
+      ),
+      pool.query(
         `SELECT id, applicant_type, response_type, count
          FROM ${applicationTable}
-         WHERE report_id = ${sqlValue(reportId)}
-           AND version_id = ${sqlValue(versionId)}
-         ORDER BY id ASC`
-      ) as Promise<FactApplicationRow[]>,
-      dbQuery(
+         WHERE report_id = $1 AND version_id = $2
+         ORDER BY id ASC`, [reportId, versionId]
+      ),
+      pool.query(
         `SELECT id, case_type, result_type, count
          FROM ${legalTable}
-         WHERE report_id = ${sqlValue(reportId)}
-           AND version_id = ${sqlValue(versionId)}
-         ORDER BY id ASC`
-      ) as Promise<FactLegalProceedingRow[]>,
-      dbQuery(
+         WHERE report_id = $1 AND version_id = $2
+         ORDER BY id ASC`, [reportId, versionId]
+      ),
+      pool.query(
         `SELECT id, rule_code, severity, description, cell_ref
          FROM quality_issues
-         WHERE report_id = ${sqlValue(reportId)}
-           AND version_id = ${sqlValue(versionId)}
-         ORDER BY severity ASC, rule_code ASC, id ASC`
-      ) as Promise<QualityIssueRow[]>,
-      dbQuery(
+         WHERE report_id = $1 AND version_id = $2
+         ORDER BY severity ASC, rule_code ASC, id ASC`, [reportId, versionId]
+      ),
+      pool.query(
         `SELECT metric_key, display_name, description, unit, caveats
          FROM metric_dictionary
-         WHERE metric_key IN (${METRIC_KEYS.map((key) => sqlValue(key)).join(', ')})
+         WHERE metric_key = ANY($1::text[])
            AND deprecated_at IS NULL
-         ORDER BY metric_key ASC`
-      ) as Promise<MetricDefinition[]>,
-      dbQuery(
+         ORDER BY metric_key ASC`, [METRIC_KEYS]
+      ),
+      pool.query(
         `SELECT id, created_at, finished_at
          FROM jobs
-         WHERE report_id = ${sqlValue(reportId)}
-           AND version_id = ${sqlValue(versionId)}
+         WHERE report_id = $1
+           AND version_id = $2
            AND kind = 'materialize'
          ORDER BY id DESC
-         LIMIT 1`
+         LIMIT 1`, [reportId, versionId]
       ),
     ]);
+
+    const activeDisclosure = activeDisclosureRes.rows as FactActiveDisclosureRow[];
+    const applications = applicationsRes.rows as FactApplicationRow[];
+    const legalProceedings = legalProceedingsRes.rows as FactLegalProceedingRow[];
+    const issues = issuesRes.rows as QualityIssueRow[];
+    const metricDefs = metricDefsRes.rows as MetricDefinition[];
+    const materializeJob = materializeJobRes.rows;
 
     const issueEvidenceRefs = issues
       .map((issue) => issue.cell_ref)
       .filter((ref): ref is string => Boolean(ref));
 
     const uniqueRefs = Array.from(new Set(issueEvidenceRefs));
-    const cellRows = uniqueRefs.length
-      ? await dbQuery(
+
+    let cellRows: CellRow[] = [];
+    if (uniqueRefs.length > 0) {
+      const cellsRes = await pool.query(
         `SELECT id, table_id, row_key, col_key, cell_ref, value_raw, value_num, normalized_value
          FROM cells
-         WHERE version_id = ${sqlValue(versionId)}
-           AND cell_ref IN (${uniqueRefs.map((ref) => sqlValue(ref)).join(', ')})
-         ORDER BY id ASC`
-      )
-      : [];
+         WHERE version_id = $1
+           AND cell_ref = ANY($2::text[])
+         ORDER BY id ASC`,
+        [versionId, uniqueRefs]
+      );
+      cellRows = cellsRes.rows as CellRow[];
+    }
 
-    const fallbackCell = (await dbQuery(
+    const fallbackCellRes = await pool.query(
       `SELECT id, table_id, row_key, col_key, cell_ref, value_raw, value_num, normalized_value
        FROM cells
-       WHERE version_id = ${sqlValue(versionId)}
+       WHERE version_id = $1
        ORDER BY id ASC
-       LIMIT 1`
-    ))[0] as CellRow | undefined;
+       LIMIT 1`,
+      [versionId]
+    );
+    const fallbackCell = fallbackCellRes.rows[0] as CellRow | undefined;
 
     const cellMap = new Map<string, CellRow>();
-    (cellRows as CellRow[]).forEach((cell) => cellMap.set(cell.cell_ref, cell));
+    cellRows.forEach((cell) => cellMap.set(cell.cell_ref, cell));
 
     const metricMap = new Map(metricDefs.map((metric) => [metric.metric_key, metric]));
 
@@ -435,8 +449,8 @@ export class ReportFactoryService {
       a.table.localeCompare(b.table) || a.row.localeCompare(b.row) || a.col.localeCompare(b.col)
     );
 
-    const nowRow = (await dbQuery(`SELECT ${dbNowExpression()} as generated_at`))[0] as { generated_at?: string } | undefined;
-    const generatedAt = nowRow?.generated_at || new Date().toISOString();
+    const nowRes = await pool.query(`SELECT NOW() as generated_at`);
+    const generatedAt = nowRes.rows[0]?.generated_at || new Date().toISOString();
 
     const titleUnit = report.unit_name || `Report ${report.id}`;
     const titleYear = report.year ? String(report.year) : '未知年份';
