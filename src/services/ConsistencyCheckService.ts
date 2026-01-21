@@ -1,6 +1,5 @@
 import crypto from 'crypto';
-import { dbExecute, dbNowExpression, dbQuery, ensureDbMigrations } from '../config/db-llm';
-import { sqlValue } from '../config/sqlite';
+import pool from '../config/database-llm';
 
 // Types for parsed JSON structure
 interface EntityResults {
@@ -994,16 +993,15 @@ export class ConsistencyCheckService {
      * Run checks and persist to database. Uses upsert to preserve human_status.
      */
     public async runAndPersist(reportVersionId: number, parsedJson: any): Promise<{ runId: number; items: ConsistencyItem[] }> {
-        ensureDbMigrations();
+        // ensureDbMigrations(); // Removed: migrations should be handled at app startup
 
-        const nowExpr = dbNowExpression();
-        const runResult = await dbQuery(`
+        const runResult = await pool.query(`
       INSERT INTO report_consistency_runs (report_version_id, status, engine_version, created_at)
-      VALUES (${sqlValue(reportVersionId)}, 'running', ${sqlValue(ENGINE_VERSION)}, ${nowExpr})
+      VALUES ($1, 'running', $2, NOW())
       RETURNING id;
-    `);
+    `, [reportVersionId, ENGINE_VERSION]);
 
-        const runId = (runResult[0] as any)?.id as number;
+        const runId = (runResult.rows[0] as any)?.id as number;
         if (!runId) {
             throw new Error('Failed to create consistency run');
         }
@@ -1014,15 +1012,15 @@ export class ConsistencyCheckService {
         for (const item of items) {
             const evidenceStr = JSON.stringify(item.evidenceJson);
 
-            await dbExecute(`
+            await pool.query(`
         INSERT INTO report_consistency_items (
           run_id, report_version_id, group_key, check_key, fingerprint,
           title, expr, left_value, right_value, delta, tolerance, auto_status,
           evidence_json, human_status, created_at, updated_at
         ) VALUES (
-          ${sqlValue(runId)}, ${sqlValue(reportVersionId)}, ${sqlValue(item.groupKey)}, ${sqlValue(item.checkKey)}, ${sqlValue(item.fingerprint)},
-          ${sqlValue(item.title)}, ${sqlValue(item.expr)}, ${sqlValue(item.leftValue)}, ${sqlValue(item.rightValue)}, ${sqlValue(item.delta)}, ${sqlValue(item.tolerance)}, ${sqlValue(item.autoStatus)},
-          ${sqlValue(evidenceStr)}, 'pending', ${nowExpr}, ${nowExpr}
+          $1, $2, $3, $4, $5,
+          $6, $7, $8, $9, $10, $11, $12,
+          $13, 'pending', NOW(), NOW()
         )
         ON CONFLICT(report_version_id, fingerprint) DO UPDATE SET
           run_id = excluded.run_id,
@@ -1037,17 +1035,21 @@ export class ConsistencyCheckService {
           evidence_json = excluded.evidence_json,
           human_status = 'pending',
           human_comment = NULL,
-          updated_at = ${nowExpr};
-      `);
+          updated_at = NOW();
+      `, [
+                runId, reportVersionId, item.groupKey, item.checkKey, item.fingerprint,
+                item.title, item.expr, item.leftValue, item.rightValue, item.delta, item.tolerance, item.autoStatus,
+                evidenceStr
+            ]);
         }
 
         // Delete stale items that were not updated in this run
         // This handles the case where a rule was removed
-        await dbExecute(`
+        await pool.query(`
           DELETE FROM report_consistency_items
-          WHERE report_version_id = ${sqlValue(reportVersionId)}
-            AND run_id != ${sqlValue(runId)};
-        `);
+          WHERE report_version_id = $1
+            AND run_id != $2;
+        `, [reportVersionId, runId]);
 
         // Update run with summary
         const summary = {
@@ -1058,11 +1060,11 @@ export class ConsistencyCheckService {
             total: items.length,
         };
 
-        await dbExecute(`
+        await pool.query(`
       UPDATE report_consistency_runs
-      SET status = 'succeeded', summary_json = ${sqlValue(JSON.stringify(summary))}, finished_at = ${nowExpr}
-      WHERE id = ${sqlValue(runId)};
-    `);
+      SET status = 'succeeded', summary_json = $1, finished_at = NOW()
+      WHERE id = $2;
+    `, [JSON.stringify(summary), runId]);
 
         return { runId, items };
     }

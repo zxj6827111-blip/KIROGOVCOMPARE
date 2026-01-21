@@ -2,13 +2,11 @@ import express from 'express';
 import multer from 'multer';
 import fs from 'fs';
 import fsPromises from 'fs/promises';
-import path from 'path';
-import { dbBool, dbNowExpression, dbQuery, dbType, ensureDbMigrations, parseDbJson } from '../config/db-llm';
-import { PROJECT_ROOT, UPLOADS_TMP_DIR, sqlValue } from '../config/sqlite';
+import pool from '../config/database-llm';
+import { PROJECT_ROOT, UPLOADS_TMP_DIR } from '../config/constants';
 import { reportUploadService } from '../services/ReportUploadService';
-import { ValidationIssue } from '../types/models';
 import { authMiddleware, requirePermission, AuthRequest } from '../middleware/auth';
-import { getAllowedRegionIds, getAllowedRegionIdsAsync } from '../utils/dataScope';
+import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 
 const router = express.Router();
 
@@ -17,24 +15,31 @@ if (!fs.existsSync(tempDir)) {
   fs.mkdirSync(tempDir, { recursive: true });
 }
 
+// Helper to safely parse JSON from DB (Postgres driver usually returns object for JSON columns, but handle strings too)
+function parseDbJson(value: any): any {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
 const upload = multer({
   storage: multer.diskStorage({
     destination: tempDir,
     filename: (_req, file, cb) => {
       // Truncate filename if too long to avoid ENAMETOOLONG error
-      // Linux max filename is 255 bytes, but we leave room for timestamp and path
       const MAX_NAME_BYTES = 100;
       let safeName = file.originalname;
 
-      // Get byte length (Chinese chars are 3 bytes each in UTF-8)
       const byteLength = Buffer.byteLength(safeName, 'utf8');
       if (byteLength > MAX_NAME_BYTES) {
-        // Find the extension
         const extMatch = safeName.match(/\.[^.]+$/);
         const ext = extMatch ? extMatch[0] : '';
         const nameWithoutExt = safeName.replace(/\.[^.]+$/, '');
 
-        // Truncate the name part, keeping room for extension
         let truncated = '';
         let currentBytes = 0;
         const maxNamePartBytes = MAX_NAME_BYTES - Buffer.byteLength(ext, 'utf8');
@@ -76,7 +81,7 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
     const unitName = typeof unitNameRaw === 'string' && unitNameRaw.trim() ? unitNameRaw.trim() : null;
     const file = req.file;
     const model = req.body.model;
-    const batchUuid = req.body.batch_uuid ?? req.body.batch_id; // Extract batch_uuid from request (fallback to legacy batch_id)
+    const batchUuid = req.body.batch_uuid ?? req.body.batch_id;
 
     if (!req.user) {
       return res.status(401).json({ error: 'Unauthorized' });
@@ -85,8 +90,6 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
     if (!regionId || Number.isNaN(regionId) || !Number.isInteger(regionId)) {
       return res.status(400).json({ error: 'region_id 无效' });
     }
-
-    ensureDbMigrations();
 
     const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
     if (allowedRegionIds) {
@@ -111,16 +114,10 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
       return res.status(400).json({ error: '仅支持 PDF、HTML 或 TXT 文件' });
     }
 
-    // Fix for garbled filenames (UTF-8 bytes interpreted as Latin-1)
+    // Fix for garbled filenames
     const fixUtf8 = (str: string) => {
       try {
-        // Check if string contains typical Latin-1 range chars that might be UTF-8 bytes
-        // E.g. "æ" (0xE6), "å" (0xE5), etc.
-        // A simple heuristic: try to decode as Latin-1 then read as UTF-8.
-        // If the result looks like valid UTF-8 (and Chinese), usage is high probability correct.
         const fixed = Buffer.from(str, 'latin1').toString('utf8');
-        // If the fixed string is significantly shorter (multi-byte chars) 
-        // AND contains Chinese characters or other Unicode, it's likely the fix.
         if (fixed.length < str.length && /[^\u0000-\u00ff]/.test(fixed)) {
           return fixed;
         }
@@ -132,36 +129,6 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
 
     const originalName = fixUtf8(file.originalname);
 
-    // [New Logic] Check if a report exists and if it is "empty".
-    // If so, delete it before uploading, to act as an overwrite and avoid "Report exists" error.
-    try {
-      const existingReport = (await dbQuery(
-        `SELECT id FROM reports WHERE region_id = ${regionId} AND year = ${year} AND unit_name = ${sqlValue(unitName)} LIMIT 1`
-      ))[0];
-
-      if (existingReport) {
-        // Check active version
-        const activeVersion = (await dbQuery(
-          `SELECT rv.parsed_json
-           FROM reports r
-           JOIN report_versions rv ON rv.id = r.active_version_id
-           WHERE r.id = ${existingReport.id}
-           LIMIT 1`
-        ))[0];
-
-        let hasContent = false;
-        if (activeVersion && activeVersion.parsed_json && activeVersion.parsed_json !== '{}') {
-          // Check content logic...
-          // We previously deleted empty reports here, but this is dangerous as it removes
-          // failed jobs/reports that simply haven't finished parsing yet or failed.
-          // Better to let them exist and just add new versions or fail the upload if exists.
-        }
-      }
-    } catch (e) {
-      console.warn('[ReportUpload] Check existing report failed:', e);
-    }
-
-
     const result = await reportUploadService.processUpload({
       regionId,
       year,
@@ -171,11 +138,9 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
       mimeType: file.mimetype,
       size: file.size,
       model,
-      batchUuid, // Pass batch_uuid to service
+      batchUuid,
     });
 
-    // FIX: Always return 201 for successful upload, even if version is reused
-    // This allows frontend batch upload to continue processing instead of skipping
     const statusCode = 201;
     return res.status(statusCode).json({
       report_id: result.reportId,
@@ -194,7 +159,7 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
       return res.status(500).json({ error: 'report version 创建失败' });
     }
 
-    if (typeof error?.message === 'string' && error.message.includes('UNIQUE constraint failed')) {
+    if (typeof error?.message === 'string' && error.message.includes('unique constraint')) {
       return res.status(409).json({ error: '记录已存在' });
     }
 
@@ -226,8 +191,6 @@ router.post('/reports/text', authMiddleware, requirePermission('upload_reports')
     if (!year || Number.isNaN(year) || !Number.isInteger(year)) {
       return res.status(400).json({ error: 'year 无效' });
     }
-
-    ensureDbMigrations();
 
     const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
     if (allowedRegionIds) {
@@ -293,42 +256,36 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
       return res.status(400).json({ error: 'Invalid parsed_json format' });
     }
 
-    // 0. Region scope check: verify user has access to this report's region
-    const reportRows = await dbQuery(
-      `SELECT region_id FROM reports WHERE id = ${dbType === 'postgres' ? '$1' : '?'}`,
-      [reportId]
-    );
-    if (reportRows.length === 0) {
+    // 0. Region scope check
+    const reportRes = await pool.query(`SELECT region_id FROM reports WHERE id = $1`, [reportId]);
+    if (reportRes.rows.length === 0) {
       return res.status(404).json({ error: 'Report not found' });
     }
-    const reportRegionId = reportRows[0].region_id;
+    const reportRegionId = reportRes.rows[0].region_id;
 
     // Check user's dataScope
     const user = req.user;
     if (user?.dataScope?.regions && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
-      // User has region restrictions - need to verify access
-      const { getAllowedRegionIdsAsync } = require('../utils/dataScope');
       const allowedIds = await getAllowedRegionIdsAsync(user);
       if (allowedIds && !allowedIds.includes(reportRegionId)) {
         return res.status(403).json({ error: 'Access denied: report region not in your data scope' });
       }
     }
 
-    // 1. Find the current active version with all fields for copying
-    const activeVersions = await dbQuery(
-      `SELECT rv.*
+    // 1. Find the current active version
+    const activeVersionRes = await pool.query(`
+       SELECT rv.*
        FROM reports r
        JOIN report_versions rv ON rv.id = r.active_version_id
-       WHERE r.id = ${dbType === 'postgres' ? '$1' : '?'}
-       LIMIT 1`,
-      [reportId]
-    );
+       WHERE r.id = $1
+       LIMIT 1
+    `, [reportId]);
 
-    if (activeVersions.length === 0) {
+    if (activeVersionRes.rows.length === 0) {
       return res.status(404).json({ error: 'No active version found for this report' });
     }
 
-    const active = activeVersions[0];
+    const active = activeVersionRes.rows[0];
     const oldVersionId = active.id;
     const jsonStr = JSON.stringify(parsed_json);
 
@@ -338,137 +295,93 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
       .update(`${active.file_hash || ''}:manual_edit:${editHash}`, 'utf8')
       .digest('hex');
 
-    // 3. Check if version with this hash already exists (idempotency)
-    const existingVersions = await dbQuery(
-      `SELECT id FROM report_versions 
-       WHERE report_id = ${dbType === 'postgres' ? '$1' : '?'} 
-       AND file_hash = ${dbType === 'postgres' ? '$2' : '?'}`,
-      [reportId, newFileHash]
-    );
+    // 3. Check if version with this hash already exists
+    const existingVersionRes = await pool.query(`
+       SELECT id FROM report_versions 
+       WHERE report_id = $1 AND file_hash = $2
+    `, [reportId, newFileHash]);
 
     let newVersionId: number;
     let reused = false;
 
-    if (existingVersions.length > 0) {
-      // Idempotent hit: reuse existing version
-      newVersionId = existingVersions[0].id;
+    if (existingVersionRes.rows.length > 0) {
+      // Reuse existing version
+      newVersionId = existingVersionRes.rows[0].id;
       reused = true;
 
-      await dbQuery(
-        `UPDATE reports
-         SET active_version_id = ${dbType === 'postgres' ? '$1' : '?'},
-             updated_at = ${dbNowExpression()}
-         WHERE id = ${dbType === 'postgres' ? '$2' : '?'}`,
-        [newVersionId, reportId]
-      );
-      await dbQuery(
-        `UPDATE report_versions
-         SET is_active = ${dbBool(false)}, updated_at = ${dbNowExpression()}
-         WHERE report_id = ${dbType === 'postgres' ? '$1' : '?'} AND id != ${dbType === 'postgres' ? '$2' : '?'}`,
-        [reportId, newVersionId]
-      );
-      await dbQuery(
-        `UPDATE report_versions
-         SET is_active = ${dbBool(true)}, updated_at = ${dbNowExpression()}
-         WHERE id = ${dbType === 'postgres' ? '$1' : '?'}`,
-        [newVersionId]
-      );
+      await pool.query(`
+         UPDATE reports
+         SET active_version_id = $1, updated_at = NOW()
+         WHERE id = $2
+      `, [newVersionId, reportId]);
+
+      await pool.query(`
+         UPDATE report_versions
+         SET is_active = false, updated_at = NOW()
+         WHERE report_id = $1 AND id != $2
+      `, [reportId, newVersionId]);
+
+      await pool.query(`
+         UPDATE report_versions
+         SET is_active = true, updated_at = NOW()
+         WHERE id = $1
+      `, [newVersionId]);
 
       console.log(`[ParsedData] Reused existing version ${newVersionId} for report ${reportId}`);
     } else {
       // Create new version
-      // Build file name for the new version
       const baseFileName = active.file_name || 'report';
       const newFileName = baseFileName.includes('(手工修订)')
         ? baseFileName
         : `${baseFileName.substring(0, 100)} (手工修订)`;
 
-      // Insert new version
-      if (dbType === 'postgres') {
-        const insertResult = await dbQuery(
-          `INSERT INTO report_versions 
+      const insertRes = await pool.query(
+        `INSERT INTO report_versions 
            (report_id, file_name, file_hash, file_size, storage_path, text_path, raw_text,
             provider, model, prompt_version, schema_version, parsed_json, is_active, created_at, updated_at,
             version_type, parent_version_id, state, ingestion_batch_id)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW(), 'manual_correct', $14, 'manual_corrected', $15)
            RETURNING id`,
-          [
-            reportId,
-            newFileName,
-            newFileHash,
-            active.file_size || 0,
-            active.storage_path || '',
-            active.text_path || '',
-            active.raw_text || '',
-            active.provider || 'manual',
-            active.model || 'manual',
-            'manual_edit',
-            active.schema_version || 'v1',
-            jsonStr,
-            true,
-            oldVersionId,
-            active.ingestion_batch_id ?? null
-          ]
-        );
-        newVersionId = insertResult[0].id;
-      } else {
-        // SQLite: INSERT then get last_insert_rowid
-        await dbQuery(
-          `INSERT INTO report_versions 
-           (report_id, file_name, file_hash, file_size, storage_path, text_path, raw_text,
-            provider, model, prompt_version, schema_version, parsed_json, is_active, created_at, updated_at,
-            version_type, parent_version_id, state, ingestion_batch_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), 'manual_correct', ?, 'manual_corrected', ?)`,
-          [
-            reportId,
-            newFileName,
-            newFileHash,
-            active.file_size || 0,
-            active.storage_path || '',
-            active.text_path || '',
-            active.raw_text || '',
-            active.provider || 'manual',
-            active.model || 'manual',
-            'manual_edit',
-            active.schema_version || 'v1',
-            jsonStr,
-            1,
-            oldVersionId,
-            active.ingestion_batch_id ?? null
-          ]
-        );
-        const lastIdResult = await dbQuery(
-          `SELECT id FROM report_versions WHERE report_id = ? AND file_hash = ? ORDER BY id DESC LIMIT 1`,
-          [reportId, newFileHash]
-        );
-        newVersionId = lastIdResult[0]?.id;
-        if (!newVersionId) {
-          throw new Error('sqlite_version_insert_failed');
-        }
-      }
+        [
+          reportId,
+          newFileName,
+          newFileHash,
+          active.file_size || 0,
+          active.storage_path || '',
+          active.text_path || '',
+          active.raw_text || '',
+          active.provider || 'manual',
+          active.model || 'manual',
+          'manual_edit',
+          active.schema_version || 'v1',
+          jsonStr,
+          true,
+          oldVersionId,
+          active.ingestion_batch_id ?? null
+        ]
+      );
+      newVersionId = insertRes.rows[0].id;
 
       console.log(`[ParsedData] Created new version ${newVersionId} for report ${reportId} (old: ${oldVersionId})`);
     }
 
-    await dbQuery(
-      `UPDATE reports
-       SET active_version_id = ${dbType === 'postgres' ? '$1' : '?'},
-           updated_at = ${dbNowExpression()}
-       WHERE id = ${dbType === 'postgres' ? '$2' : '?'}`,
-      [newVersionId, reportId]
-    );
-    await dbQuery(
-      `UPDATE report_versions
-       SET is_active = ${dbBool(false)}, updated_at = ${dbNowExpression()}
-       WHERE report_id = ${dbType === 'postgres' ? '$1' : '?'} AND id != ${dbType === 'postgres' ? '$2' : '?'}`,
-      [reportId, newVersionId]
-    );
-    await dbQuery(
-      `UPDATE report_versions
-       SET is_active = ${dbBool(true)}, updated_at = ${dbNowExpression()}
-       WHERE id = ${dbType === 'postgres' ? '$1' : '?'}`,
-      [newVersionId]
-    );
+    await pool.query(`
+       UPDATE reports
+       SET active_version_id = $1, updated_at = NOW()
+       WHERE id = $2
+    `, [newVersionId, reportId]);
+
+    await pool.query(`
+       UPDATE report_versions
+       SET is_active = false, updated_at = NOW()
+       WHERE report_id = $1 AND id != $2
+    `, [reportId, newVersionId]);
+
+    await pool.query(`
+       UPDATE report_versions
+       SET is_active = true, updated_at = NOW()
+       WHERE id = $1
+    `, [newVersionId]);
 
     return res.json({
       success: true,
@@ -486,11 +399,17 @@ router.get('/reports', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { region_id, year, unit_name } = req.query;
 
+    const conditions: string[] = [];
+    const params: any[] = [];
+    let paramIndex = 1;
+
     if (region_id !== undefined) {
       const regionIdNum = Number(region_id);
       if (!region_id || Number.isNaN(regionIdNum) || !Number.isInteger(regionIdNum) || regionIdNum < 1) {
         return res.status(400).json({ error: 'region_id 无效' });
       }
+      conditions.push(`r.region_id = $${paramIndex++}`);
+      params.push(regionIdNum);
     }
 
     if (year !== undefined) {
@@ -498,56 +417,46 @@ router.get('/reports', authMiddleware, async (req: AuthRequest, res) => {
       if (!year || Number.isNaN(yearNum) || !Number.isInteger(yearNum)) {
         return res.status(400).json({ error: 'year 无效' });
       }
+      conditions.push(`r.year = $${paramIndex++}`);
+      params.push(yearNum);
     }
 
-    ensureDbMigrations();
-
-    const conditions: string[] = [];
-    if (region_id !== undefined) {
-      conditions.push(`r.region_id = ${sqlValue(Number(region_id))}`);
-    }
-    if (year !== undefined) {
-      conditions.push(`r.year = ${sqlValue(Number(year))}`);
-    }
     if (unit_name !== undefined && String(unit_name).trim() !== '') {
-      conditions.push(`r.unit_name = ${sqlValue(String(unit_name).trim())}`);
+      conditions.push(`r.unit_name = $${paramIndex++}`);
+      params.push(String(unit_name).trim());
     }
 
     // [Data Scope Filtering]
-    // Check if user has restricted data scope (admin usually has empty scope or full perms)
-    // Assuming if dataScope.regions is not empty, we filter.
     const user = req.user;
     if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
-      // Calculate all allowed descendant IDs (including children)
-      // This ensures that if scope is 'Suqian', reports for 'Shuyang' (child) are also shown.
-      const scopeNames = user.dataScope.regions.map((r: string) => `'${r.replace(/'/g, "''")}'`).join(',');
-
+      const scopeNames = user.dataScope.regions;
       const idsQuery = `
             WITH RECURSIVE allowed_ids AS (
-                SELECT id FROM regions WHERE name IN (${scopeNames})
+                SELECT id FROM regions WHERE name = ANY($1::text[])
                 UNION ALL
                 SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
             )
             SELECT id FROM allowed_ids
       `;
       try {
-        const allowedRows = (await dbQuery(idsQuery));
-        const allowedIds = allowedRows.map((r: any) => r.id).join(',');
+        const allowedRowsRes = await pool.query(idsQuery, [scopeNames]);
+        const allowedIds = allowedRowsRes.rows.map((r: any) => r.id);
 
         if (allowedIds.length > 0) {
-          conditions.push(`r.region_id IN (${allowedIds})`);
+          conditions.push(`r.region_id = ANY($${paramIndex++}::int[])`);
+          params.push(allowedIds);
         } else {
-          conditions.push('1=0'); // Scope matches no regions
+          conditions.push('1=0');
         }
       } catch (e) {
         console.error('Error calculating scope IDs:', e);
-        conditions.push('1=0'); // Fail safe
+        conditions.push('1=0');
       }
     }
 
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    const rows = (await dbQuery(`
+    const query = `
       SELECT
         r.id AS report_id,
         r.region_id,
@@ -564,10 +473,12 @@ router.get('/reports', authMiddleware, async (req: AuthRequest, res) => {
       LEFT JOIN report_versions rv ON rv.id = r.active_version_id
       ${whereClause}
       ORDER BY r.id DESC;
-    `));
+    `;
+
+    const result = await pool.query(query, params);
 
     return res.json({
-      data: rows.map((row) => {
+      data: result.rows.map((row) => {
         let hasContent = false;
         const parsed = parseDbJson(row.parsed_json);
         if (parsed) {
@@ -605,7 +516,7 @@ router.get('/reports', authMiddleware, async (req: AuthRequest, res) => {
   }
 });
 
-// Batch check status endpoint - MUST be before /reports/:id to avoid route conflict
+// Batch check status endpoint
 router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
   try {
     const reportIdsParam = req.query.report_ids;
@@ -618,36 +529,32 @@ router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
       return res.json({});
     }
 
-    ensureDbMigrations();
-
     const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
     if (allowedRegionIds) {
       if (allowedRegionIds.length === 0) {
         return res.json({});
       }
-      const allowedReportRows = (await dbQuery(`
+      const allowedRes = await pool.query(`
         SELECT id FROM reports
-        WHERE id IN (${reportIds.join(',')})
-          AND region_id IN (${allowedRegionIds.join(',')});
-      `)) as Array<{ id: number }>;
-      reportIds = allowedReportRows.map((row) => row.id);
+        WHERE id = ANY($1::int[])
+          AND region_id = ANY($2::int[]);
+      `, [reportIds, allowedRegionIds]);
+      reportIds = allowedRes.rows.map((row: any) => row.id);
       if (reportIds.length === 0) {
         return res.json({});
       }
     }
 
     // Get active version_ids for these reports + check parsed_json
-    const versionQuery = `
+    const versionRes = await pool.query(`
       SELECT r.id as report_id, rv.id as version_id, rv.parsed_json
       FROM reports r
       JOIN report_versions rv ON rv.id = r.active_version_id
-      WHERE r.id IN (${reportIds.join(',')})
-    `;
-    console.log('[BatchCheckStatus] Query:', versionQuery.slice(0, 200));
-    const versionRows = (await dbQuery(versionQuery)) as Array<{ report_id: number; version_id: number; parsed_json: string | null }>;
-    console.log('[BatchCheckStatus] Version rows found:', versionRows.length);
+      WHERE r.id = ANY($1::int[])
+    `, [reportIds]);
 
-    const versionMap = new Map(versionRows.map(v => [v.report_id, v.version_id]));
+    const versionRows = versionRes.rows;
+    const versionMap = new Map(versionRows.map((v: any) => [v.report_id, v.version_id]));
 
     // Check which versions have actual content
     const contentMap = new Map<number, boolean>();
@@ -655,10 +562,6 @@ router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
       let hasContent = false;
       const parsed = parseDbJson(v.parsed_json);
       if (parsed) {
-        // Check for meaningful content:
-        // - 'sections' array with at least one entry (new format)
-        // - 'tables' object with at least one key (old format)
-        // - or other recognized top-level fields
         if (Array.isArray(parsed.sections) && parsed.sections.length > 0) {
           hasContent = true;
         } else if (parsed.tables && typeof parsed.tables === 'object' && Object.keys(parsed.tables).length > 0) {
@@ -670,33 +573,24 @@ router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
       contentMap.set(v.report_id, hasContent);
     }
 
-    // Batch query for FAIL items by group
     const versionIds = Array.from(versionMap.values());
     if (versionIds.length === 0) {
       return res.json({});
     }
 
-    const groupCounts = (await dbQuery(`
+    const groupCountsRes = await pool.query(`
       SELECT report_version_id, group_key, COUNT(*) as cnt
       FROM report_consistency_items
-      WHERE report_version_id IN (${versionIds.join(',')})
+      WHERE report_version_id = ANY($1::int[])
         AND auto_status = 'FAIL'
         AND (human_status != 'dismissed' OR human_status IS NULL)
       GROUP BY report_version_id, group_key
-    `));
+    `, [versionIds]);
 
-    // DEBUG: Log the raw group counts to diagnose "No issues found" bug
-    console.log('[BatchCheckStatus] Version IDs:', versionIds);
-    // console.log('[BatchCheckStatus] Group counts result:', JSON.stringify(groupCounts));
+    const typedGroupCounts = groupCountsRes.rows;
 
-    // Force cast to avoid Postgres string-count issue
-    const typedGroupCounts = groupCounts as Array<{ report_version_id: number; group_key: string; cnt: number | string }>;
-
-
-    // Build result map: reportId => { total, visual, structure, quality, has_content }
     const result: Record<string, any> = {};
 
-    // Initialize all reports with zero counts and has_content flag
     for (const [reportId, versionId] of versionMap) {
       result[String(reportId)] = {
         total: 0,
@@ -707,20 +601,14 @@ router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
       };
     }
 
-    // Fill in actual counts
-    // CRITICAL: Postgres returns strings for version IDs, so we must normalize both keys and lookups
     const versionToReport = new Map<number, number>();
     for (const [rid, vid] of versionMap) {
       versionToReport.set(Number(vid), Number(rid));
     }
 
-    console.log('[BatchCheckStatus] Group counts:', typedGroupCounts.length, 'items');
-
     for (const gc of typedGroupCounts) {
-      // Normalize report_version_id to number for Map lookup
       const vid = Number(gc.report_version_id);
       const reportId = versionToReport.get(vid);
-      console.log(`[BatchCheckStatus] Processing: vid=${vid}, reportId=${reportId}, group=${gc.group_key}, cnt=${gc.cnt}`);
       if (reportId) {
         const key = String(reportId);
         const cnt = Number(gc.cnt);
@@ -728,7 +616,6 @@ router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
         if (gc.group_key === 'visual') {
           result[key].visual += cnt;
         } else if (['structure', 'table2', 'table3', 'table4', 'text'].includes(gc.group_key)) {
-          // Merge structure, tables, and text checks into "Structure/Consistency" (勾稽)
           result[key].structure += cnt;
         } else if (gc.group_key === 'quality') {
           result[key].quality += cnt;
@@ -750,9 +637,7 @@ router.get('/reports/:id', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'report_id 无效' });
     }
 
-    ensureDbMigrations();
-
-    const report = (await dbQuery(`
+    const reportRes = await pool.query(`
       SELECT
         r.id AS report_id,
         r.region_id,
@@ -772,9 +657,10 @@ router.get('/reports/:id', authMiddleware, async (req, res) => {
       FROM reports r
       LEFT JOIN regions reg ON reg.id = r.region_id
       LEFT JOIN report_versions rv ON rv.id = r.active_version_id
-      WHERE r.id = ${sqlValue(reportId)}
+      WHERE r.id = $1
       LIMIT 1;
-    `))[0];
+    `, [reportId]);
+    const report = reportRes.rows[0];
 
     if (!report) {
       return res.status(404).json({ error: 'report 不存在' });
@@ -787,338 +673,113 @@ router.get('/reports/:id', authMiddleware, async (req, res) => {
       }
     }
 
-    const job = (await dbQuery(`
+    const jobRes = await pool.query(`
       SELECT id, status, progress, error_code, error_message
       FROM jobs
-      WHERE report_id = ${sqlValue(reportId)}
+      WHERE report_id = $1
       ORDER BY id DESC
       LIMIT 1;
-    `))[0];
+    `, [reportId]);
+    const job = jobRes.rows[0];
 
     let parsedJson: any = null;
     if (report?.parsed_json) {
-      try {
-        parsedJson = parseDbJson(report.parsed_json);
-      } catch (error) {
-        parsedJson = report.parsed_json;
-      }
+      parsedJson = parseDbJson(report.parsed_json);
     }
 
     return res.json({
       report_id: report.report_id,
       region_id: report.region_id,
       region_name: report.region_name,
-      unit_name: report.unit_name,
       year: report.year,
-      active_version: report.version_id
-        ? {
-          version_id: report.version_id,
-          file_hash: report.file_hash,
-          storage_path: report.storage_path,
-          parsed_json: parsedJson,
-          provider: report.provider,
-          model: report.model,
-          prompt_version: report.prompt_version,
-          schema_version: report.schema_version,
-          text_path: report.text_path,
-          created_at: report.created_at,
-        }
-        : null,
+      unit_name: report.unit_name,
+      version_id: report.version_id,
+      file_hash: report.file_hash,
+      storage_path: report.storage_path,
+      parsed_json: parsedJson,
+      provider: report.provider,
+      model: report.model,
+      prompt_version: report.prompt_version,
+      schema_version: report.schema_version,
+      text_path: report.text_path,
+      created_at: report.created_at,
       latest_job: job
         ? {
           job_id: job.id,
           status: job.status,
           progress: job.progress,
-          error_code: job.error_code,
-          error_message: job.error_message,
+          error: job.error_message || job.error_code || null,
         }
         : null,
     });
   } catch (error) {
-    console.error('Error fetching report detail:', error);
+    console.error('Error fetching report:', error);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Get version history for a report
-router.get('/reports/:id/versions', authMiddleware, async (req: AuthRequest, res) => {
-  try {
-    const reportId = Number(req.params.id);
-    if (!reportId || isNaN(reportId)) {
-      return res.status(400).json({ error: 'Invalid report ID' });
-    }
-
-    // Region scope check
-    const reportRows = await dbQuery(
-      `SELECT region_id FROM reports WHERE id = ${dbType === 'postgres' ? '$1' : '?'}`,
-      [reportId]
-    );
-    if (reportRows.length === 0) {
-      return res.status(404).json({ error: 'Report not found' });
-    }
-    const reportRegionId = reportRows[0].region_id;
-
-    const user = req.user;
-    if (user?.dataScope?.regions && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
-      const { getAllowedRegionIdsAsync } = require('../utils/dataScope');
-      const allowedIds = await getAllowedRegionIdsAsync(user);
-      if (allowedIds && !allowedIds.includes(reportRegionId)) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
-    }
-
-    const activeRow = await dbQuery(
-      `SELECT active_version_id FROM reports WHERE id = ${dbType === 'postgres' ? '$1' : '?'}`,
-      [reportId]
-    );
-    const activeVersionId = activeRow[0]?.active_version_id ?? null;
-
-    // Get all versions for this report
-    const versions = await dbQuery(
-      `SELECT id, file_name, file_hash, prompt_version, created_at, updated_at
-       FROM report_versions
-       WHERE report_id = ${dbType === 'postgres' ? '$1' : '?'}
-       ORDER BY created_at DESC`,
-      [reportId]
-    );
-
-    return res.json({
-      data: versions.map(v => ({
-        id: v.id,
-        file_name: v.file_name,
-        file_hash: v.file_hash,
-        prompt_version: v.prompt_version,
-        is_active: v.id === activeVersionId,
-        created_at: v.created_at,
-        updated_at: v.updated_at
-      }))
-    });
-  } catch (error) {
-    console.error('Error fetching versions:', error);
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Activate a specific version
-router.post('/reports/:id/versions/:versionId/activate', authMiddleware, requirePermission('upload_reports'), async (req: AuthRequest, res) => {
-  try {
-    const reportId = Number(req.params.id);
-    const versionId = Number(req.params.versionId);
-
-    if (!reportId || isNaN(reportId) || !versionId || isNaN(versionId)) {
-      return res.status(400).json({ error: 'Invalid report or version ID' });
-    }
-
-    // Region scope check
-    const reportRows = await dbQuery(
-      `SELECT region_id FROM reports WHERE id = ${dbType === 'postgres' ? '$1' : '?'}`,
-      [reportId]
-    );
-    if (reportRows.length === 0) {
-      return res.status(404).json({ error: 'Report not found' });
-    }
-    const reportRegionId = reportRows[0].region_id;
-
-    const user = req.user;
-    if (user?.dataScope?.regions && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
-      const { getAllowedRegionIdsAsync } = require('../utils/dataScope');
-      const allowedIds = await getAllowedRegionIdsAsync(user);
-      if (allowedIds && !allowedIds.includes(reportRegionId)) {
-        return res.status(403).json({ error: 'Access denied' });
-      }
-    }
-
-    // Verify the version belongs to this report
-    const versionRows = await dbQuery(
-      `SELECT id FROM report_versions 
-       WHERE id = ${dbType === 'postgres' ? '$1' : '?'} 
-       AND report_id = ${dbType === 'postgres' ? '$2' : '?'}`,
-      [versionId, reportId]
-    );
-    if (versionRows.length === 0) {
-      return res.status(404).json({ error: 'Version not found for this report' });
-    }
-
-    await dbQuery(
-      `UPDATE reports
-       SET active_version_id = ${dbType === 'postgres' ? '$1' : '?'},
-           updated_at = ${dbNowExpression()}
-       WHERE id = ${dbType === 'postgres' ? '$2' : '?'}`,
-      [versionId, reportId]
-    );
-
-    await dbQuery(
-      `UPDATE report_versions
-       SET is_active = ${dbBool(false)}, updated_at = ${dbNowExpression()}
-       WHERE report_id = ${dbType === 'postgres' ? '$1' : '?'} AND id != ${dbType === 'postgres' ? '$2' : '?'}`,
-      [reportId, versionId]
-    );
-
-    await dbQuery(
-      `UPDATE report_versions
-       SET is_active = ${dbBool(true)}, updated_at = ${dbNowExpression()}
-       WHERE id = ${dbType === 'postgres' ? '$1' : '?'}`,
-      [versionId]
-    );
-
-    console.log(`[Versions] Activated version ${versionId} for report ${reportId}`);
-    return res.json({ success: true, activated_version_id: versionId });
-  } catch (error) {
-    console.error('Error activating version:', error);
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-router.post('/reports/:id/parse', authMiddleware, async (req, res) => {
+router.delete('/reports/:id', authMiddleware, requirePermission('delete_reports'), async (req, res) => {
   try {
     const reportId = Number(req.params.id);
     if (!reportId || Number.isNaN(reportId) || !Number.isInteger(reportId) || reportId < 1) {
       return res.status(400).json({ error: 'report_id 无效' });
     }
 
-    ensureDbMigrations();
-
-    const report = (await dbQuery(`SELECT id, region_id FROM reports WHERE id = ${sqlValue(reportId)} LIMIT 1;`))[0] as
-      | { id?: number; region_id?: number }
-      | undefined;
-    if (!report?.id) {
+    const reportRes = await pool.query(`SELECT region_id FROM reports WHERE id = $1`, [reportId]);
+    if (reportRes.rows.length === 0) {
       return res.status(404).json({ error: 'report 不存在' });
     }
+    const reportRegionId = reportRes.rows[0].region_id;
+
     const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
     if (allowedRegionIds) {
-      if (allowedRegionIds.length === 0 || !allowedRegionIds.includes(report.region_id || 0)) {
+      if (allowedRegionIds.length === 0 || !allowedRegionIds.includes(reportRegionId)) {
         return res.status(403).json({ error: 'forbidden' });
       }
     }
 
-    const version = (await dbQuery(
-      `SELECT active_version_id as id FROM reports WHERE id = ${sqlValue(reportId)} LIMIT 1;`
-    ))[0] as { id?: number } | undefined;
-
-    if (!version?.id) {
-      return res.status(404).json({ error: 'report_version 不存在' });
-    }
-
-    const existingJob = (await dbQuery(
-      `SELECT id FROM jobs WHERE report_id = ${sqlValue(reportId)} AND version_id = ${sqlValue(version.id)} AND kind = 'parse' AND status IN ('queued','running') ORDER BY id DESC LIMIT 1;`
-    ))[0] as { id?: number } | undefined;
-
-    if (existingJob?.id) {
-      return res.json({ job_id: existingJob.id, reused: true });
-    }
-
-    const ingestionBatch = (await dbQuery(
-      `SELECT ingestion_batch_id FROM report_versions WHERE id = ${sqlValue(version.id)} LIMIT 1;`
-    ))[0] as { ingestion_batch_id?: number | null } | undefined;
-
-    const newJob = (await dbQuery(
-      `INSERT INTO jobs (report_id, version_id, kind, status, progress, ingestion_batch_id)
-       VALUES (${sqlValue(reportId)}, ${sqlValue(version.id)}, 'parse', 'queued', 0, ${sqlValue(ingestionBatch?.ingestion_batch_id ?? null)})
-       RETURNING id;`
-    ))[0] as { id?: number } | undefined;
-
-    return res.status(201).json({ job_id: newJob?.id || null, reused: false });
-  } catch (error) {
-    console.error('Error enqueue parse job:', error);
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-router.delete('/reports/:id', authMiddleware, async (req, res) => {
-  try {
-    const reportId = Number(req.params.id);
-    if (!reportId || Number.isNaN(reportId) || !Number.isInteger(reportId) || reportId < 1) {
-      return res.status(400).json({ error: 'report_id 无效' });
-    }
-
-    ensureDbMigrations();
-
-    const existing = (await dbQuery(`SELECT id, region_id FROM reports WHERE id = ${sqlValue(reportId)} LIMIT 1;`))[0] as
-      | { id?: number; region_id?: number }
-      | undefined;
-
-    if (!existing || !existing.id) {
-      return res.status(404).json({ error: 'report 不存在' });
-    }
-
-    const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
-    if (allowedRegionIds) {
-      if (allowedRegionIds.length === 0 || !allowedRegionIds.includes(existing.region_id || 0)) {
-        return res.status(403).json({ error: 'forbidden' });
-      }
-    }
-
-    // Best-effort remove stored files first
-    const versions = (await dbQuery(
-      `SELECT storage_path, text_path FROM report_versions WHERE report_id = ${sqlValue(reportId)};`
-    )) as Array<{ storage_path?: string | null; text_path?: string | null }>;
-
-    const toAbsoluteSafe = (maybeRelative: string) => {
-      const absolute = path.isAbsolute(maybeRelative)
-        ? path.normalize(maybeRelative)
-        : path.resolve(PROJECT_ROOT, maybeRelative);
-      const root = path.normalize(PROJECT_ROOT + path.sep);
-      const normalized = path.normalize(absolute);
-      if (!normalized.startsWith(root)) {
-        return null;
-      }
-      return normalized;
-    };
-
-    const unlinkIfExists = async (maybePath?: string | null) => {
-      if (!maybePath) return;
-      const absolute = toAbsoluteSafe(maybePath);
-      if (!absolute) return;
-      await fsPromises.unlink(absolute).catch(() => undefined);
-    };
-
-    for (const v of versions) {
-      await unlinkIfExists(v.storage_path || undefined);
-      await unlinkIfExists(v.text_path || undefined);
-    }
-
-    // Remove comparisons referencing this report (and their results)
-    const comparisonIds = (await dbQuery(
-      `SELECT id FROM comparisons WHERE left_report_id = ${sqlValue(reportId)} OR right_report_id = ${sqlValue(reportId)};`
-    )) as Array<{ id?: number }>;
-    const ids = comparisonIds.map((c) => c.id).filter((id): id is number => typeof id === 'number' && id > 0);
-    if (ids.length) {
-      const inClause = ids.join(',');
-      await dbQuery(`DELETE FROM comparison_results WHERE comparison_id IN (${inClause});`).catch(() => { });
-      await dbQuery(`DELETE FROM comparisons WHERE id IN (${inClause});`).catch(() => { });
-      await dbQuery(`UPDATE jobs SET comparison_id = NULL WHERE comparison_id IN (${inClause});`).catch(() => { });
-    }
-
-    // Attempt to delete consistency check related data (if tables exist)
+    // Manual Cascading Delete to handle missing DB constraints
+    const client = await pool.connect();
     try {
-      // Get version IDs
-      const versions = (await dbQuery(`SELECT id FROM report_versions WHERE report_id = ${sqlValue(reportId)}`)) as Array<{ id: number }>;
-      const versionIds = versions.map((v) => v.id);
+      await client.query('BEGIN');
+
+      // 1. Get all version IDs to clean up version-specific non-cascading data (like cells)
+      const verRes = await client.query('SELECT id FROM report_versions WHERE report_id = $1', [reportId]);
+      const versionIds = verRes.rows.map(r => r.id);
 
       if (versionIds.length > 0) {
-        const vIds = versionIds.join(',');
-
-        // Delete related notifications FIRST
-        await dbQuery(`DELETE FROM notifications WHERE related_version_id IN (${vIds})`).catch(() => { });
-
-        // Delete consistency runs & items
-        await dbQuery(`DELETE FROM report_consistency_run_items WHERE run_id IN (SELECT id FROM report_consistency_runs WHERE report_version_id IN (${vIds}))`).catch(() => { });
-        await dbQuery(`DELETE FROM report_consistency_runs WHERE report_version_id IN (${vIds})`).catch(() => { });
-        await dbQuery(`DELETE FROM report_consistency_items WHERE report_version_id IN (${vIds})`).catch(() => { });
-
-        // Delete parses
-        await dbQuery(`DELETE FROM report_version_parses WHERE report_version_id IN (${vIds})`).catch(() => { });
+        // Delete cells (no cascade in schema)
+        await client.query('DELETE FROM cells WHERE version_id = ANY($1::int[])', [versionIds]);
       }
+
+      // 2. Delete Comparisons (involving this report)
+      // comparison_results cascades from comparisons, so just delete comparisons
+      await client.query('DELETE FROM comparisons WHERE left_report_id = $1 OR right_report_id = $1', [reportId]);
+
+      // 3. Delete Facts & Quality Issues (referencing report_id, no cascade)
+      await client.query('DELETE FROM fact_active_disclosure WHERE report_id = $1', [reportId]);
+      await client.query('DELETE FROM fact_application WHERE report_id = $1', [reportId]);
+      await client.query('DELETE FROM fact_legal_proceeding WHERE report_id = $1', [reportId]);
+      await client.query('DELETE FROM quality_issues WHERE report_id = $1', [reportId]);
+
+      // 4. Delete Derived Metrics
+      await client.query('DELETE FROM derived_unit_year_metrics WHERE report_id = $1', [reportId]);
+
+      // 5. Delete Jobs (already has cascade usually, but safe to force)
+      await client.query('DELETE FROM jobs WHERE report_id = $1', [reportId]);
+
+      // 6. Delete Report (cascades to versions -> consistency runs, parses)
+      await client.query('DELETE FROM reports WHERE id = $1', [reportId]);
+
+      await client.query('COMMIT');
     } catch (e) {
-      console.warn('Error cleaning up related data:', e);
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
     }
 
-    // Remove jobs & versions, then report itself
-    await dbQuery(`DELETE FROM jobs WHERE report_id = ${sqlValue(reportId)};`).catch(() => { });
-    await dbQuery(`DELETE FROM report_versions WHERE report_id = ${sqlValue(reportId)};`).catch(() => { });
-    await dbQuery(`DELETE FROM reports WHERE id = ${sqlValue(reportId)};`);
-
-    return res.json({ ok: true });
+    return res.json({ success: true, message: '删除成功' });
   } catch (error) {
     console.error('Error deleting report:', error);
     return res.status(500).json({ error: 'Internal server error' });

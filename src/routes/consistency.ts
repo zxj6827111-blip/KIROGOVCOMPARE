@@ -1,16 +1,16 @@
 import express from 'express';
-import { dbQuery, dbExecute, dbNowExpression } from '../config/db-llm';
-import { sqlValue } from '../config/sqlite';
+import pool from '../config/database-llm';
 import { consistencyCheckService } from '../services/ConsistencyCheckService';
 
 const router = express.Router();
 
 async function refreshComparisonStatusForReport(reportId: number): Promise<void> {
-  const comparisons = await dbQuery(`
+  const comparisonsRes = await pool.query(`
     SELECT id, year_a, year_b, left_report_id, right_report_id
     FROM comparisons
-    WHERE left_report_id = ${sqlValue(reportId)} OR right_report_id = ${sqlValue(reportId)}
-  `);
+    WHERE left_report_id = $1 OR right_report_id = $1
+  `, [reportId]);
+  const comparisons = comparisonsRes.rows;
 
   if (!comparisons || comparisons.length === 0) {
     return;
@@ -24,13 +24,14 @@ async function refreshComparisonStatusForReport(reportId: number): Promise<void>
     return;
   }
 
-  const versionRows = await dbQuery(`
+  const versionRowsRes = await pool.query(`
     SELECT r.id as report_id, rv.id as version_id
     FROM reports r
     JOIN report_versions rv ON rv.id = r.active_version_id
-    WHERE r.id IN (${reportIds.join(',')})
+    WHERE r.id = ANY($1::int[])
     ORDER BY rv.id DESC
-  `);
+  `, [reportIds]);
+  const versionRows = versionRowsRes.rows;
 
   const versionMap = new Map<string, number>();
   for (const row of versionRows) {
@@ -44,14 +45,15 @@ async function refreshComparisonStatusForReport(reportId: number): Promise<void>
   const countsMap = new Map<number, number>();
 
   if (versionIds.length > 0) {
-    const countRows = await dbQuery(`
+    const countRowsRes = await pool.query(`
       SELECT report_version_id, COUNT(*) as cnt
       FROM report_consistency_items
-      WHERE report_version_id IN (${versionIds.join(',')})
+      WHERE report_version_id = ANY($1::int[])
         AND auto_status = 'FAIL'
         AND human_status = 'pending'
       GROUP BY report_version_id
-    `);
+    `, [versionIds]);
+    const countRows = countRowsRes.rows;
 
     for (const row of countRows) {
       countsMap.set(Number(row.report_version_id), Number(row.cnt));
@@ -74,11 +76,11 @@ async function refreshComparisonStatusForReport(reportId: number): Promise<void>
 
     const checkStatus = issueParts.length > 0 ? `异常(${issueParts.join('|')})` : '正常';
 
-    await dbExecute(`
+    await pool.query(`
       UPDATE comparisons
-      SET check_status = ${sqlValue(checkStatus)}
-      WHERE id = ${sqlValue(comparison.id)}
-    `);
+      SET check_status = $1
+      WHERE id = $2
+    `, [checkStatus, comparison.id]);
   }
 }
 
@@ -94,57 +96,55 @@ router.get('/reports/:id/checks', async (req, res) => {
 
   try {
     // 1. Get active version of the report
-    const reportRes = await dbQuery(`
+    const reportRes = await pool.query(`
       SELECT rv.id as version_id, rv.parsed_json
       FROM reports r
       JOIN report_versions rv ON rv.id = r.active_version_id
-      WHERE r.id = ${sqlValue(reportId)}
+      WHERE r.id = $1
       LIMIT 1
-    `);
+    `, [reportId]);
 
-    if (reportRes.length === 0) {
-      // No report or no active version
+    if (reportRes.rows.length === 0) {
       res.json({
         latest_run: null,
-        groups: [] 
+        groups: []
       });
       return;
     }
 
-    const { version_id } = reportRes[0];
+    const { version_id } = reportRes.rows[0];
 
     // 2. Get latest run info
-    // Note: Service code uses 'report_consistency_runs', ensuring compatibility
-    const runRes = await dbQuery(`
+    const runRes = await pool.query(`
       SELECT * FROM report_consistency_runs 
-      WHERE report_version_id = ${sqlValue(version_id)}
+      WHERE report_version_id = $1
       ORDER BY created_at DESC
       LIMIT 1
-    `);
-    
-    const latestRun = runRes[0] || null;
+    `, [version_id]);
+
+    const latestRun = runRes.rows[0] || null;
     let summary: any = { fail: 0, uncertain: 0, pass: 0, total: 0 };
     if (latestRun && latestRun.summary_json) {
-       try {
-         summary = typeof latestRun.summary_json === 'string' 
-           ? JSON.parse(latestRun.summary_json) 
-           : latestRun.summary_json;
-       } catch (e) {}
+      try {
+        summary = typeof latestRun.summary_json === 'string'
+          ? JSON.parse(latestRun.summary_json)
+          : latestRun.summary_json;
+      } catch (e) { }
     }
 
     // 3. Get items
-    const itemsRes = await dbQuery(`
+    const itemsRes = await pool.query(`
       SELECT * 
       FROM report_consistency_items 
-      WHERE report_version_id = ${sqlValue(version_id)}
+      WHERE report_version_id = $1
       ORDER BY id ASC
-    `);
+    `, [version_id]);
+    const itemsRows = itemsRes.rows;
 
-    // Parse specific JSON fields
-    const items = itemsRes.map(item => {
+    const items = itemsRows.map((item: any) => {
       let evidence = item.evidence_json;
       if (typeof evidence === 'string') {
-        try { evidence = JSON.parse(evidence); } catch (e) {}
+        try { evidence = JSON.parse(evidence); } catch (e) { }
       }
       return {
         ...item,
@@ -160,7 +160,7 @@ router.get('/reports/:id/checks', async (req, res) => {
     // 4. Group items
     const groupDefs: Record<string, string> = {
       'table2': '表二：主动公开',
-      'table3': '表三：非本机关产生', // Note: This name might need adjustment based on actual content
+      'table3': '表三：非本机关产生',
       'table4': '表四：行政复议诉讼',
       'text': '正文一致性校验',
       'visual': '视觉与结构审计',
@@ -168,46 +168,41 @@ router.get('/reports/:id/checks', async (req, res) => {
       'quality': '数据质量审计'
     };
 
-    // Use specific ordering
     const orderedKeys = ['visual', 'structure', 'quality', 'text', 'table2', 'table3', 'table4'];
-    
-    // Group items
-    const groupsMap: Record<string, any[]>  = {};
-    items.forEach(item => {
+
+    const groupsMap: Record<string, any[]> = {};
+    items.forEach((item: any) => {
       const k = item.group_key;
       if (!groupsMap[k]) groupsMap[k] = [];
       groupsMap[k].push(item);
     });
 
-    // Construct response
     const groups = orderedKeys.map(key => {
-        // If we have items for this key, or if it's one of the core tables, ensure it appears
-        if (groupsMap[key] || ['table3', 'table4', 'text'].includes(key)) {
-             return {
-                 group_key: key,
-                 group_name: groupDefs[key] || key,
-                 items: groupsMap[key] || []
-             };
-        }
-        return null;
+      if (groupsMap[key] || ['table3', 'table4', 'text'].includes(key)) {
+        return {
+          group_key: key,
+          group_name: groupDefs[key] || key,
+          items: groupsMap[key] || []
+        };
+      }
+      return null;
     }).filter(Boolean);
 
-    // Merge any other keys found that weren't in orderedKeys
     Object.keys(groupsMap).forEach(key => {
-        if (!orderedKeys.includes(key)) {
-             groups.push({
-                 group_key: key,
-                 group_name: groupDefs[key] || key,
-                 items: groupsMap[key]
-             });
-        }
+      if (!orderedKeys.includes(key)) {
+        groups.push({
+          group_key: key,
+          group_name: groupDefs[key] || key,
+          items: groupsMap[key]
+        });
+      }
     });
 
     res.json({
       data: {
         latest_run: latestRun ? {
-            ...latestRun,
-            summary
+          ...latestRun,
+          summary
         } : null,
         groups
       }
@@ -225,34 +220,32 @@ router.get('/reports/:id/checks', async (req, res) => {
 router.post('/reports/:id/checks/run', async (req, res) => {
   const reportId = req.params.id;
   try {
-     // 1. Get active version
-     const reportRes = await dbQuery(`
+    const reportRes = await pool.query(`
         SELECT rv.id as version_id, rv.parsed_json
         FROM reports r
         JOIN report_versions rv ON rv.id = r.active_version_id
-        WHERE r.id = ${sqlValue(reportId)}
+        WHERE r.id = $1
         LIMIT 1
-     `);
-     
-     if (reportRes.length === 0) {
-       res.status(404).json({ error: 'Report or active version not found' });
-       return;
-     }
+     `, [reportId]);
 
-     const { version_id, parsed_json } = reportRes[0];
-     let parsed = parsed_json;
-     if (typeof parsed === 'string') {
-        try { parsed = JSON.parse(parsed); } catch(e) {}
-     }
+    if (reportRes.rows.length === 0) {
+      res.status(404).json({ error: 'Report or active version not found' });
+      return;
+    }
 
-     // 2. Run checks service
-     const result = await consistencyCheckService.runAndPersist(version_id, parsed);
+    const { version_id, parsed_json } = reportRes.rows[0];
+    let parsed = parsed_json;
+    if (typeof parsed === 'string') {
+      try { parsed = JSON.parse(parsed); } catch (e) { }
+    }
 
-     res.json({ success: true, runId: result.runId, count: result.items.length });
+    const result = await consistencyCheckService.runAndPersist(version_id, parsed);
+
+    res.json({ success: true, runId: result.runId, count: result.items.length });
 
   } catch (err: any) {
-      console.error('Error running checks:', err);
-      res.status(500).json({ error: 'Failed to run checks: ' + err.message });
+    console.error('Error running checks:', err);
+    res.status(500).json({ error: 'Failed to run checks: ' + err.message });
   }
 });
 
@@ -260,52 +253,42 @@ router.post('/reports/:id/checks/run', async (req, res) => {
  * PATCH /reports/:id/checks/items/:itemId - Update check item status
  */
 router.patch('/reports/:id/checks/items/:itemId', async (req, res) => {
-   const { itemId } = req.params;
-   const { human_status, human_comment } = req.body;
+  const { itemId } = req.params;
+  const { human_status, human_comment } = req.body;
 
-   if (!human_status) {
-       res.status(400).json({ error: 'Missing human_status' });
-       return;
-   }
+  if (!human_status) {
+    res.status(400).json({ error: 'Missing human_status' });
+    return;
+  }
 
-   try {
-       await dbExecute(`
+  try {
+    await pool.query(`
          UPDATE report_consistency_items
-         SET human_status = ${sqlValue(human_status)},
-             human_comment = ${sqlValue(human_comment || null)},
-             updated_at = ${dbNowExpression()}
-         WHERE id = ${sqlValue(itemId)}
-       `);
+         SET human_status = $1,
+             human_comment = $2,
+             updated_at = NOW()
+         WHERE id = $3
+       `, [human_status, human_comment || null, itemId]);
 
-       try {
-         const itemRows = await dbQuery(`
-           SELECT report_version_id
-           FROM report_consistency_items
-           WHERE id = ${sqlValue(itemId)}
-           LIMIT 1
-         `);
-         const reportVersionId = itemRows?.[0]?.report_version_id;
-         if (reportVersionId) {
-           const reportRows = await dbQuery(`
-             SELECT report_id
-             FROM report_versions
-             WHERE id = ${sqlValue(reportVersionId)}
-             LIMIT 1
-           `);
-           const reportId = reportRows?.[0]?.report_id;
-           if (reportId) {
-             await refreshComparisonStatusForReport(Number(reportId));
-           }
-         }
-       } catch (refreshError) {
-         console.warn('[Consistency] Failed to refresh comparison status:', refreshError);
-       }
+    try {
+      const itemRowsRes = await pool.query('SELECT report_version_id FROM report_consistency_items WHERE id = $1 LIMIT 1', [itemId]);
+      const reportVersionId = itemRowsRes.rows[0]?.report_version_id;
+      if (reportVersionId) {
+        const reportRowsRes = await pool.query('SELECT report_id FROM report_versions WHERE id = $1 LIMIT 1', [reportVersionId]);
+        const reportId = reportRowsRes.rows[0]?.report_id;
+        if (reportId) {
+          await refreshComparisonStatusForReport(Number(reportId));
+        }
+      }
+    } catch (refreshError) {
+      console.warn('[Consistency] Failed to refresh comparison status:', refreshError);
+    }
 
-       res.json({ success: true });
-   } catch (err: any) {
-       console.error('Error updating check item:', err);
-       res.status(500).json({ error: 'Failed to update item' });
-   }
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error updating check item:', err);
+    res.status(500).json({ error: 'Failed to update item' });
+  }
 });
 
 export default router;

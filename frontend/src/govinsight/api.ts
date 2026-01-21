@@ -76,3 +76,57 @@ export async function fetchOrgs(year?: number): Promise<OrgItem[]> {
 
   return result.data;
 }
+
+/**
+ * 保存 AI 辅助决策报告
+ */
+export async function saveAIReport(
+  orgId: string,
+  orgName: string,
+  year: number,
+  content: any,
+  model: string = 'gemini'
+): Promise<void> {
+  const url = `${API_BASE}/api/gov-insight/ai-report/save`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ org_id: orgId, org_name: orgName, year, content, model }),
+    credentials: 'include'
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to save AI report: ${response.status}`);
+  }
+
+  const result: ApiResponse<any> = await response.json();
+  if (result.code !== 200) {
+    throw new Error(result.msg || 'Unknown error');
+  }
+}
+
+/**
+ * 获取 AI 辅助决策报告
+ */
+export async function fetchAIReport(
+  orgId: string,
+  year: number
+): Promise<{ content: any, model: string, updatedAt: string } | null> {
+  const params = new URLSearchParams();
+  params.set('org_id', orgId);
+  params.set('year', String(year));
+
+  const url = `${API_BASE}/api/gov-insight/ai-report?${params.toString()}`;
+  const response = await fetch(url, { credentials: 'include' });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch AI report: ${response.status}`);
+  }
+
+  const result: ApiResponse<any> = await response.json();
+  if (result.code !== 200 || !result.data) {
+    return null;
+  }
+
+  return result.data;
+}

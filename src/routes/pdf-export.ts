@@ -2,10 +2,9 @@ import express, { Response, Router } from 'express';
 import puppeteer from 'puppeteer';
 import http from 'http';
 import path from 'path';
-import { dbQuery, ensureDbMigrations } from '../config/db-llm';
-import { sqlValue } from '../config/sqlite';
+import pool from '../config/database-llm';
 import { authMiddleware, AuthRequest, generateExpiringToken } from '../middleware/auth';
-import { getAllowedRegionIds, getAllowedRegionIdsAsync } from '../utils/dataScope';
+import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 
 const router: Router = express.Router();
 const SERVICE_TOKEN_TTL_MS = 5 * 60 * 1000;
@@ -81,28 +80,26 @@ router.get('/:id/pdf', authMiddleware, async (req: AuthRequest, res: Response) =
             return res.status(401).json({ error: 'unauthorized' });
         }
 
-        ensureDbMigrations();
-
         const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
         if (allowedRegionIds && allowedRegionIds.length === 0) {
             return res.status(403).json({ error: 'forbidden' });
         }
 
-        const comparisonRows = await dbQuery(`
+        const comparisonRes = await pool.query(`
             SELECT c.id, lr.region_id as left_region_id, rr.region_id as right_region_id
             FROM comparisons c
             JOIN reports lr ON c.left_report_id = lr.id
             JOIN reports rr ON c.right_report_id = rr.id
-            WHERE c.id = ${sqlValue(comparisonId)}
+            WHERE c.id = $1
             LIMIT 1;
-        `) as Array<{ id: number; left_region_id: number; right_region_id: number }>;
+        `, [comparisonId]);
 
-        if (comparisonRows.length === 0) {
+        if (comparisonRes.rows.length === 0) {
             return res.status(404).json({ error: 'comparison_not_found' });
         }
 
         if (allowedRegionIds) {
-            const { left_region_id, right_region_id } = comparisonRows[0];
+            const { left_region_id, right_region_id } = comparisonRes.rows[0];
             if (!allowedRegionIds.includes(left_region_id) || !allowedRegionIds.includes(right_region_id)) {
                 return res.status(403).json({ error: 'forbidden' });
             }
@@ -190,10 +187,8 @@ router.get('/:id/pdf', authMiddleware, async (req: AuthRequest, res: Response) =
         }
 
         // Try to wait for content, but with fallback
-        let hasContent = false;
         try {
             await page.waitForSelector('#comparison-content', { timeout: 10000 });
-            hasContent = true;
             console.log(`[PDF Export] Found #comparison-content element`);
         } catch (e) {
             console.log(`[PDF Export] #comparison-content not found, checking for error state...`);
@@ -249,7 +244,7 @@ router.get('/:id/pdf', authMiddleware, async (req: AuthRequest, res: Response) =
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"; filename*=UTF-8''${filename}`);
 
-        // Puppeteer returns Uint8Array - convert to Node.js Buffer for proper binary transmission
+        // Puppeteer returns Uint8Array or Buffer - cast to any or Buffer.from to be safe
         const nodeBuffer = Buffer.from(pdfBuffer);
         res.setHeader('Content-Length', nodeBuffer.length);
 

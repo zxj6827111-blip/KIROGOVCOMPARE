@@ -2,17 +2,17 @@ import express, { Response, Router } from 'express';
 import path from 'path';
 import fs from 'fs';
 import archiver from 'archiver';
-import { dbExecute, dbQuery, ensureDbMigrations } from '../config/db-llm';
-import { sqlValue, DATA_DIR } from '../config/sqlite';
+import pool from '../config/database-llm';
+import { DATA_DIR } from '../config/constants';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
-import { getAllowedRegionIds, getAllowedRegionIdsAsync } from '../utils/dataScope';
+import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 
 const router: Router = express.Router();
 
-// PDF 瀵煎嚭鏂囦欢瀛樺偍鐩綍
+// PDF 导出文件存储目录
 export const PDF_EXPORTS_DIR = path.join(DATA_DIR, 'exports', 'pdf');
 
-// 纭繚瀵煎嚭鐩綍瀛樺湪
+// 确保导出目录存在
 function ensureExportsDir(): void {
     if (!fs.existsSync(PDF_EXPORTS_DIR)) {
         fs.mkdirSync(PDF_EXPORTS_DIR, { recursive: true });
@@ -21,11 +21,10 @@ function ensureExportsDir(): void {
 
 /**
  * POST /api/pdf-jobs
- * 鍒涘缓 PDF 瀵煎嚭浠诲姟
+ * 创建 PDF 导出任务
  */
 router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
-        ensureDbMigrations();
         ensureExportsDir();
 
         const { comparison_id, title } = req.body;
@@ -39,58 +38,64 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
             return res.status(400).json({ error: 'comparison_id is required' });
         }
 
-        // 妫€鏌?comparison 鏄惁瀛樺湪
-        const scopeClause = allowedRegionIds ? `AND reg.id IN (${allowedRegionIds.join(',')})` : '';
-        const comparisonRows = await dbQuery(`
-      SELECT c.id, c.year_a, c.year_b, r.unit_name, reg.name as region_name, c.left_report_id
-      FROM comparisons c
-      JOIN reports r ON c.left_report_id = r.id
-      JOIN regions reg ON r.region_id = reg.id
-      WHERE c.id = ${sqlValue(comparison_id)}
-      ${scopeClause};
-    `) as Array<{ id: number; year_a: number; year_b: number; unit_name: string; region_name: string; left_report_id: number }>;
+        // 检查 comparison 是否存在
+        const conditions: string[] = [`c.id = $1`];
+        const params: any[] = [comparison_id];
+        let paramIndex = 2;
 
-        if (comparisonRows.length === 0) {
+        if (allowedRegionIds) {
+            conditions.push(`reg.id = ANY($${paramIndex++}::int[])`);
+            params.push(allowedRegionIds);
+        }
+
+        const comparisonRes = await pool.query(`
+          SELECT c.id, c.year_a, c.year_b, r.unit_name, reg.name as region_name, c.left_report_id
+          FROM comparisons c
+          JOIN reports r ON c.left_report_id = r.id
+          JOIN regions reg ON r.region_id = reg.id
+          WHERE ${conditions.join(' AND ')}
+        `, params);
+
+        if (comparisonRes.rows.length === 0) {
             return res.status(404).json({ error: 'Comparison not found' });
         }
 
-        const comparison = comparisonRows[0];
+        const comparison = comparisonRes.rows[0];
 
-        // 鐢熸垚浠诲姟鏍囬
+        // 生成任务标题
         const exportTitle = title || `${comparison.region_name} ${comparison.year_a}-${comparison.year_b} 年报比对`;
 
         // 生成文件名 (地区_年份A-年份B.pdf)
         const safeRegionName = (comparison.region_name || '未知地区').replace(/[\\/:*?"<>|]/g, '_');
         const fileName = `${safeRegionName}_${comparison.year_a}-${comparison.year_b}年报比对.pdf`;
 
-        // 鍒涘缓 PDF 瀵煎嚭浠诲姟
-        const result = await dbQuery(`
-      INSERT INTO jobs (
-        report_id, 
-        kind, 
-        status, 
-        progress, 
-        step_code, 
-        step_name,
-        comparison_id,
-        export_title,
-        file_name
-      ) VALUES (
-        ${comparison.left_report_id},
-        'pdf_export',
-        'queued',
-        0,
-        'QUEUED',
-        '等待处理',
-        ${sqlValue(comparison_id)},
-        ${sqlValue(exportTitle)},
-        ${sqlValue(fileName)}
-      )
-      RETURNING id;
-    `);
+        // 创建 PDF 导出任务
+        const result = await pool.query(`
+          INSERT INTO jobs (
+            report_id, 
+            kind, 
+            status, 
+            progress, 
+            step_code, 
+            step_name,
+            comparison_id,
+            export_title,
+            file_name
+          ) VALUES (
+            $1,
+            'pdf_export',
+            'queued',
+            0,
+            'QUEUED',
+            '等待处理',
+            $2,
+            $3,
+            $4
+          )
+          RETURNING id;
+        `, [comparison.left_report_id, comparison_id, exportTitle, fileName]);
 
-        // 鑾峰彇鏂板垱寤虹殑浠诲姟 ID
-        const jobId = result[0]?.id;
+        const jobId = result.rows[0]?.id;
 
         return res.status(201).json({
             success: true,
@@ -111,12 +116,10 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
 
 /**
  * GET /api/pdf-jobs
- * 鑾峰彇 PDF 瀵煎嚭浠诲姟鍒楄〃
+ * 获取 PDF 导出任务列表
  */
 router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
-        ensureDbMigrations();
-
         const { status, page, limit } = req.query;
 
         const pageNum = Math.max(1, Number(page) || 1);
@@ -124,16 +127,21 @@ router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
         const offset = (pageNum - 1) * limitNum;
 
         const conditions: string[] = ["j.kind = 'pdf_export'"];
+        const params: any[] = [];
+        let paramIndex = 1;
+
         if (status) {
             const normalizedStatus = status === 'processing' ? 'running' : status;
-            conditions.push(`j.status = ${sqlValue(String(normalizedStatus))}`);
+            conditions.push(`j.status = $${paramIndex++}`);
+            params.push(String(normalizedStatus));
         }
 
         // DATA SCOPE FILTER
         const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
         if (allowedRegionIds) {
             if (allowedRegionIds.length > 0) {
-                conditions.push(`c.region_id IN (${allowedRegionIds.join(',')})`);
+                conditions.push(`c.region_id = ANY($${paramIndex++}::int[])`);
+                params.push(allowedRegionIds);
             } else {
                 conditions.push('1=0');
             }
@@ -141,54 +149,46 @@ router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
 
         const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
+        // 获取总数
+        const countRes = await pool.query(`
+          SELECT COUNT(*) as total FROM jobs j 
+          LEFT JOIN comparisons c ON j.comparison_id = c.id
+          ${whereClause};
+        `, params);
+        const total = Number(countRes.rows[0]?.total || 0);
 
-        // 鑾峰彇鎬绘暟
-        const countResult = await dbQuery(`
-      SELECT COUNT(*) as total FROM jobs j 
-      LEFT JOIN comparisons c ON j.comparison_id = c.id
-      ${whereClause};
-    `) as Array<{ total: number }>;
-        const total = countResult[0]?.total || 0;
+        // 获取任务列表
+        params.push(limitNum); // $Limit
+        const limitIndex = paramIndex++;
+        params.push(offset); // $Offset
+        const offsetIndex = paramIndex++;
 
-        // 鑾峰彇浠诲姟鍒楄〃
-        const rows = await dbQuery(`
-      SELECT 
-        j.id as job_id,
-        j.comparison_id,
-        j.status,
-        j.progress,
-        j.step_name,
-        j.export_title,
-        j.file_name,
-        j.file_path,
-        j.file_size,
-        j.created_at,
-        j.started_at,
-        j.finished_at,
-        j.error_message
-      FROM jobs j
-      LEFT JOIN comparisons c ON j.comparison_id = c.id
-      ${whereClause}
-      ORDER BY j.created_at DESC
-      LIMIT ${limitNum} OFFSET ${offset};
-    `) as Array<{
-            job_id: number;
-            comparison_id: number;
-            status: string;
-            progress: number;
-            step_name: string;
-            export_title: string;
-            file_name: string;
-            file_path: string | null;
-            file_size: number | null;
-            created_at: string;
-            started_at: string | null;
-            finished_at: string | null;
-            error_message: string | null;
-        }>;
+        const jobsRes = await pool.query(`
+          SELECT 
+            j.id as job_id,
+            j.comparison_id,
+            j.status,
+            j.progress,
+            j.step_name,
+            j.export_title,
+            j.file_name,
+            j.file_path,
+            j.file_size,
+            j.created_at,
+            j.started_at,
+            j.finished_at,
+            j.error_message
+          FROM jobs j
+          LEFT JOIN comparisons c ON j.comparison_id = c.id
+          ${whereClause}
+          ORDER BY j.created_at DESC
+          LIMIT $${limitIndex} OFFSET $${offsetIndex};
+        `, params);
 
-        // 妫€鏌ユ枃浠舵槸鍚﹀瓨鍦紙鍙兘宸茶娓呯悊锛?
-        const jobs = rows.map(row => {
+        const rows = jobsRes.rows;
+
+        // 检查文件是否存在
+        const jobs = rows.map((row: any) => {
             const displayStatus = row.status === 'running' ? 'processing' : row.status;
             let fileExists = false;
 
@@ -221,12 +221,10 @@ router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
 
 /**
  * GET /api/pdf-jobs/:id/download
- * 涓嬭浇宸茬敓鎴愮殑 PDF 鏂囦欢
+ * 下载已生成的 PDF 文件
  */
 router.get('/:id/download', authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
-        ensureDbMigrations();
-
         const jobId = Number(req.params.id);
         if (isNaN(jobId)) {
             return res.status(400).json({ error: 'Invalid job ID' });
@@ -237,33 +235,32 @@ router.get('/:id/download', authMiddleware, async (req: AuthRequest, res: Respon
             return res.status(403).json({ error: 'forbidden' });
         }
 
-        const scopeClause = allowedRegionIds ? `AND r.region_id IN (${allowedRegionIds.join(',')})` : '';
+        const conditions: string[] = [`j.id = $1`, `j.kind = 'pdf_export'`];
+        const params: any[] = [jobId];
+        let paramIndex = 2;
 
-        // 鑾峰彇浠诲姟淇℃伅
-        const rows = await dbQuery(`
-      SELECT 
-        j.id, j.status, j.file_path, j.file_name, j.comparison_id, j.export_title
-      FROM jobs j
-      LEFT JOIN comparisons c ON j.comparison_id = c.id
-      LEFT JOIN reports r ON c.left_report_id = r.id
-      WHERE j.id = ${sqlValue(jobId)} AND j.kind = 'pdf_export'
-      ${scopeClause};
-    `) as Array<{
-            id: number;
-            status: string;
-            file_path: string | null;
-            file_name: string;
-            comparison_id: number;
-            export_title: string;
-        }>;
+        if (allowedRegionIds) {
+            conditions.push(`r.region_id = ANY($${paramIndex++}::int[])`);
+            params.push(allowedRegionIds);
+        }
 
-        if (rows.length === 0) {
+        // 获取任务信息
+        const jobRes = await pool.query(`
+          SELECT 
+            j.id, j.status, j.file_path, j.file_name, j.comparison_id, j.export_title
+          FROM jobs j
+          LEFT JOIN comparisons c ON j.comparison_id = c.id
+          LEFT JOIN reports r ON c.left_report_id = r.id
+          WHERE ${conditions.join(' AND ')};
+        `, params);
+
+        if (jobRes.rows.length === 0) {
             return res.status(404).json({ error: 'PDF export job not found' });
         }
 
-        const job = rows[0];
+        const job = jobRes.rows[0];
 
-        // 妫€鏌ヤ换鍔＄姸鎬?
+        // 检查任务状态
         if (job.status !== 'done') {
             return res.status(400).json({
                 error: 'PDF not ready',
@@ -272,9 +269,8 @@ router.get('/:id/download', authMiddleware, async (req: AuthRequest, res: Respon
             });
         }
 
-        // 妫€鏌ユ枃浠舵槸鍚﹀瓨鍦?
+        // 检查文件是否存在
         if (!job.file_path || !fs.existsSync(job.file_path)) {
-            // 鏂囦欢宸茶娓呯悊锛岄渶瑕侀噸鏂扮敓鎴?
             return res.status(410).json({
                 error: 'File expired',
                 message: '文件已过期被清理，请重新生成',
@@ -283,7 +279,7 @@ router.get('/:id/download', authMiddleware, async (req: AuthRequest, res: Respon
             });
         }
 
-        // 鍙戦€佹枃浠?
+        // 发送文件
         const fileName = job.file_name || `comparison_${job.comparison_id}.pdf`;
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
@@ -299,12 +295,10 @@ router.get('/:id/download', authMiddleware, async (req: AuthRequest, res: Respon
 
 /**
  * DELETE /api/pdf-jobs/:id
- * 鍒犻櫎 PDF 瀵煎嚭浠诲姟鍙婂叾鏂囦欢
+ * 删除 PDF 导出任务及其文件
  */
 router.delete('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
-        ensureDbMigrations();
-
         const jobId = Number(req.params.id);
         if (isNaN(jobId)) {
             return res.status(400).json({ error: 'Invalid job ID' });
@@ -315,24 +309,30 @@ router.delete('/:id', authMiddleware, async (req: AuthRequest, res: Response) =>
             return res.status(403).json({ error: 'forbidden' });
         }
 
-        const scopeClause = allowedRegionIds ? `AND r.region_id IN (${allowedRegionIds.join(',')})` : '';
+        const conditions: string[] = [`j.id = $1`, `j.kind = 'pdf_export'`];
+        const params: any[] = [jobId];
+        let paramIndex = 2;
 
-        // 鑾峰彇浠诲姟淇℃伅
-        const rows = await dbQuery(`
-      SELECT j.file_path
-      FROM jobs j
-      LEFT JOIN comparisons c ON j.comparison_id = c.id
-      LEFT JOIN reports r ON c.left_report_id = r.id
-      WHERE j.id = ${sqlValue(jobId)} AND j.kind = 'pdf_export'
-      ${scopeClause};
-    `) as Array<{ file_path: string | null }>;
+        if (allowedRegionIds) {
+            conditions.push(`r.region_id = ANY($${paramIndex++}::int[])`);
+            params.push(allowedRegionIds);
+        }
 
-        if (rows.length === 0) {
+        // 获取任务信息
+        const jobRes = await pool.query(`
+          SELECT j.file_path
+          FROM jobs j
+          LEFT JOIN comparisons c ON j.comparison_id = c.id
+          LEFT JOIN reports r ON c.left_report_id = r.id
+          WHERE ${conditions.join(' AND ')};
+        `, params);
+
+        if (jobRes.rows.length === 0) {
             return res.status(404).json({ error: 'PDF export job not found' });
         }
 
-        // 鍒犻櫎鏂囦欢锛堝鏋滃瓨鍦級
-        const filePath = rows[0].file_path;
+        // 删除文件（如果存在）
+        const filePath = jobRes.rows[0].file_path;
         if (filePath && fs.existsSync(filePath)) {
             try {
                 fs.unlinkSync(filePath);
@@ -341,8 +341,8 @@ router.delete('/:id', authMiddleware, async (req: AuthRequest, res: Response) =>
             }
         }
 
-        // 鍒犻櫎浠诲姟璁板綍
-        await dbExecute(`DELETE FROM jobs WHERE id = ${sqlValue(jobId)};`);
+        // 删除任务记录
+        await pool.query('DELETE FROM jobs WHERE id = $1', [jobId]);
 
         return res.json({ success: true, message: 'PDF export job deleted' });
 
@@ -354,12 +354,10 @@ router.delete('/:id', authMiddleware, async (req: AuthRequest, res: Response) =>
 
 /**
  * POST /api/pdf-jobs/:id/regenerate
- * 閲嶆柊鐢熸垚宸茶繃鏈熺殑 PDF
+ * 重新生成已过期的 PDF
  */
 router.post('/:id/regenerate', authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
-        ensureDbMigrations();
-
         const jobId = Number(req.params.id);
         if (isNaN(jobId)) {
             return res.status(400).json({ error: 'Invalid job ID' });
@@ -370,43 +368,49 @@ router.post('/:id/regenerate', authMiddleware, async (req: AuthRequest, res: Res
             return res.status(403).json({ error: 'forbidden' });
         }
 
-        const scopeClause = allowedRegionIds ? `AND r.region_id IN (${allowedRegionIds.join(',')})` : '';
+        const conditions: string[] = [`j.id = $1`, `j.kind = 'pdf_export'`];
+        const params: any[] = [jobId];
+        let paramIndex = 2;
+
+        if (allowedRegionIds) {
+            conditions.push(`r.region_id = ANY($${paramIndex++}::int[])`);
+            params.push(allowedRegionIds);
+        }
 
         // Load comparison info for job
-        const rows = await dbQuery(`
-      SELECT j.comparison_id, j.export_title
-      FROM jobs j
-      LEFT JOIN comparisons c ON j.comparison_id = c.id
-      LEFT JOIN reports r ON c.left_report_id = r.id
-      WHERE j.id = ${sqlValue(jobId)} AND j.kind = 'pdf_export'
-      ${scopeClause};
-    `) as Array<{ comparison_id: number; export_title: string }>;
+        const jobRes = await pool.query(`
+          SELECT j.comparison_id, j.export_title
+          FROM jobs j
+          LEFT JOIN comparisons c ON j.comparison_id = c.id
+          LEFT JOIN reports r ON c.left_report_id = r.id
+          WHERE ${conditions.join(' AND ')};
+        `, params);
 
-        if (rows.length === 0) {
+        if (jobRes.rows.length === 0) {
             return res.status(404).json({ error: 'PDF export job not found' });
         }
 
-        const { comparison_id, export_title } = rows[0];
+        const { comparison_id, export_title } = jobRes.rows[0];
 
-        // 鐢熸垚鏂版枃浠跺悕
+        // 生成新文件名
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
         const fileName = `comparison_${comparison_id}_${timestamp}.pdf`;
 
-        // 閲嶇疆浠诲姟鐘舵€?
-        await dbExecute(`
-      UPDATE jobs SET 
-        status = 'queued',
-        progress = 0,
-        step_code = 'QUEUED',
-        step_name = '等待处理',
-        file_path = NULL,
-        file_size = NULL,
-        file_name = ${sqlValue(fileName)},
-        error_message = NULL,
-        started_at = NULL,
-        finished_at = NULL
-      WHERE id = ${sqlValue(jobId)};
-    `);
+        // 重置任务状态
+        await pool.query(`
+          UPDATE jobs SET 
+            status = 'queued',
+            progress = 0,
+            step_code = 'QUEUED',
+            step_name = '等待处理',
+            file_path = NULL,
+            file_size = NULL,
+            file_name = $1,
+            error_message = NULL,
+            started_at = NULL,
+            finished_at = NULL
+          WHERE id = $2;
+        `, [fileName, jobId]);
 
         return res.json({
             success: true,
@@ -423,12 +427,10 @@ router.post('/:id/regenerate', authMiddleware, async (req: AuthRequest, res: Res
 
 /**
  * POST /api/pdf-jobs/batch-download
- * 鎵归噺涓嬭浇 PDF锛堟墦鍖呮垚 ZIP锛?
+ * 批量下载 PDF（打包成 ZIP）
  */
 router.post('/batch-download', authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
-        ensureDbMigrations();
-
         const { job_ids } = req.body;
 
         if (!job_ids || !Array.isArray(job_ids) || job_ids.length === 0) {
@@ -440,48 +442,50 @@ router.post('/batch-download', authMiddleware, async (req: AuthRequest, res: Res
             return res.status(403).json({ error: 'forbidden' });
         }
 
-        const scopeClause = allowedRegionIds ? `AND r.region_id IN (${allowedRegionIds.join(',')})` : '';
+        const conditions: string[] = [
+            `j.id = ANY($1::int[])`,
+            `j.kind = 'pdf_export'`,
+            `j.status = 'done'`,
+            `j.file_path IS NOT NULL`
+        ];
+        const params: any[] = [job_ids];
+        let paramIndex = 2;
 
-        // Build placeholders for batch download
-        const placeholders = job_ids.map(() => '?').join(',');
-        const jobs = await dbQuery(`
-      SELECT j.id, j.file_path, j.file_name, j.export_title, j.status 
-      FROM jobs j
-      LEFT JOIN comparisons c ON j.comparison_id = c.id
-      LEFT JOIN reports r ON c.left_report_id = r.id
-      WHERE id IN (${job_ids.map(id => sqlValue(id)).join(',')}) 
-        AND kind = 'pdf_export' 
-        AND status = 'done'
-        AND file_path IS NOT NULL
-        ${scopeClause};
-    `) as Array<{
-            id: number;
-            file_path: string;
-            file_name: string;
-            export_title: string;
-            status: string;
-        }>;
+        if (allowedRegionIds) {
+            conditions.push(`r.region_id = ANY($${paramIndex++}::int[])`);
+            params.push(allowedRegionIds);
+        }
+
+        const jobsRes = await pool.query(`
+          SELECT j.id, j.file_path, j.file_name, j.export_title, j.status 
+          FROM jobs j
+          LEFT JOIN comparisons c ON j.comparison_id = c.id
+          LEFT JOIN reports r ON c.left_report_id = r.id
+          WHERE ${conditions.join(' AND ')};
+        `, params);
+
+        const jobs = jobsRes.rows;
 
         if (jobs.length === 0) {
             return res.status(404).json({ error: '没有可下载的文件' });
         }
 
-        // 妫€鏌ユ枃浠舵槸鍚﹀瓨鍦?
-        const existingFiles = jobs.filter(job => fs.existsSync(job.file_path));
+        // 检查文件是否存在
+        const existingFiles = jobs.filter((job: any) => fs.existsSync(job.file_path));
 
         if (existingFiles.length === 0) {
             return res.status(404).json({ error: '所有文件已过期，请重新生成' });
         }
 
-        // 鐢熸垚 ZIP 鏂囦欢鍚?
+        // 生成 ZIP 文件名
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
         const zipFileName = `比对报告批量下载_${timestamp}.zip`;
 
-        // 璁剧疆鍝嶅簲澶?
+        // 设置响应头
         res.setHeader('Content-Type', 'application/zip');
         res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(zipFileName)}`);
 
-        // 鍒涘缓 archiver 瀹炰緥
+        // 创建 archiver 实例
         const archive = archiver('zip', { zlib: { level: 5 } });
 
         archive.on('error', (err) => {
@@ -491,16 +495,16 @@ router.post('/batch-download', authMiddleware, async (req: AuthRequest, res: Res
             }
         });
 
-        // 绠￠亾杈撳嚭鍒板搷搴?
+        // 管道输出到响应
         archive.pipe(res);
 
-        // 娣诲姞鏂囦欢鍒?ZIP
+        // 添加文件到 ZIP
         for (const job of existingFiles) {
             const fileName = job.file_name || `比对报告_${job.id}.pdf`;
             archive.file(job.file_path, { name: fileName });
         }
 
-        // 瀹屾垚鎵撳寘
+        // 完成打包
         archive.finalize();
 
     } catch (error: any) {
@@ -512,4 +516,3 @@ router.post('/batch-download', authMiddleware, async (req: AuthRequest, res: Res
 });
 
 export default router;
-

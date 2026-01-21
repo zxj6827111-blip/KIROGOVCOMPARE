@@ -1,14 +1,15 @@
 
 import React from 'react';
-import { 
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer, 
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, ResponsiveContainer,
   BarChart, Bar, Cell, PieChart, Pie, Legend, ComposedChart, Line, LineChart,
-  Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Tooltip
+  Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Tooltip, LabelList
 } from 'recharts';
 import { AnnualData, EntityProfile } from '../types';
 
 interface ChartProps {
   data: AnnualData[];
+  isPrinting?: boolean;
 }
 
 interface BenchmarkProps {
@@ -38,36 +39,39 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 // 1. 趋势图 (Area Gradient)
-export const ReportTrendChart: React.FC<ChartProps> = ({ data }) => {
+export const ReportTrendChart: React.FC<ChartProps> = ({ data, isPrinting }) => {
   const chartData = data.map(d => ({
     year: d.year,
     value: d.applications.newReceived
   }));
-
+  const animationDuration = isPrinting ? 0 : 1500;
+  const isAnimationActive = !isPrinting;
   return (
     <div className="h-64 w-full bg-white border border-slate-100 rounded-xl p-4 shadow-sm break-inside-avoid">
       <h4 className="text-center text-xs font-bold text-slate-700 mb-4 font-sans tracking-wide">图 1：近五年政府信息公开申请接收量趋势</h4>
       <ResponsiveContainer width="100%" height="85%">
-        <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+        <AreaChart data={chartData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
           <defs>
             <linearGradient id="colorApps" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
-              <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+              <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+              <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
             </linearGradient>
           </defs>
           <CartesianGrid {...GRID_STYLE} vertical={false} />
           <XAxis dataKey="year" tick={AXIS_STYLE} axisLine={false} tickLine={false} />
           <YAxis tick={AXIS_STYLE} axisLine={false} tickLine={false} />
           <Tooltip content={<CustomTooltip />} />
-          <Area 
-            type="monotone" 
-            dataKey="value" 
+          <Area
+            type="monotone"
+            dataKey="value"
             name="申请数量"
-            stroke="#2563eb" 
+            stroke="#2563eb"
             strokeWidth={2}
-            fillOpacity={1} 
-            fill="url(#colorApps)" 
-            animationDuration={1500}
+            fillOpacity={1}
+            fill="url(#colorApps)"
+            animationDuration={animationDuration}
+            isAnimationActive={isAnimationActive}
+            label={{ position: 'top', dy: -5, fill: '#2563eb', fontSize: 11, fontWeight: 'bold', formatter: (v: any) => v.toLocaleString() }}
           />
         </AreaChart>
       </ResponsiveContainer>
@@ -76,15 +80,17 @@ export const ReportTrendChart: React.FC<ChartProps> = ({ data }) => {
 };
 
 // 2. 结果构成图 (Donut with Center Label)
-export const ReportOutcomeChart: React.FC<ChartProps> = ({ data }) => {
+export const ReportOutcomeChart: React.FC<ChartProps> = ({ data, isPrinting }) => {
   const current = data[data.length - 1];
-  
+  const animationDuration = isPrinting ? 0 : 1500;
+  const isAnimationActive = !isPrinting;
+
   const pieData = [
-    { name: '予以公开', value: current.applications.outcomes.public, color: '#10b981' }, 
-    { name: '部分公开', value: current.applications.outcomes.partial, color: '#3b82f6' }, 
-    { name: '无法提供', value: current.applications.outcomes.unable, color: '#94a3b8' }, 
-    { name: '不予公开', value: current.applications.outcomes.notOpen, color: '#f43f5e' }, 
-    { name: '其他处理', value: current.applications.outcomes.ignore, color: '#f59e0b' }, 
+    { name: '予以公开', value: current.applications.outcomes.public, color: '#10b981' },
+    { name: '部分公开', value: current.applications.outcomes.partial, color: '#3b82f6' },
+    { name: '无法提供', value: current.applications.outcomes.unable, color: '#94a3b8' },
+    { name: '不予公开', value: current.applications.outcomes.notOpen, color: '#f43f5e' },
+    { name: '其他处理', value: current.applications.outcomes.ignore, color: '#f59e0b' },
   ];
 
   return (
@@ -97,23 +103,25 @@ export const ReportOutcomeChart: React.FC<ChartProps> = ({ data }) => {
             cx="50%"
             cy="50%"
             innerRadius={50}
-            outerRadius={70}
+            outerRadius={65}
             paddingAngle={3}
             dataKey="value"
-            animationDuration={1500}
+            animationDuration={animationDuration}
+            isAnimationActive={isAnimationActive}
             stroke="none"
+            label={({ name, value }) => `${name}: ${value}`}
           >
             {pieData.map((entry, index) => (
               <Cell key={`cell-${index}`} fill={entry.color} />
             ))}
           </Pie>
           <Tooltip />
-          <Legend 
-            layout="vertical" 
-            verticalAlign="middle" 
-            align="right" 
+          <Legend
+            layout="vertical"
+            verticalAlign="middle"
+            align="right"
             iconType="circle"
-            wrapperStyle={{ fontSize: '10px', color: '#475569' }} 
+            wrapperStyle={{ fontSize: '10px', color: '#475569' }}
           />
         </PieChart>
       </ResponsiveContainer>
@@ -122,7 +130,7 @@ export const ReportOutcomeChart: React.FC<ChartProps> = ({ data }) => {
 };
 
 // 3. 风险监测图 (Composed: Bar + Smooth Line)
-export const ReportRiskChart: React.FC<ChartProps> = ({ data }) => {
+export const ReportRiskChart: React.FC<ChartProps> = ({ data, isPrinting }) => {
   const chartData = data.map(d => {
     const disputes = d.disputes.reconsideration.total + d.disputes.litigation.total;
     const corrected = d.disputes.reconsideration.corrected + d.disputes.litigation.corrected;
@@ -132,34 +140,40 @@ export const ReportRiskChart: React.FC<ChartProps> = ({ data }) => {
       rate: disputes > 0 ? ((corrected / disputes) * 100).toFixed(1) : 0
     };
   });
-
   return (
     <div className="h-64 w-full bg-white border border-slate-100 rounded-xl p-4 shadow-sm break-inside-avoid">
       <h4 className="text-center text-xs font-bold text-slate-700 mb-4 font-sans tracking-wide">图 5：行政争议总量与纠错率监测</h4>
       <ResponsiveContainer width="100%" height="85%">
-        <ComposedChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+        <ComposedChart data={chartData} margin={{ top: 30, right: 10, left: -20, bottom: 0 }}>
           <CartesianGrid {...GRID_STYLE} vertical={false} />
           <XAxis dataKey="year" tick={AXIS_STYLE} axisLine={false} tickLine={false} />
           <YAxis yAxisId="left" tick={AXIS_STYLE} axisLine={false} tickLine={false} />
           <YAxis yAxisId="right" orientation="right" tick={AXIS_STYLE} axisLine={false} tickLine={false} unit="%" />
           <Tooltip content={<CustomTooltip />} />
           <Legend wrapperStyle={{ fontSize: '10px' }} />
-          <Bar 
-            yAxisId="left" 
-            dataKey="disputes" 
-            name="争议总量" 
-            fill="#cbd5e1" 
-            barSize={20} 
-            radius={[4, 4, 0, 0]} 
-          />
-          <Line 
-            yAxisId="right" 
-            type="monotone" 
-            dataKey="rate" 
-            name="纠错率" 
-            stroke="#e11d48" 
-            strokeWidth={3} 
-            dot={{r: 3, fill: '#e11d48', strokeWidth: 2, stroke: '#fff'}} 
+          <Bar
+            yAxisId="left"
+            dataKey="disputes"
+            name="争议总量"
+            fill="#cbd5e1"
+            barSize={20}
+            radius={[4, 4, 0, 0]}
+            isAnimationActive={!isPrinting}
+            animationDuration={isPrinting ? 0 : 1500}
+          >
+            <LabelList dataKey="disputes" position="top" offset={5} style={{ fill: '#475569', fontSize: 11, fontWeight: 'bold' }} />
+          </Bar>
+          <Line
+            yAxisId="right"
+            type="monotone"
+            dataKey="rate"
+            name="纠错率"
+            stroke="#e11d48"
+            strokeWidth={3}
+            isAnimationActive={!isPrinting}
+            animationDuration={isPrinting ? 0 : 1500}
+            dot={{ r: 3, fill: '#e11d48', strokeWidth: 2, stroke: '#fff' }}
+            label={{ position: 'top', dy: -10, fill: '#e11d48', fontSize: 11, fontWeight: 'bold', formatter: (val: any) => `${val}%`, stroke: '#fff', strokeWidth: 3, paintOrder: 'stroke' }}
           />
         </ComposedChart>
       </ResponsiveContainer>
@@ -168,25 +182,31 @@ export const ReportRiskChart: React.FC<ChartProps> = ({ data }) => {
 };
 
 // 4. 来源结构 (Stacked Bar)
-export const ReportSourceChart: React.FC<ChartProps> = ({ data }) => {
+export const ReportSourceChart: React.FC<ChartProps> = ({ data, isPrinting }) => {
   const chartData = data.map(d => ({
     year: d.year,
     natural: d.applications.sources.natural,
     legal: d.applications.sources.legal
   }));
+  const animationDuration = isPrinting ? 0 : 1500;
+  const isAnimationActive = !isPrinting;
 
   return (
     <div className="h-64 w-full bg-white border border-slate-100 rounded-xl p-4 shadow-sm break-inside-avoid">
       <h4 className="text-center text-xs font-bold text-slate-700 mb-4 font-sans tracking-wide">图 3：申请人来源结构 (自然人 vs 法人)</h4>
       <ResponsiveContainer width="100%" height="85%">
-        <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+        <BarChart data={chartData} margin={{ top: 20, right: 10, left: -20, bottom: 0 }}>
           <CartesianGrid {...GRID_STYLE} vertical={false} />
           <XAxis dataKey="year" tick={AXIS_STYLE} axisLine={false} tickLine={false} />
           <YAxis tick={AXIS_STYLE} axisLine={false} tickLine={false} />
           <Tooltip content={<CustomTooltip />} />
           <Legend wrapperStyle={{ fontSize: '10px' }} />
-          <Bar dataKey="natural" name="自然人" stackId="a" fill="#60a5fa" barSize={24} />
-          <Bar dataKey="legal" name="法人/其他" stackId="a" fill="#1e40af" barSize={24} radius={[4, 4, 0, 0]} />
+          <Bar dataKey="natural" name="自然人" stackId="a" fill="#60a5fa" barSize={24} isAnimationActive={isAnimationActive} animationDuration={animationDuration}>
+            <LabelList dataKey="natural" position="inside" style={{ fill: '#000', fontSize: 11, fontWeight: 'bold', textShadow: '0 0 2px #fff' }} formatter={(v: any) => v > 50 ? v : ''} />
+          </Bar>
+          <Bar dataKey="legal" name="法人/其他" stackId="a" fill="#1e40af" barSize={24} radius={[4, 4, 0, 0]} isAnimationActive={isAnimationActive} animationDuration={animationDuration}>
+            <LabelList dataKey="legal" position="inside" style={{ fill: '#000', fontSize: 11, fontWeight: 'bold', textShadow: '0 0 2px #fff' }} formatter={(v: any) => v > 50 ? v : ''} />
+          </Bar>
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -194,41 +214,64 @@ export const ReportSourceChart: React.FC<ChartProps> = ({ data }) => {
 };
 
 // 5. 许可处罚对比 (Dual Line)
-export const ReportAdminActionChart: React.FC<ChartProps> = ({ data }) => {
+const CustomizedLineLabel = (props: any) => {
+  const { x, y, value, index, total, dy, fill, formatter } = props;
+
+  // 首尾点水平偏移，避免与坐标轴重叠
+  let dx = 0;
+  if (index === 0) dx = 25;
+  if (index === (total - 1)) dx = -25;
+
+  return (
+    <text x={x} y={y} dy={dy} dx={dx} fill={fill} fontSize={11} fontWeight="bold" textAnchor="middle" stroke="#fff" strokeWidth={3} paintOrder="stroke">
+      {formatter ? formatter(value) : value}
+    </text>
+  );
+};
+
+export const ReportAdminActionChart: React.FC<ChartProps> = ({ data, isPrinting }) => {
   const chartData = data.map(d => ({
     year: d.year,
     licensing: d.adminActions.licensing,
     punishment: d.adminActions.punishment
   }));
+  const animationDuration = isPrinting ? 0 : 1500;
+  const isAnimationActive = !isPrinting;
 
   return (
-    <div className="h-64 w-full bg-white border border-slate-100 rounded-xl p-4 shadow-sm break-inside-avoid">
+    <div className="h-80 w-full bg-white border border-slate-100 rounded-xl p-4 shadow-sm break-inside-avoid">
       <h4 className="text-center text-xs font-bold text-slate-700 mb-4 font-sans tracking-wide">图 4：行政许可与行政处罚趋势对比</h4>
       <ResponsiveContainer width="100%" height="85%">
-        <LineChart data={chartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+        <LineChart data={chartData} margin={{ top: 35, right: 40, left: 30, bottom: 0 }}>
           <CartesianGrid {...GRID_STYLE} vertical={false} />
           <XAxis dataKey="year" tick={AXIS_STYLE} axisLine={false} tickLine={false} />
-          <YAxis yAxisId="left" tick={AXIS_STYLE} axisLine={false} tickLine={false} />
-          <YAxis yAxisId="right" orientation="right" tick={AXIS_STYLE} axisLine={false} tickLine={false} />
+          <YAxis yAxisId="left" tick={AXIS_STYLE} axisLine={false} tickLine={false} tickFormatter={(v) => v >= 10000 ? `${(v / 10000).toFixed(0)}万` : v} />
+          <YAxis yAxisId="right" orientation="right" tick={AXIS_STYLE} axisLine={false} tickLine={false} tickFormatter={(v) => v >= 10000 ? `${(v / 10000).toFixed(0)}万` : v} />
           <Tooltip content={<CustomTooltip />} />
           <Legend wrapperStyle={{ fontSize: '10px' }} />
-          <Line 
-            yAxisId="left" 
-            type="monotone" 
-            dataKey="licensing" 
-            name="行政许可(左轴)" 
-            stroke="#10b981" 
-            strokeWidth={3} 
+          <Line
+            yAxisId="left"
+            type="monotone"
+            dataKey="licensing"
+            name="行政许可(左轴)"
+            stroke="#10b981"
+            strokeWidth={3}
             dot={false}
+            label={{ content: (props: any) => <CustomizedLineLabel {...props} total={chartData.length} dy={25} fill="#10b981" formatter={(v: any) => `${(v / 10000).toFixed(1)}万`} /> }}
+            isAnimationActive={isAnimationActive}
+            animationDuration={animationDuration}
           />
-          <Line 
-            yAxisId="right" 
-            type="monotone" 
-            dataKey="punishment" 
-            name="行政处罚(右轴)" 
-            stroke="#f59e0b" 
-            strokeWidth={3} 
+          <Line
+            yAxisId="right"
+            type="monotone"
+            dataKey="punishment"
+            name="行政处罚(右轴)"
+            stroke="#f59e0b"
+            strokeWidth={3}
             dot={false}
+            label={{ content: (props: any) => <CustomizedLineLabel {...props} total={chartData.length} dy={-20} fill="#f59e0b" formatter={(v: any) => `${(v / 10000).toFixed(1)}万`} /> }}
+            isAnimationActive={isAnimationActive}
+            animationDuration={animationDuration}
           />
         </LineChart>
       </ResponsiveContainer>
@@ -243,7 +286,7 @@ export const ReportBenchmarkRadar: React.FC<BenchmarkProps> = ({ entity, avgProf
   const avg = avgProfile.data.find(x => x.year === year)!;
 
   const normalize = (val: number, max: number) => Math.min(100, (val / max) * 100);
-  
+
   const radarData = [
     { subject: '依申请受理量', A: normalize(d.applications.newReceived, 2000), B: normalize(avg.applications.newReceived, 2000), fullMark: 100 },
     { subject: '主动公开量', A: normalize(d.regulations.published + d.normativeDocuments.published, 50), B: normalize(avg.regulations.published + avg.normativeDocuments.published, 50), fullMark: 100 },

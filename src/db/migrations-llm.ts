@@ -1,113 +1,7 @@
-import crypto from 'crypto';
-import fs from 'fs';
-import path from 'path';
-import pool, { dbType } from '../config/database-llm';
-import { dbNowExpression } from '../config/db-llm';
-import { querySqlite, sqlValue } from '../config/sqlite';
+import pool from '../config/database-llm';
 
 // ============================================================================
-// FORBIDDEN KEYWORDS FOR SQLITE
-// These PostgreSQL-specific keywords must NEVER appear in SQLite migrations.
-// This list mirrors scripts/scan_sqlite_migrations.js for runtime validation.
-// ============================================================================
-const FORBIDDEN_KEYWORDS_PATH = path.join(__dirname, '..', '..', 'migrations', 'sqlite_forbidden_keywords.json');
-
-type ForbiddenKeywordEntry = { label: string; pattern: string; flags?: string };
-
-function loadForbiddenKeywords(): Array<{ label: string; pattern: RegExp }> {
-  if (!fs.existsSync(FORBIDDEN_KEYWORDS_PATH)) {
-    throw new Error('[SQLite Migration Error] Forbidden keywords file not found: ' + FORBIDDEN_KEYWORDS_PATH);
-  }
-  const raw = fs.readFileSync(FORBIDDEN_KEYWORDS_PATH, 'utf8');
-  const parsed = JSON.parse(raw) as { keywords?: ForbiddenKeywordEntry[] };
-  if (!parsed.keywords || !Array.isArray(parsed.keywords)) {
-    throw new Error('[SQLite Migration Error] Invalid forbidden keywords format: ' + FORBIDDEN_KEYWORDS_PATH);
-  }
-  return parsed.keywords.map((entry) => ({
-    label: entry.label,
-    pattern: new RegExp(entry.pattern, entry.flags || ''),
-  }));
-}
-
-const FORBIDDEN_SQLITE_KEYWORDS = loadForbiddenKeywords();
-
-/**
- * Strip SQL comments to avoid false positives in keyword detection.
- */
-function stripSqlComments(sql: string): string {
-  // Remove single-line comments
-  let cleaned = sql.replace(/--.*$/gm, '');
-  // Remove multi-line comments (preserve line count for error messages)
-  cleaned = cleaned.replace(/\/\*[\s\S]*?\*\//g, (match) => match.replace(/[^\n]/g, ''));
-  return cleaned;
-}
-
-/**
- * Validate that SQL does not contain PostgreSQL-specific keywords.
- * Throws an error if any forbidden keyword is found.
- */
-function validateNoForbiddenKeywords(sql: string, source: string): void {
-  const stripped = stripSqlComments(sql);
-  const lines = stripped.split('\n');
-
-  const violations: { line: number; keyword: string }[] = [];
-
-  lines.forEach((line, index) => {
-    FORBIDDEN_SQLITE_KEYWORDS.forEach(({ label, pattern }) => {
-      if (pattern.test(line)) {
-        violations.push({ line: index + 1, keyword: label });
-      }
-    });
-  });
-
-  if (violations.length > 0) {
-    const details = violations.map(v => '  Line ' + v.line + ': ' + v.keyword).join('\n');
-    throw new Error(
-      '[SQLite Migration Error] Forbidden PostgreSQL keywords detected in ' + source + ':\n' + details + '\n' +
-      'Fix: Use SQLite-compatible syntax (e.g., TEXT instead of TIMESTAMPTZ, datetime(\'now\') instead of NOW())'
-    );
-  }
-}
-
-const SCHEMA_MIGRATIONS_TABLE = 'schema_migrations';
-
-function ensureSchemaMigrationsTable(): void {
-  querySqlite(
-    `CREATE TABLE IF NOT EXISTS ${SCHEMA_MIGRATIONS_TABLE} (
-      filename TEXT PRIMARY KEY,
-      applied_at TEXT NOT NULL DEFAULT (datetime('now')),
-      checksum TEXT NULL
-    );`
-  );
-}
-
-function getAppliedMigration(filename: string): { filename?: string; checksum?: string } | undefined {
-  const rows = querySqlite(
-    `SELECT filename, checksum FROM ${SCHEMA_MIGRATIONS_TABLE} WHERE filename = ${sqlValue(filename)} LIMIT 1;`
-  ) as Array<{ filename?: string; checksum?: string }>;
-  return rows[0];
-}
-
-function getAppliedMigrationCount(): number {
-  const rows = querySqlite(`SELECT COUNT(*) as cnt FROM ${SCHEMA_MIGRATIONS_TABLE};`) as Array<{ cnt?: number }>;
-  return Number(rows[0]?.cnt || 0);
-}
-
-function hasReportsTable(): boolean {
-  const rows = querySqlite(
-    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'reports' LIMIT 1;`
-  ) as Array<{ name?: string }>;
-  return rows.length > 0;
-}
-
-function recordMigration(filename: string, checksum: string): void {
-  querySqlite(
-    `INSERT INTO ${SCHEMA_MIGRATIONS_TABLE} (filename, checksum) VALUES (${sqlValue(filename)}, ${sqlValue(checksum)});`
-  );
-}
-
-// ============================================================================
-// POSTGRESQL SCHEMA (kept as-is for postgres mode)
+// POSTGRESQL SCHEMA
 // ============================================================================
 const postgresSchema = `
 CREATE TABLE IF NOT EXISTS regions (
@@ -524,6 +418,20 @@ CREATE TABLE IF NOT EXISTS derived_region_year_metrics (
 
 CREATE INDEX IF NOT EXISTS idx_derived_region_year ON derived_region_year_metrics(region_id, year);
 
+CREATE TABLE IF NOT EXISTS ai_decision_reports (
+  id BIGSERIAL PRIMARY KEY,
+  region_id BIGINT, 
+  org_name VARCHAR(255),
+  year INTEGER NOT NULL,
+  content_json JSONB NOT NULL,
+  model_used VARCHAR(100),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(region_id, year)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_reports_region_year ON ai_decision_reports(region_id, year);
+
 INSERT INTO metric_dictionary (
   metric_key,
   version,
@@ -561,189 +469,159 @@ ON CONFLICT DO NOTHING;
 -- 政务公开智慧治理大屏数据聚合视图
 DROP VIEW IF EXISTS gov_open_annual_stats;
 CREATE VIEW gov_open_annual_stats AS
-WITH
-base AS (
-  SELECT
-    r.id AS report_id,
-    r.region_id,
-    reg.name AS org_name,
-    CASE WHEN reg.parent_id IS NULL THEN 'city' ELSE 'district' END AS org_type,
-    reg.parent_id,
-    r.year,
-    r.active_version_id AS version_id
-  FROM reports r
-  LEFT JOIN regions reg ON reg.id = r.region_id
-  WHERE r.active_version_id IS NOT NULL
-),
-active_disclosure_pivot AS (
-  SELECT
-    fad.report_id,
-    fad.version_id,
-    SUM(CASE WHEN fad.category = '规章' THEN fad.made_count ELSE 0 END) AS reg_published,
-    SUM(CASE WHEN fad.category = '规章' THEN fad.valid_count ELSE 0 END) AS reg_active,
-    SUM(CASE WHEN fad.category = '规范性文件' THEN fad.made_count ELSE 0 END) AS doc_published,
-    SUM(CASE WHEN fad.category = '规范性文件' THEN fad.valid_count ELSE 0 END) AS doc_active,
-    SUM(CASE WHEN fad.category = '行政许可' THEN COALESCE(fad.processed_count, 0) ELSE 0 END) AS action_licensing,
-    SUM(CASE WHEN fad.category = '行政处罚' THEN COALESCE(fad.processed_count, 0) ELSE 0 END) AS action_punishment
-  FROM fact_active_disclosure fad
-  GROUP BY fad.report_id, fad.version_id
-),
-application_pivot AS (
-  SELECT
-    fa.report_id,
-    fa.version_id,
-    SUM(CASE WHEN fa.response_type = 'new_received' THEN fa.count ELSE 0 END) AS app_new,
-    SUM(CASE WHEN fa.response_type = 'carried_over' THEN fa.count ELSE 0 END) AS app_carried_over,
-    SUM(CASE WHEN fa.applicant_type = 'natural_person' THEN fa.count ELSE 0 END) AS source_natural,
-    SUM(CASE WHEN fa.response_type IN ('granted', 'public') THEN fa.count ELSE 0 END) AS outcome_public,
-    SUM(CASE WHEN fa.response_type IN ('partial_grant', 'partial') THEN fa.count ELSE 0 END) AS outcome_partial,
-    SUM(CASE WHEN fa.response_type IN ('unable_to_provide', 'unable') THEN fa.count ELSE 0 END) AS outcome_unable,
-    SUM(CASE WHEN fa.response_type IN ('denied', 'not_open') THEN fa.count ELSE 0 END) AS outcome_not_open,
-    SUM(CASE WHEN fa.response_type IN ('ignored', 'other') THEN fa.count ELSE 0 END) AS outcome_ignore,
-    SUM(CASE WHEN fa.response_type = 'carried_forward' THEN fa.count ELSE 0 END) AS app_carried_forward
-  FROM fact_application fa
-  GROUP BY fa.report_id, fa.version_id
-),
-legal_pivot AS (
-  SELECT
-    flp.report_id,
-    flp.version_id,
-    SUM(CASE WHEN flp.case_type = 'reconsideration' AND flp.result_type = 'total' THEN flp.count ELSE 0 END) AS rev_total,
-    SUM(CASE WHEN flp.case_type = 'reconsideration' AND flp.result_type = 'corrected' THEN flp.count ELSE 0 END) AS rev_corrected,
-    SUM(CASE WHEN flp.case_type = 'litigation' AND flp.result_type = 'total' THEN flp.count ELSE 0 END) AS lit_total,
-    SUM(CASE WHEN flp.case_type = 'litigation' AND flp.result_type = 'corrected' THEN flp.count ELSE 0 END) AS lit_corrected
-  FROM fact_legal_proceeding flp
-  GROUP BY flp.report_id, flp.version_id
-)
-SELECT
-  CONCAT('report_', b.report_id) AS id,
-  b.year,
-  CONCAT(b.org_type, '_', b.region_id) AS org_id,
-  b.org_name,
-  b.org_type,
-  CASE WHEN b.parent_id IS NULL THEN NULL ELSE CONCAT('city_', b.parent_id) END AS parent_id,
-  COALESCE(ad.reg_published, 0) AS reg_published,
-  COALESCE(ad.reg_active, 0) AS reg_active,
-  COALESCE(ad.doc_published, 0) AS doc_published,
-  COALESCE(ad.doc_active, 0) AS doc_active,
-  COALESCE(ad.action_licensing, 0) AS action_licensing,
-  COALESCE(ad.action_punishment, 0) AS action_punishment,
-  COALESCE(ap.app_new, 0) AS app_new,
-  COALESCE(ap.app_carried_over, 0) AS app_carried_over,
-  COALESCE(ap.source_natural, 0) AS source_natural,
-  COALESCE(ap.outcome_public, 0) AS outcome_public,
-  COALESCE(ap.outcome_partial, 0) AS outcome_partial,
-  COALESCE(ap.outcome_unable, 0) AS outcome_unable,
-  COALESCE(ap.outcome_not_open, 0) AS outcome_not_open,
-  COALESCE(ap.outcome_ignore, 0) AS outcome_ignore,
-  COALESCE(ap.app_carried_forward, 0) AS app_carried_forward,
-  COALESCE(lp.rev_total, 0) AS rev_total,
-  COALESCE(lp.rev_corrected, 0) AS rev_corrected,
-  COALESCE(lp.lit_total, 0) AS lit_total,
-  COALESCE(lp.lit_corrected, 0) AS lit_corrected
-FROM base b
-LEFT JOIN active_disclosure_pivot ad ON ad.report_id = b.report_id AND ad.version_id = b.version_id
-LEFT JOIN application_pivot ap ON ap.report_id = b.report_id AND ap.version_id = b.version_id
-LEFT JOIN legal_pivot lp ON lp.report_id = b.report_id AND lp.version_id = b.version_id;
+ WITH RECURSIVE base AS (
+         SELECT r.id AS report_id,
+            reg.id AS region_id,
+            reg.name AS org_name,
+            reg.level,
+            reg.parent_id,
+            parent_1.level AS parent_level,
+            r.year,
+            r.active_version_id AS version_id
+           FROM ((regions reg
+             LEFT JOIN regions parent_1 ON ((parent_1.id = reg.parent_id)))
+             LEFT JOIN reports r ON (((r.region_id = reg.id) AND (r.active_version_id IS NOT NULL))))
+        ), active_disclosure_pivot AS (
+         SELECT fad.report_id,
+            fad.version_id,
+            sum(
+                CASE
+                    WHEN (fad.category = 'regulations') THEN fad.made_count
+                    ELSE 0
+                END) AS reg_published,
+            sum(
+                CASE
+                    WHEN (fad.category = 'regulations') THEN fad.valid_count
+                    ELSE 0
+                END) AS reg_active,
+            sum(
+                CASE
+                    WHEN (fad.category = 'regulations') THEN fad.repealed_count
+                    ELSE 0
+                END) AS reg_abolished,
+            sum(
+                CASE
+                    WHEN (fad.category = 'normative_documents') THEN fad.made_count
+                    ELSE 0
+                END) AS doc_published,
+            sum(
+                CASE
+                    WHEN (fad.category = 'normative_documents') THEN fad.valid_count
+                    ELSE 0
+                END) AS doc_active,
+            sum(
+                CASE
+                    WHEN (fad.category = 'normative_documents') THEN fad.repealed_count
+                    ELSE 0
+                END) AS doc_abolished,
+            sum(
+                CASE
+                    WHEN (fad.category = 'licensing') THEN COALESCE(fad.processed_count, 0)
+                    ELSE 0
+                END) AS action_licensing,
+            sum(
+                CASE
+                    WHEN (fad.category = 'punishment') THEN COALESCE(fad.processed_count, 0)
+                    ELSE 0
+                END) AS action_punishment
+           FROM fact_active_disclosure fad
+          GROUP BY fad.report_id, fad.version_id
+        ), application_pivot AS (
+         SELECT fa.report_id,
+            fa.version_id,
+            sum(CASE WHEN fa.response_type = 'new_received' THEN fa.count ELSE 0 END) AS app_new,
+            sum(CASE WHEN fa.response_type = 'carried_over' THEN fa.count ELSE 0 END) AS app_carried_over,
+            sum(CASE WHEN fa.applicant_type = 'natural_person' AND fa.response_type = 'new_received' THEN fa.count ELSE 0 END) AS source_natural,
+            sum(CASE WHEN fa.response_type IN ('granted', 'public') THEN fa.count ELSE 0 END) AS outcome_public,
+            sum(CASE WHEN fa.response_type IN ('partial_grant', 'partial') THEN fa.count ELSE 0 END) AS outcome_partial,
+            sum(CASE WHEN fa.response_type IN ('unable_to_provide', 'unable', 'unable_no_info', 'unable_need_creation', 'unable_unclear') THEN fa.count ELSE 0 END) AS outcome_unable,
+            sum(CASE WHEN fa.response_type = 'unable_no_info' THEN fa.count ELSE 0 END) AS outcome_unable_no_info,
+            sum(CASE WHEN fa.response_type = 'unable_need_creation' THEN fa.count ELSE 0 END) AS outcome_unable_need_creation,
+            sum(CASE WHEN fa.response_type = 'unable_unclear' THEN fa.count ELSE 0 END) AS outcome_unable_unclear,
+            sum(CASE WHEN fa.response_type IN ('denied', 'not_open', 'denied_law_forbidden', 'denied_state_secret', 'not_open_danger', 'denied_safety_stability', 'not_open_process', 'denied_process_info', 'not_open_internal', 'denied_internal_affairs', 'not_open_third_party', 'denied_third_party_rights', 'denied_enforcement_case') THEN fa.count ELSE 0 END) AS outcome_not_open,
+            sum(CASE WHEN fa.response_type IN ('not_open_danger', 'denied_safety_stability') THEN fa.count ELSE 0 END) AS outcome_not_open_danger,
+            sum(CASE WHEN fa.response_type IN ('not_open_process', 'denied_process_info') THEN fa.count ELSE 0 END) AS outcome_not_open_process,
+            sum(CASE WHEN fa.response_type IN ('not_open_internal', 'denied_internal_affairs') THEN fa.count ELSE 0 END) AS outcome_not_open_internal,
+            sum(CASE WHEN fa.response_type IN ('not_open_third_party', 'denied_third_party_rights') THEN fa.count ELSE 0 END) AS outcome_not_open_third_party,
+            sum(CASE WHEN fa.response_type IN ('not_open_admin_query', 'denied_admin_query') THEN fa.count ELSE 0 END) AS outcome_not_open_admin_query,
+            sum(CASE WHEN fa.response_type IN ('ignored', 'other', 'not_processed_complaint', 'not_processed_confirm_info', 'ignore_repeat', 'not_processed_repeat', 'not_open_admin_query', 'denied_admin_query', 'other_other_reasons', 'other_overdue_correction', 'other_overdue_fee') THEN fa.count ELSE 0 END) AS outcome_ignore,
+            sum(CASE WHEN fa.response_type IN ('ignore_repeat', 'not_processed_repeat') THEN fa.count ELSE 0 END) AS outcome_ignore_repeat,
+            sum(CASE WHEN fa.response_type = 'outcome_other' THEN fa.count ELSE 0 END) AS outcome_other,
+            sum(CASE WHEN fa.response_type = 'carried_forward' THEN fa.count ELSE 0 END) AS app_carried_forward
+           FROM fact_application fa
+          WHERE fa.applicant_type <> 'total'
+          GROUP BY fa.report_id, fa.version_id
+        ), legal_pivot AS (
+         SELECT flp.report_id,
+            flp.version_id,
+            sum(CASE WHEN (flp.case_type = 'review' AND flp.result_type = 'total') THEN flp.count ELSE 0 END) AS rev_total,
+            sum(CASE WHEN (flp.case_type = 'review' AND flp.result_type = 'correct') THEN flp.count ELSE 0 END) AS rev_corrected,
+            sum(CASE WHEN (flp.case_type IN ('litigation_direct', 'litigation_post_review') AND flp.result_type = 'total') THEN flp.count ELSE 0 END) AS lit_total,
+            sum(CASE WHEN (flp.case_type IN ('litigation_direct', 'litigation_post_review') AND flp.result_type = 'correct') THEN flp.count ELSE 0 END) AS lit_corrected
+           FROM fact_legal_proceeding flp
+          GROUP BY flp.report_id, flp.version_id
+        )
+ SELECT concat('report_', b.report_id) AS id,
+    b.year,
+        CASE
+            WHEN (b.level <= 2) THEN concat('city_', b.region_id)
+            ELSE concat('district_', b.region_id)
+        END AS org_id,
+    b.org_name,
+        CASE
+            WHEN (b.level <= 2) THEN 'city'
+            ELSE 'district'
+        END AS org_type,
+        CASE
+            WHEN (b.parent_id IS NULL) THEN NULL
+            WHEN (parent.level <= 2) THEN concat('city_', b.parent_id)
+            ELSE concat('district_', b.parent_id)
+        END AS parent_id,
+    COALESCE(ad.reg_published, (0)) AS reg_published,
+    COALESCE(ad.reg_active, (0)) AS reg_active,
+    COALESCE(ad.reg_abolished, (0)) AS reg_abolished,
+    COALESCE(ad.doc_published, (0)) AS doc_published,
+    COALESCE(ad.doc_active, (0)) AS doc_active,
+    COALESCE(ad.doc_abolished, (0)) AS doc_abolished,
+    COALESCE(ad.action_licensing, (0)) AS action_licensing,
+    COALESCE(ad.action_punishment, (0)) AS action_punishment,
+    COALESCE(ap.app_new, (0)) AS app_new,
+    COALESCE(ap.app_carried_over, (0)) AS app_carried_over,
+    COALESCE(ap.source_natural, (0)) AS source_natural,
+    COALESCE(ap.outcome_public, (0)) AS outcome_public,
+    COALESCE(ap.outcome_partial, (0)) AS outcome_partial,
+    COALESCE(ap.outcome_unable, (0)) AS outcome_unable,
+    COALESCE(ap.outcome_unable_no_info, (0)) AS outcome_unable_no_info,
+    COALESCE(ap.outcome_unable_need_creation, (0)) AS outcome_unable_need_creation,
+    COALESCE(ap.outcome_unable_unclear, (0)) AS outcome_unable_unclear,
+    COALESCE(ap.outcome_not_open, (0)) AS outcome_not_open,
+    COALESCE(ap.outcome_not_open_danger, (0)) AS outcome_not_open_danger,
+    COALESCE(ap.outcome_not_open_process, (0)) AS outcome_not_open_process,
+    COALESCE(ap.outcome_not_open_internal, (0)) AS outcome_not_open_internal,
+    COALESCE(ap.outcome_not_open_third_party, (0)) AS outcome_not_open_third_party,
+    COALESCE(ap.outcome_not_open_admin_query, (0)) AS outcome_not_open_admin_query,
+    COALESCE(ap.outcome_ignore, (0)) AS outcome_ignore,
+    COALESCE(ap.outcome_ignore_repeat, (0)) AS outcome_ignore_repeat,
+    COALESCE(ap.outcome_other, (0)) AS outcome_other,
+    COALESCE(ap.app_carried_forward, (0)) AS app_carried_forward,
+    COALESCE(lp.rev_total, (0)) AS rev_total,
+    COALESCE(lp.rev_corrected, (0)) AS rev_corrected,
+    COALESCE(lp.lit_total, (0)) AS lit_total,
+    COALESCE(lp.lit_corrected, (0)) AS lit_corrected
+   FROM ((((base b
+     LEFT JOIN regions parent ON ((parent.id = b.parent_id)))
+     LEFT JOIN active_disclosure_pivot ad ON (((ad.report_id = b.report_id) AND (ad.version_id = b.version_id))))
+     LEFT JOIN application_pivot ap ON (((ap.report_id = b.report_id) AND (ap.version_id = b.version_id))))
+     LEFT JOIN legal_pivot lp ON (((lp.report_id = b.report_id) AND (lp.version_id = b.version_id))));
 `;
 
-// ============================================================================
-// MIGRATION RUNNER
-// ============================================================================
-
-/**
- * Run SQLite migrations by reading .sql files from migrations/sqlite/ directory.
- * This ensures the executed SQL matches the static scan in scan_sqlite_migrations.js.
- */
-async function runSqliteMigrationsFromFiles(): Promise<void> {
-  // Path relative to compiled dist/db/migrations-llm.js -> ../../migrations/sqlite
-  const migrationsDir = path.join(__dirname, '..', '..', 'migrations', 'sqlite');
-
-  if (!fs.existsSync(migrationsDir)) {
-    throw new Error('[SQLite Migration Error] migrations/sqlite directory not found: ' + migrationsDir);
-  }
-
-  const files = fs.readdirSync(migrationsDir)
-    .filter(f => f.endsWith('.sql'))
-    .sort(); // Sorted order: 001_, 002_, etc.
-
-  console.log('[SQLite Migrations] Found ' + files.length + ' migration files in ' + migrationsDir);
-
-  ensureSchemaMigrationsTable();
-
-  const appliedCount = getAppliedMigrationCount();
-  if (appliedCount === 0 && hasReportsTable()) {
-    console.log('[SQLite Migrations] schema_migrations empty but reports table exists; seeding records only.');
-    for (const file of files) {
-      const filePath = path.join(migrationsDir, file);
-      const sql = fs.readFileSync(filePath, 'utf8');
-      const checksum = crypto.createHash('sha256').update(sql).digest('hex');
-      recordMigration(file, checksum);
-    }
-    console.log('[SQLite Migrations] schema_migrations seeded for existing database.');
-    return;
-  }
-
-  for (const file of files) {
-    const filePath = path.join(migrationsDir, file);
-    const sql = fs.readFileSync(filePath, 'utf8');
-    const checksum = crypto.createHash('sha256').update(sql).digest('hex');
-
-    const applied = getAppliedMigration(file);
-    if (applied) {
-      if (applied.checksum && applied.checksum !== checksum) {
-        throw new Error(
-          '[SQLite Migration Error] Migration file changed after apply: ' + file + '\n' +
-          'Expected checksum: ' + applied.checksum + '\n' +
-          'Actual checksum: ' + checksum + '\n' +
-          'Fix: revert the file or create a new migration.'
-        );
-      }
-      console.log('[SQLite Migrations] Skipping already applied: ' + file);
-      continue;
-    }
-
-    // Runtime validation: reject PG keywords
-    validateNoForbiddenKeywords(sql, file);
-
-    // Execute the entire file using querySqlite (handles multi-statement SQL correctly)
-    try {
-      querySqlite(sql);
-      recordMigration(file, checksum);
-      console.log('[SQLite Migrations] Applied: ' + file);
-    } catch (err: any) {
-      const errMsg = (err.message || '') + (err.stderr || '');
-      // Tolerate "already exists" or "duplicate column" errors for existing databases
-      if (errMsg.includes('already exists') || errMsg.includes('duplicate column name')) {
-        console.log('[SQLite Migrations] Partial apply (existing objects): ' + file);
-        recordMigration(file, checksum);
-      } else {
-        throw new Error('[SQLite Migration Error] Failed in ' + file + ': ' + errMsg);
-      }
-    }
-  }
-}
-
 export async function runLLMMigrations(): Promise<void> {
+  // Use Postgres pool
   try {
-    if (dbType === 'sqlite') {
-      // SQLite: MUST use file-based migrations from migrations/sqlite/*.sql
-      // This ensures runtime matches static scan (scan_sqlite_migrations.js)
-      console.log('[SQLite Migrations] Running file-based migrations...');
-      await runSqliteMigrationsFromFiles();
-      console.log('✓ SQLite LLM migrations completed (file-based)');
-    } else {
-      // PostgreSQL 迁移 (embedded schema is fine for PG)
-      const statements = postgresSchema.split(';').filter(s => s.trim());
-      for (const statement of statements) {
-        if (statement.trim()) {
-          await pool.query(statement);
-        }
-      }
-      console.log('✓ PostgreSQL LLM migrations completed');
-    }
-  } catch (error) {
-    console.error('LLM migrations failed:', error);
+    await pool.query(postgresSchema);
+    console.log('[Postgres Migrations] Schema ensured.');
+  } catch (error: any) {
+    console.error('Failed to run Postgres schema migrations:', error);
     throw error;
   }
 }

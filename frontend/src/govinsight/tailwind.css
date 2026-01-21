@@ -23,3 +23,153 @@
 .gov-dashboard-root button {
     cursor: pointer;
 }
+
+/* ===================================================== */
+/* 打印样式 - A4格式报告打印支持                          */
+/* ===================================================== */
+
+@media print {
+
+    /* 1. 隐藏所有非打印元素 */
+    .no-print,
+    .gov-dashboard-root .no-print {
+        display: none !important;
+        visibility: hidden !important;
+    }
+
+    /* 2. 页面设置 - A4尺寸 */
+    @page {
+        size: A4 portrait;
+        margin: 0;
+    }
+
+    /* 3. 重置整体布局 */
+    html,
+    body {
+        width: 210mm !important;
+        min-height: 297mm !important;
+        background: white !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: visible !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+
+    /* 4. 隐藏主导航和顶栏 */
+    .gov-dashboard-root>div>div:first-child,
+    /* Top nav bar */
+    nav,
+    header,
+    footer {
+        display: none !important;
+    }
+
+    /* 5. 主内容区域全宽 */
+    main {
+        padding: 0 !important;
+        margin: 0 !important;
+        overflow: visible !important;
+    }
+
+    main>div {
+        max-width: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    /* 6. 报告容器样式 - 关键修复 */
+    #printable-report {
+        width: 210mm !important;
+        min-height: 297mm !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        box-shadow: none !important;
+        border: none !important;
+        background: white !important;
+        position: static !important;
+    }
+
+    /* 7. 隐藏报告生成器左侧面板 */
+    .gov-dashboard-root .flex.gap-6>.w-72,
+    .gov-dashboard-root .flex.gap-6>div:first-child:not(#printable-report) {
+        display: none !important;
+    }
+
+    /* 8. 确保右侧预览区域全宽 */
+    .gov-dashboard-root .flex.gap-6 {
+        display: block !important;
+    }
+
+    .gov-dashboard-root .flex.gap-6>.flex-1 {
+        background: transparent !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        display: flex !important;
+        justify-content: flex-start !important;
+    }
+
+    /* 9. 分页控制 */
+    .break-after-page {
+        page-break-after: always !important;
+        break-after: page !important;
+    }
+
+    .break-before-page {
+        page-break-before: always !important;
+        break-before: page !important;
+    }
+
+    .break-inside-avoid {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+    }
+
+    /* 10. 封面页样式优化 */
+    #printable-report>div:first-child {
+        page-break-after: always !important;
+        break-after: page !important;
+    }
+
+    /* 11. 主要章节打印控制 - 每个大点新起一页 */
+    .print-section {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+    }
+
+    /* 12. 图表打印控制 - 避免跨页截断 */
+    .print-chart {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+        margin-bottom: 20px;
+    }
+
+    /* 13. 图表容器最大高度限制，确保不超过一页 */
+    .print-chart>div {
+        max-height: 280mm !important;
+        overflow: hidden;
+    }
+
+    /* 14. 表格打印优化 */
+    table {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+    }
+
+    /* 15. 隐藏下载工具栏 */
+    #printable-report .group>.absolute {
+        display: none !important;
+    }
+
+    /* 16. 移除灰色背景 */
+    .bg-slate-200,
+    .bg-\[#f0f2f5\] {
+        background: white !important;
+    }
+
+    /* 17. 附录页分页 */
+    .print-section:last-of-type {
+        page-break-before: always !important;
+        break-before: page !important;
+    }
+}

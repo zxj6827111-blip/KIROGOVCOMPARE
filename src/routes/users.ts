@@ -1,6 +1,5 @@
 import express, { Response } from 'express';
-import { dbExecute, dbNowExpression, dbQuery, ensureDbMigrations, parseDbJson } from '../config/db-llm';
-import { sqlValue } from '../config/sqlite';
+import pool from '../config/database-llm';
 import { authMiddleware, requirePermission, AuthRequest, hashPassword } from '../middleware/auth';
 
 const router = express.Router();
@@ -15,18 +14,18 @@ router.use(authMiddleware);
  */
 router.get('/', requirePermission('manage_users'), async (req: AuthRequest, res: Response) => {
     try {
-        ensureDbMigrations();
-        const users = await dbQuery(`
+        const result = await pool.query(`
       SELECT id, username, display_name, created_at, last_login_at, permissions, data_scope
       FROM admin_users
       ORDER BY created_at DESC
     `);
+        const users = result.rows;
 
-        // Parse JSON fields
+        // Parse JSON fields if they are strings (Postgres jsonb might return objects already)
         const parsedUsers = users.map(user => ({
             ...user,
-            permissions: parseDbJson(user.permissions) || {},
-            dataScope: parseDbJson(user.data_scope) || {}
+            permissions: typeof user.permissions === 'string' ? JSON.parse(user.permissions) : (user.permissions || {}),
+            dataScope: typeof user.data_scope === 'string' ? JSON.parse(user.data_scope) : (user.data_scope || {})
         }));
 
         res.json(parsedUsers);
@@ -46,13 +45,12 @@ router.post('/', requirePermission('manage_users'), async (req: AuthRequest, res
         const { username, password, displayName, permissions, dataScope } = req.body;
 
         if (!username || !password) {
-            return res.status(400).json({ error: '鐢ㄦ埛鍚嶅拰瀵嗙爜蹇呭～' });
+            return res.status(400).json({ error: '用户名和密码必填' });
         }
 
         // Check existing
-        ensureDbMigrations();
-        const existing = await dbQuery(`SELECT id FROM admin_users WHERE username = ${sqlValue(username)}`);
-        if (existing && existing.length > 0) {
+        const existingRes = await pool.query('SELECT id FROM admin_users WHERE username = $1', [username]);
+        if (existingRes.rows.length > 0) {
             return res.status(400).json({ error: '用户名已存在' });
         }
 
@@ -60,19 +58,12 @@ router.post('/', requirePermission('manage_users'), async (req: AuthRequest, res
         const permJson = JSON.stringify(permissions || {});
         const scopeJson = JSON.stringify(dataScope || {});
 
-        await dbExecute(`
+        await pool.query(`
       INSERT INTO admin_users (username, password_hash, display_name, permissions, data_scope, created_at)
-      VALUES (
-        ${sqlValue(username)}, 
-        ${sqlValue(hash)}, 
-        ${sqlValue(displayName || username)}, 
-        ${sqlValue(permJson)}, 
-        ${sqlValue(scopeJson)}, 
-        ${dbNowExpression()}
-      )
-    `);
+      VALUES ($1, $2, $3, $4, $5, NOW())
+    `, [username, hash, displayName || username, permJson, scopeJson]);
 
-        res.json({ message: '鐢ㄦ埛鍒涘缓鎴愬姛' });
+        res.json({ message: '用户创建成功' });
     } catch (error) {
         console.error('Create user error:', error);
         res.status(500).json({ error: '创建用户失败' });
@@ -89,39 +80,48 @@ router.put('/:id', requirePermission('manage_users'), async (req: AuthRequest, r
         const userId = req.params.id;
         const { password, displayName, permissions, dataScope } = req.body;
 
-        // Prevent modifying super admin (id=1) casually, or at least be careful
-        // For now, allow it but maybe warn? 
-        // Usually ID 1 is protected.
         if (Number(userId) === 1 && req.user?.id !== 1) {
             return res.status(403).json({ error: 'cannot modify super admin' });
         }
 
-        let updates: string[] = [];
+        const updates: string[] = [];
+        const values: any[] = [];
+        let paramIndex = 1;
 
-        if (displayName) updates.push(`display_name = ${sqlValue(displayName)}`);
-        if (permissions) updates.push(`permissions = ${sqlValue(JSON.stringify(permissions))}`);
-        if (dataScope) updates.push(`data_scope = ${sqlValue(JSON.stringify(dataScope))}`);
+        if (displayName) {
+            updates.push(`display_name = $${paramIndex++}`);
+            values.push(displayName);
+        }
+        if (permissions) {
+            updates.push(`permissions = $${paramIndex++}`);
+            values.push(JSON.stringify(permissions));
+        }
+        if (dataScope) {
+            updates.push(`data_scope = $${paramIndex++}`);
+            values.push(JSON.stringify(dataScope));
+        }
         if (password && password.length >= 6) {
-            updates.push(`password_hash = ${sqlValue(hashPassword(password))}`);
+            updates.push(`password_hash = $${paramIndex++}`);
+            values.push(hashPassword(password));
         }
 
-        updates.push(`updated_at = ${dbNowExpression()}`);
+        updates.push(`updated_at = NOW()`);
 
-        if (updates.length === 0) {
+        if (updates.length <= 1) { // Only updated_at
             return res.json({ message: 'no fields to update' });
         }
 
-        ensureDbMigrations();
-        await dbExecute(`
+        values.push(userId);
+        await pool.query(`
       UPDATE admin_users 
       SET ${updates.join(', ')}
-      WHERE id = ${sqlValue(userId)}
-    `);
+      WHERE id = $${paramIndex}
+    `, values);
 
-        res.json({ message: '鐢ㄦ埛鏇存柊鎴愬姛' });
+        res.json({ message: '用户更新成功' });
     } catch (error) {
         console.error('Update user error:', error);
-        res.status(500).json({ error: '鏇存柊鐢ㄦ埛澶辫触' });
+        res.status(500).json({ error: '更新用户失败' });
     }
 });
 
@@ -142,10 +142,9 @@ router.delete('/:id', requirePermission('manage_users'), async (req: AuthRequest
             return res.status(400).json({ error: '不能删除自己' });
         }
 
-        ensureDbMigrations();
-        await dbExecute(`DELETE FROM admin_users WHERE id = ${sqlValue(userId)}`);
+        await pool.query('DELETE FROM admin_users WHERE id = $1', [userId]);
 
-        res.json({ message: '鐢ㄦ埛删除成功' });
+        res.json({ message: '用户删除成功' });
     } catch (error) {
         console.error('Delete user error:', error);
         res.status(500).json({ error: '删除用户失败' });
@@ -153,4 +152,3 @@ router.delete('/:id', requirePermission('manage_users'), async (req: AuthRequest
 });
 
 export default router;
-
