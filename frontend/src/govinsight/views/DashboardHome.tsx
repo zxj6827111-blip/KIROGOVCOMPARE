@@ -135,35 +135,33 @@ export const DashboardHome: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* 1. Header KPIs */}
+      {/* 1. KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard
-          title="现行有效规章/文件"
-          value={activeRegs}
-          unit="件"
-          color="blue"
-          trend={2.5} // Example static for regs, or calc similarly
-          tooltip="现行有效规章数 + 现行有效规范性文件数"
-          source="表2-1-3, 表2-2-3"
-        />
         <KPICard
           title="依申请新收总量"
           value={currentData.applications.newReceived.toLocaleString()}
           unit="件"
           trend={appTrend}
-          color="indigo"
-          tooltip="本年度新收到的政府信息公开申请数量（不含上年结转）"
-          source="表3-1 (总计)"
+          color="blue"
+          tooltip="本年度新收到的政府信息公开申请数量"
+          source="表3-1"
         />
         <KPICard
-          title="行政执法强度"
-          value={(currentData.adminActions.punishment).toLocaleString()}
-          unit="次"
-          trend={null} // Example: force hide trend if logic complex
-          trendLabel="同比"
-          color="slate"
-          tooltip="全年实施行政处罚的总次数"
-          source="表2-3-2 (扩展指标)"
+          title="行政事业性收费"
+          value={(currentData.fees.amount / 100).toFixed(1)}
+          unit="亿元"
+          trend={null} // Mock data doesn't fully support trend calc unless I improved types.ts more, but relying on mocked data.ts logic 
+          color="amber"
+          tooltip="本年度根据国家规定收取的行政事业性收费总额"
+          source="表2-20-(8)"
+        />
+        <KPICard
+          title="规章/规范性文件"
+          value={activeRegs}
+          unit="件"
+          color="indigo"
+          tooltip="现行有效规章数 + 现行有效规范性文件数"
+          source="表2"
         />
         <KPICard
           title="复议诉讼纠错率"
@@ -172,47 +170,38 @@ export const DashboardHome: React.FC = () => {
           trend={riskTrend}
           trendLabel="风险变动"
           color="rose"
-          tooltip="(复议纠错数+诉讼败诉数) ÷ (复议总数+诉讼总数) × 100%"
-          source="表4-1, 表4-2"
+          tooltip="败诉纠错案件占比"
+          source="表4"
         />
       </div>
 
+      {/* 2. Main Trend & Ranking */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* 2. Main Trend Chart */}
         <div className="lg:col-span-2 bg-white p-6 rounded-lg shadow-sm border border-slate-200">
           <div className="flex justify-between items-center mb-6">
-            <div>
-              <h3 className="text-lg font-bold text-slate-800 flex items-center">
-                治理效能趋势分析
-                <MetricTip content="左轴：申请量（件）；右轴：比率（%）。" />
-              </h3>
-            </div>
-            {/* Legend */}
-            <div className="flex space-x-4 text-sm hidden sm:flex">
-              <div className="flex items-center"><span className="w-3 h-3 bg-blue-100 border border-blue-500 mr-1"></span> 压力(申请量)</div>
-              <div className="flex items-center"><span className="w-3 h-3 bg-emerald-500 rounded-full mr-1"></span> 质量(公开率)</div>
-              <div className="flex items-center"><span className="w-3 h-3 bg-rose-500 rounded-full mr-1"></span> 风险(纠错率)</div>
+            <h3 className="text-lg font-bold text-slate-800 flex items-center">
+              治理效能趋势分析
+              <MetricTip content="压力、质量与风险的综合演进趋势" />
+            </h3>
+            <div className="flex space-x-4 text-sm hidden sm:flex text-slate-500">
+              <div className="flex items-center"><span className="w-2 h-2 bg-blue-400 mr-1.5 rounded-full"></span> 申请压力</div>
+              <div className="flex items-center"><span className="w-2 h-2 bg-emerald-500 mr-1.5 rounded-full"></span> 公开质量</div>
+              <div className="flex items-center"><span className="w-2 h-2 bg-rose-500 mr-1.5 rounded-full"></span> 法律风险</div>
             </div>
           </div>
           <div className="h-80">
-            {mainTrendData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={mainTrendData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                  <XAxis dataKey="year" stroke="#64748b" />
-                  <YAxis yAxisId="left" stroke="#64748b" />
-                  <YAxis yAxisId="right" orientation="right" stroke="#64748b" unit="%" />
-                  <Tooltip contentStyle={{ borderRadius: '8px' }} />
-                  <Area yAxisId="left" type="monotone" dataKey="pressure" fill="#dbeafe" stroke="#3b82f6" fillOpacity={0.6} />
-                  <Line yAxisId="right" type="monotone" dataKey="quality" stroke="#10b981" strokeWidth={2} dot={{ r: 4 }} />
-                  <Line yAxisId="right" type="monotone" dataKey="risk" stroke="#f43f5e" strokeWidth={2} dot={{ r: 4 }} />
-                </ComposedChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex items-center justify-center text-slate-400 bg-slate-50">
-                暂无历史数据
-              </div>
-            )}
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={mainTrendData}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                <XAxis dataKey="year" stroke="#64748b" />
+                <YAxis yAxisId="left" stroke="#64748b" />
+                <YAxis yAxisId="right" orientation="right" stroke="#64748b" unit="%" />
+                <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                <Area yAxisId="left" type="monotone" dataKey="pressure" name="申请量" fill="#dbeafe" stroke="#3b82f6" fillOpacity={0.6} />
+                <Line yAxisId="right" type="monotone" dataKey="quality" name="公开率" stroke="#10b981" strokeWidth={2} dot={{ r: 4 }} />
+                <Line yAxisId="right" type="monotone" dataKey="risk" name="纠错率" stroke="#f43f5e" strokeWidth={2} dot={{ r: 4 }} />
+              </ComposedChart>
+            </ResponsiveContainer>
           </div>
         </div>
 

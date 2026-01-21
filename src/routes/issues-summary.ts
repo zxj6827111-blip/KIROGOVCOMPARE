@@ -1,6 +1,5 @@
 import express from 'express';
-import { dbQuery, dbType } from '../config/db-llm';
-import { sqlValue } from '../config/sqlite';
+import pool from '../config/database-llm';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 
@@ -31,25 +30,28 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
         }
 
         // Build recursive CTE to get all descendant regions
-        let regionFilter = '';
+        let regionsResult: any[] = [];
+
         if (regionId) {
-            regionFilter = `
-        WITH RECURSIVE region_tree AS (
-          SELECT id, name, parent_id, level FROM regions WHERE id = ${sqlValue(regionId)}
-          UNION ALL
-          SELECT r.id, r.name, r.parent_id, r.level
-          FROM regions r
-          INNER JOIN region_tree rt ON r.parent_id = rt.id
-        )
-        SELECT id, name, level FROM region_tree
-      `;
+            const regionTreeQuery = `
+            WITH RECURSIVE region_tree AS (
+              SELECT id, name, parent_id, level FROM regions WHERE id = $1
+              UNION ALL
+              SELECT r.id, r.name, r.parent_id, r.level
+              FROM regions r
+              INNER JOIN region_tree rt ON r.parent_id = rt.id
+            )
+            SELECT id, name, level FROM region_tree
+            `;
+            const result = await pool.query(regionTreeQuery, [regionId]);
+            regionsResult = result.rows;
         } else {
             // Get all regions
-            regionFilter = `SELECT id, name, level FROM regions`;
+            const regionAllQuery = `SELECT id, name, level FROM regions`;
+            const result = await pool.query(regionAllQuery);
+            regionsResult = result.rows;
         }
 
-        // Get all regions in scope
-        let regionsResult = await dbQuery(regionFilter);
         console.log(`[IssuesSummary] Total regions found: ${regionsResult.length}`);
 
         // Apply data scope filtering
@@ -67,22 +69,12 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
             return res.json({ data: { total_issues: 0, regions: [] } });
         }
 
-        const regionIds = regionsResult.map((r: any) => String(r.id));
+        const regionIds = regionsResult.map((r: any) => r.id);
         const regionMap = new Map(regionsResult.map((r: any) => [String(r.id), r]));
 
         console.log(`[IssuesSummary] Region IDs count: ${regionIds.length}`);
-        console.log(`[IssuesSummary] Current dbType: ${dbType}`);
 
-        // OPTIMIZATION: Manually fetch items to debug exactly why SQL fails
-        // First, get the reports
-        let whereClause = `WHERE r.region_id IN (${regionIds.join(',')})`;
-
-        // If query is too large, we skip the IN clause and just join/query all
-        if (regionIds.length > 500) {
-            console.log('[IssuesSummary] Large region set detected, verifying via JOIN instead of IN clause');
-            whereClause = '';
-        }
-
+        // Use ANY for potentially large lists
         const reportsQuery = `
           SELECT 
             r.id as report_id,
@@ -92,29 +84,29 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
             rv.id as version_id
           FROM reports r
           INNER JOIN report_versions rv ON rv.id = r.active_version_id
-          ${whereClause}
+          WHERE r.region_id = ANY($1::int[])
           ORDER BY r.region_id, r.year DESC
         `;
 
-        console.log(`[IssuesSummary] SQL Query Preview: ${reportsQuery.substring(0, 300)}...`);
-        const reportsResult = await dbQuery(reportsQuery);
+        const reportsResultRes = await pool.query(reportsQuery, [regionIds]);
+        const reportsResult = reportsResultRes.rows;
         console.log(`[IssuesSummary] Base reports found: ${reportsResult.length}`);
 
         if (reportsResult.length === 0) {
             return res.json({ data: { total_issues: 0, regions: [] } });
         }
 
-        // JS-BASED AGGREGATION: Fetch all items and count in memory to avoid SQL pitfalls
+        // JS-BASED AGGREGATION: Fetch all items and count in memory
         const versionIds = reportsResult.map((r: any) => r.version_id);
 
-        // Chunk the version IDs to avoid IN limit (though 200 is fine)
         const itemsQuery = `
             SELECT *
             FROM report_consistency_items 
-            WHERE report_version_id IN (${versionIds.join(',')})
+            WHERE report_version_id = ANY($1::int[])
         `;
 
-        const itemsResult = await dbQuery(itemsQuery);
+        const itemsResultRes = await pool.query(itemsQuery, [versionIds]);
+        const itemsResult = itemsResultRes.rows;
         console.log(`[IssuesSummary] Total consistency items fetched: ${itemsResult.length}`);
 
         // Perform counting in JS
@@ -124,9 +116,7 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
         let debugFailCount = 0;
 
         for (const item of itemsResult) {
-            // Robust check: handle nulls, case insensitive
             const statusStr = (item.auto_status || item.status || '').toString().toUpperCase();
-            // Catch FAIL, also catch NOT_ASSESSABLE if needed? No, usually just FAIL.
             const isFail = statusStr.trim() === 'FAIL';
             const isDismissed = (item.human_status === 'dismissed');
 
@@ -160,10 +150,6 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
         const regionReportsMap = new Map<string, any[]>();
         for (const report of reportsResult) {
             const rId = String(report.region_id);
-            // Only verify region exists in our filtered map (if we filtered)
-            // If we skipped IN clause, some regions might not be in our initial map if we didn't fetch ALL regions initially
-            // But usually for 'admin' we fetched all regions.
-
             if (!regionReportsMap.has(rId)) {
                 regionReportsMap.set(rId, []);
             }
@@ -184,20 +170,15 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
         let totalIssues = 0;
 
         for (const [rId, reports] of regionReportsMap) {
-            // Need to look up region info.
             const region = regionMap.get(rId);
 
-            // If region not found in our initially fetched map, we verify the user truly has access
             if (!region) {
-                // But since reportsResult comes from the DB, and if we joined valid regions, it should be fine.
-                // However, we only care about regions in regionMap (which was scope filtered)
                 continue;
             }
 
             const regionIssues = reports.reduce((sum: number, r: any) => sum + r.issue_count, 0);
             totalIssues += regionIssues;
 
-            // Only include regions that have reports to show
             if (reports.length > 0) {
                 regions.push({
                     region_id: Number(rId),

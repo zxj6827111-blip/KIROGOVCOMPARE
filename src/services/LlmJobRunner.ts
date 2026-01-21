@@ -1,13 +1,11 @@
-import { ensureSqliteMigrations, querySqlite, sqlValue } from '../config/sqlite';
-import pool, { dbType } from '../config/database-llm';
-import { dbNowExpression } from '../config/db-llm';
+import pool from '../config/database-llm';
 import { LlmParseResult, LlmProvider, LlmProviderError } from './LlmProvider';
 import { createLlmProvider } from './LlmProviderFactory';
-import { summarizeDiff } from '../utils/jsonDiff';
 import { consistencyCheckService } from './ConsistencyCheckService';
 import { materializeService } from './data-center/MaterializeService';
 import { ingestionBatchService } from './data-center/IngestionBatchService';
 import axios from 'axios';
+import { summarizeDiff } from '../utils/jsonDiff';
 
 interface QueuedJob {
   id: number;
@@ -99,27 +97,15 @@ export class LlmJobRunner {
     }
 
     // 2. If valid but not running in memory, update DB directly.
-    if (dbType === 'postgres') {
-      await pool.query(`
-        UPDATE jobs
-        SET status = 'cancelled',
-            step_code = 'CANCELLED',
-            step_name = '已取消',
-            progress = 100,
-            finished_at = NOW(),
-            error_message = '用户手动取消'
-        WHERE id = $1 AND status IN ('queued', 'running')`, [jobId]);
-    } else {
-      querySqlite(`
-        UPDATE jobs
-        SET status = 'cancelled',
-            step_code = 'CANCELLED',
-            step_name = '已取消',
-            progress = 100,
-            finished_at = ${dbNowExpression()},
-            error_message = '用户手动取消'
-        WHERE id = ${sqlValue(jobId)} AND status IN ('queued', 'running');`);
-    }
+    await pool.query(`
+      UPDATE jobs
+      SET status = 'cancelled',
+          step_code = 'CANCELLED',
+          step_name = '已取消',
+          progress = 100,
+          finished_at = NOW(),
+          error_message = '用户手动取消'
+      WHERE id = $1 AND status IN ('queued', 'running')`, [jobId]);
 
     return true;
   }
@@ -130,27 +116,15 @@ export class LlmJobRunner {
     // Check for Cancellation
     if (axios.isCancel(error) || error.name === 'AbortError' || message.includes('User cancelled') || message.includes('canceled')) {
       console.log(`[Job ${job.id}] Job was cancelled.`);
-      if (dbType === 'postgres') {
-        await pool.query(`
-          UPDATE jobs 
-          SET status = 'cancelled',
-              error_message = '用户手动取消',
-              progress = 100,
-              step_code = 'CANCELLED',
-              step_name = '已取消',
-              finished_at = NOW()
-          WHERE id = $1`, [job.id]);
-      } else {
-        querySqlite(`
-          UPDATE jobs 
-          SET status = 'cancelled',
-              error_message = '用户手动取消',
-              progress = 100,
-              step_code = 'CANCELLED',
-              step_name = '已取消',
-              finished_at = datetime('now')
-          WHERE id = ${sqlValue(job.id)};`);
-      }
+      await pool.query(`
+        UPDATE jobs 
+        SET status = 'cancelled',
+            error_message = '用户手动取消',
+            progress = 100,
+            step_code = 'CANCELLED',
+            step_name = '已取消',
+            finished_at = NOW()
+        WHERE id = $1`, [job.id]);
       return;
     }
 
@@ -164,60 +138,33 @@ export class LlmJobRunner {
       console.log(`[Job ${job.id}] Retrying with attempt ${attempt + 1} (fallback model)...`);
 
       const errorMsg = `第${attempt}轮失败: ${message}`;
-      if (dbType === 'postgres') {
-        await pool.query(`
-          UPDATE jobs 
-          SET status = 'queued',
-              retry_count = retry_count + 1,
-              attempt = retry_count + 2,
-              progress = $1,
-              step_code = $2,
-              step_name = $3,
-              error_code = $4,
-              error_message = $5
-          WHERE id = $6`,
-          [STEPS.QUEUED.progress, STEPS.QUEUED.code, STEPS.QUEUED.name, code, errorMsg, job.id]);
-      } else {
-        querySqlite(`
-          UPDATE jobs 
-          SET status = 'queued',
-              retry_count = retry_count + 1,
-              attempt = retry_count + 2,
-              progress = ${STEPS.QUEUED.progress},
-              step_code = ${sqlValue(STEPS.QUEUED.code)},
-              step_name = ${sqlValue(STEPS.QUEUED.name)},
-              error_code = ${sqlValue(code)},
-              error_message = ${sqlValue(errorMsg)}
-          WHERE id = ${sqlValue(job.id)};`);
-      }
+      await pool.query(`
+        UPDATE jobs 
+        SET status = 'queued',
+            retry_count = retry_count + 1,
+            attempt = retry_count + 2,
+            progress = $1,
+            step_code = $2,
+            step_name = $3,
+            error_code = $4,
+            error_message = $5
+        WHERE id = $6`,
+        [STEPS.QUEUED.progress, STEPS.QUEUED.code, STEPS.QUEUED.name, code, errorMsg, job.id]);
     } else {
       // Final failure: mark as failed
       const finalMessage = `已更换模型重试仍失败。第1轮失败原因: ${code}; 第2轮失败原因: ${message}`;
 
-      if (dbType === 'postgres') {
-        await pool.query(`
-          UPDATE jobs 
-          SET status = 'failed',
-              error_code = $1,
-              error_message = $2,
-              finished_at = NOW(),
-              progress = 100,
-              step_code = $3,
-              step_name = '失败'
-          WHERE id = $4`,
-          [code, finalMessage, STEPS.DONE.code, job.id]);
-      } else {
-        querySqlite(`
-          UPDATE jobs 
-          SET status = 'failed',
-              error_code = ${sqlValue(code)},
-              error_message = ${sqlValue(finalMessage)},
-              finished_at = ${dbNowExpression()},
-              progress = 100,
-              step_code = ${sqlValue(STEPS.DONE.code)},
-              step_name = ${sqlValue('失败')}
-          WHERE id = ${sqlValue(job.id)};`);
-      }
+      await pool.query(`
+        UPDATE jobs 
+        SET status = 'failed',
+            error_code = $1,
+            error_message = $2,
+            finished_at = NOW(),
+            progress = 100,
+            step_code = $3,
+            step_name = '失败'
+        WHERE id = $4`,
+        [code, finalMessage, STEPS.DONE.code, job.id]);
 
       console.error(`[Job ${job.id}] Final failure after ${attempt} attempts`);
 
@@ -244,12 +191,8 @@ export class LlmJobRunner {
       // CRITICAL FIX: Prioritize provider/model from the JOBS table (user's actual selection)
       // Only fallback to report_versions if jobs.provider/model are NULL
       let jobConfig: { provider?: string; model?: string } | undefined;
-      if (dbType === 'postgres') {
-        const result = await pool.query('SELECT provider, model FROM jobs WHERE id = $1 LIMIT 1', [job.id]);
-        jobConfig = result.rows[0];
-      } else {
-        jobConfig = querySqlite(`SELECT provider, model FROM jobs WHERE id = ${sqlValue(job.id)} LIMIT 1;`)[0] as { provider?: string; model?: string } | undefined;
-      }
+      const result = await pool.query('SELECT provider, model FROM jobs WHERE id = $1 LIMIT 1', [job.id]);
+      jobConfig = result.rows[0];
 
       let pName = jobConfig?.provider;
       let mName = jobConfig?.model;
@@ -257,12 +200,8 @@ export class LlmJobRunner {
       // If job doesn't have provider/model, fallback to version config
       if (!pName && !mName) {
         let versionConfig: { provider?: string; model?: string } | undefined;
-        if (dbType === 'postgres') {
-          const result = await pool.query('SELECT provider, model FROM report_versions WHERE id = $1 LIMIT 1', [job.version_id]);
-          versionConfig = result.rows[0];
-        } else {
-          versionConfig = querySqlite(`SELECT provider, model FROM report_versions WHERE id = ${sqlValue(job.version_id)} LIMIT 1;`)[0] as { provider?: string; model?: string } | undefined;
-        }
+        const result = await pool.query('SELECT provider, model FROM report_versions WHERE id = $1 LIMIT 1', [job.version_id]);
+        versionConfig = result.rows[0];
 
         // If provider is 'upload' (legacy/default) or 'pending', ignore it and use env default.
         pName =
@@ -303,122 +242,66 @@ export class LlmJobRunner {
     }, signal);
 
     // Update progress: POSTPROCESS
-    if (dbType === 'postgres') {
-      await pool.query(`
-        UPDATE jobs 
-        SET step_code = $1,
-        step_name = $2,
-        progress = $3,
-        provider = $4,
-        model = $5
-        WHERE id = $6`,
-        [STEPS.POSTPROCESS.code, STEPS.POSTPROCESS.name, STEPS.POSTPROCESS.progress, parseResult.provider, parseResult.model, job.id]);
-    } else {
-      querySqlite(`
-        UPDATE jobs 
-        SET step_code = ${sqlValue(STEPS.POSTPROCESS.code)},
-        step_name = ${sqlValue(STEPS.POSTPROCESS.name)},
-        progress = ${STEPS.POSTPROCESS.progress},
-        provider = ${sqlValue(parseResult.provider)},
-        model = ${sqlValue(parseResult.model)}
-        WHERE id = ${sqlValue(job.id)};`);
-    }
+    await pool.query(`
+      UPDATE jobs 
+      SET step_code = $1,
+      step_name = $2,
+      progress = $3,
+      provider = $4,
+      model = $5
+      WHERE id = $6`,
+      [STEPS.POSTPROCESS.code, STEPS.POSTPROCESS.name, STEPS.POSTPROCESS.progress, parseResult.provider, parseResult.model, job.id]);
 
     const outputJson = this.stringifyOutput(parseResult);
 
     // Insert parse result
-    if (dbType === 'postgres') {
-      await pool.query(
-        `INSERT INTO report_version_parses (report_version_id, provider, model, output_json, created_at)
-         VALUES ($1, $2, $3, $4, NOW())`,
-        [job.version_id, parseResult.provider, parseResult.model, outputJson]);
-    } else {
-      querySqlite(
-        `INSERT INTO report_version_parses (report_version_id, provider, model, output_json, created_at)
-         VALUES (${sqlValue(job.version_id)}, ${sqlValue(parseResult.provider)}, ${sqlValue(parseResult.model)}, ${sqlValue(outputJson)}, datetime('now'));`);
-    }
+    await pool.query(
+      `INSERT INTO report_version_parses (report_version_id, provider, model, output_json, created_at)
+       VALUES ($1, $2, $3, $4, NOW())`,
+      [job.version_id, parseResult.provider, parseResult.model, outputJson]);
 
-    if (this.hasParsedJsonColumn()) {
-      if (dbType === 'postgres') {
-        await pool.query(
-          `UPDATE report_versions
-           SET parsed_json = $1,
-               provider = $2,
-               model = $3,
-               prompt_version = 'v1'
-           WHERE id = $4`,
-          [outputJson, parseResult.provider, parseResult.model, job.version_id]);
-      } else {
-        querySqlite(
-          `UPDATE report_versions
-           SET parsed_json = ${sqlValue(outputJson)},
-               provider = ${sqlValue(parseResult.provider)},
-               model = ${sqlValue(parseResult.model)},
-               prompt_version = 'v1'
-           WHERE id = ${sqlValue(job.version_id)};`);
-      }
+    if (await this.hasParsedJsonColumn()) {
+      await pool.query(
+        `UPDATE report_versions
+         SET parsed_json = $1,
+             provider = $2,
+             model = $3,
+             prompt_version = 'v1'
+         WHERE id = $4`,
+        [outputJson, parseResult.provider, parseResult.model, job.version_id]);
     }
 
     // Success: mark as DONE
-    if (dbType === 'postgres') {
-      await pool.query(`
-        UPDATE jobs 
-        SET status = 'succeeded', 
-            progress = $1,
-            step_code = $2,
-            step_name = $3,
-            finished_at = NOW() 
-        WHERE id = $4`,
-        [STEPS.DONE.progress, STEPS.DONE.code, STEPS.DONE.name, job.id]);
-    } else {
-      querySqlite(`
-        UPDATE jobs 
-        SET status = 'succeeded', 
-            progress = ${STEPS.DONE.progress},
-            step_code = ${sqlValue(STEPS.DONE.code)},
-            step_name = ${sqlValue(STEPS.DONE.name)},
-            finished_at = datetime('now') 
-        WHERE id = ${sqlValue(job.id)};`);
-    }
+    await pool.query(`
+      UPDATE jobs 
+      SET status = 'succeeded', 
+          progress = $1,
+          step_code = $2,
+          step_name = $3,
+          finished_at = NOW() 
+      WHERE id = $4`,
+      [STEPS.DONE.progress, STEPS.DONE.code, STEPS.DONE.name, job.id]);
 
     // Enqueue materialize job if not already queued/running
     if (job.version_id && job.report_id) {
       let existingMaterializeJob: { id?: number } | undefined;
-      if (dbType === 'postgres') {
-        const result = await pool.query(
-          `SELECT id FROM jobs WHERE report_id = $1 AND version_id = $2 AND kind = 'materialize' AND status IN ('queued', 'running') LIMIT 1`,
-          [job.report_id, job.version_id]);
-        existingMaterializeJob = result.rows[0];
-      } else {
-        existingMaterializeJob = querySqlite(
-          `SELECT id FROM jobs WHERE report_id = ${sqlValue(job.report_id)} AND version_id = ${sqlValue(job.version_id)} AND kind = 'materialize' AND status IN ('queued', 'running') LIMIT 1;`
-        )[0] as { id?: number } | undefined;
-      }
+      const result = await pool.query(
+        `SELECT id FROM jobs WHERE report_id = $1 AND version_id = $2 AND kind = 'materialize' AND status IN ('queued', 'running') LIMIT 1`,
+        [job.report_id, job.version_id]);
+      existingMaterializeJob = result.rows[0];
 
       if (!existingMaterializeJob?.id) {
         let ingestionBatchId: number | null = null;
-        if (dbType === 'postgres') {
-          const result = await pool.query(
-            `SELECT ingestion_batch_id FROM report_versions WHERE id = $1 LIMIT 1`,
-            [job.version_id]
-          );
-          ingestionBatchId = result.rows[0]?.ingestion_batch_id ?? null;
-        } else {
-          ingestionBatchId = querySqlite(
-            `SELECT ingestion_batch_id FROM report_versions WHERE id = ${sqlValue(job.version_id)} LIMIT 1;`
-          )[0]?.ingestion_batch_id ?? null;
-        }
+        const result = await pool.query(
+          `SELECT ingestion_batch_id FROM report_versions WHERE id = $1 LIMIT 1`,
+          [job.version_id]
+        );
+        ingestionBatchId = result.rows[0]?.ingestion_batch_id ?? null;
 
-        if (dbType === 'postgres') {
-          await pool.query(
-            `INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, max_retries, ingestion_batch_id) 
-             VALUES ($1, $2, 'materialize', 'queued', 60, $3, $4, 1, $5)`,
-            [job.report_id, job.version_id, STEPS.MATERIALIZE.code, STEPS.MATERIALIZE.name, ingestionBatchId]);
-        } else {
-          querySqlite(
-            `INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, max_retries, ingestion_batch_id) 
-             VALUES (${sqlValue(job.report_id)}, ${sqlValue(job.version_id)}, 'materialize', 'queued', 60, ${sqlValue(STEPS.MATERIALIZE.code)}, ${sqlValue(STEPS.MATERIALIZE.name)}, 1, ${sqlValue(ingestionBatchId)});`);
-        }
+        await pool.query(
+          `INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, max_retries, ingestion_batch_id) 
+           VALUES ($1, $2, 'materialize', 'queued', 60, $3, $4, 1, $5)`,
+          [job.report_id, job.version_id, STEPS.MATERIALIZE.code, STEPS.MATERIALIZE.name, ingestionBatchId]);
         console.log(`[Job ${job.id}] Enqueued materialize job for version ${job.version_id}`);
       }
     }
@@ -434,31 +317,8 @@ export class LlmJobRunner {
    * to avoid permanent stall on server restart
    */
   private recoverRunningJobs(): void {
-    // For PostgreSQL, run async recovery
-    if (dbType === 'postgres') {
-      this.recoverRunningJobsAsync().catch(err =>
-        console.error('[Recovery] Failed to recover running jobs:', err));
-      return;
-    }
-
-    // SQLite: synchronous recovery
-    const runningJobs = querySqlite(`SELECT id FROM jobs WHERE status = 'running';`);
-
-    if (runningJobs.length > 0) {
-      console.log(`[Recovery] Found ${runningJobs.length} running jobs, resetting to queued...`);
-
-      querySqlite(`
-        UPDATE jobs 
-        SET status = 'queued',
-            progress = ${STEPS.QUEUED.progress},
-            step_code = ${sqlValue(STEPS.QUEUED.code)},
-            step_name = ${sqlValue(STEPS.QUEUED.name)},
-            error_code = NULL,
-            error_message = NULL
-        WHERE status = 'running';`);
-
-      console.log(`[Recovery] Reset ${runningJobs.length} jobs to queued`);
-    }
+    this.recoverRunningJobsAsync().catch(err =>
+      console.error('[Recovery] Failed to recover running jobs:', err));
   }
 
   private async recoverRunningJobsAsync(): Promise<void> {
@@ -515,27 +375,20 @@ export class LlmJobRunner {
   }
 
   private async claimNextJob(): Promise<QueuedJob | null> {
-    // Ensure migrations for SQLite only
-    if (dbType === 'sqlite') {
-      ensureSqliteMigrations();
-    }
-
-    let updatedJobs: any[];
-    if (dbType === 'postgres') {
-      // PostgreSQL: Use two separate queries for atomic claim
-      const selectResult = await pool.query(`
+    // PostgreSQL: Use two separate queries for atomic claim
+    const selectResult = await pool.query(`
         SELECT id FROM jobs 
         WHERE status = 'queued' AND kind != 'pdf_export'
         ORDER BY (CASE kind WHEN 'parse' THEN 0 WHEN 'materialize' THEN 1 WHEN 'checks' THEN 2 WHEN 'compare' THEN 3 ELSE 9 END) ASC, created_at ASC
         LIMIT 1
         FOR UPDATE SKIP LOCKED`);
 
-      if (selectResult.rows.length === 0) {
-        return null;
-      }
+    if (selectResult.rows.length === 0) {
+      return null;
+    }
 
-      const jobId = selectResult.rows[0].id;
-      const updateResult = await pool.query(`
+    const jobId = selectResult.rows[0].id;
+    const updateResult = await pool.query(`
         UPDATE jobs
         SET status = 'running', 
             started_at = NOW(),
@@ -544,26 +397,9 @@ export class LlmJobRunner {
             progress = $3
         WHERE id = $4
         RETURNING id, report_id, version_id, kind, comparison_id, retry_count, max_retries`,
-        [STEPS.PARSING.code, STEPS.PARSING.name, STEPS.PARSING.progress, jobId]);
+      [STEPS.PARSING.code, STEPS.PARSING.name, STEPS.PARSING.progress, jobId]);
 
-      updatedJobs = updateResult.rows;
-    } else {
-      updatedJobs = querySqlite(`
-        UPDATE jobs
-        SET status = 'running', 
-            started_at = ${dbNowExpression()},
-            step_code = ${sqlValue(STEPS.PARSING.code)},
-            step_name = ${sqlValue(STEPS.PARSING.name)},
-            progress = ${STEPS.PARSING.progress}
-        WHERE id = (
-          SELECT id
-          FROM jobs
-          WHERE status = 'queued' AND kind != 'pdf_export'
-          ORDER BY (CASE kind WHEN 'parse' THEN 0 WHEN 'materialize' THEN 1 WHEN 'checks' THEN 2 WHEN 'compare' THEN 3 ELSE 9 END) ASC, created_at ASC
-          LIMIT 1
-        )
-        RETURNING id, report_id, version_id, kind, comparison_id, retry_count, max_retries;`);
-    }
+    const updatedJobs = updateResult.rows;
 
     if (!updatedJobs.length) {
       return null;
@@ -582,16 +418,10 @@ export class LlmJobRunner {
     let storagePath: string | undefined;
     let fileHash: string | undefined;
     if ((jobRow.kind || 'parse') === 'parse' && jobRow.version_id) {
-      let versionRow: any;
-      if (dbType === 'postgres') {
-        const result = await pool.query(
-          'SELECT storage_path, file_hash FROM report_versions WHERE id = $1 LIMIT 1',
-          [jobRow.version_id]);
-        versionRow = result.rows[0];
-      } else {
-        versionRow = querySqlite(
-          `SELECT storage_path, file_hash FROM report_versions WHERE id = ${sqlValue(jobRow.version_id)} LIMIT 1;`)[0];
-      }
+      const result = await pool.query(
+        'SELECT storage_path, file_hash FROM report_versions WHERE id = $1 LIMIT 1',
+        [jobRow.version_id]);
+      const versionRow = result.rows[0];
       storagePath = versionRow?.storage_path;
       fileHash = versionRow?.file_hash;
     }
@@ -615,17 +445,12 @@ export class LlmJobRunner {
     }
 
     let version: { id?: number; parsed_json?: string } | undefined;
-    if (dbType === 'postgres') {
-      const result = await pool.query(
-        `SELECT id, parsed_json FROM report_versions WHERE id = $1 LIMIT 1`,
-        [job.version_id]
-      );
-      version = result.rows[0];
-    } else {
-      version = querySqlite(`
-        SELECT id, parsed_json FROM report_versions WHERE id = ${sqlValue(job.version_id)} LIMIT 1;
-      `)[0] as { id?: number; parsed_json?: string } | undefined;
-    }
+
+    const result = await pool.query(
+      `SELECT id, parsed_json FROM report_versions WHERE id = $1 LIMIT 1`,
+      [job.version_id]
+    );
+    version = result.rows[0];
 
     if (!version?.id) {
       throw new Error('Version not found');
@@ -635,10 +460,10 @@ export class LlmJobRunner {
       throw new LlmProviderError('parsed_json is empty, cannot materialize', 'PARSED_JSON_EMPTY');
     }
 
-    const result = await materializeService.materializeVersion(job.version_id);
+    const materializeResult = await materializeService.materializeVersion(job.version_id);
 
-    if (!result.success) {
-      throw new Error(`Materialization failed: ${result.error}`);
+    if (!materializeResult.success) {
+      throw new Error(`Materialization failed: ${materializeResult.error}`);
     }
 
     // Update batch stats if applicable
@@ -646,68 +471,37 @@ export class LlmJobRunner {
       await ingestionBatchService.updateBatchStats(Number(job.ingestion_batch_id));
     }
 
-    if (dbType === 'postgres') {
-      await pool.query(
-        `UPDATE jobs
+    await pool.query(
+      `UPDATE jobs
          SET status = 'succeeded',
              progress = $1,
              step_code = $2,
              step_name = $3,
              finished_at = NOW()
          WHERE id = $4`,
-        [STEPS.DONE.progress, STEPS.DONE.code, STEPS.DONE.name, job.id]
-      );
-    } else {
-      querySqlite(
-        `UPDATE jobs
-         SET status = 'succeeded',
-             progress = ${STEPS.DONE.progress},
-             step_code = ${sqlValue(STEPS.DONE.code)},
-             step_name = ${sqlValue(STEPS.DONE.name)},
-             finished_at = datetime('now')
-         WHERE id = ${sqlValue(job.id)};`
-      );
-    }
+      [STEPS.DONE.progress, STEPS.DONE.code, STEPS.DONE.name, job.id]
+    );
 
     let existingChecksJob: { id?: number } | undefined;
-    if (dbType === 'postgres') {
-      const result = await pool.query(
-        `SELECT id FROM jobs WHERE report_id = $1 AND version_id = $2 AND kind = 'checks' AND status IN ('queued', 'running') LIMIT 1`,
-        [job.report_id, job.version_id]
-      );
-      existingChecksJob = result.rows[0];
-    } else {
-      existingChecksJob = querySqlite(
-        `SELECT id FROM jobs WHERE report_id = ${sqlValue(job.report_id)} AND version_id = ${sqlValue(job.version_id)} AND kind = 'checks' AND status IN ('queued', 'running') LIMIT 1;`
-      )[0] as { id?: number } | undefined;
-    }
+    const checksResult = await pool.query(
+      `SELECT id FROM jobs WHERE report_id = $1 AND version_id = $2 AND kind = 'checks' AND status IN ('queued', 'running') LIMIT 1`,
+      [job.report_id, job.version_id]
+    );
+    existingChecksJob = checksResult.rows[0];
 
     if (!existingChecksJob?.id) {
       let ingestionBatchId: number | null = null;
-      if (dbType === 'postgres') {
-        const result = await pool.query(
-          `SELECT ingestion_batch_id FROM report_versions WHERE id = $1 LIMIT 1`,
-          [job.version_id]
-        );
-        ingestionBatchId = result.rows[0]?.ingestion_batch_id ?? null;
-      } else {
-        ingestionBatchId = querySqlite(
-          `SELECT ingestion_batch_id FROM report_versions WHERE id = ${sqlValue(job.version_id)} LIMIT 1;`
-        )[0]?.ingestion_batch_id ?? null;
-      }
+      const result = await pool.query(
+        `SELECT ingestion_batch_id FROM report_versions WHERE id = $1 LIMIT 1`,
+        [job.version_id]
+      );
+      ingestionBatchId = result.rows[0]?.ingestion_batch_id ?? null;
 
-      if (dbType === 'postgres') {
-        await pool.query(
-          `INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, max_retries, ingestion_batch_id)
+      await pool.query(
+        `INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, max_retries, ingestion_batch_id)
            VALUES ($1, $2, 'checks', 'queued', 60, $3, $4, 1, $5)`,
-          [job.report_id, job.version_id, STEPS.POSTPROCESS.code, '等待校验', ingestionBatchId]
-        );
-      } else {
-        querySqlite(
-          `INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, max_retries, ingestion_batch_id)
-           VALUES (${sqlValue(job.report_id)}, ${sqlValue(job.version_id)}, 'checks', 'queued', 60, ${sqlValue(STEPS.POSTPROCESS.code)}, ${sqlValue('等待校验')}, 1, ${sqlValue(ingestionBatchId)});`
-        );
-      }
+        [job.report_id, job.version_id, STEPS.POSTPROCESS.code, '等待校验', ingestionBatchId]
+      );
     }
   }
 
@@ -718,16 +512,10 @@ export class LlmJobRunner {
 
     // Get parsed_json from report_versions
     let version: { id?: number; parsed_json?: string } | undefined;
-    if (dbType === 'postgres') {
-      const result = await pool.query(
-        `SELECT id, parsed_json FROM report_versions WHERE id = $1 LIMIT 1`,
-        [job.version_id]);
-      version = result.rows[0];
-    } else {
-      version = querySqlite(`
-        SELECT id, parsed_json FROM report_versions WHERE id = ${sqlValue(job.version_id)} LIMIT 1;
-      `)[0] as { id?: number; parsed_json?: string } | undefined;
-    }
+    const result = await pool.query(
+      `SELECT id, parsed_json FROM report_versions WHERE id = $1 LIMIT 1`,
+      [job.version_id]);
+    version = result.rows[0];
 
     if (!version?.id) {
       throw new Error('Version not found');
@@ -742,12 +530,11 @@ export class LlmJobRunner {
       const { runId, items } = await consistencyCheckService.runAndPersist(job.version_id, version.parsed_json);
       console.log(`[Job ${job.id}] Consistency checks completed: runId=${runId}, items=${items.length}`);
     } catch (error) {
-      console.error('[Job ${job.id}] Consistency check failed:', error);
+      console.error(`[Job ${job.id}] Consistency check failed:`, error);
       throw error;
     }
 
-    if (dbType === 'postgres') {
-      await pool.query(`
+    await pool.query(`
         UPDATE jobs 
         SET status = 'succeeded', 
             progress = $1,
@@ -755,17 +542,7 @@ export class LlmJobRunner {
             step_name = $3,
             finished_at = NOW() 
         WHERE id = $4`,
-        [STEPS.DONE.progress, STEPS.DONE.code, STEPS.DONE.name, job.id]);
-    } else {
-      querySqlite(`
-        UPDATE jobs 
-        SET status = 'succeeded', 
-            progress = ${STEPS.DONE.progress},
-            step_code = ${sqlValue(STEPS.DONE.code)},
-            step_name = ${sqlValue(STEPS.DONE.name)},
-            finished_at = datetime('now') 
-        WHERE id = ${sqlValue(job.id)};`);
-    }
+      [STEPS.DONE.progress, STEPS.DONE.code, STEPS.DONE.name, job.id]);
 
     // Check if we need to generate notification (after all jobs complete)
     if (job.version_id) {
@@ -782,511 +559,220 @@ export class LlmJobRunner {
     }
 
     let comparison: any;
-    if (dbType === 'postgres') {
-      const result = await pool.query(
-        `SELECT id, left_report_id, right_report_id FROM comparisons WHERE id = $1 LIMIT 1`,
-        [job.comparison_id]);
-      comparison = result.rows[0];
-    } else {
-      comparison = querySqlite(`
-        SELECT id, left_report_id, right_report_id
-        FROM comparisons
-        WHERE id = ${sqlValue(job.comparison_id)}
-        LIMIT 1;`)[0];
-    }
+    const result = await pool.query(
+      `SELECT id, left_report_id, right_report_id FROM comparisons WHERE id = $1 LIMIT 1`,
+      [job.comparison_id]);
+    comparison = result.rows[0];
 
     if (!comparison) {
       throw new Error('comparison_not_found');
     }
 
-    let leftVersion: any;
-    let rightVersion: any;
-    if (dbType === 'postgres') {
-      const leftResult = await pool.query(
-        `SELECT rv.id as version_id, rv.parsed_json
-         FROM reports r
-         JOIN report_versions rv ON rv.id = r.active_version_id
-         WHERE r.id = $1
-         LIMIT 1`,
-        [comparison.left_report_id]
-      );
-      leftVersion = leftResult.rows[0];
-      const rightResult = await pool.query(
-        `SELECT rv.id as version_id, rv.parsed_json
-         FROM reports r
-         JOIN report_versions rv ON rv.id = r.active_version_id
-         WHERE r.id = $1
-         LIMIT 1`,
-        [comparison.right_report_id]
-      );
-      rightVersion = rightResult.rows[0];
-    } else {
-      leftVersion = querySqlite(`
-        SELECT rv.id as version_id, rv.parsed_json
-        FROM reports r
-        JOIN report_versions rv ON rv.id = r.active_version_id
-        WHERE r.id = ${sqlValue(comparison.left_report_id)}
-        LIMIT 1;`)[0];
-      rightVersion = querySqlite(`
-        SELECT rv.id as version_id, rv.parsed_json
-        FROM reports r
-        JOIN report_versions rv ON rv.id = r.active_version_id
-        WHERE r.id = ${sqlValue(comparison.right_report_id)}
-        LIMIT 1;`)[0];
-    }
+    console.log(`[Job ${job.id}] Running comparison ${comparison.id} for reports ${comparison.left_report_id} <-> ${comparison.right_report_id}...`);
 
-    const parseJson = (value: any): any => {
-      if (value === null || value === undefined) return null;
-      if (typeof value === 'object') return value;
-      try {
-        return JSON.parse(value);
-      } catch (error) {
-        return null;
-      }
-    };
+    // Get JSON data for both versions
+    const leftRes = await pool.query('SELECT parsed_json FROM report_versions WHERE report_id = $1 AND is_active = true LIMIT 1', [comparison.left_report_id]);
+    const rightRes = await pool.query('SELECT parsed_json FROM report_versions WHERE report_id = $1 AND is_active = true LIMIT 1', [comparison.right_report_id]);
 
-    const leftParsed = parseJson(leftVersion?.parsed_json);
-    const rightParsed = parseJson(rightVersion?.parsed_json);
+    const leftJson = leftRes.rows[0]?.parsed_json || {};
+    const rightJson = rightRes.rows[0]?.parsed_json || {};
 
-    if (!leftVersion?.version_id || !rightVersion?.version_id || !leftParsed || !rightParsed) {
-      const error = new LlmProviderError('Parse result not ready for comparison', 'PARSE_NOT_READY');
-      throw error;
-    }
+    // 1. Calculate Diff
+    const diff = summarizeDiff(leftJson, rightJson);
 
-    const diffResult = summarizeDiff(leftParsed, rightParsed);
-    const diffJson = JSON.stringify(diffResult);
+    // 2. Calculate Similarity (0-100)
+    const diffKeys = Object.keys(diff.changed).length;
+    const totalKeys = Object.keys(leftJson).length + Object.keys(rightJson).length;
+    // Simple similarity metric: (1 - diffs/total) * 100
+    // Prevent div/0
+    const similarity = totalKeys === 0 ? 100 : Math.max(0, Math.floor(100 * (1 - (diffKeys * 2) / (totalKeys || 1))));
 
-    // Calculate similarity and check_status from diff result
-    let similarity = 0;
-    let checkStatus = '正常';
+    // 3. Save Results
+    await pool.query(
+      'INSERT INTO comparison_results (comparison_id, diff_json) VALUES ($1, $2) ON CONFLICT (comparison_id) DO UPDATE SET diff_json = $2, created_at = NOW()',
+      [comparison.id, JSON.stringify(diff)]
+    );
 
-    try {
-      // Calculate similarity from diff summary
-      const dr = diffResult as any;
-      if (dr.summary) {
-        similarity = Math.round(dr.summary.overallRepetition || dr.summary.textRepetition || 0);
-      }
+    await pool.query(
+      `UPDATE comparisons SET similarity = $1, check_status = 'completed' WHERE id = $2`,
+      [similarity, comparison.id]
+    );
 
-      // Check for issues in both reports
-      const checkIssues: string[] = [];
-
-      // Get left version issues
-      let leftIssueCount = 0;
-      let rightIssueCount = 0;
-
-      if (dbType === 'postgres') {
-        const leftResult = await pool.query(`
-          SELECT COUNT(*) as cnt FROM report_consistency_items 
-          WHERE report_version_id = $1 AND auto_status = 'FAIL' AND human_status = 'pending'
-        `, [leftVersion.version_id]);
-        leftIssueCount = leftResult.rows[0]?.cnt || 0;
-
-        const rightResult = await pool.query(`
-          SELECT COUNT(*) as cnt FROM report_consistency_items 
-          WHERE report_version_id = $1 AND auto_status = 'FAIL' AND human_status = 'pending'
-        `, [rightVersion.version_id]);
-        rightIssueCount = rightResult.rows[0]?.cnt || 0;
-      } else {
-        leftIssueCount = querySqlite(`
-          SELECT COUNT(*) as cnt FROM report_consistency_items 
-          WHERE report_version_id = ${sqlValue(leftVersion.version_id)} AND auto_status = 'FAIL' AND human_status = 'pending';
-        `)[0]?.cnt || 0;
-
-        rightIssueCount = querySqlite(`
-          SELECT COUNT(*) as cnt FROM report_consistency_items 
-          WHERE report_version_id = ${sqlValue(rightVersion.version_id)} AND auto_status = 'FAIL' AND human_status = 'pending';
-        `)[0]?.cnt || 0;
-      }
-
-      // Get year info for status message
-      let yearA: number = 0, yearB: number = 0;
-      if (dbType === 'postgres') {
-        const compInfo = await pool.query(`SELECT year_a, year_b FROM comparisons WHERE id = $1`, [job.comparison_id]);
-        yearA = compInfo.rows[0]?.year_a || 0;
-        yearB = compInfo.rows[0]?.year_b || 0;
-      } else {
-        const compInfo = querySqlite(`SELECT year_a, year_b FROM comparisons WHERE id = ${sqlValue(job.comparison_id)};`)[0] as any;
-        yearA = compInfo?.year_a || 0;
-        yearB = compInfo?.year_b || 0;
-      }
-
-      if (leftIssueCount > 0) checkIssues.push(`${yearA}年校验${leftIssueCount}项`);
-      if (rightIssueCount > 0) checkIssues.push(`${yearB}年校验${rightIssueCount}项`);
-
-      if (checkIssues.length > 0) {
-        checkStatus = `异常(${checkIssues.join('|')})`;
-      }
-    } catch (e) {
-      console.error('[Compare] Error calculating metrics:', e);
-    }
-
-    if (dbType === 'postgres') {
-      await pool.query(`
-        INSERT INTO comparison_results (comparison_id, diff_json, created_at)
-        VALUES ($1, $2, NOW())
-        ON CONFLICT(comparison_id) DO UPDATE SET diff_json = excluded.diff_json, created_at = excluded.created_at`,
-        [job.comparison_id, diffJson]);
-
-      // Update comparison with calculated metrics
-      await pool.query(`
-        UPDATE comparisons SET similarity = $1, check_status = $2 WHERE id = $3
-      `, [similarity, checkStatus, job.comparison_id]);
-
-      await pool.query(`
-        UPDATE jobs 
-        SET status = 'succeeded', 
-            progress = $1,
-            step_code = $2,
-            step_name = $3,
-            finished_at = NOW() 
-        WHERE id = $4`,
-        [STEPS.DONE.progress, STEPS.DONE.code, STEPS.DONE.name, job.id]);
-    } else {
-      querySqlite(`
-        INSERT INTO comparison_results (comparison_id, diff_json, created_at)
-        VALUES (${sqlValue(job.comparison_id)}, ${sqlValue(diffJson)}, datetime('now'))
-        ON CONFLICT(comparison_id) DO UPDATE SET diff_json = excluded.diff_json, created_at = excluded.created_at;`);
-
-      // Update comparison with calculated metrics
-      querySqlite(`
-        UPDATE comparisons SET similarity = ${sqlValue(similarity)}, check_status = ${sqlValue(checkStatus)} WHERE id = ${sqlValue(job.comparison_id)};
-      `);
-
-      querySqlite(`
-        UPDATE jobs 
-        SET status = 'succeeded', 
-            progress = ${STEPS.DONE.progress},
-            step_code = ${sqlValue(STEPS.DONE.code)},
-            step_name = ${sqlValue(STEPS.DONE.name)},
-            finished_at = datetime('now') 
-        WHERE id = ${sqlValue(job.id)};`);
-    }
-
-    console.log(`[Compare] Updated comparison ${job.comparison_id}: similarity=${similarity}%, status=${checkStatus}`);
+    await pool.query(`
+      UPDATE jobs 
+      SET status = 'succeeded', 
+          progress = $1,
+          step_code = $2,
+          step_name = $3,
+          finished_at = NOW() 
+      WHERE id = $4`,
+      [STEPS.DONE.progress, STEPS.DONE.code, STEPS.DONE.name, job.id]);
   }
 
-  /**
-   * Generate notification when all jobs for a version are complete
-   */
-  private async generateNotificationIfNeeded(versionId: number): Promise<void> {
-    // Check if all jobs for this version are complete
-    let versionJobs: Array<{ id: number; status: string; kind: string; error_message?: string }>;
-    if (dbType === 'postgres') {
-      const result = await pool.query(
-        `SELECT id, status, kind, error_message FROM jobs WHERE version_id = $1 ORDER BY created_at ASC`,
-        [versionId]);
-      versionJobs = result.rows;
-    } else {
-      versionJobs = querySqlite(`
-        SELECT id, status, kind, error_message
-        FROM jobs
-        WHERE version_id = ${sqlValue(versionId)}
-        ORDER BY created_at ASC;
-      `) as Array<{ id: number; status: string; kind: string; error_message?: string }>;
-    }
-
-    if (versionJobs.length === 0) {
-      return;
-    }
-
-    // Check if any job is still running or queued
-    const hasIncomplete = versionJobs.some(j => j.status === 'queued' || j.status === 'running');
-    if (hasIncomplete) {
-      return; // Not all jobs complete yet
-    }
-
-    // All jobs complete: determine success/failure
-    const hasFailure = versionJobs.some(j => j.status === 'failed');
-
-    // Get version details
-    let version: { id: number; report_id: number; region_id: number; year: number; unit_name: string } | undefined;
-    if (dbType === 'postgres') {
-      const result = await pool.query(
-        `SELECT rv.id, rv.report_id, r.region_id, r.year, r.unit_name
-         FROM report_versions rv
-         JOIN reports r ON rv.report_id = r.id
-         WHERE rv.id = $1
-         LIMIT 1`,
-        [versionId]);
-      version = result.rows[0];
-    } else {
-      version = querySqlite(`
-        SELECT rv.id, rv.report_id, r.region_id, r.year, r.unit_name
-        FROM report_versions rv
-        JOIN reports r ON rv.report_id = r.id
-        WHERE rv.id = ${sqlValue(versionId)}
-        LIMIT 1;
-      `)[0] as typeof version;
-    }
-
-    if (!version) {
-      return;
-    }
-
-    // Check if notification already exists
-    let existingNotification: any;
-    if (dbType === 'postgres') {
-      const result = await pool.query(
-        `SELECT id FROM notifications WHERE related_version_id = $1 LIMIT 1`,
-        [versionId]);
-      existingNotification = result.rows[0];
-    } else {
-      existingNotification = querySqlite(`
-        SELECT id FROM notifications WHERE related_version_id = ${sqlValue(versionId)} LIMIT 1;
-      `)[0];
-    }
-
-    if (existingNotification) {
-      return; // Already notified
-    }
-
-    // Build notification content
-    const successCount = hasFailure ? 0 : 1;
-    const failList: Array<{ region_id: number; year: number; unit_name: string; reason: string }> = [];
-
-    if (hasFailure) {
-      const failedJob = versionJobs.find(j => j.status === 'failed');
-      failList.push({
-        region_id: version.region_id,
-        year: version.year,
-        unit_name: version.unit_name,
-        reason: failedJob?.error_message || '未知错误',
-      });
-    }
-
-    const contentJson = JSON.stringify({
-      uploaded_count: 1,
-      success_count: successCount,
-      fail_list: failList,
-      task_link: `/jobs/${versionId}`,
-    });
-
-    const title = hasFailure ? '上传任务失败' : '上传任务成功';
-
-    if (dbType === 'postgres') {
-      await pool.query(
-        `INSERT INTO notifications (type, title, content_json, related_version_id, created_at)
-         VALUES ('upload_complete', $1, $2, $3, NOW())`,
-        [title, contentJson, versionId]);
-    } else {
-      querySqlite(`
-        INSERT INTO notifications (type, title, content_json, related_version_id, created_at)
-        VALUES ('upload_complete', ${sqlValue(title)}, ${sqlValue(contentJson)}, ${sqlValue(versionId)}, datetime('now'));
-      `);
-    }
-
-    console.log(`[Notification] Generated for version ${versionId}: ${title}`);
-  }
-
-  /**
-   * Get the appropriate provider based on attempt number
-   * attempt=1: use PRIMARY model
-   * attempt=2: use FALLBACK model
-   */
-  private getProvider(attempt: number): LlmProvider {
-    if (attempt === 1) {
-      if (!this.primaryProvider) {
-        this.primaryProvider = createLlmProvider();
-      }
-      return this.primaryProvider;
-    } else {
-      if (!this.fallbackProvider) {
-        this.fallbackProvider = this.createFallbackProvider();
-      }
-      return this.fallbackProvider;
-    }
-  }
-
-  private createFallbackProvider(): LlmProvider {
-    // Read fallback config from env
-    const fallbackProviderName = process.env.LLM_FALLBACK_PROVIDER?.toLowerCase().trim();
-    const fallbackModel = process.env.LLM_FALLBACK_MODEL?.trim() || 'deepseek-ai/DeepSeek-V3.2';
-
-    if (!fallbackProviderName || !fallbackModel) {
-      console.warn('[Warning] LLM_FALLBACK_PROVIDER or LLM_FALLBACK_MODEL not configured, using primary provider as fallback');
-      return createLlmProvider();
-    }
-
-    // Support gemini, modelscope, or stub
-    if (fallbackProviderName === 'gemini') {
-      const GeminiLlmProvider = require('./GeminiLlmProvider').GeminiLlmProvider;
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        throw new LlmProviderError('GEMINI_API_KEY required for fallback provider', 'missing_gemini_key');
-      }
-      return new GeminiLlmProvider(apiKey, fallbackModel);
-    }
-
-    if (fallbackProviderName === 'modelscope') {
-      const ModelScopeLlmProvider = require('./ModelScopeLlmProvider').ModelScopeLlmProvider;
-      const apiKey = process.env.MODELSCOPE_API_KEY;
-      if (!apiKey) {
-        throw new LlmProviderError('MODELSCOPE_API_KEY required for fallback provider', 'missing_modelscope_key');
-      }
-      return new ModelScopeLlmProvider(apiKey, fallbackModel);
-    }
-
-    // Default: use primary provider
-    console.warn(`[Warning] Unsupported fallback provider: ${fallbackProviderName}, using primary provider`);
-    return createLlmProvider();
-  }
-
-  private stringifyOutput(parseResult: LlmParseResult): string {
-    const output = parseResult?.output ?? parseResult;
-    try {
-      return JSON.stringify(output);
-    } catch (error) {
-      throw new LlmProviderError('Failed to serialize LLM output', 'llm_output_serialization_error');
-    }
-  }
-
-  private hasParsedJsonColumn(): boolean {
+  private async hasParsedJsonColumn(): Promise<boolean> {
     if (this.parsedJsonColumnExists !== null) {
       return this.parsedJsonColumnExists;
     }
 
-    // PostgreSQL always has this column per our schema
-    if (dbType === 'postgres') {
-      this.parsedJsonColumnExists = true;
-      return true;
-    }
-
-
-    // SQLite: check using PRAGMA
-    const columns = querySqlite('PRAGMA table_info(report_versions);') as Array<{ name?: string }>;
-    this.parsedJsonColumnExists = columns.some((column) => column.name === 'parsed_json');
+    const result = await pool.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'report_versions' AND column_name = 'parsed_json'
+    `);
+    this.parsedJsonColumnExists = result.rows.length > 0;
     return this.parsedJsonColumnExists;
   }
 
-  private normalizeError(error: unknown): { code: string; message: string } {
-    if (error instanceof LlmProviderError) {
-      return { code: error.code || 'LLM_PROVIDER_ERROR', message: error.message };
+  private stringifyOutput(result: LlmParseResult): string {
+    if (typeof result.output === 'string') {
+      return result.output;
     }
+    return JSON.stringify(result.output, null, 2);
+  }
 
-    const message = typeof (error as any)?.message === 'string' ? (error as any).message : 'unknown_error';
-    if ((error as any)?.code) {
-      return { code: String((error as any).code), message };
+  private getProvider(attempt: number): LlmProvider {
+    if (!this.primaryProvider) {
+      this.primaryProvider = createLlmProvider();
     }
-    return { code: 'LLM_JOB_ERROR', message };
+    return this.primaryProvider;
+  }
+
+  private normalizeError(error: any): { code: string; message: string } {
+    const message = error instanceof Error ? error.message : String(error);
+    let code = 'UNKNOWN_ERROR';
+    if (error instanceof LlmProviderError) {
+      code = error.code || 'UNKNOWN_ERROR';
+    } else if (message.includes('timeout')) {
+      code = 'TIMEOUT';
+    } else if (message.includes('network')) {
+      code = 'NETWORK_ERROR';
+    } else if (message.includes('json')) {
+      code = 'JSON_PARSE_ERROR';
+    }
+    return { code, message };
   }
 
   /**
-   * Auto-trigger comparison with the previous year's report
-   * Called after checks job completes successfully
+   * IMPORTANT: Notifications should trigger ONLY when all 3 jobs are done:
+   * 1. PARSE (is parsed)
+   * 2. MATERIALIZE (is materialized)
+   * 3. CHECKS (consistency checks pass)
+   *
+   * But checks can be long running or fail independently.
+   * Current Logic: Trigger when Parsing + Materialization is done.
+   *
+   * Checks job is subsequent.
+   */
+  private async generateNotificationIfNeeded(versionId: number): Promise<void> {
+    // Check if main parsing job is done
+    const parseJobRes = await pool.query(
+      `SELECT status FROM jobs WHERE version_id = $1 AND kind = 'parse' ORDER BY created_at DESC LIMIT 1`,
+      [versionId]
+    );
+
+    if (parseJobRes.rows[0]?.status !== 'succeeded') {
+      return; // Not ready
+    }
+
+    // Check if materialized job exists and is done
+    const matJobRes = await pool.query(
+      `SELECT status FROM jobs WHERE version_id = $1 AND kind = 'materialize' ORDER BY created_at DESC LIMIT 1`,
+      [versionId]
+    );
+
+    // If materialize job exists but not succeeded, wait.
+    if (matJobRes.rows.length > 0 && matJobRes.rows[0].status !== 'succeeded') {
+      return;
+    }
+    // If no materialize job (e.g. legacy), we might proceed, but typically we want it.
+
+    // Get report details
+    const reportRes = await pool.query(`
+        SELECT r.region_id, r.year, r.unit_name, v.file_name, r.id as report_id
+        FROM report_versions v
+        JOIN reports r ON v.report_id = r.id
+        WHERE v.id = $1
+    `, [versionId]);
+
+    const report = reportRes.rows[0];
+    if (!report) return;
+
+    // Create Notification
+    const title = `解析完成: ${report.unit_name} ${report.year}`;
+    const content = JSON.stringify({
+      reportId: report.report_id,
+      versionId: versionId,
+      message: `文件 ${report.file_name} 已成功解析并入库。`,
+      timestamp: new Date().toISOString()
+    });
+
+    await pool.query(`
+        INSERT INTO notifications (type, title, content_json, related_version_id, created_at)
+        VALUES ('upload_complete', $1, $2, $3, NOW())
+    `, [title, content, versionId]);
+  }
+
+  /**
+   * Auto-trigger a comparison job against the previous year's report
+   * This is called after consistency checks are done.
    */
   private async triggerAutoComparison(versionId: number, reportId: number | null): Promise<void> {
     if (!reportId) return;
 
-    try {
-      // 1. Get current report info
-      let currentReport: { id: number; region_id: number; year: number } | undefined;
-      if (dbType === 'postgres') {
-        const result = await pool.query(
-          `SELECT id, region_id, year FROM reports WHERE id = $1 LIMIT 1`,
-          [reportId]);
-        currentReport = result.rows[0];
-      } else {
-        currentReport = querySqlite(`
-          SELECT id, region_id, year FROM reports WHERE id = ${sqlValue(reportId)} LIMIT 1;
-        `)[0] as { id: number; region_id: number; year: number } | undefined;
-      }
+    // 1. Get current report details (region, year)
+    const currentRes = await pool.query('SELECT region_id, year FROM reports WHERE id = $1', [reportId]);
+    const currentReport = currentRes.rows[0];
+    if (!currentReport) return;
 
-      if (!currentReport) {
-        console.log(`[AutoCompare] Report ${reportId} not found, skipping auto-comparison`);
-        return;
-      }
+    const prevYear = currentReport.year - 1;
 
-      const { region_id, year } = currentReport;
-      const prevYear = year - 1;
+    // 2. Find previous year's active report for same region
+    const prevRes = await pool.query(`
+        SELECT id
+        FROM reports
+        WHERE region_id = $1 AND year = $2 AND active_version_id IS NOT NULL
+        LIMIT 1
+    `, [currentReport.region_id, prevYear]);
 
-      // 2. Find previous year's report for the same region
-      let prevReport: { id: number; version_id: number } | undefined;
-      if (dbType === 'postgres') {
-        const result = await pool.query(`
-          SELECT r.id, r.active_version_id as version_id
-          FROM reports r
-          WHERE r.region_id = $1 AND r.year = $2 AND r.active_version_id IS NOT NULL
-          LIMIT 1
-        `, [region_id, prevYear]);
-        prevReport = result.rows[0];
-      } else {
-        prevReport = querySqlite(`
-          SELECT r.id, r.active_version_id as version_id
-          FROM reports r
-          WHERE r.region_id = ${sqlValue(region_id)} AND r.year = ${sqlValue(prevYear)} AND r.active_version_id IS NOT NULL
-          LIMIT 1;
-        `)[0] as { id: number; version_id: number } | undefined;
-      }
+    const prevReport = prevRes.rows[0];
+    if (!prevReport) {
+      console.log(`[AutoCompare] No previous year (${prevYear}) report found for region ${currentReport.region_id}. Skipping.`);
+      return;
+    }
 
-      if (!prevReport) {
-        console.log(`[AutoCompare] No previous year (${prevYear}) report for region ${region_id}, skipping`);
-        return;
-      }
+    console.log(`[AutoCompare] Found previous report ${prevReport.id}. Triggering comparison...`);
 
-      // 3. Check if comparison already exists
-      let existingComparison: { id: number } | undefined;
-      if (dbType === 'postgres') {
-        const result = await pool.query(`
-          SELECT id FROM comparisons
-          WHERE region_id = $1 AND year_a = $2 AND year_b = $3
-          LIMIT 1
-        `, [region_id, prevYear, year]);
-        existingComparison = result.rows[0];
-      } else {
-        existingComparison = querySqlite(`
-          SELECT id FROM comparisons
-          WHERE region_id = ${sqlValue(region_id)} AND year_a = ${sqlValue(prevYear)} AND year_b = ${sqlValue(year)}
-          LIMIT 1;
-        `)[0] as { id: number } | undefined;
-      }
+    // 3. Create or Update Comparison Record
+    // We want year_a = min, year_b = max to keep it ordered
+    const yearA = Math.min(prevYear, currentReport.year);
+    const yearB = Math.max(prevYear, currentReport.year);
+    const reportA = prevYear < currentReport.year ? prevReport.id : reportId;
+    const reportB = prevYear < currentReport.year ? reportId : prevReport.id;
 
-      if (existingComparison) {
-        console.log(`[AutoCompare] Comparison already exists (ID: ${existingComparison.id}) for ${region_id} ${prevYear}-${year}`);
-        return;
-      }
+    // Upsert comparison
+    const compRes = await pool.query(`
+        INSERT INTO comparisons (region_id, year_a, year_b, left_report_id, right_report_id, check_status)
+        VALUES ($1, $2, $3, $4, $5, 'pending')
+        ON CONFLICT (region_id, year_a, year_b)
+        DO UPDATE SET left_report_id = $4, right_report_id = $5, check_status = 'pending', updated_at = NOW()
+        RETURNING id
+    `, [currentReport.region_id, yearA, yearB, reportA, reportB]);
 
-      // 4. Create comparison and job
-      console.log(`[AutoCompare] Creating comparison for region ${region_id}: ${prevYear} → ${year}`);
+    const comparisonId = compRes.rows[0].id;
 
-      let comparisonId: number;
-      if (dbType === 'postgres') {
-        const result = await pool.query(`
-          INSERT INTO comparisons (region_id, year_a, year_b, left_report_id, right_report_id, created_at)
-          VALUES ($1, $2, $3, $4, $5, NOW())
-          RETURNING id
-        `, [region_id, prevYear, year, prevReport.id, reportId]);
-        comparisonId = result.rows[0].id;
-      } else {
-        // SQLite: Must run INSERT and SELECT last_insert_rowid() in same session!
-        const result = querySqlite(`
-          INSERT INTO comparisons (region_id, year_a, year_b, left_report_id, right_report_id, created_at)
-          VALUES (${sqlValue(region_id)}, ${sqlValue(prevYear)}, ${sqlValue(year)}, ${sqlValue(prevReport.id)}, ${sqlValue(reportId)}, datetime('now'));
-          SELECT last_insert_rowid() as id;
-        `);
-        comparisonId = result[0]?.id as number;
-        if (!comparisonId) {
-          console.error('[AutoCompare] Failed to get comparison ID after insert');
-          return;
-        }
-      }
+    // 4. Enqueue Comparison Job
+    // Check if job already exists
+    const jobRes = await pool.query(`
+        SELECT id FROM jobs
+        WHERE comparison_id = $1 AND kind = 'compare' AND status IN ('queued', 'running')
+    `, [comparisonId]);
 
-      // 5. Create compare job
-      if (dbType === 'postgres') {
-        await pool.query(`
-          INSERT INTO jobs (report_id, kind, status, progress, comparison_id, step_code, step_name)
-          VALUES ($1, 'compare', 'queued', 0, $2, 'QUEUED', '等待比对')
-        `, [prevReport.id, comparisonId]);
-      } else {
-        querySqlite(`
-          INSERT INTO jobs (report_id, kind, status, progress, comparison_id, step_code, step_name)
-          VALUES (${sqlValue(prevReport.id)}, 'compare', 'queued', 0, ${sqlValue(comparisonId)}, 'QUEUED', '等待比对');
-        `);
-      }
-
-      console.log(`[AutoCompare] Created comparison ${comparisonId} and queued compare job`);
-    } catch (error) {
-      // Don't fail the checks job if auto-comparison fails
-      console.error('[AutoCompare] Failed to trigger auto-comparison:', error);
+    if (jobRes.rows.length === 0) {
+      await pool.query(`
+        INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, comparison_id)
+        VALUES ($1, $2, 'compare', 'queued', 0, 'QUEUED', '等待比对', $3)
+      `, [reportId, versionId, comparisonId]);
+      console.log(`[AutoCompare] Enqueued comparison job for comparison ${comparisonId}`);
     }
   }
 }

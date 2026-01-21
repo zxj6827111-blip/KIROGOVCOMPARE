@@ -1,7 +1,6 @@
 import express from 'express';
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
-import { dbQuery, ensureDbMigrations, dbNowExpression } from '../config/db-llm';
-import { sqlValue } from '../config/sqlite';
+import pool from '../config/database-llm';
 import { authMiddleware } from '../middleware/auth';
 
 const router = express.Router();
@@ -36,13 +35,14 @@ function isParsedReady(version: ParsedVersion | undefined): boolean {
 }
 
 async function buildLatestJob(comparisonId: number): Promise<any> {
-  const job = (await dbQuery(`
+  const res = await pool.query(`
     SELECT id, status, progress, error_code, error_message
     FROM jobs
-    WHERE comparison_id = ${sqlValue(comparisonId)}
+    WHERE comparison_id = $1
     ORDER BY id DESC
     LIMIT 1;
-  `))[0];
+  `, [comparisonId]);
+  const job = res.rows[0];
 
   if (!job) {
     return null;
@@ -58,13 +58,14 @@ async function buildLatestJob(comparisonId: number): Promise<any> {
 }
 
 async function fetchParsedVersion(reportId: number): Promise<ParsedVersion | undefined> {
-  const version = (await dbQuery(`
+  const res = await pool.query(`
     SELECT rv.id as version_id, rv.parsed_json
     FROM reports r
     JOIN report_versions rv ON rv.id = r.active_version_id
-    WHERE r.id = ${sqlValue(reportId)}
+    WHERE r.id = $1
     LIMIT 1;
-  `))[0];
+  `, [reportId]);
+  const version = res.rows[0];
 
   if (!version) {
     return undefined;
@@ -163,22 +164,24 @@ router.post('/comparisons', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'right_report_id invalid' });
     }
 
-    ensureDbMigrations();
-
     if (regionId && yearA !== undefined && yearB !== undefined) {
       if (yearA > yearB) {
         [yearA, yearB] = [yearB, yearA];
       }
-      const leftReport = (await dbQuery(
-        `SELECT id, region_id, year FROM reports WHERE region_id = ${sqlValue(regionId)} AND year = ${sqlValue(yearA)} LIMIT 1;`
-      ))[0];
-      const rightReport = (await dbQuery(
-        `SELECT id, region_id, year FROM reports WHERE region_id = ${sqlValue(regionId)} AND year = ${sqlValue(yearB)} LIMIT 1;`
-      ))[0];
+      const leftReportRes = await pool.query(
+        'SELECT id, region_id, year FROM reports WHERE region_id = $1 AND year = $2 LIMIT 1',
+        [regionId, yearA]
+      );
+      const rightReportRes = await pool.query(
+        'SELECT id, region_id, year FROM reports WHERE region_id = $1 AND year = $2 LIMIT 1',
+        [regionId, yearB]
+      );
+      const leftReport = leftReportRes.rows[0];
+      const rightReport = rightReportRes.rows[0];
 
       if (!leftReport || !rightReport) {
-      return res.status(404).json({ error: 'report not found' });
-    }
+        return res.status(404).json({ error: 'report not found' });
+      }
 
       leftReportId = leftReport.id;
       rightReportId = rightReport.id;
@@ -188,8 +191,10 @@ router.post('/comparisons', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'left_report_id and right_report_id required' });
     }
 
-    const leftReport = (await dbQuery(`SELECT id, region_id, year FROM reports WHERE id = ${sqlValue(leftReportId)} LIMIT 1;`))[0];
-    const rightReport = (await dbQuery(`SELECT id, region_id, year FROM reports WHERE id = ${sqlValue(rightReportId)} LIMIT 1;`))[0];
+    const leftReportRes = await pool.query('SELECT id, region_id, year FROM reports WHERE id = $1 LIMIT 1', [leftReportId]);
+    const rightReportRes = await pool.query('SELECT id, region_id, year FROM reports WHERE id = $1 LIMIT 1', [rightReportId]);
+    const leftReport = leftReportRes.rows[0];
+    const rightReport = rightReportRes.rows[0];
 
     if (!leftReport || !rightReport) {
       return res.status(404).json({ error: 'report not found' });
@@ -205,18 +210,18 @@ router.post('/comparisons', authMiddleware, async (req, res) => {
 
     const user = (req as any).user;
     if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
-      const scopeNames = user.dataScope.regions.map((r: string) => `'${r.replace(/'/g, "''")}'`).join(',');
+      const scopeNames = user.dataScope.regions;
       const idsQuery = `
             WITH RECURSIVE allowed_ids AS (
-                SELECT id FROM regions WHERE name IN (${scopeNames})
+                SELECT id FROM regions WHERE name = ANY($1::text[])
                 UNION ALL
                 SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
             )
             SELECT id FROM allowed_ids
       `;
       try {
-        const allowedRows = await dbQuery(idsQuery);
-        const allowedIds = allowedRows.map((r: any) => r.id);
+        const allowedRows = await pool.query(idsQuery, [scopeNames]);
+        const allowedIds = allowedRows.rows.map((r: any) => Number(r.id));
         if (!allowedIds.includes(Number(regionId))) {
           return res.status(403).json({ error: '无权限访问该地区' });
         }
@@ -237,40 +242,44 @@ router.post('/comparisons', authMiddleware, async (req, res) => {
       return res.status(409).json({ error: 'parse not ready', error_code: 'PARSE_NOT_READY' });
     }
 
-    const existingComparison = (await dbQuery(`
-      SELECT id FROM comparisons WHERE region_id = ${sqlValue(regionId)} AND year_a = ${sqlValue(yearA)} AND year_b = ${sqlValue(yearB)} LIMIT 1;
-    `))[0];
+    const existingComparisonRes = await pool.query(
+      'SELECT id FROM comparisons WHERE region_id = $1 AND year_a = $2 AND year_b = $3 LIMIT 1',
+      [regionId, yearA, yearB]
+    );
+    const existingComparison = existingComparisonRes.rows[0];
 
-    const comparison = (await dbQuery(`
+    const comparisonRes = await pool.query(`
       INSERT INTO comparisons (region_id, year_a, year_b, left_report_id, right_report_id)
-      VALUES (${sqlValue(regionId)}, ${sqlValue(yearA)}, ${sqlValue(yearB)}, ${sqlValue(leftReportId)}, ${sqlValue(rightReportId)})
+      VALUES ($1, $2, $3, $4, $5)
       ON CONFLICT(region_id, year_a, year_b) DO UPDATE SET
         left_report_id = excluded.left_report_id,
         right_report_id = excluded.right_report_id
       RETURNING id;
-    `))[0];
+    `, [regionId, yearA, yearB, leftReportId, rightReportId]);
+    const comparison = comparisonRes.rows[0];
 
     if (!comparison?.id) {
       return res.status(500).json({ error: 'comparison 创建失败' });
     }
 
-    const existingJob = (await dbQuery(`
+    const existingJobRes = await pool.query(`
       SELECT id FROM jobs
-      WHERE comparison_id = ${sqlValue(comparison.id)} AND status IN ('queued', 'running')
+      WHERE comparison_id = $1 AND status IN ('queued', 'running')
       ORDER BY id DESC
       LIMIT 1;
-    `))[0];
+    `, [comparison.id]);
+    const existingJob = existingJobRes.rows[0];
 
     let jobId: number;
     if (existingJob?.id) {
       jobId = existingJob.id;
     } else {
-      const newJob = (await dbQuery(`
+      const newJobRes = await pool.query(`
         INSERT INTO jobs (report_id, kind, status, progress, comparison_id)
-        VALUES (${sqlValue(leftReportId)}, 'compare', 'queued', 0, ${sqlValue(comparison.id)})
+        VALUES ($1, 'compare', 'queued', 0, $2)
         RETURNING id;
-      `))[0];
-      jobId = newJob.id;
+      `, [leftReportId, comparison.id]);
+      jobId = newJobRes.rows[0].id;
     }
 
     return res.status(existingComparison ? 200 : 201).json({
@@ -287,62 +296,65 @@ router.get('/comparisons', authMiddleware, async (req, res) => {
   try {
     const { region_id, year_a, year_b } = req.query;
 
-    ensureDbMigrations();
-
     const conditions: string[] = [];
+    const params: any[] = [];
+    let paramIndex = 1;
+
     if (region_id !== undefined) {
       const regionIdNum = Number(region_id);
       if (!Number.isInteger(regionIdNum) || regionIdNum < 1) {
         return res.status(400).json({ error: 'region_id 无效' });
       }
-      conditions.push(`region_id = ${sqlValue(regionIdNum)}`);
+      conditions.push(`c.region_id = $${paramIndex++}`);
+      params.push(regionIdNum);
     }
     if (year_a !== undefined) {
       const yearANum = Number(year_a);
       if (!Number.isInteger(yearANum)) {
         return res.status(400).json({ error: 'year_a 无效' });
       }
-      conditions.push(`year_a = ${sqlValue(yearANum)}`);
+      conditions.push(`c.year_a = $${paramIndex++}`);
+      params.push(yearANum);
     }
     if (year_b !== undefined) {
       const yearBNum = Number(year_b);
       if (!Number.isInteger(yearBNum)) {
         return res.status(400).json({ error: 'year_b 无效' });
       }
-      conditions.push(`year_b = ${sqlValue(yearBNum)}`);
+      conditions.push(`c.year_b = $${paramIndex++}`);
+      params.push(yearBNum);
     }
 
     // CHECK DATA SCOPE
     const user = (req as any).user;
     if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
-      // Calculate all allowed descendant IDs
-      const scopeNames = user.dataScope.regions.map((r: string) => `'${r.replace(/'/g, "''")}'`).join(',');
-
+      const scopeNames = user.dataScope.regions;
       const idsQuery = `
             WITH RECURSIVE allowed_ids AS (
-                SELECT id FROM regions WHERE name IN (${scopeNames})
+                SELECT id FROM regions WHERE name = ANY($1::text[])
                 UNION ALL
                 SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
             )
             SELECT id FROM allowed_ids
       `;
       try {
-        const allowedRows = await dbQuery(idsQuery);
-        const allowedIds = allowedRows.map((r: any) => r.id).join(',');
+        const allowedRowsRes = await pool.query(idsQuery, [scopeNames]);
+        const allowedIds = allowedRowsRes.rows.map((r: any) => r.id);
 
         if (allowedIds.length > 0) {
-          conditions.push(`c.region_id IN (${allowedIds})`);
+          conditions.push(`c.region_id = ANY($${paramIndex++}::int[])`);
+          params.push(allowedIds);
         } else {
-          conditions.push('1=0'); // Scope matches no regions
+          conditions.push('1=0');
         }
       } catch (e) {
         console.error('Error calculating scope IDs in comparisons:', e);
-        conditions.push('1=0'); // Fail safe
+        conditions.push('1=0');
       }
     }
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    const rows = await dbQuery(`
+    const rowsRes = await pool.query(`
       SELECT
         c.id,
         c.region_id,
@@ -353,7 +365,8 @@ router.get('/comparisons', authMiddleware, async (req, res) => {
       FROM comparisons c
       ${whereClause}
       ORDER BY c.id DESC;
-    `);
+    `, params);
+    const rows = rowsRes.rows;
 
     const data = await Promise.all(rows.map(async (row: any) => ({
       id: row.id,
@@ -379,14 +392,13 @@ router.get('/comparisons/:id', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'comparison_id invalid' });
     }
 
-    ensureDbMigrations();
-
-    const comparison = (await dbQuery(`
+    const comparisonRes = await pool.query(`
       SELECT id, region_id, year_a, year_b, left_report_id, right_report_id
       FROM comparisons
-      WHERE id = ${sqlValue(comparisonId)}
+      WHERE id = $1
       LIMIT 1;
-    `))[0];
+    `, [comparisonId]);
+    const comparison = comparisonRes.rows[0];
 
     if (!comparison) {
       return res.status(404).json({ error: 'comparison not found' });
@@ -394,18 +406,18 @@ router.get('/comparisons/:id', authMiddleware, async (req, res) => {
 
     const user = (req as any).user;
     if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
-      const scopeNames = user.dataScope.regions.map((r: string) => `'${r.replace(/'/g, "''")}'`).join(',');
+      const scopeNames = user.dataScope.regions;
       const idsQuery = `
             WITH RECURSIVE allowed_ids AS (
-                SELECT id FROM regions WHERE name IN (${scopeNames})
+                SELECT id FROM regions WHERE name = ANY($1::text[])
                 UNION ALL
                 SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
             )
             SELECT id FROM allowed_ids
       `;
       try {
-        const allowedRows = await dbQuery(idsQuery);
-        const allowedIds = allowedRows.map((r: any) => r.id);
+        const allowedRowsRes = await pool.query(idsQuery, [scopeNames]);
+        const allowedIds = allowedRowsRes.rows.map((r: any) => Number(r.id));
         if (!allowedIds.includes(Number(comparison.region_id))) {
           return res.status(403).json({ error: '无权限访问该地区' });
         }
@@ -415,9 +427,10 @@ router.get('/comparisons/:id', authMiddleware, async (req, res) => {
       }
     }
 
-    const resultRow = (await dbQuery(`
-      SELECT diff_json FROM comparison_results WHERE comparison_id = ${sqlValue(comparisonId)} LIMIT 1;
-    `))[0];
+    const resultRowRes = await pool.query(`
+      SELECT diff_json FROM comparison_results WHERE comparison_id = $1 LIMIT 1;
+    `, [comparisonId]);
+    const resultRow = resultRowRes.rows[0];
 
     let diffJson: any = null;
     if (resultRow?.diff_json !== undefined) {
@@ -447,16 +460,15 @@ router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'comparison_id invalid' });
     }
 
-    ensureDbMigrations();
-
-    const comparison = (await dbQuery(`
+    const comparisonRes = await pool.query(`
       SELECT c.id, c.region_id, c.year_a, c.year_b, c.left_report_id, c.right_report_id,
              r.name as region_name
       FROM comparisons c
       LEFT JOIN regions r ON r.id = c.region_id
-      WHERE c.id = ${sqlValue(comparisonId)}
+      WHERE c.id = $1
       LIMIT 1;
-    `))[0];
+    `, [comparisonId]);
+    const comparison = comparisonRes.rows[0];
 
     if (!comparison) {
       return res.status(404).json({ error: 'comparison not found' });
@@ -464,18 +476,18 @@ router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
 
     const user = (req as any).user;
     if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
-      const scopeNames = user.dataScope.regions.map((r: string) => `'${r.replace(/'/g, "''")}'`).join(',');
+      const scopeNames = user.dataScope.regions;
       const idsQuery = `
             WITH RECURSIVE allowed_ids AS (
-                SELECT id FROM regions WHERE name IN (${scopeNames})
+                SELECT id FROM regions WHERE name = ANY($1::text[])
                 UNION ALL
                 SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
             )
             SELECT id FROM allowed_ids
       `;
       try {
-        const allowedRows = await dbQuery(idsQuery);
-        const allowedIds = allowedRows.map((r: any) => r.id);
+        const allowedRowsRes = await pool.query(idsQuery, [scopeNames]);
+        const allowedIds = allowedRowsRes.rows.map((r: any) => Number(r.id));
         if (!allowedIds.includes(Number(comparison.region_id))) {
           return res.status(403).json({ error: '无权限访问该地区' });
         }
@@ -485,16 +497,16 @@ router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
       }
     }
 
-    // Fetch parsed content from both reports
     const leftVersion = await fetchParsedVersion(comparison.left_report_id);
     const rightVersion = await fetchParsedVersion(comparison.right_report_id);
 
     const leftParsed = leftVersion?.parsed_json || {};
     const rightParsed = rightVersion?.parsed_json || {};
 
-    // Get unit name from parsed data or reports
-    const leftReport = (await dbQuery(`SELECT unit_name FROM reports WHERE id = ${sqlValue(comparison.left_report_id)} LIMIT 1;`))[0];
-    const rightReport = (await dbQuery(`SELECT unit_name FROM reports WHERE id = ${sqlValue(comparison.right_report_id)} LIMIT 1;`))[0];
+    const leftReportRes = await pool.query('SELECT unit_name FROM reports WHERE id = $1 LIMIT 1;', [comparison.left_report_id]);
+    const rightReportRes = await pool.query('SELECT unit_name FROM reports WHERE id = $1 LIMIT 1;', [comparison.right_report_id]);
+    const leftReport = leftReportRes.rows[0];
+    const rightReport = rightReportRes.rows[0];
     const unitName = leftReport?.unit_name || rightReport?.unit_name || comparison.region_name || '未知地区';
 
     const paragraphs: Paragraph[] = [];
@@ -534,7 +546,6 @@ router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
       })
     );
 
-    // Extract sections from both reports
     const leftSections = Array.isArray(leftParsed.sections) ? leftParsed.sections : [];
     const rightSections = Array.isArray(rightParsed.sections) ? rightParsed.sections : [];
 
@@ -547,7 +558,6 @@ router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
       '六、其他需要报告的事项',
     ];
 
-    // Count sections
     const leftCount = leftSections.length;
     const rightCount = rightSections.length;
 
@@ -655,7 +665,6 @@ router.get('/comparisons/:id/export', authMiddleware, async (req, res) => {
         spacing: { before: 400 },
       })
     );
-
 
     const doc = new Document({
       sections: [

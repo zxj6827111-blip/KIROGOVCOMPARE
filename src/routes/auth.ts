@@ -1,6 +1,5 @@
 import express, { Request, Response } from 'express';
-import pool, { dbType } from '../config/database-llm';
-import { querySqlite, sqlValue, ensureSqliteMigrations } from '../config/sqlite';
+import pool from '../config/database-llm';
 import { generateToken, verifyPassword, hashPassword, authMiddleware, AuthRequest } from '../middleware/auth';
 
 const router = express.Router();
@@ -18,25 +17,11 @@ router.post('/login', async (req: Request, res: Response) => {
       return res.status(400).json({ error: '请输入用户名和密码' });
     }
 
-    if (dbType === 'sqlite') {
-      ensureSqliteMigrations();
-    }
-
-    let users: any[] = [];
-    if (dbType === 'postgres') {
-      const result = await pool.query(
-        'SELECT id, username, password_hash, display_name, permissions, data_scope FROM admin_users WHERE username = $1',
-        [username]
-      );
-      users = result.rows;
-    } else {
-      // Find user by username
-      users = querySqlite(`
-        SELECT id, username, password_hash, display_name, permissions, data_scope
-        FROM admin_users 
-        WHERE username = ${sqlValue(username)}
-      `);
-    }
+    const result = await pool.query(
+      'SELECT id, username, password_hash, display_name, permissions, data_scope FROM admin_users WHERE username = $1',
+      [username]
+    );
+    const users = result.rows;
 
     if (!users || users.length === 0) {
       console.log('[Auth] User not found:', username);
@@ -56,15 +41,7 @@ router.post('/login', async (req: Request, res: Response) => {
     const token = generateToken(user.id, user.username);
 
     // Update last login time
-    if (dbType === 'postgres') {
-      await pool.query('UPDATE admin_users SET last_login_at = NOW() WHERE id = $1', [user.id]);
-    } else {
-      querySqlite(`
-        UPDATE admin_users 
-        SET last_login_at = datetime('now') 
-        WHERE id = ${sqlValue(user.id)}
-      `);
-    }
+    await pool.query('UPDATE admin_users SET last_login_at = NOW() WHERE id = $1', [user.id]);
 
     // Parse permissions and scope
     const permissions = user.permissions ? (typeof user.permissions === 'string' ? JSON.parse(user.permissions) : user.permissions) : {};
@@ -115,21 +92,8 @@ router.post('/reset-default-password', async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'reset_only_allowed_for_admin' });
     }
 
-    if (dbType === 'sqlite') {
-      ensureSqliteMigrations();
-    }
-
-    let users: any[] = [];
-    if (dbType === 'postgres') {
-      const result = await pool.query('SELECT id, username, password_hash FROM admin_users WHERE username = $1', [username]);
-      users = result.rows;
-    } else {
-      users = querySqlite(`
-        SELECT id, username, password_hash
-        FROM admin_users 
-        WHERE username = ${sqlValue(username)}
-      `);
-    }
+    const result = await pool.query('SELECT id, username, password_hash FROM admin_users WHERE username = $1', [username]);
+    const users = result.rows;
 
     if (!users || users.length === 0) {
       return res.status(401).json({ error: '用户不存在' });
@@ -150,15 +114,7 @@ router.post('/reset-default-password', async (req: Request, res: Response) => {
     // Hash the new password with PBKDF2
     const newHash = hashPassword(newPassword);
 
-    if (dbType === 'postgres') {
-      await pool.query('UPDATE admin_users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [newHash, user.id]);
-    } else {
-      querySqlite(`
-        UPDATE admin_users 
-        SET password_hash = ${sqlValue(newHash)}, updated_at = datetime('now') 
-        WHERE id = ${sqlValue(user.id)}
-      `);
-    }
+    await pool.query('UPDATE admin_users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [newHash, user.id]);
 
     res.json({ message: '密码重置成功，请使用新密码登录' });
   } catch (error) {
@@ -177,17 +133,8 @@ router.get('/me', authMiddleware, async (req: AuthRequest, res: Response) => {
       return res.status(401).json({ error: '未登录' });
     }
 
-    let users: any[] = [];
-    if (dbType === 'postgres') {
-      const result = await pool.query('SELECT id, username, display_name, created_at, last_login_at FROM admin_users WHERE id = $1', [req.user.id]);
-      users = result.rows;
-    } else {
-      users = querySqlite(`
-        SELECT id, username, display_name, created_at, last_login_at 
-        FROM admin_users 
-        WHERE id = ${sqlValue(req.user.id)}
-      `);
-    }
+    const result = await pool.query('SELECT id, username, display_name, created_at, last_login_at FROM admin_users WHERE id = $1', [req.user.id]);
+    const users = result.rows;
 
     if (!users || users.length === 0) {
       return res.status(404).json({ error: '用户不存在' });
@@ -229,17 +176,8 @@ router.post('/change-password', authMiddleware, async (req: AuthRequest, res: Re
     }
 
     // Get current password hash
-    let users: any[] = [];
-    if (dbType === 'postgres') {
-      const result = await pool.query('SELECT password_hash FROM admin_users WHERE id = $1', [req.user.id]);
-      users = result.rows;
-    } else {
-      users = querySqlite(`
-        SELECT password_hash 
-        FROM admin_users 
-        WHERE id = ${sqlValue(req.user.id)}
-      `);
-    }
+    const result = await pool.query('SELECT password_hash FROM admin_users WHERE id = $1', [req.user.id]);
+    const users = result.rows;
 
     if (!users || users.length === 0) {
       return res.status(404).json({ error: '用户不存在' });
@@ -253,15 +191,7 @@ router.post('/change-password', authMiddleware, async (req: AuthRequest, res: Re
     // Hash new password and update
     const newHash = hashPassword(newPassword);
 
-    if (dbType === 'postgres') {
-      await pool.query('UPDATE admin_users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [newHash, req.user.id]);
-    } else {
-      querySqlite(`
-        UPDATE admin_users 
-        SET password_hash = ${sqlValue(newHash)}, updated_at = datetime('now') 
-        WHERE id = ${sqlValue(req.user.id)}
-      `);
-    }
+    await pool.query('UPDATE admin_users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [newHash, req.user.id]);
 
     res.json({ message: '密码修改成功' });
   } catch (error) {

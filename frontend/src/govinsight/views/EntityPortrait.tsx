@@ -4,7 +4,7 @@ import { EntityContext } from '../components/Layout';
 import { districts, departments } from '../data';
 import { MetricTip } from '../components/MetricTip';
 import {
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, ComposedChart, Bar
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, ComposedChart, Bar
 } from 'recharts';
 import {
   AlertTriangle, CheckCircle2, FileText
@@ -148,6 +148,7 @@ export const EntityPortrait: React.FC = () => {
   const appTrendData = entity?.data ? [...entity.data].sort((a, b) => a.year - b.year).map(d => ({
     year: d.year,
     new: d.applications.newReceived,
+    carried: d.applications.carriedOver,
     total: d.applications.totalHandled,
     natural: d.applications.sources.natural
   })) : [];
@@ -254,7 +255,10 @@ export const EntityPortrait: React.FC = () => {
                 <XAxis dataKey="year" stroke="#94a3b8" />
                 <YAxis stroke="#94a3b8" />
                 <Tooltip />
+                <Legend />
                 <Line type="monotone" dataKey="total" name="受理合计" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4 }} />
+                <Line type="monotone" dataKey="new" name="新收申请" stroke="#10b981" strokeWidth={2} dot={{ r: 4 }} />
+                <Line type="monotone" dataKey="carried" name="上年结转" stroke="#f59e0b" strokeWidth={2} dot={{ r: 4 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>

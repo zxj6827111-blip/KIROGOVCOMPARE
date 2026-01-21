@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './BatchUpload.css';
 import { apiClient } from '../apiClient';
+import RegionCascader from './RegionCascader';
 import {
     UploadCloud, X, FileText, Clock, Loader, Check, XCircle,
     SkipForward, Edit2, Trash2, Play, AlertTriangle
@@ -629,17 +630,11 @@ function BatchUpload({ onClose, isEmbedded = false }) {
                                             </div>
                                             <div className="edit-row">
                                                 <label>区域:</label>
-                                                <select
+                                                <RegionCascader
+                                                    regions={regions}
                                                     value={fileItem.regionId}
-                                                    onChange={(e) => updateFile(fileItem.id, { regionId: e.target.value })}
-                                                >
-                                                    <option value="">-- 请选择 --</option>
-                                                    {regions.map(r => (
-                                                        <option key={r.id} value={r.id}>
-                                                            {getRegionPath(r.id) || r.name}
-                                                        </option>
-                                                    ))}
-                                                </select>
+                                                    onChange={(val) => updateFile(fileItem.id, { regionId: val })}
+                                                />
                                             </div>
                                             <div className="edit-actions">
                                                 <button className="btn-small" onClick={() => setEditingId(null)}>完成</button>

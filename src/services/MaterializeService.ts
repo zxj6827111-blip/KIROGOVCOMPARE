@@ -1,5 +1,4 @@
-import pool, { dbType } from '../config/database-llm';
-import { querySqlite, sqlValue } from '../config/sqlite';
+import pool from '../config/database-llm';
 
 interface MaterializeInput {
   reportId: number;
@@ -279,16 +278,6 @@ function buildLegalProceeding(parsed: any): { facts: FactLegalProceeding[]; cell
   return { facts, cells };
 }
 
-function buildInsert(tableName: string, columns: string[], rows: Record<string, any>[]): string[] {
-  if (!rows.length) {
-    return [];
-  }
-  const values = rows
-    .map((row) => `(${columns.map((col) => sqlValue((row as any)[col])).join(', ')})`)
-    .join(', ');
-  return [`INSERT INTO ${tableName} (${columns.join(', ')}) VALUES ${values};`];
-}
-
 export async function materializeReportVersion(input: MaterializeInput): Promise<void> {
   const parsed = parseJson(input.parsedJson);
   if (!parsed) {
@@ -301,78 +290,58 @@ export async function materializeReportVersion(input: MaterializeInput): Promise
 
   const cells = [...activeDisclosure.cells, ...application.cells, ...legal.cells];
 
-  const statements: string[] = [
-    `DELETE FROM cells WHERE version_id = ${sqlValue(input.versionId)};`,
-    `DELETE FROM fact_active_disclosure WHERE version_id = ${sqlValue(input.versionId)};`,
-    `DELETE FROM fact_application WHERE version_id = ${sqlValue(input.versionId)};`,
-    `DELETE FROM fact_legal_proceeding WHERE version_id = ${sqlValue(input.versionId)};`,
-  ];
+  const client = await pool.connect();
 
-  statements.push(
-    ...buildInsert(
-      'fact_active_disclosure',
-      ['report_id', 'version_id', 'category', 'made_count', 'repealed_count', 'valid_count', 'processed_count', 'amount'],
-      activeDisclosure.facts.map((fact) => ({
-        report_id: input.reportId,
-        version_id: input.versionId,
-        ...fact,
-      }))
-    )
-  );
+  try {
+    await client.query('BEGIN');
 
-  statements.push(
-    ...buildInsert(
-      'fact_application',
-      ['report_id', 'version_id', 'applicant_type', 'response_type', 'count'],
-      application.facts.map((fact) => ({
-        report_id: input.reportId,
-        version_id: input.versionId,
-        ...fact,
-      }))
-    )
-  );
+    // Delete existing data
+    await client.query('DELETE FROM cells WHERE version_id = $1', [input.versionId]);
+    await client.query('DELETE FROM fact_active_disclosure WHERE version_id = $1', [input.versionId]);
+    await client.query('DELETE FROM fact_application WHERE version_id = $1', [input.versionId]);
+    await client.query('DELETE FROM fact_legal_proceeding WHERE version_id = $1', [input.versionId]);
 
-  statements.push(
-    ...buildInsert(
-      'fact_legal_proceeding',
-      ['report_id', 'version_id', 'case_type', 'result_type', 'count'],
-      legal.facts.map((fact) => ({
-        report_id: input.reportId,
-        version_id: input.versionId,
-        ...fact,
-      }))
-    )
-  );
-
-  statements.push(
-    ...buildInsert(
-      'cells',
-      ['version_id', 'table_id', 'row_key', 'col_key', 'cell_ref', 'value_raw', 'value_num', 'value_semantic', 'normalized_value'],
-      cells.map((cell) => ({
-        version_id: input.versionId,
-        ...cell,
-      }))
-    )
-  );
-
-  if (dbType === 'postgres') {
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      for (const statement of statements) {
-        if (statement.trim()) {
-          await client.query(statement);
-        }
-      }
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
+    // Insert active disclosure facts
+    for (const fact of activeDisclosure.facts) {
+      await client.query(
+        `INSERT INTO fact_active_disclosure (report_id, version_id, category, made_count, repealed_count, valid_count, processed_count, amount)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [input.reportId, input.versionId, fact.category, fact.made_count, fact.repealed_count, fact.valid_count, fact.processed_count, fact.amount]
+      );
     }
-  } else {
-    const sql = ['BEGIN;', ...statements, 'COMMIT;'].join('\n');
-    querySqlite(sql);
+
+    // Insert application facts
+    for (const fact of application.facts) {
+      await client.query(
+        `INSERT INTO fact_application (report_id, version_id, applicant_type, response_type, count)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [input.reportId, input.versionId, fact.applicant_type, fact.response_type, fact.count]
+      );
+    }
+
+    // Insert legal proceeding facts
+    for (const fact of legal.facts) {
+      await client.query(
+        `INSERT INTO fact_legal_proceeding (report_id, version_id, case_type, result_type, count)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [input.reportId, input.versionId, fact.case_type, fact.result_type, fact.count]
+      );
+    }
+
+    // Insert cells
+    for (const cell of cells) {
+      await client.query(
+        `INSERT INTO cells (version_id, table_id, row_key, col_key, cell_ref, value_raw, value_num, value_semantic, normalized_value)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [input.versionId, cell.table_id, cell.row_key, cell.col_key, cell.cell_ref, cell.value_raw, cell.value_num, cell.value_semantic, cell.normalized_value]
+      );
+    }
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
   }
 }

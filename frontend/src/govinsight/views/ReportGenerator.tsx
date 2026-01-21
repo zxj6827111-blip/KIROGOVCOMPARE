@@ -1,6 +1,7 @@
 import React, { useContext, useState, useEffect, useRef } from 'react';
 import { EntityContext } from '../components/Layout';
 import { provinceAvg } from '../data';
+import { saveAIReport, fetchAIReport } from '../api';
 import {
   Printer, Sparkles, Target,
   TrendingUp, AlertOctagon, CheckCircle2, Bot, Cpu, Settings,
@@ -33,8 +34,10 @@ export const ReportGenerator: React.FC = () => {
   const { entity } = useContext(EntityContext);
   const [isGenerating, setIsGenerating] = useState(false);
   const [reportData, setReportData] = useState<GeminiReportResponse | null>(null);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [showConfig, setShowConfig] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
+  const [isPrinting, setIsPrinting] = useState(false);
   const timerRef = useRef<number | null>(null);
 
   // Engine Selection State
@@ -46,6 +49,31 @@ export const ReportGenerator: React.FC = () => {
     model: 'gemini-3-flash-preview', // Default to Flash for speed
     thinkingBudget: 0 // Default 0 for Flash
   });
+
+  // Timer Logic
+  // Dynamic Year Calculation
+  const sortedYears = entity?.data ? entity.data.map(d => d.year).sort((a, b) => b - a) : [];
+  const year = sortedYears[0];
+  const current = entity?.data ? entity.data.find(d => d.year === year) : null;
+
+  useEffect(() => {
+    if (!year) return;
+    const unitName = entity?.name || '未知单位';
+    document.title = `${year}年度政务公开工作绩效评估与风险研判报告(${unitName})`;
+  }, [year, entity?.name]);
+
+  // Robust check for previous year (might not exist)
+  const prev = entity?.data?.find(d => d.year === year - 1) || {
+    ...current,
+    year: year - 1,
+    applications: {
+      newReceived: 0,
+      totalHandled: 1,
+      outcomes: { public: 0, partial: 0, unable: 0, notOpen: 0, ignore: 0 },
+      sources: { natural: 0, legal: 0 }
+    },
+    disputes: { reconsideration: { total: 0, corrected: 0 }, litigation: { total: 0, corrected: 0 } }
+  } as any;
 
   // Timer Logic
   useEffect(() => {
@@ -62,23 +90,69 @@ export const ReportGenerator: React.FC = () => {
     };
   }, [isGenerating]);
 
-  // Dynamic Year Calculation
-  const sortedYears = entity?.data ? entity.data.map(d => d.year).sort((a, b) => b - a) : [];
-  const year = sortedYears[0];
-  const current = entity?.data ? entity.data.find(d => d.year === year) : null;
+  useEffect(() => {
+    const handleBeforePrint = () => setIsPrinting(true);
+    const handleAfterPrint = () => setIsPrinting(false);
+    window.addEventListener('beforeprint', handleBeforePrint);
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => {
+      window.removeEventListener('beforeprint', handleBeforePrint);
+      window.removeEventListener('afterprint', handleAfterPrint);
+    };
+  }, []);
 
-  // Robust check for previous year (might not exist)
-  const prev = entity?.data?.find(d => d.year === year - 1) || {
-    ...current,
-    year: year - 1,
-    applications: {
-      newReceived: 0,
-      totalHandled: 1,
-      outcomes: { public: 0, partial: 0, unable: 0, notOpen: 0, ignore: 0 },
-      sources: { natural: 0, legal: 0 }
-    },
-    disputes: { reconsideration: { total: 0, corrected: 0 }, litigation: { total: 0, corrected: 0 } }
-  } as any;
+  // Effect: Restore from Cloud or Cache
+  useEffect(() => {
+    let isMounted = true;
+    async function loadReport() {
+      if (!entity?.id || !year) {
+        console.log('[ReportLoader] No entity or year, skipping load');
+        return;
+      }
+
+      console.log(`[ReportLoader] Attempting to load report for ${entity.id}, year ${year}`);
+
+      // 1. Try Session Cache First (instant, no network)
+      const cacheKey = `report_cache_${entity.id}_${year}`;
+      const cached = sessionStorage.getItem(cacheKey);
+      if (isMounted && cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (parsed.summary) {
+            console.log('[ReportLoader] Loaded from sessionStorage cache');
+            setReportData(parsed);
+            setEngine('gemini');
+            setSaveStatus('saved');
+            // Don't return - still try cloud to sync status
+          }
+        } catch (e) {
+          console.warn("[ReportLoader] Invalid cache", e);
+        }
+      }
+
+      // 2. Try Cloud (async, may fail if table doesn't exist)
+      try {
+        setSaveStatus('idle');
+        const cloudReport = await fetchAIReport(entity.id, year);
+        console.log('[ReportLoader] Cloud response:', cloudReport);
+        if (isMounted && cloudReport && cloudReport.content) {
+          console.log('[ReportLoader] Loaded from cloud');
+          setReportData(cloudReport.content);
+          setEngine('gemini');
+          setSaveStatus('saved');
+          // Also update session cache
+          sessionStorage.setItem(cacheKey, JSON.stringify(cloudReport.content));
+        }
+      } catch (err) {
+        console.warn("[ReportLoader] Cloud fetch failed (table may not exist):", err);
+        // Session cache fallback already handled above
+      }
+    }
+    loadReport();
+    return () => { isMounted = false; };
+  }, [entity?.id, year]);
+
+
 
   const fmt = (n: number) => n.toLocaleString();
   const diffPct = (curr: number, last: number) => {
@@ -99,7 +173,13 @@ export const ReportGenerator: React.FC = () => {
   // --- Actions ---
 
   const handlePrint = () => {
-    window.print();
+    setIsPrinting(true);
+    requestAnimationFrame(() => {
+      window.dispatchEvent(new Event('resize'));
+      setTimeout(() => {
+        window.print();
+      }, 200);
+    });
   };
 
   const handleDownloadMarkdown = () => {
@@ -144,7 +224,7 @@ export const ReportGenerator: React.FC = () => {
     const TIMEOUT_LIMIT = modelConfig.model.includes('pro') ? 600000 : 180000;
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: process.env.REACT_APP_GEMINI_API_KEY || '' });
 
       const dataContext = JSON.stringify({
         entityName: entity?.name || '未知单位',
@@ -153,38 +233,34 @@ export const ReportGenerator: React.FC = () => {
         provinceAverage: provinceAvg.data.find((d: any) => d.year === year)
       });
 
-      // UPGRADED PROMPT FOR RICHER CONTENT
+      // UPGRADED PROMPT FOR DRY GOODS AND DEEP POLICY AUDIT
       const prompt = `
-        角色设定：你是由省政府办公厅聘请的第三方绩效评估专家组组长，具有深厚的法学背景和公共管理经验。
-        任务：请根据提供的JSON数据，为"${entity?.name || '未知单位'}"撰写一份《${year}年度政务公开工作绩效评估与法治风险研判专报》。
+        角色设定：你是一名以“严谨、犀利、唯实”著称的资深政务公开绩效评估专家，也是法治政府建设的第三方审计员。你的工作是基于提供的数据，为"${entity?.name || '未知单位'}"撰写一份《${year}年度政务公开工作体检报告》。
 
-        **核心要求：**
-        1. **文风要求**：必须使用标准的中国政府公文语体（如：倒逼机制、源头治理、提质增效、常态化、制度性交易成本）。避免口语化，语气要客观、犀利、有深度。
-        2. **深度思考（CoT）**：
-           - 不要只罗列数字，要分析数字背后的行政行为逻辑。
-           - 例如：如果申请量大但公开率低，要分析是否存在“滥用不予公开条款”的风险。
-           - 例如：如果败诉率高，要反推是业务部门源头执法不规范，还是法制审核缺位。
-           - 对比“全省均值”数据，明确该单位在全省的位次。
+        **核心原则（违反即废稿）：**
+        1.  **拒绝废话**：严禁使用“高度重视”、“显著成绩”、“稳步推进”等无实质内容的套话。每一句话都必须有数据支撑或逻辑推演。
+        2.  **数据为王**：必须引用 dataContext 中的具体数字。例如，不要说“申请量增加”，要说“申请量同比增长7.2%（增加21件）”。
+        3.  **问题导向**：报告的价值在于发现问题。对于“复议被纠错”、“败诉”、“超期办理”等负面指标，必须进行深度的归因分析（是制度缺失？还是人员懈怠？）。
+        4.  **操作性强**：建议必须具体到“谁来做”、“怎么做”、“做到什么程度”。
 
-        **输出结构要求（请严格按照JSON Schema输出）：**
+        **写作要求（请严格按照JSON Schema输出）：**
 
-        1. **summary (总体研判)**：
-           - 字数要求：**500字以上**。
-           - 结构建议：
-             - 第一段（基本面）：概括全年工作体量（申请量、办件量），用“稳中有进”、“压力激增”等词定性。
-             - 第二段（质效分析）：结合公开率、结转率，评价办理质量。
-             - 第三段（风险研判）：重点分析复议诉讼数据，指出法治风险点。
-             - 第四段（结论）：给出年度总体评分倾向（优/良/中/差）。
-           - 必须包含同比数据分析。
+        1.  **summary (总体研判)**：
+            -   **第一段（体量与负荷）**：精准描述全年工作量（依申请公开数、行政处罚数等），计算同比变化，判断行政压力是“激增”还是“回落”。
+            -   **第二段（质效与风险）**：聚焦“结转下年度办理”及“复议纠错率”。如果结转量大，必须提出警示。如果复议纠错多，必须定性为“法治隐患”。
+            -   **第三段（定性评价）**：基于上述分析，给出一个犀利的总体评价（如“有量无质”、“风险高企”、“平稳规范”），并给出年度评分建议（优/良/中/差）。
+            -   **字数**：500字左右，分段清晰。
 
-        2. **critique (专家点评)**：
-           - **strengths (亮点)**：列出2-3个成效最显著的领域。不仅要说数据好，还要说这意味着什么（如：优化了营商环境、保障了群众知情权）。每个亮点约100字。
-           - **weaknesses (不足)**：列出2-3个深层次问题。语言要犀利，直击痛点（如：程序空转、形式主义、避责思维）。每个短板约100字。
+        2.  **critique (专家点评)**：
+            -   **strengths (亮点)**：只写真正的干货。例如：某项指标优于全省平均值，或零复议纠错。不要写常规工作。若无明显亮点，甚至可以写“本年度无显著创新”。
+            -   **weaknesses (不足 - 重点)**：这是报告的灵魂。请从“法律风险”、“行政效能”、“数据质量”三个维度挖掘。例如：滥用“过程性信息”拒不公开、滥用延期审理等。
+            -   *注意：必须生成至少2条亮点和2条不足。*
 
-        3. **futurePlan (下一步建议)**：
-           - 列出3条高优先级的整改建议。
-           - **Title**：必须是四字或六字对仗短语（如“强化源头治理”、“重塑审核机制”）。
-           - **Content**：具体的实施路径、抓手和预期目标。不要泛泛而谈，要提到具体机制（如：联席会议、案卷评查、红黑榜）。
+        3.  **futurePlan (2025年整改建议)**：
+            -   针对上述不足，提出3条具体的整改计划。
+            -   **Title**：四字或六字行动指令（如“清零积案存量”、“规范答复口径”）。
+            -   **Content**：具体措施 + 预期KPI。例如：“建立复议案件周报制，确保2025年纠错率下降至5%以内”。
+            -   *注意：必须生成3条建议。*
 
         数据上下文：${dataContext}
       `;
@@ -200,7 +276,8 @@ export const ReportGenerator: React.FC = () => {
               properties: {
                 strengths: { type: Type.ARRAY, items: { type: Type.STRING } },
                 weaknesses: { type: Type.ARRAY, items: { type: Type.STRING } },
-              }
+              },
+              required: ["strengths", "weaknesses"]
             },
             futurePlan: {
               type: Type.ARRAY,
@@ -209,34 +286,77 @@ export const ReportGenerator: React.FC = () => {
                 properties: {
                   title: { type: Type.STRING },
                   content: { type: Type.STRING },
-                }
+                },
+                required: ["title", "content"]
               }
             }
-          }
+          },
+          required: ["summary", "critique", "futurePlan"]
         }
       };
 
-      if (modelConfig.model === 'gemini-3-pro-preview' && modelConfig.thinkingBudget > 0) {
-        requestConfig.thinkingConfig = { thinkingBudget: modelConfig.thinkingBudget };
-      }
-
       // Create a timeout promise to race against the API
+      // (Re-added to fix ReferenceError: timeoutPromise is not defined)
       const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error("TIMEOUT")), TIMEOUT_LIMIT)
       );
 
-      const apiCall = ai.models.generateContent({
-        model: modelConfig.model,
-        contents: prompt,
-        config: requestConfig
-      });
+      // Function to execute the API call
+      const executeGeneration = async (model: string, budget: number) => {
+        const config = { ...requestConfig };
+        if (model === 'gemini-3-pro-preview' && budget > 0) {
+          config.thinkingConfig = { thinkingBudget: budget };
+        }
 
-      // Execute with Timeout Protection
-      const response = await Promise.race([apiCall, timeoutPromise]) as any;
+        const call = ai.models.generateContent({
+          model: model,
+          contents: prompt,
+          config: config
+        });
 
-      if (response.text) {
+        return await Promise.race([call, timeoutPromise]) as any;
+      };
+
+      let response;
+      try {
+        response = await executeGeneration(modelConfig.model, modelConfig.thinkingBudget);
+      } catch (firstError: any) {
+        // Auto-fallback for 503 Overloaded on Pro model
+        const isOverloaded = firstError.message?.includes("503") || firstError.message?.includes("overloaded");
+        if (isOverloaded && modelConfig.model === 'gemini-3-pro-preview') {
+          console.warn("Gemini Pro overloaded, falling back to Flash...");
+          alert("⚠️ 检测到 Gemini Pro 服务器繁忙 (503)，已自动为您切换至 Gemini Flash 模型重试...");
+          response = await executeGeneration('gemini-3-flash-preview', 0);
+        } else {
+          throw firstError;
+        }
+      }
+
+      if (response && response.text) {
         const result = JSON.parse(response.text) as GeminiReportResponse;
         setReportData(result);
+
+        // 1. Cache to Session (Fast Fallback)
+        try {
+          if (entity?.id && year) {
+            const cacheKey = `report_cache_${entity.id}_${year}`;
+            sessionStorage.setItem(cacheKey, JSON.stringify(result));
+          }
+        } catch (e) {
+          console.warn("Failed to cache report:", e);
+        }
+
+        // 2. Save to Cloud (Persistent)
+        if (entity?.id && year) {
+          setSaveStatus('saving');
+          try {
+            await saveAIReport(entity.id, entity.name, year, result, modelConfig.model);
+            setSaveStatus('saved');
+          } catch (e) {
+            console.error("Failed to save report to cloud:", e);
+            setSaveStatus('error');
+          }
+        }
       }
     } catch (error: any) {
       console.error("Gemini Generation Failed:", error);
@@ -253,13 +373,16 @@ export const ReportGenerator: React.FC = () => {
       } else if (error.message.includes("API key")) {
         errorMsg = "API Key 无效";
         errorDetail = "请检查环境变量中的 API_KEY 是否正确配置。";
+      } else if (error.message.includes("503") || error.message.includes("overloaded")) {
+        errorMsg = "服务器繁忙 (503)";
+        errorDetail = "Google Gemini 服务当前负载过高，请稍后重试，或尝试使用 'Flash' 模型。";
+      } else {
+        // Show raw error for debugging
+        errorDetail = `错误详情: ${error.message || JSON.stringify(error)}`;
       }
 
       alert(`⚠️ ${errorMsg}\n\n${errorDetail}\n\n已为您自动切换回本地规则引擎，以保证演示继续。`);
-
-      // Fallback to rule engine so user is not stuck with nothing
-      setEngine('rule');
-      handleGenerateRuleBased();
+      setReportData(null); // Clear data on error
     } finally {
       setIsGenerating(false);
     }
@@ -594,7 +717,12 @@ export const ReportGenerator: React.FC = () => {
 
         {reportData && (
           <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200 flex-1 overflow-y-auto">
-            <h4 className="text-xs font-bold text-slate-400 uppercase mb-4 tracking-wider">目录导航</h4>
+            <div className="flex justify-between items-center mb-4">
+              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">目录导航</h4>
+              {saveStatus === 'saving' && <span className="text-[10px] text-indigo-500 animate-pulse">☁️ 正在保存...</span>}
+              {saveStatus === 'saved' && <span className="text-[10px] text-emerald-600">✅ 已云端归档</span>}
+              {saveStatus === 'error' && <span className="text-[10px] text-rose-500">❌ 保存失败</span>}
+            </div>
             <ul className="space-y-1 text-xs text-slate-600">
               {['核心指标监测', '一、总体研判', '二、专家深度点评', '三、图表可视分析', '四、下一步计划', '附录：统计台账'].map((item, i) => (
                 <li key={i} className="flex items-center p-2 rounded hover:bg-slate-50 cursor-pointer transition-colors group">
@@ -608,269 +736,369 @@ export const ReportGenerator: React.FC = () => {
       </div>
 
       {/* A4 Preview Area */}
-      <div className="flex-1 bg-slate-200 overflow-y-auto p-8 flex justify-center shadow-inner rounded-xl scroll-smooth">
+      <div className="flex-1 bg-slate-200 overflow-y-auto p-8 flex justify-center shadow-inner rounded-xl">
         {reportData ? (
-          <div id="printable-report" className="bg-white w-[210mm] min-h-[297mm] shadow-2xl text-slate-800 leading-relaxed animate-in fade-in zoom-in-95 duration-500 flex flex-col relative group">
+          <>
+            {/* 内联打印样式 - 确保分页控制生效 */}
+            <style>
+              {`
+                @media print {
+                  /* 隐藏非打印元素 */
+                  .no-print, 
+                  .gov-dashboard-root > div > div:first-child,
+                  nav, header, footer {
+                    display: none !important;
+                  }
+                  
+                  /* 页面设置 */
+                  @page {
+                    size: A4 portrait;
+                    margin: 10mm;
+                  }
+                  
+                  /* 重置布局 */
+                  html, body {
+                    width: 210mm !important;
+                    background: white !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    -webkit-print-color-adjust: exact !important;
+                    print-color-adjust: exact !important;
+                  }
+                  
+                  /* 报告容器 */
+                  #printable-report {
+                    width: 210mm !important;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    box-shadow: none !important;
+                    display: block !important;
+                    overflow: visible !important;
+                  }
 
-            {/* Download Toolbar (Visible only on hover, hidden on print) */}
-            <div className="absolute top-4 right-4 flex space-x-2 no-print opacity-0 group-hover:opacity-100 transition-opacity z-10 bg-white/90 p-2 rounded-lg shadow border border-slate-200 backdrop-blur-sm">
-              <button
-                onClick={handleDownloadMarkdown}
-                className="flex items-center px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
-                title="下载可编辑文件 (.md)"
-              >
-                <FileDown className="w-4 h-4 mr-1.5" />
-                下载源文件
-              </button>
-              <div className="w-px bg-slate-300 h-6"></div>
-              <button
-                onClick={handlePrint}
-                className="flex items-center px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded shadow-sm transition-colors"
-                title="打开打印窗口，选择'另存为PDF'"
-              >
-                <Printer className="w-4 h-4 mr-1.5" />
-                打印 / 存为PDF
-              </button>
-            </div>
+                  /* 内容页内边距（首节与后续页保持一致） */
+                  #printable-report .print-content {
+                    padding: 8mm 18mm 18mm !important;
+                  }
 
-            {/* --- Cover Page --- */}
-            <div className="min-h-[297mm] p-[25mm] flex flex-col justify-between relative border-b-2 border-slate-100 bg-gradient-to-br from-white to-slate-50/50 break-after-page">
-              <div className="mt-24 text-center">
-                <div className={`inline-flex items-center justify-center px-4 py-1.5 border rounded-full text-xs font-bold tracking-widest mb-12 uppercase ${engine === 'gemini' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>
-                  Internal Reference · Decision Support
-                </div>
-                <h1 className="text-4xl font-extrabold text-slate-900 mb-6 tracking-tight leading-tight">
-                  {year}年度政务公开工作<br />
-                  <span className={engine === 'gemini' ? 'text-indigo-600' : 'text-slate-600'}>绩效评估与风险研判报告</span>
-                </h1>
-                <div className={`w-24 h-1.5 mx-auto rounded-full mb-8 ${engine === 'gemini' ? 'bg-indigo-600' : 'bg-slate-600'}`}></div>
-                <h3 className="text-xl text-slate-500 font-medium">{entity?.name || '未知单位'}</h3>
+                  /* 封面页高度适配打印可视区域，避免内容溢出到下一页 */
+                  .print-cover {
+                    height: calc(297mm - 20mm) !important;
+                    min-height: 0 !important;
+                    padding: 16mm 18mm !important;
+                  }
+
+                  /* 降低打印渲染负担，提升预览加载速度 */
+                  #printable-report * {
+                    animation: none !important;
+                    transition: none !important;
+                    box-shadow: none !important;
+                    filter: none !important;
+                  }
+
+                  #printable-report svg {
+                    overflow: visible !important;
+                  }
+                  
+                  /* 封面页分页 */
+                  .print-cover {
+                    page-break-after: always !important;
+                    break-after: page !important;
+                  }
+                  
+                  /* 章节分页 - 新起一页 */
+                  .print-section-break {
+                    page-break-before: always !important;
+                    break-before: page !important;
+                    padding-top: 8mm !important;
+                  }
+                  
+                  /* 避免跨页截断 */
+                  .print-avoid-break {
+                    page-break-inside: avoid !important;
+                    break-inside: avoid !important;
+                  }
+                  
+                  /* 隐藏左侧控制面板 */
+                  .gov-dashboard-root .flex.gap-6 > .w-72 {
+                    display: none !important;
+                  }
+                  
+                  /* 预览容器全宽 */
+                  .gov-dashboard-root .flex.gap-6 {
+                    display: block !important;
+                  }
+                  
+                  .gov-dashboard-root .flex.gap-6 > .flex-1 {
+                    background: white !important;
+                    padding: 0 !important;
+                  }
+                }
+              `}
+            </style>
+            <div id="printable-report" className="bg-white w-[210mm] min-h-[297mm] shadow-2xl text-slate-800 leading-relaxed animate-in fade-in zoom-in-95 duration-500 flex flex-col relative group">
+
+              {/* Download Toolbar (Visible only on hover, hidden on print) */}
+              <div className="absolute top-4 right-4 flex space-x-2 no-print opacity-0 group-hover:opacity-100 transition-opacity z-10 bg-white/90 p-2 rounded-lg shadow border border-slate-200 backdrop-blur-sm">
+                <button
+                  onClick={handleDownloadMarkdown}
+                  className="flex items-center px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                  title="下载可编辑文件 (.md)"
+                >
+                  <FileDown className="w-4 h-4 mr-1.5" />
+                  下载源文件
+                </button>
+                <div className="w-px bg-slate-300 h-6"></div>
+                <button
+                  onClick={handlePrint}
+                  className="flex items-center px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded shadow-sm transition-colors"
+                  title="打开打印窗口，选择'另存为PDF'"
+                >
+                  <Printer className="w-4 h-4 mr-1.5" />
+                  打印 / 存为PDF
+                </button>
               </div>
 
-              <div className="mb-20 text-center text-sm space-y-3 text-slate-400 font-mono">
-                <p>Generated by {engine === 'gemini' ? modelConfig.model : 'GovGPT-Pro (Local)'}</p>
-                <p>Date: {new Date().toLocaleDateString()}</p>
-                <p>ID: {(entity?.id || 'UNKNOWN').toUpperCase()}-{year}-V4</p>
+              {/* --- Cover Page --- */}
+              <div className="min-h-[297mm] p-[25mm] flex flex-col justify-between relative border-b-2 border-slate-100 bg-gradient-to-br from-white to-slate-50/50 print-cover">
+                <div className="mt-24 text-center">
+                  <h1 className="text-4xl font-extrabold text-slate-900 mb-6 tracking-tight leading-tight">
+                    {year}年度政务公开工作<br />
+                    <span className={engine === 'gemini' ? 'text-indigo-600' : 'text-slate-600'}>绩效评估与风险研判报告</span>
+                  </h1>
+                  <div className={`w-24 h-1.5 mx-auto rounded-full mb-8 ${engine === 'gemini' ? 'bg-indigo-600' : 'bg-slate-600'}`}></div>
+                  <h3 className="text-xl text-slate-500 font-medium">{entity?.name || '未知单位'}</h3>
+                </div>
+
+                <div className="mb-20"></div>
               </div>
-            </div>
 
-            {/* --- Content Pages --- */}
-            <div className="p-[25mm]">
+              {/* --- Content Pages --- */}
+              <div className="p-[25mm] print-content">
 
-              {/* 1. Executive Summary */}
-              <section className="mb-12">
-                <div className="flex items-center mb-6">
-                  <span className={`flex items-center justify-center w-8 h-8 rounded-lg text-white font-bold mr-3 shadow-md font-mono ${engine === 'gemini' ? 'bg-indigo-600 shadow-indigo-200' : 'bg-slate-700 shadow-slate-200'}`}>01</span>
-                  <h2 className="text-xl font-bold text-slate-900">总体研判与核心指标</h2>
-                </div>
-
-                <SummaryTable />
-
-                <div className="relative p-8 bg-slate-50 rounded-xl border border-slate-200 text-justify text-sm leading-8 text-slate-700">
-                  {/* Decorative Quote Icon */}
-                  <div className="absolute top-4 left-4 text-slate-200 transform -scale-x-100">
-                    <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor"><path d="M14.017 21L14.017 18C14.017 16.896 14.384 16.035 15.118 15.417C15.852 14.8 16.875 14.491 18.188 14.491L18.785 14.491L18.785 12.592C18.785 11.896 18.575 11.235 18.156 10.609C17.737 9.984 17.151 9.671 16.4 9.671L15.939 9.671L15.939 6.811L16.273 6.811C17.788 6.811 19.043 7.324 20.038 8.35C21.033 9.376 21.531 10.749 21.531 12.469L21.531 21L14.017 21ZM5 21L5 18C5 16.896 5.367 16.035 6.101 15.417C6.835 14.8 7.858 14.491 9.171 14.491L9.768 14.491L9.768 12.592C9.768 11.896 9.558 11.235 9.139 10.609C8.72 9.984 8.134 9.671 7.383 9.671L6.922 9.671L6.922 6.811L7.256 6.811C8.771 6.811 10.026 7.324 11.021 8.35C12.016 9.376 12.514 10.749 12.514 12.469L12.514 21L5 21Z" /></svg>
-                  </div>
-                  <div className="relative z-10 whitespace-pre-line">
-                    <RenderText text={reportData.summary} />
-                  </div>
-                </div>
-              </section>
-
-              {/* 2. Expert Critique */}
-              <section className="mb-12 break-inside-avoid">
-                <div className="flex items-center mb-6">
-                  <span className={`flex items-center justify-center w-8 h-8 rounded-lg text-white font-bold mr-3 shadow-md font-mono ${engine === 'gemini' ? 'bg-indigo-600 shadow-indigo-200' : 'bg-slate-700 shadow-slate-200'}`}>02</span>
-                  <h2 className="text-xl font-bold text-slate-900">专家深度点评</h2>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  {/* Strengths */}
-                  <div>
-                    <h4 className="flex items-center text-emerald-700 font-bold mb-4 pb-2 border-b-2 border-emerald-100">
-                      <TrendingUp className="w-5 h-5 mr-2" /> 亮点与成绩
-                    </h4>
-                    <ul className="space-y-4">
-                      {reportData.critique?.strengths?.map((s: string, i: number) => (
-                        <li key={i} className="flex items-start text-sm leading-6 text-slate-700 bg-white p-3 rounded-lg border border-slate-100 shadow-sm">
-                          <CheckCircle2 className="w-5 h-5 mr-3 mt-0.5 text-emerald-500 flex-shrink-0" />
-                          <span dangerouslySetInnerHTML={{ __html: s }}></span>
-                        </li>
-                      ))}
-                    </ul>
+                {/* 1. Executive Summary - 首页内容，不需要break-before */}
+                <section className="mb-12 break-inside-avoid print-section">
+                  <div className="flex items-center mb-6">
+                    <span className={`flex items-center justify-center w-8 h-8 rounded-lg text-white font-bold mr-3 shadow-md font-mono ${engine === 'gemini' ? 'bg-indigo-600 shadow-indigo-200' : 'bg-slate-700 shadow-slate-200'}`}>01</span>
+                    <h2 className="text-xl font-bold text-slate-900">总体研判与核心指标</h2>
                   </div>
 
-                  {/* Weaknesses */}
-                  <div>
-                    <h4 className="flex items-center text-rose-700 font-bold mb-4 pb-2 border-b-2 border-rose-100">
-                      <AlertOctagon className="w-5 h-5 mr-2" /> 短板与不足
-                    </h4>
-                    <ul className="space-y-4">
-                      {reportData.critique?.weaknesses?.map((w: string, i: number) => (
-                        <li key={i} className="flex items-start text-sm leading-6 text-slate-700 bg-white p-3 rounded-lg border border-slate-100 shadow-sm">
-                          <div className="w-1.5 h-1.5 rounded-full bg-rose-500 mr-3 mt-2 flex-shrink-0"></div>
-                          <span dangerouslySetInnerHTML={{ __html: w }}></span>
-                        </li>
-                      ))}
-                    </ul>
+                  <SummaryTable />
+
+                  <div className="relative p-8 bg-slate-50 rounded-xl border border-slate-200 text-justify text-sm leading-8 text-slate-700">
+                    {/* Decorative Quote Icon */}
+                    <div className="absolute top-4 left-4 text-slate-200 transform -scale-x-100">
+                      <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor"><path d="M14.017 21L14.017 18C14.017 16.896 14.384 16.035 15.118 15.417C15.852 14.8 16.875 14.491 18.188 14.491L18.785 14.491L18.785 12.592C18.785 11.896 18.575 11.235 18.156 10.609C17.737 9.984 17.151 9.671 16.4 9.671L15.939 9.671L15.939 6.811L16.273 6.811C17.788 6.811 19.043 7.324 20.038 8.35C21.033 9.376 21.531 10.749 21.531 12.469L21.531 21L14.017 21ZM5 21L5 18C5 16.896 5.367 16.035 6.101 15.417C6.835 14.8 7.858 14.491 9.171 14.491L9.768 14.491L9.768 12.592C9.768 11.896 9.558 11.235 9.139 10.609C8.72 9.984 8.134 9.671 7.383 9.671L6.922 9.671L6.922 6.811L7.256 6.811C8.771 6.811 10.026 7.324 11.021 8.35C12.016 9.376 12.514 10.749 12.514 12.469L12.514 21L5 21Z" /></svg>
+                    </div>
+                    <div className="relative z-10 whitespace-pre-line">
+                      <RenderText text={reportData.summary} />
+                    </div>
                   </div>
-                </div>
-              </section>
+                </section>
 
-              {/* 3. Visual Analysis */}
-              <section className="mb-12 break-inside-avoid">
-                <div className="flex items-center mb-6">
-                  <span className={`flex items-center justify-center w-8 h-8 rounded-lg text-white font-bold mr-3 shadow-md font-mono ${engine === 'gemini' ? 'bg-indigo-600 shadow-indigo-200' : 'bg-slate-700 shadow-slate-200'}`}>03</span>
-                  <h2 className="text-xl font-bold text-slate-900">重点领域可视分析</h2>
-                </div>
+                {/* 2. Expert Critique - 新起一页 */}
+                <section className="mb-12 print-section-break print-avoid-break">
+                  <div className="flex items-center mb-6">
+                    <span className={`flex items-center justify-center w-8 h-8 rounded-lg text-white font-bold mr-3 shadow-md font-mono ${engine === 'gemini' ? 'bg-indigo-600 shadow-indigo-200' : 'bg-slate-700 shadow-slate-200'}`}>02</span>
+                    <h2 className="text-xl font-bold text-slate-900">专家深度点评</h2>
+                  </div>
 
-                <div className="grid grid-cols-2 gap-8 mb-8">
-                  <ReportTrendChart data={entity?.data || []} />
-                  <ReportSourceChart data={entity?.data || []} />
-                  <ReportOutcomeChart data={entity?.data || []} />
-                  <ReportRiskChart data={entity?.data || []} />
-                </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8 print-avoid-break">
+                    {/* Strengths */}
+                    <div>
+                      <h4 className="flex items-center text-emerald-700 font-bold mb-4 pb-2 border-b-2 border-emerald-100">
+                        <TrendingUp className="w-5 h-5 mr-2" /> 亮点与成绩
+                      </h4>
+                      <ul className="space-y-4">
+                        {reportData.critique?.strengths?.map((s: string, i: number) => (
+                          <li key={i} className="flex items-start text-sm leading-6 text-slate-700 bg-white p-3 rounded-lg border border-slate-100 shadow-sm print-avoid-break">
+                            <CheckCircle2 className="w-5 h-5 mr-3 mt-0.5 text-emerald-500 flex-shrink-0" />
+                            <span dangerouslySetInnerHTML={{ __html: s }}></span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
 
-                <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 shadow-inner">
-                  <ReportAdminActionChart data={entity?.data || []} />
-                </div>
-              </section>
+                    {/* Weaknesses */}
+                    <div>
+                      <h4 className="flex items-center text-rose-700 font-bold mb-4 pb-2 border-b-2 border-rose-100">
+                        <AlertOctagon className="w-5 h-5 mr-2" /> 短板与不足
+                      </h4>
+                      <ul className="space-y-4">
+                        {reportData.critique?.weaknesses?.map((w: string, i: number) => (
+                          <li key={i} className="flex items-start text-sm leading-6 text-slate-700 bg-white p-3 rounded-lg border border-slate-100 shadow-sm print-avoid-break">
+                            <div className="w-1.5 h-1.5 rounded-full bg-rose-500 mr-3 mt-2 flex-shrink-0"></div>
+                            <span dangerouslySetInnerHTML={{ __html: w }}></span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                </section>
 
-              {/* 4. Future Plan */}
-              <section className="mb-12 break-inside-avoid">
-                <div className="flex items-center mb-8">
-                  <span className={`flex items-center justify-center w-8 h-8 rounded-lg text-white font-bold mr-3 shadow-md font-mono ${engine === 'gemini' ? 'bg-indigo-600 shadow-indigo-200' : 'bg-slate-700 shadow-slate-200'}`}>04</span>
-                  <h2 className="text-xl font-bold text-slate-900">{year + 1}年 工作计划建议</h2>
-                </div>
+                {/* 3. Visual Analysis - 新起一页，每个图表独立避免跨页 */}
+                <section className="mb-12 print-section-break">
+                  <div className="flex items-center mb-6">
+                    <span className={`flex items-center justify-center w-8 h-8 rounded-lg text-white font-bold mr-3 shadow-md font-mono ${engine === 'gemini' ? 'bg-indigo-600 shadow-indigo-200' : 'bg-slate-700 shadow-slate-200'}`}>03</span>
+                    <h2 className="text-xl font-bold text-slate-900">重点领域可视分析</h2>
+                  </div>
 
-                <div className="space-y-6">
-                  {reportData.futurePlan?.map((plan: any, idx: number) => (
-                    <div key={idx} className="flex items-start p-5 bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-                      <div className={`flex-shrink-0 w-10 h-10 rounded-full font-bold flex items-center justify-center text-lg mr-5 border ${engine === 'gemini' ? 'bg-indigo-50 text-indigo-600 border-indigo-100' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>
-                        {idx + 1}
+                  <div className="space-y-6 -mx-12">
+                    <div className="print-avoid-break">
+                      <ReportTrendChart data={entity?.data || []} isPrinting={isPrinting} />
+                    </div>
+                    <div className="print-avoid-break">
+                      <ReportSourceChart data={entity?.data || []} isPrinting={isPrinting} />
+                    </div>
+                    <div className="print-avoid-break">
+                      <ReportOutcomeChart data={entity?.data || []} isPrinting={isPrinting} />
+                    </div>
+                    <div className="print-avoid-break">
+                      <ReportRiskChart data={entity?.data || []} isPrinting={isPrinting} />
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 shadow-inner -mx-16 mt-6 print-avoid-break">
+                    <ReportAdminActionChart data={entity?.data || []} isPrinting={isPrinting} />
+                  </div>
+                </section>
+
+                {/* 4. Future Plan - 新起一页 */}
+                <section className="mb-12 print-section-break">
+                  <div className="flex items-center mb-8">
+                    <span className={`flex items-center justify-center w-8 h-8 rounded-lg text-white font-bold mr-3 shadow-md font-mono ${engine === 'gemini' ? 'bg-indigo-600 shadow-indigo-200' : 'bg-slate-700 shadow-slate-200'}`}>04</span>
+                    <h2 className="text-xl font-bold text-slate-900">{year + 1}年 工作计划建议</h2>
+                  </div>
+
+                  <div className="space-y-6">
+                    {reportData.futurePlan?.map((plan: any, idx: number) => (
+                      <div key={idx} className="flex items-start p-5 bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+                        <div className={`flex-shrink-0 w-10 h-10 rounded-full font-bold flex items-center justify-center text-lg mr-5 border ${engine === 'gemini' ? 'bg-indigo-50 text-indigo-600 border-indigo-100' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>
+                          {idx + 1}
+                        </div>
+                        <div>
+                          <h4 className="text-base font-bold text-slate-800 mb-2">{plan.title}</h4>
+                          <p className="text-sm text-slate-600 leading-relaxed">
+                            {plan.content}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <h4 className="text-base font-bold text-slate-800 mb-2">{plan.title}</h4>
-                        <p className="text-sm text-slate-600 leading-relaxed">
-                          {plan.content}
-                        </p>
+                    ))}
+                  </div>
+                </section>
+
+                {/* Appendix - 新起一页 */}
+                <section className="mb-10 print-section-break">
+                  <div className="text-center mb-10">
+                    <h2 className="text-lg font-bold text-slate-900 border-b-2 border-slate-100 pb-3 inline-block px-12 uppercase tracking-widest">
+                      附录：{year}年度政务公开工作统计台账
+                    </h2>
+                  </div>
+
+                  {['规章规范性文件与行政管理', '政府信息公开依申请办理情况', '行政复议与诉讼情况'].map((title, i) => (
+                    <div key={i} className="mb-10 print-avoid-break">
+                      <div className="flex items-center mb-4">
+                        <Bookmark className="w-4 h-4 text-indigo-400 mr-2" />
+                        <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wide">Table 0{i + 1} — {title}</h4>
+                      </div>
+
+                      {/* Clean Table Style */}
+                      <div className="border border-slate-200 rounded-lg overflow-hidden shadow-sm print-avoid-break">
+                        {i === 0 && (
+                          <table className="w-full text-xs text-center">
+                            <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                              <tr>
+                                <th className="py-3 border-r border-slate-200">规章制发</th>
+                                <th className="py-3 border-r border-slate-200">规章现行</th>
+                                <th className="py-3 border-r border-slate-200">规范性文件制发</th>
+                                <th className="py-3 border-r border-slate-200">规范性文件现行</th>
+                                <th className="py-3 border-r border-slate-200">行政许可</th>
+                                <th className="py-3">行政处罚</th>
+                              </tr>
+                            </thead>
+                            <tbody className="bg-white text-slate-700">
+                              <tr>
+                                <td className="py-3 border-r border-slate-100">{current.regulations.published}</td>
+                                <td className="py-3 border-r border-slate-100">{current.regulations.active}</td>
+                                <td className="py-3 border-r border-slate-100">{current.normativeDocuments.published}</td>
+                                <td className="py-3 border-r border-slate-100">{current.normativeDocuments.active}</td>
+                                <td className="py-3 border-r border-slate-100">{fmt(current.adminActions.licensing)}</td>
+                                <td className="py-3">{fmt(current.adminActions.punishment)}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        )}
+                        {i === 1 && (
+                          <table className="w-full text-xs text-center">
+                            <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                              <tr>
+                                <th className="py-3 border-r border-slate-200">新收申请</th>
+                                <th className="py-3 border-r border-slate-200">上年结转</th>
+                                <th className="py-3 border-r border-slate-200">自然人</th>
+                                <th className="py-3 border-r border-slate-200">予以公开</th>
+                                <th className="py-3 border-r border-slate-200">部分公开</th>
+                                <th className="py-3 border-r border-slate-200">无法提供</th>
+                                <th className="py-3">不予处理</th>
+                              </tr>
+                            </thead>
+                            <tbody className="bg-white text-slate-700">
+                              <tr>
+                                <td className="py-3 border-r border-slate-100">{fmt(current.applications.newReceived)}</td>
+                                <td className="py-3 border-r border-slate-100">{current.applications.carriedOver}</td>
+                                <td className="py-3 border-r border-slate-100">{fmt(current.applications.sources.natural)}</td>
+                                <td className="py-3 border-r border-slate-100">{fmt(current.applications.outcomes.public)}</td>
+                                <td className="py-3 border-r border-slate-100">{fmt(current.applications.outcomes.partial)}</td>
+                                <td className="py-3 border-r border-slate-100">{fmt(current.applications.outcomes.unable)}</td>
+                                <td className="py-3">{fmt(current.applications.outcomes.ignore)}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        )}
+                        {i === 2 && (
+                          <table className="w-full text-xs text-center">
+                            <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                              <tr className="border-b border-slate-200">
+                                <th className="py-2 border-r border-slate-200 bg-slate-100/50" colSpan={4}>行政复议</th>
+                                <th className="py-2 bg-slate-100/50" colSpan={4}>行政诉讼</th>
+                              </tr>
+                              <tr>
+                                <th className="py-2 border-r border-slate-200">总数</th>
+                                <th className="py-2 border-r border-slate-200">纠错</th>
+                                <th className="py-2 border-r border-slate-200">维持</th>
+                                <th className="py-2 border-r border-slate-200">未结</th>
+                                <th className="py-2 border-r border-slate-200">总数</th>
+                                <th className="py-2 border-r border-slate-200">纠错</th>
+                                <th className="py-2 border-r border-slate-200">维持</th>
+                                <th className="py-2">未结</th>
+                              </tr>
+                            </thead>
+                            <tbody className="bg-white text-slate-700">
+                              <tr>
+                                <td className="py-3 border-r border-slate-100">{current.disputes.reconsideration.total}</td>
+                                <td className="py-3 border-r border-slate-100 text-slate-700">{current.disputes.reconsideration.corrected}</td>
+                                <td className="py-3 border-r border-slate-100">{current.disputes.reconsideration.maintained}</td>
+                                <td className="py-3 border-r border-slate-100">{current.disputes.reconsideration.pending}</td>
+                                <td className="py-3 border-r border-slate-100">{current.disputes.litigation.total}</td>
+                                <td className="py-3 border-r border-slate-100 text-slate-700">{current.disputes.litigation.corrected}</td>
+                                <td className="py-3 border-r border-slate-100">{current.disputes.litigation.maintained}</td>
+                                <td className="py-3">{current.disputes.litigation.pending}</td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        )}
                       </div>
                     </div>
                   ))}
+                </section>
+
+                {/* Footer */}
+                <div className="pt-8 flex justify-between text-[10px] text-slate-400 border-t border-slate-200 font-mono">
+                  <span>CLASSIFICATION: INTERNAL USE ONLY</span>
+                  <span>GENERATED BY {engine === 'gemini' ? 'GOOGLE VERTEX AI' : 'GOVINSIGHT PRO'} v4.2</span>
                 </div>
-              </section>
-
-              {/* Appendix */}
-              <section className="mb-10 break-before-page">
-                <div className="text-center mb-10">
-                  <h2 className="text-lg font-bold text-slate-900 border-b-2 border-slate-100 pb-3 inline-block px-12 uppercase tracking-widest">
-                    附录：{year}年度政务公开工作统计台账
-                  </h2>
-                </div>
-
-                {['规章规范性文件与行政管理', '政府信息公开依申请办理情况', '行政复议与诉讼情况'].map((title, i) => (
-                  <div key={i} className="mb-10">
-                    <div className="flex items-center mb-4">
-                      <Bookmark className="w-4 h-4 text-indigo-400 mr-2" />
-                      <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wide">Table 0{i + 1} — {title}</h4>
-                    </div>
-
-                    {/* Clean Table Style */}
-                    <div className="border border-slate-200 rounded-lg overflow-hidden shadow-sm">
-                      {i === 0 && (
-                        <table className="w-full text-xs text-center">
-                          <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
-                            <tr>
-                              <th className="py-3 border-r border-slate-200">规章制发</th>
-                              <th className="py-3 border-r border-slate-200">规章现行</th>
-                              <th className="py-3 border-r border-slate-200">规范性文件制发</th>
-                              <th className="py-3 border-r border-slate-200">规范性文件现行</th>
-                              <th className="py-3 border-r border-slate-200">行政许可</th>
-                              <th className="py-3">行政处罚</th>
-                            </tr>
-                          </thead>
-                          <tbody className="bg-white text-slate-700">
-                            <tr>
-                              <td className="py-3 border-r border-slate-100">{current.regulations.published}</td>
-                              <td className="py-3 border-r border-slate-100">{current.regulations.active}</td>
-                              <td className="py-3 border-r border-slate-100">{current.normativeDocuments.published}</td>
-                              <td className="py-3 border-r border-slate-100">{current.normativeDocuments.active}</td>
-                              <td className="py-3 border-r border-slate-100">{fmt(current.adminActions.licensing)}</td>
-                              <td className="py-3">{fmt(current.adminActions.punishment)}</td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      )}
-                      {i === 1 && (
-                        <table className="w-full text-xs text-center">
-                          <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
-                            <tr>
-                              <th className="py-3 border-r border-slate-200">新收申请</th>
-                              <th className="py-3 border-r border-slate-200">上年结转</th>
-                              <th className="py-3 border-r border-slate-200">自然人</th>
-                              <th className="py-3 border-r border-slate-200">予以公开</th>
-                              <th className="py-3 border-r border-slate-200">部分公开</th>
-                              <th className="py-3 border-r border-slate-200">无法提供</th>
-                              <th className="py-3">不予处理</th>
-                            </tr>
-                          </thead>
-                          <tbody className="bg-white text-slate-700">
-                            <tr>
-                              <td className="py-3 border-r border-slate-100">{fmt(current.applications.newReceived)}</td>
-                              <td className="py-3 border-r border-slate-100">{current.applications.carriedOver}</td>
-                              <td className="py-3 border-r border-slate-100">{fmt(current.applications.sources.natural)}</td>
-                              <td className="py-3 border-r border-slate-100">{fmt(current.applications.outcomes.public)}</td>
-                              <td className="py-3 border-r border-slate-100">{fmt(current.applications.outcomes.partial)}</td>
-                              <td className="py-3 border-r border-slate-100">{fmt(current.applications.outcomes.unable)}</td>
-                              <td className="py-3">{fmt(current.applications.outcomes.ignore)}</td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      )}
-                      {i === 2 && (
-                        <table className="w-full text-xs text-center">
-                          <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
-                            <tr className="border-b border-slate-200">
-                              <th className="py-2 border-r border-slate-200 bg-slate-100/50" colSpan={4}>行政复议</th>
-                              <th className="py-2 bg-slate-100/50" colSpan={4}>行政诉讼</th>
-                            </tr>
-                            <tr>
-                              <th className="py-2 border-r border-slate-200">总数</th>
-                              <th className="py-2 border-r border-slate-200">纠错</th>
-                              <th className="py-2 border-r border-slate-200">维持</th>
-                              <th className="py-2 border-r border-slate-200">未结</th>
-                              <th className="py-2 border-r border-slate-200">总数</th>
-                              <th className="py-2 border-r border-slate-200">纠错</th>
-                              <th className="py-2 border-r border-slate-200">维持</th>
-                              <th className="py-2">未结</th>
-                            </tr>
-                          </thead>
-                          <tbody className="bg-white text-slate-700">
-                            <tr>
-                              <td className="py-3 border-r border-slate-100">{current.disputes.reconsideration.total}</td>
-                              <td className="py-3 border-r border-slate-100 font-bold text-rose-600">{current.disputes.reconsideration.corrected}</td>
-                              <td className="py-3 border-r border-slate-100">{current.disputes.reconsideration.maintained}</td>
-                              <td className="py-3 border-r border-slate-100">{current.disputes.reconsideration.pending}</td>
-                              <td className="py-3 border-r border-slate-100">{current.disputes.litigation.total}</td>
-                              <td className="py-3 border-r border-slate-100 font-bold text-rose-600">{current.disputes.litigation.corrected}</td>
-                              <td className="py-3 border-r border-slate-100">{current.disputes.litigation.maintained}</td>
-                              <td className="py-3">{current.disputes.litigation.pending}</td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </section>
-
-              {/* Footer */}
-              <div className="pt-8 flex justify-between text-[10px] text-slate-400 border-t border-slate-200 font-mono">
-                <span>CLASSIFICATION: INTERNAL USE ONLY</span>
-                <span>GENERATED BY {engine === 'gemini' ? 'GOOGLE VERTEX AI' : 'GOVINSIGHT PRO'} v4.2</span>
               </div>
             </div>
-          </div>
+          </>
         ) : (
           /* Empty State */
           <div className="w-[210mm] min-h-[297mm] flex flex-col items-center justify-center text-slate-400 border border-dashed border-slate-300 rounded-xl bg-slate-50/50">

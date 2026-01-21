@@ -1,6 +1,5 @@
 import express, { Request, Response } from 'express';
-import { dbQuery, ensureDbMigrations } from '../config/db-llm';
-import { sqlValue } from '../config/sqlite';
+import pool from '../config/database-llm';
 
 const router = express.Router();
 
@@ -11,12 +10,12 @@ router.get('/:id', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'job_id 无效' });
     }
 
-    ensureDbMigrations();
-
-    const job = (await dbQuery(
+    const result = await pool.query(
       `SELECT id, report_id, version_id, status, created_at, started_at, finished_at, error_code, error_message
-       FROM jobs WHERE id = ${sqlValue(jobId)} LIMIT 1;`
-    ))[0];
+       FROM jobs WHERE id = $1 LIMIT 1`,
+      [jobId]
+    );
+    const job = result.rows[0];
 
     if (!job) {
       return res.status(404).json({ error: 'job 不存在' });
