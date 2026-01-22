@@ -353,7 +353,10 @@ function CityIndex({ onSelectReport, onViewComparison }) {
       }
     }
 
-    return [...direct, ...govReports];
+    // Combine and sort by year ascending (from oldest to newest)
+    const combined = [...direct, ...govReports];
+    combined.sort((a, b) => (a.year || 0) - (b.year || 0));
+    return combined;
   }, [currentParentId, reports, regions]);
 
   // Count availability for tabs (to show counts or hide empty tabs if desired)

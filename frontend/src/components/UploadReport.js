@@ -371,7 +371,8 @@ function UploadReport() {
           try {
             const detailResp = await apiClient.get(`/reports/${existing.report_id || existing.id}`);
             const detail = detailResp.data;
-            const parsedJson = detail.parsed_json || detail.latest_version?.parsed_json;
+            // 后端返回结构: detail.active_version.parsed_json
+            const parsedJson = detail.active_version?.parsed_json || detail.parsed_json || detail.latest_version?.parsed_json;
             const hasContent = parsedJson && Object.keys(parsedJson).length > 0;
             setEmptyReport(!hasContent);
           } catch (detailErr) {

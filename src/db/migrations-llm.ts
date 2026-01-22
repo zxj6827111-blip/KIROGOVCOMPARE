@@ -620,6 +620,37 @@ export async function runLLMMigrations(): Promise<void> {
   try {
     await pool.query(postgresSchema);
     console.log('[Postgres Migrations] Schema ensured.');
+
+    // ============================================================================
+    // DATA INTEGRITY REPAIR
+    // ============================================================================
+
+    // 1. Fix missing active_version_id AND fix cases where active version is empty but valid one exists
+    // We check if current active_version is NULL or has very short content (likely empty JSON)
+    const repairRes = await pool.query(`
+      UPDATE reports r
+      SET active_version_id = (
+        SELECT id FROM report_versions rv
+        WHERE rv.report_id = r.id
+        AND rv.parsed_json IS NOT NULL
+        AND length(rv.parsed_json::text) > 100 
+        ORDER BY rv.created_at DESC
+        LIMIT 1
+      )
+      WHERE 
+        (r.active_version_id IS NULL)
+        OR 
+        EXISTS (
+          SELECT 1 FROM report_versions cur 
+          WHERE cur.id = r.active_version_id 
+          AND (cur.parsed_json IS NULL OR length(cur.parsed_json::text) < 100)
+        );
+    `);
+
+    if ((repairRes.rowCount ?? 0) > 0) {
+      console.log(`[Migrations] Fixed data integrity for ${repairRes.rowCount} reports (linked to valid versions)`);
+    }
+
   } catch (error: any) {
     console.error('Failed to run Postgres schema migrations:', error);
     throw error;

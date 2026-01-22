@@ -693,16 +693,18 @@ router.get('/reports/:id', authMiddleware, async (req, res) => {
       region_name: report.region_name,
       year: report.year,
       unit_name: report.unit_name,
-      version_id: report.version_id,
-      file_hash: report.file_hash,
-      storage_path: report.storage_path,
-      parsed_json: parsedJson,
-      provider: report.provider,
-      model: report.model,
-      prompt_version: report.prompt_version,
-      schema_version: report.schema_version,
-      text_path: report.text_path,
-      created_at: report.created_at,
+      active_version: report.version_id ? {
+        version_id: report.version_id,
+        file_hash: report.file_hash,
+        storage_path: report.storage_path,
+        text_path: report.text_path,
+        parsed_json: parsedJson,
+        provider: report.provider,
+        model: report.model,
+        prompt_version: report.prompt_version,
+        schema_version: report.schema_version,
+        created_at: report.created_at,
+      } : null,
       latest_job: job
         ? {
           job_id: job.id,
@@ -750,6 +752,8 @@ router.delete('/reports/:id', authMiddleware, requirePermission('delete_reports'
       if (versionIds.length > 0) {
         // Delete cells (no cascade in schema)
         await client.query('DELETE FROM cells WHERE version_id = ANY($1::int[])', [versionIds]);
+        // Delete notifications referencing these versions
+        await client.query('DELETE FROM notifications WHERE related_version_id = ANY($1::int[])', [versionIds]);
       }
 
       // 2. Delete Comparisons (involving this report)
