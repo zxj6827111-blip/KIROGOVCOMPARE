@@ -262,7 +262,7 @@ function App() {
       <main className="main">{renderContent()}</main>
 
       <footer className="footer">
-        <p>© 2025 政府信息公开年度报告差异比对系统 | 后端 API: {API_BASE_URL || '同域 /dev proxy'}</p>
+        <p>© 2025 政府信息公开年度报告差异比对系统</p>
       </footer>
     </div>
   );

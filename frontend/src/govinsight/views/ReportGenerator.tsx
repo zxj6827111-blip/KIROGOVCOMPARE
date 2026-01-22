@@ -45,10 +45,19 @@ export const ReportGenerator: React.FC = () => {
 
   // Real Configuration State
   const [modelConfig, setModelConfig] = useState({
-    deployment: 'cloud', // Default to cloud for Gemini
+    deployment: 'local',
     model: 'gemini-3-flash-preview', // Default to Flash for speed
-    thinkingBudget: 0 // Default 0 for Flash
+    thinkingBudget: 0
   });
+
+  // 模型ID到友好名称的映射
+  const getModelDisplayName = (modelId: string): string => {
+    const modelNames: Record<string, string> = {
+      'gemini-3-flash-preview': '互政AI-flash',
+      'gemini-3-pro-preview': '互政AI-PRO'
+    };
+    return modelNames[modelId] || modelId;
+  };
 
   // Timer Logic
   // Dynamic Year Calculation
@@ -189,7 +198,7 @@ export const ReportGenerator: React.FC = () => {
     let md = `# ${year}年度政务公开工作绩效评估与风险研判报告\n`;
     md += `**评估对象**: ${entity?.name || '未知单位'}\n`;
     md += `**生成时间**: ${date}\n`;
-    md += `**生成引擎**: ${engine === 'gemini' ? modelConfig.model : 'GovGPT-Pro (Local)'}\n\n`;
+    md += `**生成引擎**: ${engine === 'gemini' ? getModelDisplayName(modelConfig.model) : '互政AI(Local)'}\n\n`;
 
     md += `## 一、总体研判与核心指标\n\n${reportData.summary}\n\n`;
 
@@ -547,8 +556,8 @@ export const ReportGenerator: React.FC = () => {
                     setModelConfig({ ...modelConfig, model: m, thinkingBudget: budget });
                   }}
                 >
-                  <option value="gemini-3-flash-preview">Gemini 3.0 Flash (极速/推荐)</option>
-                  <option value="gemini-3-pro-preview">Gemini 3.0 Pro (深度思考/较慢)</option>
+                  <option value="gemini-3-flash-preview">互政AI-flash (极速/推荐)</option>
+                  <option value="gemini-3-pro-preview">互政AI-PRO (深度思考/较慢)</option>
                 </select>
                 <p className="mt-2 text-xs text-slate-500">
                   {modelConfig.model === 'gemini-3-flash-preview'
@@ -634,7 +643,7 @@ export const ReportGenerator: React.FC = () => {
             <div className="flex justify-between items-center">
               <span>当前内核:</span>
               <span className={`font-mono font-bold truncate max-w-[130px] ${engine === 'gemini' ? 'text-pink-300' : 'text-indigo-300'}`} title={modelConfig.model}>
-                {engine === 'gemini' ? modelConfig.model : 'GovGPT-Pro (Local)'}
+                {engine === 'gemini' ? getModelDisplayName(modelConfig.model) : '互政AI(Local)'}
               </span>
             </div>
             {engine === 'gemini' && (

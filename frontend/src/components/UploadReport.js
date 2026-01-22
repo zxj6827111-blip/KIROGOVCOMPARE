@@ -19,7 +19,7 @@ function UploadReport() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [unitName, setUnitName] = useState('');
   const [file, setFile] = useState(null);
-  const [textContent, setTextContent] = useState('');
+  const [, setTextContent] = useState(''); // Only setter used
   const [model, setModel] = useState('qwen3-235b');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -371,7 +371,8 @@ function UploadReport() {
           try {
             const detailResp = await apiClient.get(`/reports/${existing.report_id || existing.id}`);
             const detail = detailResp.data;
-            const parsedJson = detail.parsed_json || detail.latest_version?.parsed_json;
+            // 后端返回结构: detail.active_version.parsed_json
+            const parsedJson = detail.active_version?.parsed_json || detail.parsed_json || detail.latest_version?.parsed_json;
             const hasContent = parsedJson && Object.keys(parsedJson).length > 0;
             setEmptyReport(!hasContent);
           } catch (detailErr) {
@@ -472,24 +473,7 @@ function UploadReport() {
     setMessage('');
   };
 
-  // Build region path for display
-  const getRegionPath = (regionId) => {
-    const region = regions.find(r => String(r.id) === String(regionId));
-    if (!region) return '';
 
-    const path = [region.name];
-    let curr = region;
-    while (curr.parent_id) {
-      const parent = regions.find(r => r.id === curr.parent_id);
-      if (parent) {
-        path.unshift(parent.name);
-        curr = parent;
-      } else {
-        break;
-      }
-    }
-    return path.join(' / ');
-  };
 
   return (
     <div className="upload-report-page">
@@ -526,7 +510,7 @@ function UploadReport() {
                 <option value="gemini/gemini-2.5-flash">Gemini 2.5 Flash</option>
                 <option value="gemini/gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
                 <option value="gemini/gemini-2.5-pro">Gemini 2.5 Pro</option>
-                <option value="gemini/gemini-3-flash">Gemini 3.0 Flash</option>
+                <option value="gemini/gemini-3-flash">互政AI-flash</option>
               </select>
             </div>
 
