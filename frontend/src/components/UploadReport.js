@@ -510,7 +510,7 @@ function UploadReport() {
                 <option value="gemini/gemini-2.5-flash">Gemini 2.5 Flash</option>
                 <option value="gemini/gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
                 <option value="gemini/gemini-2.5-pro">Gemini 2.5 Pro</option>
-                <option value="gemini/gemini-3-flash">Gemini 3.0 Flash</option>
+                <option value="gemini/gemini-3-flash">互政AI-flash</option>
               </select>
             </div>
 
