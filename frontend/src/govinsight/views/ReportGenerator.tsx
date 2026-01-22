@@ -85,31 +85,6 @@ export const ReportGenerator: React.FC = () => {
   } as any;
 
   // Timer Logic
-  // Dynamic Year Calculation
-  const sortedYears = entity?.data ? entity.data.map(d => d.year).sort((a, b) => b - a) : [];
-  const year = sortedYears[0];
-  const current = entity?.data ? entity.data.find(d => d.year === year) : null;
-
-  useEffect(() => {
-    if (!year) return;
-    const unitName = entity?.name || '未知单位';
-    document.title = `${year}年度政务公开工作绩效评估与风险研判报告(${unitName})`;
-  }, [year, entity?.name]);
-
-  // Robust check for previous year (might not exist)
-  const prev = entity?.data?.find(d => d.year === year - 1) || {
-    ...current,
-    year: year - 1,
-    applications: {
-      newReceived: 0,
-      totalHandled: 1,
-      outcomes: { public: 0, partial: 0, unable: 0, notOpen: 0, ignore: 0 },
-      sources: { natural: 0, legal: 0 }
-    },
-    disputes: { reconsideration: { total: 0, corrected: 0 }, litigation: { total: 0, corrected: 0 } }
-  } as any;
-
-  // Timer Logic
   useEffect(() => {
     if (isGenerating) {
       setElapsedTime(0);
