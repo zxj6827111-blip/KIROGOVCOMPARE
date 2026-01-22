@@ -232,6 +232,7 @@ function BatchUpload({ onClose, isEmbedded = false }) {
         const path = [region.name];
         let current = region;
         while (current.parent_id) {
+            // eslint-disable-next-line no-loop-func
             const parent = regions.find(r => Number(r.id) === Number(current.parent_id));
             if (parent) {
                 path.unshift(parent.name);
