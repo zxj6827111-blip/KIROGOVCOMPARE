@@ -19,7 +19,7 @@ function UploadReport() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [unitName, setUnitName] = useState('');
   const [file, setFile] = useState(null);
-  const [textContent, setTextContent] = useState('');
+  const [, setTextContent] = useState(''); // Only setter used
   const [model, setModel] = useState('qwen3-235b');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -473,24 +473,7 @@ function UploadReport() {
     setMessage('');
   };
 
-  // Build region path for display
-  const getRegionPath = (regionId) => {
-    const region = regions.find(r => String(r.id) === String(regionId));
-    if (!region) return '';
 
-    const path = [region.name];
-    let curr = region;
-    while (curr.parent_id) {
-      const parent = regions.find(r => r.id === curr.parent_id);
-      if (parent) {
-        path.unshift(parent.name);
-        curr = parent;
-      } else {
-        break;
-      }
-    }
-    return path.join(' / ');
-  };
 
   return (
     <div className="upload-report-page">
