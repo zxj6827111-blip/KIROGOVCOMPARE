@@ -93,7 +93,7 @@ function BatchUpload({ onClose, isEmbedded = false }) {
     const [isDragging, setIsDragging] = useState(false);
     const [model, setModel] = useState('qwen3-235b');
     const [editingId, setEditingId] = useState(null);
-    const [batchId, setBatchId] = useState(null); // Track current batch session
+    const [, setBatchId] = useState(null); // Only setter used for batch tracking
     const fileInputRef = useRef(null);
 
     // 加载区域列表
@@ -192,7 +192,6 @@ function BatchUpload({ onClose, isEmbedded = false }) {
             // 2. 祖先上下文匹配 (关键)
             // 向上查找所有祖先，如果祖先的名字也出现在搜索词中，给予高额奖励
             let current = r;
-            let ancestorMatchCount = 0;
 
             // 防止死循环 (max depth 10)
             let depth = 0;
@@ -204,7 +203,6 @@ function BatchUpload({ onClose, isEmbedded = false }) {
                 // 注意：需要避免短名误判，但行政区划通常较独特
                 if (searchName.includes(parentName)) {
                     score += 20; // 匹配到一级祖先奖励20分
-                    ancestorMatchCount++;
                 }
 
                 current = parent;
@@ -271,20 +269,6 @@ function BatchUpload({ onClose, isEmbedded = false }) {
         }
     };
 
-    // 批量检查文件是否存在
-    const checkFilesExistence = async (fileItems) => {
-        const results = await Promise.all(fileItems.map(async (f) => {
-            if (!f.unitName || !f.year) return { id: f.id, exists: false, hasContent: false };
-            const { exists, hasContent } = await checkDuplicate(f.unitName, f.year);
-            return { id: f.id, exists, hasContent };
-        }));
-
-        setFiles(prev => prev.map(f => {
-            const res = results.find(r => r.id === f.id);
-            return res ? { ...f, duplicate: res.exists, duplicateEmpty: res.exists && !res.hasContent } : f;
-        }));
-    };
-
     // 处理文件选择
     const handleFilesSelect = useCallback((fileList) => {
         const existingCount = files.length;
@@ -313,8 +297,21 @@ function BatchUpload({ onClose, isEmbedded = false }) {
         });
 
         setFiles(prev => [...prev, ...newFiles]);
-        checkFilesExistence(newFiles);
-    }, [files.length, autoMatchRegion, checkFilesExistence]);
+
+        // Batch check existence inline to avoid useCallback dependency issues
+        (async () => {
+            const results = await Promise.all(newFiles.map(async (f) => {
+                if (!f.unitName || !f.year) return { id: f.id, exists: false, hasContent: false };
+                const { exists, hasContent } = await checkDuplicate(f.unitName, f.year);
+                return { id: f.id, exists, hasContent };
+            }));
+
+            setFiles(prev => prev.map(f => {
+                const res = results.find(r => r.id === f.id);
+                return res ? { ...f, duplicate: res.exists, duplicateEmpty: res.exists && !res.hasContent } : f;
+            }));
+        })();
+    }, [files.length, autoMatchRegion]);
 
     // 拖拽处理
     const handleDragOver = (e) => {
