@@ -5,6 +5,7 @@ import fsPromises from 'fs/promises';
 import pool from '../config/database-llm';
 import { PROJECT_ROOT, UPLOADS_TMP_DIR } from '../config/constants';
 import { reportUploadService } from '../services/ReportUploadService';
+import { consistencyCheckService } from '../services/ConsistencyCheckService';
 import { authMiddleware, requirePermission, AuthRequest } from '../middleware/auth';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 
@@ -626,6 +627,80 @@ router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
     return res.json(result);
   } catch (error: any) {
     console.error('Error in batch-check-status:', error);
+    return res.status(500).json({ error: 'internal_server_error', message: error.message });
+  }
+});
+
+// Batch run consistency checks for reports
+router.post('/reports/batch-checks/run', authMiddleware, async (req, res) => {
+  try {
+    const reportIdsRaw = req.body?.report_ids;
+    if (!Array.isArray(reportIdsRaw) || reportIdsRaw.length === 0) {
+      return res.status(400).json({ error: 'report_ids is required' });
+    }
+
+    let reportIds = reportIdsRaw.map((id: any) => Number(id)).filter((id: number) => !Number.isNaN(id) && id > 0);
+    if (reportIds.length === 0) {
+      return res.status(400).json({ error: 'report_ids is invalid' });
+    }
+
+    const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
+    if (allowedRegionIds) {
+      if (allowedRegionIds.length === 0) {
+        return res.json({ processed: 0, skipped: reportIds.length, failed: 0, results: [] });
+      }
+      const allowedRes = await pool.query(`
+        SELECT id FROM reports
+        WHERE id = ANY($1::int[])
+          AND region_id = ANY($2::int[]);
+      `, [reportIds, allowedRegionIds]);
+      reportIds = allowedRes.rows.map((row: any) => row.id);
+      if (reportIds.length === 0) {
+        return res.json({ processed: 0, skipped: 0, failed: 0, results: [] });
+      }
+    }
+
+    const versionRes = await pool.query(`
+      SELECT r.id as report_id, rv.id as version_id, rv.parsed_json
+      FROM reports r
+      JOIN report_versions rv ON rv.id = r.active_version_id
+      WHERE r.id = ANY($1::int[])
+    `, [reportIds]);
+
+    const versionRows = versionRes.rows || [];
+    const foundIds = new Set(versionRows.map((row: any) => Number(row.report_id)));
+    const results: Array<{ report_id: number; status: string; reason?: string }> = [];
+
+    for (const row of versionRows) {
+      const reportId = Number(row.report_id);
+      const versionId = Number(row.version_id);
+      const parsed = parseDbJson(row.parsed_json);
+      if (!parsed) {
+        results.push({ report_id: reportId, status: 'skipped', reason: 'no_parsed_json' });
+        continue;
+      }
+
+      try {
+        await consistencyCheckService.runAndPersist(versionId, parsed);
+        results.push({ report_id: reportId, status: 'ok' });
+      } catch (error: any) {
+        results.push({ report_id: reportId, status: 'failed', reason: error?.message || 'run_failed' });
+      }
+    }
+
+    for (const reportId of reportIds) {
+      if (!foundIds.has(Number(reportId))) {
+        results.push({ report_id: Number(reportId), status: 'skipped', reason: 'no_active_version' });
+      }
+    }
+
+    const processed = results.filter(r => r.status === 'ok').length;
+    const skipped = results.filter(r => r.status === 'skipped').length;
+    const failed = results.filter(r => r.status === 'failed').length;
+
+    return res.json({ processed, skipped, failed, results });
+  } catch (error: any) {
+    console.error('Error in batch-checks/run:', error);
     return res.status(500).json({ error: 'internal_server_error', message: error.message });
   }
 });

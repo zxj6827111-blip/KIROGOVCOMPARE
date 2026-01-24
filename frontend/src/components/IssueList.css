@@ -125,12 +125,18 @@
 
 /* Filter Bar */
 .filter-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
     margin-bottom: 20px;
 }
 
 .filter-tabs {
     display: flex;
     gap: 8px;
+    flex-wrap: wrap;
 }
 
 .filter-tab {
@@ -156,6 +162,32 @@
     background: var(--primary, #2563eb);
     border-color: var(--primary, #2563eb);
     color: #fff;
+}
+
+.batch-check-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 16px;
+    margin-left: auto;
+    background: var(--primary, #2563eb);
+    border: 1px solid var(--primary, #2563eb);
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #fff;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.batch-check-btn:hover {
+    background: #1d4ed8;
+    border-color: #1d4ed8;
+}
+
+.batch-check-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 
 /* Loading State */
@@ -444,6 +476,20 @@
 
 /* Responsive */
 @media (max-width: 768px) {
+    .filter-bar {
+        align-items: stretch;
+    }
+
+    .filter-tabs {
+        width: 100%;
+    }
+
+    .batch-check-btn {
+        width: 100%;
+        justify-content: center;
+        margin-left: 0;
+    }
+
     .summary-section {
         flex-direction: column;
     }

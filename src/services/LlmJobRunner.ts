@@ -32,7 +32,8 @@ const STEPS = {
   CANCELLED: { code: 'CANCELLED', name: '已取消', progress: 100 },
 };
 
-const POLL_INTERVAL_MS = 2000;
+const POLL_INTERVAL_MS = 5000; // 5秒轮询间隔，避免API速率限制
+const POST_JOB_COOLDOWN_MS = 3000; // 任务完成后的冷却时间
 
 export class LlmJobRunner {
   private running = false;
@@ -368,6 +369,12 @@ export class LlmJobRunner {
       }
 
       await this.processJob(job);
+
+      // 任务完成后添加冷却时间，避免过快调用 API 触发速率限制
+      if (POST_JOB_COOLDOWN_MS > 0) {
+        console.log(`[JobRunner] Cooling down for ${POST_JOB_COOLDOWN_MS}ms before next job...`);
+        await new Promise(resolve => setTimeout(resolve, POST_JOB_COOLDOWN_MS));
+      }
     } finally {
       this.processing = false;
       this.scheduleNextTick();
@@ -534,6 +541,21 @@ export class LlmJobRunner {
       throw error;
     }
 
+    // Check if we need to generate notification (after all jobs complete)
+    if (job.version_id) {
+      await this.generateNotificationIfNeeded(job.version_id);
+
+      // Auto-trigger comparison with previous year's report
+      // IMPORTANT: Run this BEFORE marking job as succeeded, so we can see logs/errors if it fails
+      try {
+        console.log(`[Job ${job.id}] Attempting to trigger auto-comparison...`);
+        await this.triggerAutoComparison(job.version_id, job.report_id);
+      } catch (err) {
+        // Log error but don't fail the check job itself, as checks technically passed
+        console.error(`[Job ${job.id}] Auto-comparison trigger failed:`, err);
+      }
+    }
+
     await pool.query(`
         UPDATE jobs 
         SET status = 'succeeded', 
@@ -543,14 +565,6 @@ export class LlmJobRunner {
             finished_at = NOW() 
         WHERE id = $4`,
       [STEPS.DONE.progress, STEPS.DONE.code, STEPS.DONE.name, job.id]);
-
-    // Check if we need to generate notification (after all jobs complete)
-    if (job.version_id) {
-      await this.generateNotificationIfNeeded(job.version_id);
-
-      // Auto-trigger comparison with previous year's report
-      await this.triggerAutoComparison(job.version_id, job.report_id);
-    }
   }
 
   private async processCompareJob(job: QueuedJob): Promise<void> {
@@ -720,11 +734,15 @@ export class LlmJobRunner {
     if (!reportId) return;
 
     // 1. Get current report details (region, year)
-    const currentRes = await pool.query('SELECT region_id, year FROM reports WHERE id = $1', [reportId]);
+    const currentRes = await pool.query('SELECT region_id, year, unit_name FROM reports WHERE id = $1', [reportId]);
     const currentReport = currentRes.rows[0];
-    if (!currentReport) return;
+    if (!currentReport) {
+      console.log(`[AutoCompare] Report ${reportId} not found, skipping.`);
+      return;
+    }
 
     const prevYear = currentReport.year - 1;
+    console.log(`[AutoCompare] Triggered for Report ${reportId} (${currentReport.unit_name}, ${currentReport.year}). Looking for year ${prevYear}...`);
 
     // 2. Find previous year's active report for same region
     const prevRes = await pool.query(`
@@ -736,11 +754,11 @@ export class LlmJobRunner {
 
     const prevReport = prevRes.rows[0];
     if (!prevReport) {
-      console.log(`[AutoCompare] No previous year (${prevYear}) report found for region ${currentReport.region_id}. Skipping.`);
+      console.log(`[AutoCompare] No active report found for region ${currentReport.region_id} in year ${prevYear}. Skipping comparison.`);
       return;
     }
 
-    console.log(`[AutoCompare] Found previous report ${prevReport.id}. Triggering comparison...`);
+    console.log(`[AutoCompare] Found previous report ${prevReport.id}. Creating comparison job...`);
 
     // 3. Create or Update Comparison Record
     // We want year_a = min, year_b = max to keep it ordered

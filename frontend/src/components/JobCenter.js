@@ -541,7 +541,7 @@ function JobCenter() {
                                         style={{ width: '100px' }}
                                     >
                                         <option value="">省/直辖市</option>
-                                        {regions.filter(r => r.level === 1).map((r) => (
+                                        {regions.filter(r => r.level === 1 || (!r.parent_id && !r.level)).map((r) => (
                                             <option key={r.id} value={r.id}>{r.name}</option>
                                         ))}
                                     </select>
@@ -553,7 +553,7 @@ function JobCenter() {
                                         disabled={!filters.province_id}
                                     >
                                         <option value="">市/地区</option>
-                                        {regions.filter(r => r.level === 2 && r.parent_id === Number(filters.province_id)).map((r) => (
+                                        {filters.province_id && regions.filter(r => String(r.parent_id) === String(filters.province_id)).map((r) => (
                                             <option key={r.id} value={r.id}>{r.name}</option>
                                         ))}
                                     </select>
@@ -565,7 +565,7 @@ function JobCenter() {
                                         disabled={!filters.city_id}
                                     >
                                         <option value="">区/县</option>
-                                        {regions.filter(r => r.level === 3 && r.parent_id === Number(filters.city_id)).map((r) => (
+                                        {filters.city_id && regions.filter(r => String(r.parent_id) === String(filters.city_id)).map((r) => (
                                             <option key={r.id} value={r.id}>{r.name}</option>
                                         ))}
                                     </select>

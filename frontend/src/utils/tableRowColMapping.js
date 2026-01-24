@@ -127,21 +127,168 @@ export const TABLE2_ROW_COL_MAP = {
     'activeDisclosureData.normativeDocuments.currentYearValid': { row: 3, col: 5, name: '本年有效' },
 };
 
-// 获取路径的行列信息
-export const getRowColFromPath = (path) => {
-    if (!path) return null;
+// 新版：统一解析三张表的位置（行/列）
+const TABLE3_COLUMN_LABELS = {
+    naturalPerson: '自然人',
+    'legalPerson.commercial': '商业企业',
+    'legalPerson.research': '科研机构',
+    'legalPerson.social': '社会公益组织',
+    'legalPerson.legal': '法律服务机构',
+    'legalPerson.other': '其他',
+    total: '总计',
+};
 
-    // 尝试表三映射
+const TABLE3_ROW_LABELS = {
+    newReceived: '一、本年新收政府信息公开申请数量',
+    carriedOver: '二、上年结转政府信息公开申请数量',
+    'results.granted': '三、本年度办理结果 / （一）予以公开',
+    'results.partialGrant': '三、本年度办理结果 / （二）部分公开',
+    'results.denied.stateSecret': '三、本年度办理结果 / （三）不予公开 / 1.属于国家秘密',
+    'results.denied.lawForbidden': '三、本年度办理结果 / （三）不予公开 / 2.其他法律行政法规禁止公开',
+    'results.denied.safetyStability': '三、本年度办理结果 / （三）不予公开 / 3.危及“三安全一稳定”',
+    'results.denied.thirdPartyRights': '三、本年度办理结果 / （三）不予公开 / 4.保护第三方合法权益',
+    'results.denied.internalAffairs': '三、本年度办理结果 / （三）不予公开 / 5.属于三类内部事务信息',
+    'results.denied.processInfo': '三、本年度办理结果 / （三）不予公开 / 6.属于四类过程性信息',
+    'results.denied.enforcementCase': '三、本年度办理结果 / （三）不予公开 / 7.属于行政执法案卷',
+    'results.denied.adminQuery': '三、本年度办理结果 / （三）不予公开 / 8.属于行政查询事项',
+    'results.unableToProvide.noInfo': '三、本年度办理结果 / （四）无法提供 / 1.本机关不掌握相关政府信息',
+    'results.unableToProvide.needCreation': '三、本年度办理结果 / （四）无法提供 / 2.没有现成信息需要另行制作',
+    'results.unableToProvide.unclear': '三、本年度办理结果 / （四）无法提供 / 3.补正后申请内容仍不明确',
+    'results.notProcessed.complaint': '三、本年度办理结果 / （五）不予处理 / 1.信访举报投诉类申请',
+    'results.notProcessed.repeat': '三、本年度办理结果 / （五）不予处理 / 2.重复申请',
+    'results.notProcessed.publication': '三、本年度办理结果 / （五）不予处理 / 3.要求提供公开出版物',
+    'results.notProcessed.massiveRequests': '三、本年度办理结果 / （五）不予处理 / 4.无正当理由大量反复申请',
+    'results.notProcessed.confirmInfo': '三、本年度办理结果 / （五）不予处理 / 5.要求行政机关确认或重新出具已获取信息',
+    'results.other.overdueCorrection': '三、本年度办理结果 / （六）其他处理 / 1.申请人无正当理由逾期不补正',
+    'results.other.overdueFee': '三、本年度办理结果 / （六）其他处理 / 2.申请人逾期未按收费通知要求缴纳费用',
+    'results.other.otherReasons': '三、本年度办理结果 / （六）其他处理 / 3.其他',
+    'results.totalProcessed': '三、本年度办理结果 / （七）总计',
+    'results.carriedForward': '四、结转下年度继续办理',
+};
+
+const TABLE4_ROW_LABELS = {
+    review: '行政复议',
+    litigationDirect: '未经复议直接起诉',
+    litigationPostReview: '复议后起诉',
+};
+
+const TABLE4_COL_LABELS = {
+    maintain: '结果维持',
+    correct: '结果纠正',
+    other: '其他结果',
+    unfinished: '尚未审结',
+    total: '总计',
+};
+
+const TABLE2_ROW_LABELS = {
+    regulations: '规章',
+    normativeDocuments: '规范性文件',
+    licensing: '行政许可',
+    punishment: '行政处罚',
+    coercion: '行政强制',
+    fees: '行政事业性收费',
+};
+
+const TABLE2_COL_LABELS = {
+    made: '本年制发件数',
+    repealed: '本年废止件数',
+    valid: '现行有效件数',
+    processed: '本年处理决定数量',
+    amount: '本年收费金额',
+};
+
+export const normalizeTablePath = (rawPath) => {
+    if (!rawPath) return null;
+    if (rawPath.startsWith('sections[table_2].')) {
+        return `activeDisclosureData.${rawPath.replace('sections[table_2].', '')}`;
+    }
+    return rawPath;
+};
+
+const getTable3Location = (path) => {
+    if (!path || !path.startsWith('tableData.')) return null;
+
+    const raw = path.replace('tableData.', '');
+    const parts = raw.split('.');
+    if (parts.length < 2) return null;
+
+    let entityKey = parts[0];
+    let fieldPathParts = parts.slice(1);
+
+    if (entityKey === 'legalPerson') {
+        if (!parts[1]) return null;
+        entityKey = `legalPerson.${parts[1]}`;
+        fieldPathParts = parts.slice(2);
+    }
+
+    const fieldPath = fieldPathParts.join('.');
+    const rowLabel = TABLE3_ROW_LABELS[fieldPath];
+    const colLabel = TABLE3_COLUMN_LABELS[entityKey];
+
+    if (!rowLabel && !colLabel) return null;
+
+    return {
+        table: '表三',
+        rowLabel,
+        colLabel,
+    };
+};
+
+const getTable4Location = (path) => {
+    if (!path || !path.startsWith('reviewLitigationData.')) return null;
+
+    const raw = path.replace('reviewLitigationData.', '');
+    const parts = raw.split('.');
+    if (parts.length < 2) return null;
+
+    const rowLabel = TABLE4_ROW_LABELS[parts[0]];
+    const colLabel = TABLE4_COL_LABELS[parts[1]];
+
+    if (!rowLabel && !colLabel) return null;
+
+    return {
+        table: '表四',
+        rowLabel,
+        colLabel,
+    };
+};
+
+const getTable2Location = (path) => {
+    if (!path || !path.startsWith('activeDisclosureData.')) return null;
+
+    const raw = path.replace('activeDisclosureData.', '');
+    const parts = raw.split('.');
+    if (parts.length < 2) return null;
+
+    const rowLabel = TABLE2_ROW_LABELS[parts[0]];
+    const colLabel = TABLE2_COL_LABELS[parts[1]];
+
+    if (!rowLabel && !colLabel) return null;
+
+    return {
+        table: '表二',
+        rowLabel,
+        colLabel,
+    };
+};
+
+// 获取路径的行列信息
+export const getRowColFromPath = (rawPath) => {
+    if (!rawPath) return null;
+    const path = normalizeTablePath(rawPath);
+
+    const normalized = getTable3Location(path) || getTable4Location(path) || getTable2Location(path);
+    if (normalized) return normalized;
+
+    // 兼容旧字段映射
     if (TABLE3_ROW_COL_MAP[path]) {
         return { table: '表三', ...TABLE3_ROW_COL_MAP[path] };
     }
 
-    // 尝试表四映射
     if (TABLE4_ROW_COL_MAP[path]) {
         return { table: '表四', ...TABLE4_ROW_COL_MAP[path] };
     }
 
-    // 尝试表二映射
     if (TABLE2_ROW_COL_MAP[path]) {
         return { table: '表二', ...TABLE2_ROW_COL_MAP[path] };
     }

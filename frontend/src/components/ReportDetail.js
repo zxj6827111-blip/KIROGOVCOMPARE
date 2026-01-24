@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import './ReportDetail.css';
 import { apiClient } from '../apiClient';
 import { Table2View, Table3View, Table4View } from './TableViews';
+import { normalizeTablePath } from '../utils/tableRowColMapping';
 import ParsedDataEditor from './ParsedDataEditor';
 import ConsistencyCheckView from './ConsistencyCheckView';
 
@@ -16,10 +17,14 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const [activeTab, setActiveTab] = useState('content'); // 'content' | 'checks'
   const [highlightCells, setHighlightCells] = useState([]); // 勾稽问题单元格路径
   const [highlightTexts, setHighlightTexts] = useState([]); // 勾稽问题文本
+  const [focusedCheck, setFocusedCheck] = useState(null); // 当前定位的勾稽问题
+  const [focusedCells, setFocusedCells] = useState([]); // 定位模式下的单元格路径
   const [qualityIssues, setQualityIssues] = useState({}); // 质量审计问题 { sec5: [...], sec6: [...] }
   const [showVersionHistory, setShowVersionHistory] = useState(false); // 版本历史折叠
   const [versionHistory, setVersionHistory] = useState(null); // 历史版本列表数据
   const [versionsLoading, setVersionsLoading] = useState(false);
+  const isTablePath = (p) =>
+    p && (p.includes('tableData') || p.includes('reviewLitigationData') || p.includes('activeDisclosureData'));
 
   const handleBack = () => {
     if (onBack) return onBack();
@@ -44,6 +49,11 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     };
 
     fetchDetail();
+  }, [reportId]);
+
+  useEffect(() => {
+    setFocusedCheck(null);
+    setFocusedCells([]);
   }, [reportId]);
 
   // 获取勾稽校验问题数据用于高亮
@@ -78,12 +88,34 @@ function ReportDetail({ reportId: propReportId, onBack }) {
               }
             }
 
-            const paths = item.evidence?.paths || [];
-            console.log('[DEBUG ReportDetail] Item:', item.title, 'paths:', paths);
-            paths.forEach(p => {
-              if (p.includes('tableData') || p.includes('reviewLitigationData')) {
-                cellPaths.push(p);
-              } else if (p.includes('text') || p.includes('content')) {
+            // New logic: Check distinct left/right paths first
+            const leftPaths = item.evidence?.leftPaths || [];
+            const rightPaths = item.evidence?.rightPaths || [];
+            const allPaths = item.evidence?.paths || [];
+
+            if (leftPaths.length > 0 || rightPaths.length > 0) {
+              leftPaths.forEach(p => {
+                const normalized = normalizeTablePath(p);
+                if (isTablePath(normalized)) cellPaths.push({ path: normalized, type: 'left' });
+              });
+              rightPaths.forEach(p => {
+                const normalized = normalizeTablePath(p);
+                if (isTablePath(normalized)) cellPaths.push({ path: normalized, type: 'right' });
+              });
+            } else {
+              // Fallback for logic without split paths
+              allPaths.forEach(p => {
+                const normalized = normalizeTablePath(p);
+                if (isTablePath(normalized)) {
+                  // Default to 'diff' or generic highlight if we don't know
+                  cellPaths.push({ path: normalized, type: 'diff' });
+                }
+              });
+            }
+
+            // Text Info extraction
+            allPaths.forEach(p => {
+              if (p.includes('text') || p.includes('content')) {
                 // 提取文本问题信息
                 const textValue = item.evidence?.values?.textValue;
                 if (textValue) {
@@ -104,6 +136,50 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     } catch (err) {
       console.error('Failed to fetch highlights:', err);
     }
+  };
+
+  const buildFocusCells = (leftPaths = [], rightPaths = []) => {
+    const toCells = (paths, type) =>
+      (paths || [])
+        .map((p) => normalizeTablePath(p))
+        .filter((p) => p && isTablePath(p))
+        .map((path) => ({ path, type, scope: 'focus' }));
+
+    return [...toCells(leftPaths, 'left'), ...toCells(rightPaths, 'right')];
+  };
+
+  const scrollToFirstCell = (paths = []) => {
+    const targets = (paths || [])
+      .map((p) => normalizeTablePath(p))
+      .filter((p) => p && isTablePath(p));
+
+    if (targets.length === 0) return;
+
+    setTimeout(() => {
+      for (const path of targets) {
+        const cell = document.querySelector(`[data-cell-path="${path}"]`);
+        if (cell) {
+          cell.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+          break;
+        }
+      }
+    }, 160);
+  };
+
+  const handleLocateIssue = ({ title, leftPaths = [], rightPaths = [] }) => {
+    const focusCells = buildFocusCells(leftPaths, rightPaths);
+    if (focusCells.length === 0) return;
+
+    setFocusedCheck({ title: title || '勾稽关系定位' });
+    setFocusedCells(focusCells);
+    setActiveTab('content');
+    setShowParsed(true);
+    scrollToFirstCell(leftPaths.length > 0 ? leftPaths : rightPaths);
+  };
+
+  const clearFocus = () => {
+    setFocusedCheck(null);
+    setFocusedCells([]);
   };
 
   // 加载报告时同时获取高亮数据
@@ -244,6 +320,9 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     return <span>{elements}</span>;
   };
 
+  const isFocusMode = focusedCells.length > 0 && focusedCheck;
+  const activeHighlightCells = isFocusMode ? focusedCells : highlightCells;
+
   const renderParsedContent = (parsed) => {
     if (!parsed) return <p className="meta">暂无解析内容</p>;
 
@@ -302,6 +381,16 @@ function ReportDetail({ reportId: propReportId, onBack }) {
           </div>
         </div>
 
+        {isFocusMode && (
+          <div className="focus-banner">
+            <div className="focus-title">定位：{focusedCheck?.title}</div>
+            <div className="focus-actions">
+              <span className="focus-legend">蓝色=左值，橙色=右值，角标显示左/右</span>
+              <button className="btn-clear-focus" onClick={clearFocus}>清除定位</button>
+            </div>
+          </div>
+        )}
+
         {showParsed && (
           <div className="sections-container">
             {sections.map((section, idx) => (
@@ -346,13 +435,13 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                     <div className="text-content">{highlightTextIssues(section.content, highlightTexts)}</div>
                   )}
                   {section.type === 'table_2' && section.activeDisclosureData && (
-                    <Table2View data={section.activeDisclosureData} />
+                    <Table2View data={section.activeDisclosureData} highlightCells={activeHighlightCells} />
                   )}
                   {section.type === 'table_3' && section.tableData && (
-                    <Table3View data={section.tableData} compact={true} highlightCells={highlightCells} />
+                    <Table3View data={section.tableData} compact={true} highlightCells={activeHighlightCells} />
                   )}
                   {section.type === 'table_4' && section.reviewLitigationData && (
-                    <Table4View data={section.reviewLitigationData} highlightCells={highlightCells} />
+                    <Table4View data={section.reviewLitigationData} highlightCells={activeHighlightCells} />
                   )}
                   {!['text', 'table_2', 'table_3', 'table_4'].includes(section.type) && (
                     <div className="unknown-type">
@@ -642,6 +731,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                 <ConsistencyCheckView
                   reportId={reportId}
                   filterGroups={['table2', 'table3', 'table4', 'text']}
+                  onLocate={handleLocateIssue}
                   onEdit={(paths) => {
                     const editData = {
                       data: report.active_version?.parsed_json,

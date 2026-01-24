@@ -68,6 +68,15 @@ function CityIndex({ onSelectReport, onViewComparison }) {
   const [comparing, setComparing] = useState(false);
   const [activeTab, setActiveTab] = useState('all'); // 'all', 'district', 'department'
   const [searchTerm, setSearchTerm] = useState(''); // Search filter
+  const [hideEmptyReports, setHideEmptyReports] = useState(true); // 默认隐藏无内容报告
+  const [selectedYear, setSelectedYear] = useState('all'); // 年份筛选
+  const [batchChecking, setBatchChecking] = useState(false);
+
+  // extract all unique years from reports
+  const availableYears = useMemo(() => {
+    const years = new Set(reports.map(r => r.year));
+    return Array.from(years).sort((a, b) => b - a); // 降序排列
+  }, [reports]);
 
   // 当 path 变化时，更新 URL 参数
   useEffect(() => {
@@ -314,10 +323,26 @@ function CityIndex({ onSelectReport, onViewComparison }) {
   const allCards = childrenOf(currentParentId);
 
   const filteredCards = useMemo(() => {
-    return allCards.filter(c => {
-      // Search Filter
-      if (searchTerm && !c.name.includes(searchTerm)) return false;
+    // 如果有搜索词，进行全局搜索（搜索所有区域）
+    if (searchTerm && searchTerm.trim()) {
+      const term = searchTerm.trim().toLowerCase();
+      return regions.filter(r => {
+        // 名称包含搜索词
+        if (!r.name.toLowerCase().includes(term)) return false;
 
+        // Tab Filter
+        if (activeTab === 'all') return true;
+        const type = getRegionType(r.name);
+        if (activeTab === 'district') {
+          return type === 'district' || type === 'town';
+        }
+        if (activeTab === 'department') return type === 'department';
+        return true;
+      });
+    }
+
+    // 无搜索词时，只显示当前层级子节点
+    return allCards.filter(c => {
       // Tab Filter
       if (activeTab === 'all') return true;
       const type = getRegionType(c.name);
@@ -330,18 +355,20 @@ function CityIndex({ onSelectReport, onViewComparison }) {
       if (activeTab === 'department') return type === 'department';
       return true;
     });
-  }, [allCards, searchTerm, activeTab]);
+  }, [allCards, regions, searchTerm, activeTab]);
 
   const currentReports = useMemo(() => {
     if (!currentParentId) return [];
 
+    let combined = [];
+
     // 1. Reports belonging directly to this region node
     const direct = reports.filter((r) => String(r.region_id) === String(currentParentId));
+    combined = [...combined, ...direct];
 
     // 2. Reports belonging to "People's Government" child node (e.g. "X County People's Government")
     // These are effectively the region's main reports and should be shown here.
     const currentRegionName = regions.find(r => String(r.id) === String(currentParentId))?.name;
-    let govReports = [];
 
     if (currentRegionName) {
       const govChild = regions.find(r =>
@@ -349,15 +376,61 @@ function CityIndex({ onSelectReport, onViewComparison }) {
         r.name === `${currentRegionName}人民政府`
       );
       if (govChild) {
-        govReports = reports.filter(r => String(r.region_id) === String(govChild.id));
+        const govReports = reports.filter(r => String(r.region_id) === String(govChild.id));
+        combined = [...combined, ...govReports];
       }
     }
 
     // Combine and sort by year ascending (from oldest to newest)
-    const combined = [...direct, ...govReports];
     combined.sort((a, b) => (a.year || 0) - (b.year || 0));
     return combined;
   }, [currentParentId, reports, regions]);
+
+  const filteredReports = useMemo(() => {
+    let result = [...currentReports];
+    if (selectedYear !== 'all') {
+      result = result.filter(r => String(r.year) === String(selectedYear));
+    }
+    return result;
+  }, [currentReports, selectedYear]);
+
+  const visibleReports = useMemo(() => {
+    return filteredReports.filter(r => {
+      if (hideEmptyReports && checkStatusLoaded) {
+        const reportId = Number(r.report_id || r.id);
+        const checkStatus = checkStatusMap.get(reportId);
+        if (checkStatus?.has_content === false) return false;
+      }
+      return true;
+    });
+  }, [filteredReports, hideEmptyReports, checkStatusLoaded, checkStatusMap]);
+
+  const handleBatchCheck = async () => {
+    if (batchChecking) return;
+    const reportIds = visibleReports.map(r => r.report_id || r.id).filter(Boolean);
+    if (reportIds.length === 0) {
+      alert('当前筛选没有可校验的报告');
+      return;
+    }
+
+    if (!window.confirm(`确认对当前筛选的 ${reportIds.length} 份报告批量校验？`)) return;
+
+    setBatchChecking(true);
+    try {
+      const resp = await apiClient.post('/reports/batch-checks/run', { report_ids: reportIds });
+      const data = resp.data || {};
+      const processed = data.processed || 0;
+      const skipped = data.skipped || 0;
+      const failed = data.failed || 0;
+      await fetchCheckStatusForReports(reports);
+      alert(`批量校验完成：成功 ${processed}，跳过 ${skipped}，失败 ${failed}`);
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || '批量校验失败';
+      alert(message);
+    } finally {
+      setBatchChecking(false);
+    }
+  };
 
   // Count availability for tabs (to show counts or hide empty tabs if desired)
   const tabCounts = useMemo(() => {
@@ -440,6 +513,34 @@ function CityIndex({ onSelectReport, onViewComparison }) {
             <div className="section-header">
               <h3>{currentRegion?.name || '当前城市'}的年报</h3>
               <div className="section-actions">
+                <select
+                  value={selectedYear}
+                  onChange={(e) => setSelectedYear(e.target.value)}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid #e5e7eb',
+                    fontSize: '13px',
+                    color: '#666',
+                    marginRight: '8px',
+                    outline: 'none',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <option value="all">全部年份</option>
+                  {availableYears.map(year => (
+                    <option key={year} value={year}>{year}年</option>
+                  ))}
+                </select>
+                <button
+                  className="ghost-btn"
+                  onClick={handleBatchCheck}
+                  disabled={batchChecking || visibleReports.length === 0}
+                  title="对当前筛选报告批量运行勾稽校验"
+                >
+                  <BarChart size={16} className={batchChecking ? 'spin' : ''} />
+                  {batchChecking ? '批量校验中...' : `批量校验(${visibleReports.length})`}
+                </button>
                 {selectedForCompare.length === 2 && (
                   <button
                     className="compare-btn"
@@ -460,90 +561,102 @@ function CityIndex({ onSelectReport, onViewComparison }) {
               </div>
             )}
 
+            {/* 隐藏无内容报告开关 */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', fontSize: '13px', color: '#666' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={hideEmptyReports}
+                  onChange={(e) => setHideEmptyReports(e.target.checked)}
+                />
+                隐藏无内容报告
+              </label>
+            </div>
+
             <div className="report-grid">
-              {currentReports.map((r) => {
-                const region = regions.find(reg => reg.id === r.region_id);
-                const regionName = region?.name || '未知区域';
-                const reportTitle = `${r.year}年${regionName} 政务公开年报`;
+              {visibleReports.map((r) => {
+                  const region = regions.find(reg => reg.id === r.region_id);
+                  const regionName = region?.name || '未知区域';
+                  const reportTitle = `${r.year}年${regionName} 政务公开年报`;
 
-                return (
-                  <div
-                    key={r.report_id}
-                    className={`report-card ${selectedForCompare.includes(r.report_id) ? 'selected' : ''}`}
-                    onClick={() => onSelectReport?.(r.report_id)}
-                  >
-                    {/* ZONE 1: Header */}
-                    <div className="report-card-header">
-                      <div className="header-top">
-                        <input
-                          type="checkbox"
-                          checked={selectedForCompare.includes(r.report_id)}
-                          onChange={(e) => toggleReportSelection(e, r.report_id)}
-                          onClick={(e) => e.stopPropagation()}
-                          className="report-checkbox"
-                        />
-                        <span className="year-badge">{r.year}年度</span>
+                  return (
+                    <div
+                      key={r.report_id}
+                      className={`report-card ${selectedForCompare.includes(r.report_id) ? 'selected' : ''}`}
+                      onClick={() => onSelectReport?.(r.report_id)}
+                    >
+                      {/* ZONE 1: Header */}
+                      <div className="report-card-header">
+                        <div className="header-top">
+                          <input
+                            type="checkbox"
+                            checked={selectedForCompare.includes(r.report_id)}
+                            onChange={(e) => toggleReportSelection(e, r.report_id)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="report-checkbox"
+                          />
+                          <span className="year-badge">{r.year}年度</span>
+                        </div>
+                        <h4 className="report-title-text">{regionName}政务公开年报</h4>
                       </div>
-                      <h4 className="report-title-text">{regionName}政务公开年报</h4>
-                    </div>
 
-                    {/* ZONE 2: Status */}
-                    <div className="report-card-status">
-                      {(() => {
-                        const reportId = Number(r.report_id || r.id);
-                        const checkStatus = checkStatusMap.get(reportId);
+                      {/* ZONE 2: Status */}
+                      <div className="report-card-status">
+                        {(() => {
+                          const reportId = Number(r.report_id || r.id);
+                          const checkStatus = checkStatusMap.get(reportId);
 
-                        if (!checkStatusLoaded && !checkStatus) {
-                          return <span className="status-pill loading">加载中...</span>;
-                        }
+                          if (!checkStatusLoaded && !checkStatus) {
+                            return <span className="status-pill loading">加载中...</span>;
+                          }
 
-                        if (checkStatus?.has_content === false) {
-                          return <span className="status-pill gray">⚪ 无内容</span>;
-                        }
+                          if (checkStatus?.has_content === false) {
+                            return <span className="status-pill gray">⚪ 无内容</span>;
+                          }
 
-                        if (!checkStatus || checkStatus.total === 0) {
+                          if (!checkStatus || checkStatus.total === 0) {
+                            return (
+                              <span className="status-pill green">
+                                <CheckCircle size={14} />
+                                <span>无问题发现</span>
+                              </span>
+                            );
+                          }
+
                           return (
-                            <span className="status-pill green">
-                              <CheckCircle size={14} />
-                              <span>无问题发现</span>
+                            <span className="status-pill red">
+                              <AlertCircle size={14} />
+                              <span>发现 {checkStatus.total} 个问题</span>
                             </span>
                           );
-                        }
+                        })()}
+                      </div>
 
-                        return (
-                          <span className="status-pill red">
-                            <AlertCircle size={14} />
-                            <span>发现 {checkStatus.total} 个问题</span>
-                          </span>
-                        );
-                      })()}
-                    </div>
-
-                    {/* ZONE 3: Footer Actions */}
-                    <div className="report-card-footer">
-                      <div className="footer-date">{r.created_at?.slice(0, 10)}</div>
-                      <div className="footer-actions">
-                        <button
-                          className="action-btn-ghost blue"
-                          onClick={(e) => { e.stopPropagation(); onSelectReport?.(r.report_id); }}
-                          title="查看详情"
-                        >
-                          <Eye size={16} />
-                          <span>查看</span>
-                        </button>
-                        <button
-                          className="action-btn-ghost red"
-                          onClick={(e) => handleDeleteReport(e, r.report_id)}
-                          title="删除报告"
-                        >
-                          <Trash2 size={16} />
-                          <span>删除</span>
-                        </button>
+                      {/* ZONE 3: Footer Actions */}
+                      <div className="report-card-footer">
+                        <div className="footer-date">{r.created_at?.slice(0, 10)}</div>
+                        <div className="footer-actions">
+                          <button
+                            className="action-btn-ghost blue"
+                            onClick={(e) => { e.stopPropagation(); onSelectReport?.(r.report_id); }}
+                            title="查看详情"
+                          >
+                            <Eye size={16} />
+                            <span>查看</span>
+                          </button>
+                          <button
+                            className="action-btn-ghost red"
+                            onClick={(e) => handleDeleteReport(e, r.report_id)}
+                            title="删除报告"
+                          >
+                            <Trash2 size={16} />
+                            <span>删除</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
             </div>
           </div>
         )
