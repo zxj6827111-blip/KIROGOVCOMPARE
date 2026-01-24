@@ -501,8 +501,10 @@
 }
 
 .status-pill.red {
-  background: #fee2e2;
-  color: #dc2626;
+  background: #fecaca;
+  color: #b91c1c;
+  font-weight: 600;
+  border: 1px solid #f87171;
 }
 
 .status-pill.gray {

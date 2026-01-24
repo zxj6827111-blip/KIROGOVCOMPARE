@@ -2,8 +2,24 @@ import React from 'react';
 import { TrendingUp } from 'lucide-react';
 
 // Table 2: Active Disclosure - Matched to PDF format
-const Table2View = ({ data }) => {
+const Table2View = ({ data, highlightCells = [] }) => {
   if (!data) return null;
+
+  const renderCell = (value, path, colSpan = 1) => {
+    const fullPath = path ? `activeDisclosureData.${path}` : null;
+    const meta = fullPath ? getHighlightMeta(fullPath, highlightCells) : { className: '', sideLabel: '' };
+
+    return (
+      <td
+        colSpan={colSpan}
+        className={meta.className}
+        data-cell-path={fullPath || undefined}
+        data-hl-side={meta.sideLabel || undefined}
+      >
+        {value}
+      </td>
+    );
+  };
 
   return (
     <div className="comparison-table-container">
@@ -23,15 +39,15 @@ const Table2View = ({ data }) => {
         <tbody>
           <tr>
             <td>规章</td>
-            <td>{data.regulations?.made}</td>
-            <td>{data.regulations?.repealed}</td>
-            <td>{data.regulations?.valid}</td>
+            {renderCell(data.regulations?.made, 'regulations.made')}
+            {renderCell(data.regulations?.repealed, 'regulations.repealed')}
+            {renderCell(data.regulations?.valid, 'regulations.valid')}
           </tr>
           <tr>
             <td>行政规范性文件</td>
-            <td>{data.normativeDocuments?.made}</td>
-            <td>{data.normativeDocuments?.repealed}</td>
-            <td>{data.normativeDocuments?.valid}</td>
+            {renderCell(data.normativeDocuments?.made, 'normativeDocuments.made')}
+            {renderCell(data.normativeDocuments?.repealed, 'normativeDocuments.repealed')}
+            {renderCell(data.normativeDocuments?.valid, 'normativeDocuments.valid')}
           </tr>
 
           {/* Header 2 */}
@@ -44,7 +60,7 @@ const Table2View = ({ data }) => {
           </tr>
           <tr>
             <td>行政许可</td>
-            <td colSpan={3}>{data.licensing?.processed}</td>
+            {renderCell(data.licensing?.processed, 'licensing.processed', 3)}
           </tr>
 
           {/* Header 3 */}
@@ -57,11 +73,11 @@ const Table2View = ({ data }) => {
           </tr>
           <tr>
             <td>行政处罚</td>
-            <td colSpan={3}>{data.punishment?.processed}</td>
+            {renderCell(data.punishment?.processed, 'punishment.processed', 3)}
           </tr>
           <tr>
             <td>行政强制</td>
-            <td colSpan={3}>{data.coercion?.processed}</td>
+            {renderCell(data.coercion?.processed, 'coercion.processed', 3)}
           </tr>
 
           {/* Header 4 */}
@@ -74,12 +90,56 @@ const Table2View = ({ data }) => {
           </tr>
           <tr>
             <td>行政事业性收费</td>
-            <td colSpan={3}>{data.fees?.amount}</td>
+            {renderCell(data.fees?.amount, 'fees.amount', 3)}
           </tr>
         </tbody>
       </table>
     </div>
   );
+};
+
+// Helper to determine highlight class + side label
+const getHighlightMeta = (fullPath, highlightCells) => {
+  if (!highlightCells || highlightCells.length === 0 || !fullPath) {
+    return { className: '', sideLabel: '' };
+  }
+
+  const matches = highlightCells.filter(item => {
+    const p = typeof item === 'string' ? item : item.path;
+    return p === fullPath || (p && fullPath && (p.includes(fullPath) || fullPath.includes(p)));
+  });
+
+  if (matches.length === 0) return { className: '', sideLabel: '' };
+
+  const focusMatches = matches.filter(m => typeof m === 'object' && m.scope === 'focus');
+  const effectiveMatches = focusMatches.length > 0 ? focusMatches : matches;
+  const types = new Set(effectiveMatches.map(m => typeof m === 'string' ? 'diff' : m.type));
+
+  if (focusMatches.length > 0) {
+    const hasLeft = types.has('left');
+    const hasRight = types.has('right');
+    let sideLabel = '';
+    if (hasLeft && hasRight) sideLabel = '左右';
+    else if (hasLeft) sideLabel = '左';
+    else if (hasRight) sideLabel = '右';
+
+    if (hasLeft && hasRight) return { className: 'cell-focus-both', sideLabel };
+    if (hasLeft) return { className: 'cell-focus-left', sideLabel };
+    if (hasRight) return { className: 'cell-focus-right', sideLabel };
+    return { className: 'cell-focus', sideLabel };
+  }
+
+  if (types.has('left') && types.has('right')) {
+    return { className: 'bg-purple-50 ring-2 ring-purple-500 ring-inset text-purple-700 font-bold', sideLabel: '' };
+  }
+  if (types.has('left')) {
+    return { className: 'bg-blue-50 ring-2 ring-blue-500 ring-inset text-blue-700 font-bold', sideLabel: '' };
+  }
+  if (types.has('right')) {
+    return { className: 'bg-indigo-50 ring-2 ring-indigo-500 ring-inset text-indigo-700 font-bold', sideLabel: '' };
+  }
+
+  return { className: 'bg-red-50 ring-2 ring-red-500 ring-inset text-red-700 font-bold', sideLabel: '' };
 };
 
 // Table 3 View
@@ -90,12 +150,6 @@ const Table3View = ({ data, compact = false, highlightCells = [] }) => {
     if (key === 'naturalPerson') return data.naturalPerson;
     if (key === 'total') return data.total;
     return data.legalPerson?.[key];
-  };
-
-  const shouldHighlight = (category, fieldPath) => {
-    if (!highlightCells || highlightCells.length === 0) return false;
-    const fullPath = `tableData.${category}.${fieldPath}`;
-    return highlightCells.some(p => p === fullPath || p.includes(fullPath) || fullPath.includes(p));
   };
 
   const val = (cat, path) => {
@@ -127,10 +181,15 @@ const Table3View = ({ data, compact = false, highlightCells = [] }) => {
   };
 
   const renderCell = (v, category = null, fieldPath = null) => {
-    const highlight = category && fieldPath ? shouldHighlight(category, fieldPath) : false;
-    const highlightClass = highlight ? 'cell-warning' : '';
+    const fullPath = category && fieldPath ? `tableData.${category}.${fieldPath}` : null;
+    const meta = fullPath ? getHighlightMeta(fullPath, highlightCells) : { className: '', sideLabel: '' };
+
     return (
-      <td className={`text-center ${highlightClass}`}>
+      <td
+        className={`text-center ${meta.className}`}
+        data-cell-path={fullPath || undefined}
+        data-hl-side={meta.sideLabel || undefined}
+      >
         {v}
       </td>
     );
@@ -333,17 +392,16 @@ const Table3View = ({ data, compact = false, highlightCells = [] }) => {
 const Table4View = ({ data, highlightCells = [] }) => {
   if (!data) return null;
 
-  const shouldHighlight = (category, field) => {
-    if (!highlightCells || highlightCells.length === 0) return false;
-    const fullPath = `reviewLitigationData.${category}.${field}`;
-    return highlightCells.some(p => p === fullPath || p.includes(fullPath) || fullPath.includes(p));
-  };
-
   const renderCell = (value, category, field, extraClass = '') => {
-    const highlight = shouldHighlight(category, field);
-    const highlightClass = highlight ? 'cell-warning' : '';
+    const fullPath = `reviewLitigationData.${category}.${field}`;
+    const meta = getHighlightMeta(fullPath, highlightCells);
+
     return (
-      <td className={`${extraClass} ${highlightClass}`}>
+      <td
+        className={`${extraClass} ${meta.className}`}
+        data-cell-path={fullPath}
+        data-hl-side={meta.sideLabel || undefined}
+      >
         {value}
       </td>
     );
@@ -399,7 +457,7 @@ const Table4View = ({ data, highlightCells = [] }) => {
             {renderCell(data.litigationPostReview?.correct, 'litigationPostReview', 'correct')}
             {renderCell(data.litigationPostReview?.other, 'litigationPostReview', 'other')}
             {renderCell(data.litigationPostReview?.unfinished, 'litigationPostReview', 'unfinished')}
-            <td className="font-bold">{data.litigationPostReview?.total}</td>
+            {renderCell(data.litigationPostReview?.total, 'litigationPostReview', 'total', 'font-bold')}
           </tr>
         </tbody>
       </table>

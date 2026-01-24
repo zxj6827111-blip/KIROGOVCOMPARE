@@ -85,6 +85,8 @@ export interface ConsistencyItem {
     autoStatus: AutoStatus;
     evidenceJson: {
         paths: string[];
+        leftPaths?: string[];  // 左值数据来源路径
+        rightPaths?: string[]; // 右值数据来源路径
         values: Record<string, any>;
         textMatches?: Array<{ text: string; position?: number }>;
     };
@@ -147,7 +149,9 @@ export class ConsistencyCheckService {
         rightValue: number | null,
         tolerance: number,
         paths: string[],
-        values: Record<string, any>
+        values: Record<string, any>,
+        leftPaths?: string[],   // Added
+        rightPaths?: string[]   // Added
     ): ConsistencyItem {
         const fingerprint = this.generateFingerprint(groupKey, checkKey, expr);
 
@@ -176,7 +180,7 @@ export class ConsistencyCheckService {
             delta,
             tolerance,
             autoStatus,
-            evidenceJson: { paths, values },
+            evidenceJson: { paths, values, leftPaths, rightPaths }, // Store distinct paths
         };
     }
 
@@ -271,8 +275,8 @@ export class ConsistencyCheckService {
                     ? components.reduce((sum, c) => sum! + c!, 0)
                     : null;
 
-                // Expand wildcards to explicit paths for frontend highlighting
-                const paths = [
+                // Left Paths: All components
+                const leftPaths = [
                     `${basePath}.results.granted`,
                     `${basePath}.results.partialGrant`,
                     // Denied (8 items)
@@ -298,8 +302,13 @@ export class ConsistencyCheckService {
                     `${basePath}.results.other.overdueCorrection`,
                     `${basePath}.results.other.overdueFee`,
                     `${basePath}.results.other.otherReasons`,
-                    `${basePath}.results.totalProcessed`,
                 ];
+
+                // Right Path: Total
+                const rightPaths = [`${basePath}.results.totalProcessed`];
+
+                // Combined paths for backward compatibility or general highlighting
+                const paths = [...leftPaths, ...rightPaths];
 
                 const values: Record<string, any> = {
                     granted,
@@ -320,7 +329,9 @@ export class ConsistencyCheckService {
                     totalProcessed,
                     0,
                     paths,
-                    values
+                    values,
+                    leftPaths,  // Pass left paths
+                    rightPaths  // Pass right paths
                 ));
             }
 
@@ -337,6 +348,15 @@ export class ConsistencyCheckService {
                 ? totalProcessed + carriedForward
                 : null;
 
+            const identityLeftPaths = [
+                `${basePath}.newReceived`,
+                `${basePath}.carriedOver`,
+            ];
+            const identityRightPaths = [
+                `${basePath}.results.totalProcessed`,
+                `${basePath}.results.carriedForward`,
+            ];
+
             items.push(this.createItem(
                 'table3',
                 `t3_identity_${entityKey.replace('.', '_')}`,
@@ -345,13 +365,10 @@ export class ConsistencyCheckService {
                 leftInput,
                 rightOutput,
                 0,
-                [
-                    `${basePath}.newReceived`,
-                    `${basePath}.carriedOver`,
-                    `${basePath}.results.totalProcessed`,
-                    `${basePath}.results.carriedForward`,
-                ],
-                { newReceived, carriedOver, totalProcessed, carriedForward }
+                [...identityLeftPaths, ...identityRightPaths],
+                { newReceived, carriedOver, totalProcessed, carriedForward },
+                identityLeftPaths,
+                identityRightPaths
             ));
         }
 
@@ -415,7 +432,7 @@ export class ConsistencyCheckService {
                 'legalPerson.other',
             ];
 
-            const evidencePaths: string[] = [];
+            const leftPaths: string[] = [];
             const values: Record<string, any> = {};
             let hasAll = true;
             let sum = 0;
@@ -425,7 +442,7 @@ export class ConsistencyCheckService {
                 const val = getNestedVal(entity, path);
                 const fullPath = `tableData.${ek}.${path}`;
 
-                evidencePaths.push(fullPath);
+                leftPaths.push(fullPath);
                 values[ek] = val;
 
                 if (val === null) {
@@ -438,7 +455,7 @@ export class ConsistencyCheckService {
             const totalEntity = tableData.total;
             const totalVal = getNestedVal(totalEntity, path);
 
-            evidencePaths.push(`tableData.total.${path}`);
+            const rightPaths = [`tableData.total.${path}`];
             values['total'] = totalVal;
 
             items.push(this.createItem(
@@ -449,8 +466,10 @@ export class ConsistencyCheckService {
                 hasAll ? sum : null,
                 totalVal,
                 0,
-                evidencePaths,
-                values
+                [...leftPaths, ...rightPaths],
+                values,
+                leftPaths,
+                rightPaths
             ));
         }
 
@@ -501,13 +520,13 @@ export class ConsistencyCheckService {
             const leftSum = hasAll ? components.reduce((s, c) => s! + c!, 0) : null;
 
             const basePath = `reviewLitigationData.${key}`;
-            const paths = [
+            const leftPaths = [
                 `${basePath}.maintain`,
                 `${basePath}.correct`,
                 `${basePath}.other`,
                 `${basePath}.unfinished`,
-                `${basePath}.total`,
             ];
+            const rightPaths = [`${basePath}.total`];
 
             items.push(this.createItem(
                 'table4',
@@ -517,8 +536,10 @@ export class ConsistencyCheckService {
                 leftSum,
                 total,
                 0,
-                paths,
-                { maintain, correct, other, unfinished, total }
+                [...leftPaths, ...rightPaths],
+                { maintain, correct, other, unfinished, total },
+                leftPaths,
+                rightPaths
             ));
         }
 
@@ -633,6 +654,12 @@ export class ConsistencyCheckService {
                     const contextEnd = Math.min(section.content.length, matchStart + match[0].length + 20);
                     const context = section.content.substring(contextStart, contextEnd);
 
+                    // Parse table path(s) - handle potential expressions like "path1 + path2"
+                    const tablePaths = pattern.path.includes('+')
+                        ? pattern.path.split('+').map(p => p.trim())
+                        : [pattern.path];
+                    const textPath = `sections[${section.sectionIndex}].content`;
+
                     items.push(this.createItem(
                         'text',
                         `text_vs_${pattern.table}_${pattern.field}`,
@@ -641,7 +668,7 @@ export class ConsistencyCheckService {
                         textValue,
                         tableValue,
                         0,
-                        [pattern.path, `sections[${section.sectionIndex}].content`],
+                        [...tablePaths, textPath],
                         {
                             textValue,
                             tableValue,
@@ -649,7 +676,9 @@ export class ConsistencyCheckService {
                             context: `...${context}...`,
                             sectionTitle: section.title,
                             sectionIndex: section.sectionIndex + 1, // 1-indexed for display
-                        }
+                        },
+                        [textPath],
+                        tablePaths
                     ));
 
                     // Only match once per pattern (first occurrence)

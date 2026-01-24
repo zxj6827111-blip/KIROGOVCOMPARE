@@ -74,8 +74,17 @@ router.get('/', async (req, res) => {
         }
 
         if (unit_name !== undefined && unit_name !== '') {
-            conditions.push(`r.unit_name = $${paramIndex++}`);
-            params.push(String(unit_name));
+            // 模糊搜索：单位名称或区域名称包含搜索词
+            const searchPattern = `%${String(unit_name)}%`;
+            conditions.push(`(
+                r.unit_name ILIKE $${paramIndex}
+                OR EXISTS (
+                    SELECT 1 FROM regions rg
+                    WHERE rg.id = r.region_id AND rg.name ILIKE $${paramIndex}
+                )
+            )`);
+            paramIndex++;
+            params.push(searchPattern);
         }
 
         if (status) {

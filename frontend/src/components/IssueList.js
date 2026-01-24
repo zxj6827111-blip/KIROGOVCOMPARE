@@ -19,6 +19,7 @@ function IssueList({ regionId, regionName, onBack, onSelectReport }) {
     const [data, setData] = useState(null);
     const [expandedRegions, setExpandedRegions] = useState(new Set());
     const [filterMode, setFilterMode] = useState('issues'); // 'all' | 'issues'
+    const [batchChecking, setBatchChecking] = useState(false);
 
     const fetchData = async () => {
         setLoading(true);
@@ -64,6 +65,43 @@ function IssueList({ regionId, regionName, onBack, onSelectReport }) {
         }
         return data.regions;
     }, [data, filterMode]);
+
+    const issueReportIds = useMemo(() => {
+        const ids = new Set();
+        filteredRegions.forEach(region => {
+            (region.reports || []).forEach(report => {
+                if (report.issue_count > 0) {
+                    ids.add(report.report_id);
+                }
+            });
+        });
+        return Array.from(ids);
+    }, [filteredRegions]);
+
+    const handleBatchCheck = async () => {
+        if (batchChecking) return;
+        if (issueReportIds.length === 0) {
+            alert('当前没有需要校验的问题报告');
+            return;
+        }
+        if (!window.confirm(`确认对当前筛选的 ${issueReportIds.length} 份问题报告进行一键校验？`)) return;
+
+        setBatchChecking(true);
+        try {
+            const resp = await apiClient.post('/reports/batch-checks/run', { report_ids: issueReportIds });
+            const data = resp.data || {};
+            const processed = data.processed || 0;
+            const skipped = data.skipped || 0;
+            const failed = data.failed || 0;
+            await fetchData();
+            alert(`一键校验完成：成功 ${processed}，跳过 ${skipped}，失败 ${failed}`);
+        } catch (err) {
+            const message = err.response?.data?.error || err.message || '一键校验失败';
+            alert(message);
+        } finally {
+            setBatchChecking(false);
+        }
+    };
 
     const handleViewReport = (e, reportId) => {
         e.stopPropagation();
@@ -146,6 +184,15 @@ function IssueList({ regionId, regionName, onBack, onSelectReport }) {
                         显示全部 ({data?.regions?.length || 0})
                     </button>
                 </div>
+                <button
+                    className="batch-check-btn"
+                    onClick={handleBatchCheck}
+                    disabled={batchChecking || issueReportIds.length === 0}
+                    title="对当前筛选的问题报告一键校验"
+                >
+                    <CheckCircle size={16} className={batchChecking ? 'spin' : ''} />
+                    {batchChecking ? '一键校验中...' : `一键校验(${issueReportIds.length})`}
+                </button>
             </div>
 
             {/* Error State */}

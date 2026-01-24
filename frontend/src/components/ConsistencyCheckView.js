@@ -1,43 +1,72 @@
 import React, { useState, useEffect } from 'react';
 import './ConsistencyCheckView.css';
 import { apiClient } from '../apiClient';
+import { getRowColFromPath, normalizeTablePath } from '../utils/tableRowColMapping';
 
 // 将 JSON 路径解析为人类可读的位置描述
 const parseLocationFromPath = (path) => {
   if (!path) return null;
+  const v2 = parseLocationFromPathV2(path);
+  if (v2) return v2;
 
+  // 1. 获取基础表格和字段名称 (利用映射表获取准确的中文显式名称)
+  const rowCol = getRowColFromPath(path);
+  const tableName = rowCol ? rowCol.table : '表格数据';
+  const fieldName = rowCol ? rowCol.name : null;
+
+  // 2. 解析具体的列/分类 (如自然人、商业企业)
+  // 注意：不再使用 row/col 数字，而是直接解析语义，因为表格布局可能与内部逻辑行号视觉上不一致
+  let categoryName = '';
+  if (path.includes('naturalPerson')) categoryName = '自然人列';
+  else if (path.includes('legalPerson.commercial')) categoryName = '法人-商业企业列';
+  else if (path.includes('legalPerson.research')) categoryName = '法人-科研机构列';
+  else if (path.includes('legalPerson.social')) categoryName = '法人-社会公益列';
+  else if (path.includes('legalPerson.legal')) categoryName = '法人-法律服务列';
+  else if (path.includes('legalPerson.other')) categoryName = '法人-其他列';
+  else if (path.includes('total')) categoryName = '总计列';
+
+  // 3. 组合描述: 表名 · 分类 · 字段名
+  if (fieldName && categoryName) {
+    return `${tableName} · ${categoryName} · ${fieldName}`;
+  }
+
+  if (fieldName) {
+    return `${tableName} · ${fieldName}`;
+  }
+
+  // 4. 回退机制：如果没有精确映射，使用旧的字典映射
   const pathMappings = {
     // 表三相关路径
-    'tableData.total.results.totalProcessed': '表三 → 办理结果总计 → 总数',
-    'tableData.total.results.disclosure.activeDisclosure': '表三 → 办理结果总计 → 予以公开 → 主动公开',
-    'tableData.total.results.disclosure.dependentApplication': '表三 → 办理结果总计 → 予以公开 → 依申请公开',
-    'tableData.total.results.partialDisclosure.applyForInfo': '表三 → 办理结果总计 → 部分公开 → 申请信息',
-    'tableData.total.results.notDisclosed': '表三 → 办理结果总计 → 不予公开',
-    'tableData.total.results.notAccepted.notOwnInfo': '表三 → 办理结果总计 → 不予处理 → 非本机关信息',
-    'tableData.total.results.notAccepted.notExist': '表三 → 办理结果总计 → 不予处理 → 信息不存在',
-    'tableData.total.results.other': '表三 → 办理结果总计 → 其他处理',
-    'tableData.total.results.transferred': '表三 → 办理结果总计 → 已移送',
-    'tableData.total.channelStats': '表三 → 渠道统计',
-    'tableData.currentYear': '表三 → 本年新收申请',
-    'tableData.previousYear': '表三 → 上年结转申请',
+    'tableData.total.results.totalProcessed': '表三 · 办理结果总计 · 总数',
+    'tableData.total.results.disclosure.activeDisclosure': '表三 · 办理结果总计 · 予以公开 · 主动公开',
+    'tableData.total.results.disclosure.dependentApplication': '表三 · 办理结果总计 · 予以公开 · 依申请公开',
+    'tableData.total.results.partialDisclosure.applyForInfo': '表三 · 办理结果总计 · 部分公开 · 申请信息',
+    'tableData.total.results.notDisclosed': '表三 · 办理结果总计 · 不予公开',
+    'tableData.total.results.notAccepted.notOwnInfo': '表三 · 办理结果总计 · 不予处理 · 非本机关信息',
+    'tableData.total.results.notAccepted.notExist': '表三 · 办理结果总计 · 不予处理 · 信息不存在',
+    'tableData.total.results.other': '表三 · 办理结果总计 · 其他处理',
+    'tableData.total.results.transferred': '表三 · 办理结果总计 · 已移送',
+    'tableData.total.channelStats': '表三 · 渠道统计',
+    'tableData.currentYear': '表三 · 本年新收申请',
+    'tableData.previousYear': '表三 · 上年结转申请',
 
     // 表四相关路径
-    'reviewLitigationData.review.total': '表四 → 行政复议 → 总计',
-    'reviewLitigationData.review.maintain': '表四 → 行政复议 → 维持',
-    'reviewLitigationData.review.correct': '表四 → 行政复议 → 纠正',
-    'reviewLitigationData.review.other': '表四 → 行政复议 → 其他',
-    'reviewLitigationData.review.unfinished': '表四 → 行政复议 → 尚未审结',
-    'reviewLitigationData.litigationDirect.total': '表四 → 未经复议直接起诉 → 总计',
-    'reviewLitigationData.litigationDirect.maintain': '表四 → 未经复议直接起诉 → 维持',
-    'reviewLitigationData.litigationDirect.correct': '表四 → 未经复议直接起诉 → 纠正',
-    'reviewLitigationData.litigationPostReview.total': '表四 → 复议后起诉 → 总计',
+    'reviewLitigationData.review.total': '表四 · 行政复议 · 总计',
+    'reviewLitigationData.review.maintain': '表四 · 行政复议 · 维持',
+    'reviewLitigationData.review.correct': '表四 · 行政复议 · 纠正',
+    'reviewLitigationData.review.other': '表四 · 行政复议 · 其他',
+    'reviewLitigationData.review.unfinished': '表四 · 行政复议 · 尚未审结',
+    'reviewLitigationData.litigationDirect.total': '表四 · 未经复议直接起诉 · 总计',
+    'reviewLitigationData.litigationDirect.maintain': '表四 · 未经复议直接起诉 · 维持',
+    'reviewLitigationData.litigationDirect.correct': '表四 · 未经复议直接起诉 · 纠正',
+    'reviewLitigationData.litigationPostReview.total': '表四 · 复议后起诉 · 总计',
 
     // 表二相关路径
-    'activeDisclosureData.regulations': '表二 → 规章',
-    'activeDisclosureData.normativeDocuments': '表二 → 规范性文件',
-    'activeDisclosureData.licensing': '表二 → 行政许可',
-    'activeDisclosureData.punishment': '表二 → 行政处罚',
-    'activeDisclosureData.coercion': '表二 → 行政强制',
+    'activeDisclosureData.regulations': '表二 · 规章',
+    'activeDisclosureData.normativeDocuments': '表二 · 规范性文件',
+    'activeDisclosureData.licensing': '表二 · 行政许可',
+    'activeDisclosureData.punishment': '表二 · 行政处罚',
+    'activeDisclosureData.coercion': '表二 · 行政强制',
 
     // 正文相关
     'text.content': '正文内容',
@@ -52,40 +81,46 @@ const parseLocationFromPath = (path) => {
   for (const [key, value] of Object.entries(pathMappings)) {
     if (path.startsWith(key)) {
       const suffix = path.replace(key, '').replace(/^\./, '');
-      return suffix ? `${value} → ${suffix}` : value;
+      return suffix ? `${value} · ${suffix}` : value;
     }
   }
 
-  // 通用解析
-  const parts = path.split('.');
-  const readableParts = parts.map(part => {
-    const mappings = {
-      'tableData': '表三数据',
-      'reviewLitigationData': '表四数据',
-      'activeDisclosureData': '表二数据',
-      'text': '正文',
-      'total': '总计',
-      'results': '办理结果',
-      'channelStats': '渠道统计',
-      'currentYear': '本年新收',
-      'previousYear': '上年结转',
-      'disclosure': '公开',
-      'review': '行政复议',
-      'litigationDirect': '未经复议直接起诉',
-      'litigationPostReview': '复议后起诉',
-      'maintain': '维持',
-      'correct': '纠正',
-      'other': '其他',
-      'unfinished': '尚未审结',
-      'content': '内容',
-    };
-    return mappings[part] || part;
-  });
-
-  return readableParts.join(' → ');
+  return path; // Fallback to raw path if really nothing matches
 };
 
 // 在文本中高亮数字 - 使用 HTML 标记
+const parseLocationFromPathV2 = (rawPath) => {
+  if (!rawPath) return null;
+
+  const path = normalizeTablePath(rawPath);
+  const rowCol = getRowColFromPath(path);
+
+  if (rowCol) {
+    const parts = [rowCol.table];
+    const rowLabel = rowCol.rowLabel || rowCol.name;
+    if (rowLabel) parts.push(`行：${rowLabel}`);
+    if (rowCol.colLabel) parts.push(`列：${rowCol.colLabel}`);
+    return parts.join(' / ');
+  }
+
+  const pathMappings = {
+    'text.content': '正文内容',
+  };
+
+  if (pathMappings[path]) {
+    return pathMappings[path];
+  }
+
+  for (const [key, value] of Object.entries(pathMappings)) {
+    if (path.startsWith(key)) {
+      const suffix = path.replace(key, '').replace(/^\./, '');
+      return suffix ? `${value} / ${suffix}` : value;
+    }
+  }
+
+  return null;
+};
+
 const highlightNumber = (text, number) => {
   if (!text || number === null || number === undefined) return text;
   const numStr = String(number);
@@ -98,53 +133,68 @@ const highlightNumber = (text, number) => {
 const getLocationInfo = (item) => {
   if (!item.evidence) return null;
 
-  const result = {
-    textSource: null,  // 正文来源
-    tableSource: null, // 表格来源
-    context: null,     // 上下文（带高亮）
-    leftValue: item.left_value,
-    rightValue: item.right_value,
+  const getSourceDesc = (rawPath) => {
+    const path = normalizeTablePath(rawPath);
+    const isTablePath = path && (path.includes('tableData') || path.includes('reviewLitigationData') || path.includes('activeDisclosureData'));
+
+    if (isTablePath) {
+      const desc = parseLocationFromPath(path);
+      return { type: 'table', label: `${desc}`, path, rawPath };
+    }
+    if (path && path.includes('content')) {
+      return { type: 'text', label: '正文匹配内容', path, rawPath };
+    }
+    return { type: 'unknown', label: path || rawPath, path: path || rawPath };
   };
 
-  const values = item.evidence.values || {};
-  const paths = item.evidence.paths || [];
+  const parsePaths = (paths) => {
+    if (!paths) return [];
+    return paths.map(path => getSourceDesc(path));
+  };
 
-  // 解析表格来源路径
-  paths.forEach(path => {
-    if (path.includes('tableData') || path.includes('reviewLitigationData')) {
-      const desc = parseLocationFromPath(path);
-      if (desc && !result.tableSource) {
-        result.tableSource = desc;
-      }
-    }
-  });
+  // 优先使用分开的 paths
+  const leftSources = parsePaths(item.evidence.leftPaths);
+  const rightSources = parsePaths(item.evidence.rightPaths);
 
-  // 如果有章节标题信息（从正文匹配中）
-  if (values.sectionTitle) {
-    const sectionNum = values.sectionIndex ? `第${values.sectionIndex}部分` : '';
-    result.textSource = `${sectionNum}「${values.sectionTitle}」`;
-  } else if (values.matchedText || paths.some(p => p.includes('content'))) {
-    // 回退显示的 Text Source
-    result.textSource = '正文相关内容';
-  }
+  // 如果没有分离的 paths（旧数据兼容），尝试从 values 或 paths 猜测，或者直接返回空
+  // 但我们的后端已经保证了新数据会有 left/rightPaths
 
-  // 在上下文中高亮数字 - 独立于 sectionTitle 判断
-  if (values.context) {
-    result.context = highlightNumber(values.context, values.textValue);
-  } else if (values.matchedText) {
-    result.context = highlightNumber(values.matchedText, values.textValue);
-  }
-
-  return result;
+  return {
+    leftSources,
+    rightSources,
+    values: item.evidence.values || {},
+    context: item.evidence.values?.context || item.evidence.values?.matchedText
+      ? highlightNumber(item.evidence.values.context || item.evidence.values.matchedText, item.evidence.values.textValue)
+      : null
+  };
 };
 
-const ConsistencyCheckView = ({ reportId, onEdit, filterGroups }) => {
+const ConsistencyCheckView = ({ reportId, onEdit, filterGroups, onLocate }) => {
+  // ... (state and fetch methods same as before)
   const [checksData, setChecksData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [expandedGroups, setExpandedGroups] = useState({});
 
-  // ... fetchChecks ...
+  const isTablePath = (path) =>
+    path && (path.includes('tableData') || path.includes('reviewLitigationData') || path.includes('activeDisclosureData'));
+
+  const normalizeTablePaths = (paths) =>
+    (paths || [])
+      .map((p) => normalizeTablePath(p))
+      .filter((p) => p && isTablePath(p));
+
+  const getLocatePayload = (item) => {
+    const leftPaths = normalizeTablePaths(item?.evidence?.leftPaths);
+    const rightPaths = normalizeTablePaths(item?.evidence?.rightPaths);
+    const fallbackPaths = normalizeTablePaths(item?.evidence?.paths);
+
+    return {
+      leftPaths,
+      rightPaths,
+      fallbackPaths,
+    };
+  };
 
   const fetchChecks = async () => {
     setLoading(true);
@@ -154,11 +204,9 @@ const ConsistencyCheckView = ({ reportId, onEdit, filterGroups }) => {
       const data = response.data?.data || response.data;
       setChecksData(data);
 
-      // 根据是否有问题项来决定默认展开状态
       if (data?.groups) {
         const newExpandedState = {};
         data.groups.forEach(group => {
-          // 只展开有 FAIL 或 UNCERTAIN 状态项目的分组
           const hasProblems = group.items?.some(item =>
             item.auto_status === 'FAIL' || item.auto_status === 'UNCERTAIN'
           );
@@ -185,8 +233,6 @@ const ConsistencyCheckView = ({ reportId, onEdit, filterGroups }) => {
     setError('');
     try {
       await apiClient.post(`/reports/${reportId}/checks/run`, {});
-
-      // 等待3秒后重新获取
       setTimeout(() => {
         fetchChecks();
       }, 3000);
@@ -202,18 +248,14 @@ const ConsistencyCheckView = ({ reportId, onEdit, filterGroups }) => {
         `/reports/${reportId}/checks/items/${itemId}`,
         { human_status: humanStatus, human_comment: comment }
       );
-
-      // 刷新数据
       fetchChecks();
     } catch (err) {
       alert(err.response?.data?.error || err.message || '更新失败');
     }
   };
 
-  // 一键确认所有待复核项
   const handleBulkConfirm = async () => {
     if (!checksData?.groups) return;
-
     const pendingItems = [];
     checksData.groups.forEach(group => {
       group.items?.forEach(item => {
@@ -234,15 +276,12 @@ const ConsistencyCheckView = ({ reportId, onEdit, filterGroups }) => {
 
     setLoading(true);
     try {
-      // 批量更新所有待复核项
       for (const itemId of pendingItems) {
         await apiClient.patch(
           `/reports/${reportId}/checks/items/${itemId}`,
           { human_status: 'confirmed', human_comment: '批量确认' }
         );
       }
-
-      // 刷新数据
       fetchChecks();
     } catch (err) {
       alert(err.response?.data?.error || err.message || '批量确认失败');
@@ -275,7 +314,6 @@ const ConsistencyCheckView = ({ reportId, onEdit, filterGroups }) => {
     ? groups.filter(g => filterGroups.includes(g.group_key))
     : groups;
 
-  // Re-writing the block below with correct logic
   let displaySummary = latest_run ? { ...latest_run.summary } : { fail: 0, pending: 0, confirmed: 0 };
 
   if (latest_run && filterGroups) {
@@ -335,7 +373,11 @@ const ConsistencyCheckView = ({ reportId, onEdit, filterGroups }) => {
                   {group.items.length === 0 ? (
                     <div className="no-issues">✅ 无问题项</div>
                   ) : (
-                    group.items.map(item => (
+                    group.items.map(item => {
+                      const locatePayload = getLocatePayload(item);
+                      const canLocate = onLocate && (locatePayload.leftPaths.length > 0 || locatePayload.rightPaths.length > 0);
+
+                      return (
                       <div key={item.id} className={`check-item ${getSeverityColor(item.auto_status)}`}>
                         <div className="item-header">
                           <span className={`status-badge ${getSeverityColor(item.auto_status)}`}>
@@ -348,59 +390,59 @@ const ConsistencyCheckView = ({ reportId, onEdit, filterGroups }) => {
                           <div className="formula" style={{ display: 'none' }}>
                             <strong>公式:</strong> {item.expr}
                           </div>
-                          <div className="values">
-                            <span>左值: <strong>{item.left_value ?? 'N/A'}</strong></span>
-                            <span>右值: <strong>{item.right_value ?? 'N/A'}</strong></span>
-                            <span>差值: <strong className={Math.abs(item.delta || 0) > 0.001 ? 'delta-nonzero' : ''}>
-                              {item.delta ?? 'N/A'}
-                            </strong></span>
-                          </div>
 
-                          {/* 位置信息（增强显示） */}
                           {(() => {
-                            const locInfo = getLocationInfo(item);
-                            if (!locInfo) return null;
-
-                            const isTextVsTable = locInfo.textSource && locInfo.tableSource;
+                            const { leftSources, rightSources, context } = getLocationInfo(item) || { leftSources: [], rightSources: [], context: null };
+                            const leftColor = '#2563eb'; // blue-600
+                            const rightColor = '#ea580c'; // orange-600
 
                             return (
-                              <div className="location-panel enhanced">
-                                <div className="location-header">
-                                  <span className="location-icon">📍</span>
-                                  <strong>数据定位：</strong>
+                              <div className="values enhanced-values" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '12px', padding: '12px', background: '#f8fafc', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                                {/* Left Component */}
+                                <div className="value-component" style={{ width: '100%' }}>
+                                  <div style={{ display: 'flex', alignItems: 'baseline', marginBottom: '4px' }}>
+                                    <span style={{ color: leftColor, fontWeight: 'bold', minWidth: '60px' }}>左值:</span>
+                                    <strong style={{ fontSize: '1.2em', color: '#1e293b' }}>{item.left_value ?? 'N/A'}</strong>
+                                  </div>
+                                  <div style={{ marginLeft: '60px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                    {leftSources.length > 0 ? leftSources.map((src, i) => (
+                                      <div key={i} style={{ fontSize: '0.85em', color: '#64748b', display: 'flex', alignItems: 'center' }}>
+                                        <span style={{ marginRight: '6px' }}>{src.type === 'table' ? '📊' : '📍'}</span>
+                                        <span>{src.label}</span>
+                                      </div>
+                                    )) : <span style={{ fontSize: '0.85em', color: '#94a3b8' }}>无详细来源信息</span>}
+                                  </div>
                                 </div>
 
-                                {isTextVsTable ? (
-                                  <div className="comparison-sources">
-                                    <div className="source-item text-source">
-                                      <div className="source-label">📄 正文来源</div>
-                                      <div className="source-value">{locInfo.textSource}</div>
-                                      <div className="source-number">
-                                        提取数值: <span className="highlight-num error">{locInfo.leftValue}</span>
-                                      </div>
-                                    </div>
-                                    <div className="vs-arrow">⟷</div>
-                                    <div className="source-item table-source">
-                                      <div className="source-label">📊 表格来源</div>
-                                      <div className="source-value">{locInfo.tableSource}</div>
-                                      <div className="source-number">
-                                        表格数值: <span className="highlight-num correct">{locInfo.rightValue}</span>
-                                      </div>
-                                    </div>
+                                {/* Right Component */}
+                                <div className="value-component" style={{ width: '100%', borderTop: '1px solid #e2e8f0', paddingTop: '8px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'baseline', marginBottom: '4px' }}>
+                                    <span style={{ color: rightColor, fontWeight: 'bold', minWidth: '60px' }}>右值:</span>
+                                    <strong style={{ fontSize: '1.2em', color: '#1e293b' }}>{item.right_value ?? 'N/A'}</strong>
                                   </div>
-                                ) : locInfo.tableSource ? (
-                                  <div className="single-source">
-                                    <div className="source-label">📊 表格位置</div>
-                                    <div className="source-value">{locInfo.tableSource}</div>
+                                  <div style={{ marginLeft: '60px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                    {rightSources.length > 0 ? rightSources.map((src, i) => (
+                                      <div key={i} style={{ fontSize: '0.85em', color: '#64748b', display: 'flex', alignItems: 'center' }}>
+                                        <span style={{ marginRight: '6px' }}>{src.type === 'table' ? '📊' : '📍'}</span>
+                                        <span>{src.label}</span>
+                                      </div>
+                                    )) : <span style={{ fontSize: '0.85em', color: '#94a3b8' }}>无详细来源信息</span>}
                                   </div>
-                                ) : null}
+                                </div>
 
-                                {locInfo.context && (
-                                  <div className="context-highlight">
-                                    <div className="context-label">🔍 匹配文本：</div>
-                                    <div className="context-text">
-                                      {/* SECURITY FIX: Render as plain text to prevent XSS */}
-                                      {locInfo.context.replace(/<[^>]*>/g, '')}
+                                <div className="value-row diff-row" style={{ display: 'flex', alignItems: 'center', width: '100%', marginTop: '4px', paddingTop: '8px', borderTop: '1px dashed #e2e8f0' }}>
+                                  <span style={{ color: '#ef4444', fontWeight: 'bold', minWidth: '60px' }}>差值:</span>
+                                  <strong className={Math.abs(item.delta || 0) > 0.001 ? 'delta-nonzero' : ''} style={{ color: '#ef4444' }}>
+                                    {item.delta ?? 'N/A'}
+                                  </strong>
+                                </div>
+
+                                {/* Context */}
+                                {context && (
+                                  <div className="location-panel enhanced" style={{ marginTop: '12px', borderTop: '1px solid #e2e8f0', paddingTop: '8px', width: '100%' }}>
+                                    <div className="context-highlight">
+                                      <div className="context-label" style={{ fontSize: '0.85em', fontWeight: 'bold', marginBottom: '4px', color: '#475569' }}>🔍 匹配文本上下文：</div>
+                                      <div className="context-text" dangerouslySetInnerHTML={{ __html: context }}></div>
                                     </div>
                                   </div>
                                 )}
@@ -431,6 +473,19 @@ const ConsistencyCheckView = ({ reportId, onEdit, filterGroups }) => {
                             {item.human_comment && <span className="comment"> - {item.human_comment}</span>}
                           </div>
                           <div className="action-buttons">
+                            {canLocate && (
+                              <button
+                                className="btn-locate"
+                                onClick={() => onLocate({
+                                  item,
+                                  title: item.title,
+                                  leftPaths: locatePayload.leftPaths,
+                                  rightPaths: locatePayload.rightPaths
+                                })}
+                              >
+                                定位到表格
+                              </button>
+                            )}
                             {item.human_status !== 'confirmed' && (
                               <button
                                 className="btn-confirm"
@@ -469,7 +524,7 @@ const ConsistencyCheckView = ({ reportId, onEdit, filterGroups }) => {
                           </div>
                         </div>
                       </div>
-                    ))
+                    )})
                   )}
                 </div>
               )}

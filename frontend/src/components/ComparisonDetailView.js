@@ -349,7 +349,7 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
           </div>
 
           <div className="bg-white border border-gray-200 rounded p-4">
-            <h3 className="font-bold text-gray-900 mb-2">差异摘要</h3>
+            <h3 className="font-bold text-gray-900 mb-2">发现问题</h3>
             <ul className="list-disc list-inside space-y-1 text-sm text-gray-700 font-serif-sc">
               {summary.items && summary.items.length > 0 ? (
                 summary.items.map((item, idx) => <li key={idx}>{item}</li>)
