@@ -278,7 +278,6 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
                 {!leftIntraLoading && leftIntraIssues.length > 0 && (
                     <div className="issues-wrapper">
                         {leftIntraIssues.map(item => {
-                            const details = getLocationInfo(item);
                             return (
                                 <div key={item.id} className="issue-card">
                                     <div className="issue-header">

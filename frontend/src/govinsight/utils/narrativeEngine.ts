@@ -1,5 +1,5 @@
 
-import { EntityProfile, AnnualData } from '../types';
+import { EntityProfile } from '../types';
 
 const calcTrend = (current: number, prev: number) => {
   if (prev === 0) return 0;
@@ -31,11 +31,6 @@ export const generateExecutiveSummary = (entity: EntityProfile, year: number): s
 
   // 计算核心同比
   const appGrowth = calcTrend(current.applications.newReceived, prev.applications.newReceived);
-  const disputeGrowth = calcTrend(
-    current.disputes.reconsideration.total + current.disputes.litigation.total,
-    prev.disputes.reconsideration.total + prev.disputes.litigation.total
-  );
-  
   // 纠错率
   const correctionRate = (current.disputes.reconsideration.corrected + current.disputes.litigation.corrected) / 
                          (current.disputes.reconsideration.total + current.disputes.litigation.total || 1);

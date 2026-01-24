@@ -120,21 +120,10 @@ function RegionCascader({ regions = [], value, onChange }) {
         }
     };
 
-    // Helper to render options
-    const renderOptions = (parentId) => {
-        const list = parentId
-            ? childrenMap.get(String(parentId)) || []
-            : rootIds.map(id => regionMap.get(id));
-
-        return list.map(r => (
-            <option key={r.id} value={r.id}>{r.name}</option>
-        ));
-    };
-
     const l1Options = rootIds.map(id => regionMap.get(id));
-    const l2Options = level1 && childrenMap.get(level1) || [];
-    const l3Options = level2 && childrenMap.get(level2) || [];
-    const l4Options = level3 && childrenMap.get(level3) || [];
+    const l2Options = (level1 && childrenMap.get(level1)) || [];
+    const l3Options = (level2 && childrenMap.get(level2)) || [];
+    const l4Options = (level3 && childrenMap.get(level3)) || [];
 
     return (
         <div className="region-cascader">

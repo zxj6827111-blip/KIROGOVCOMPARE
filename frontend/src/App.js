@@ -17,7 +17,7 @@ import IssueList from './components/IssueList';
 
 import DataCenterReportsList from './components/datacenter/DataCenterReportsList';
 import DataCenterReportDetail from './components/datacenter/DataCenterReportDetail';
-import { API_BASE_URL, isAuthenticated, getCurrentUser, logout } from './apiClient';
+import { isAuthenticated, getCurrentUser, logout } from './apiClient';
 import { Map, UploadCloud, ListTodo, PieChart, GitCompare, User, Activity } from 'lucide-react';
 import GovInsightModule from './govinsight/DashboardApp';
 

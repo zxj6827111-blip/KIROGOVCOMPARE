@@ -10,6 +10,7 @@ import { PolicyRegulation } from './views/PolicyRegulation';
 import { RegionalBenchmark } from './views/RegionalBenchmark';
 import { EntityPortrait } from './views/EntityPortrait';
 import { ReportGenerator } from './views/ReportGenerator';
+import { LeaderCockpit } from './leader-cockpit/LeaderCockpit';
 
 import './tailwind.css';
 
@@ -29,6 +30,7 @@ const GovInsightModule: React.FC = () => {
             <Route path="/policy" element={<PolicyRegulation />} />
             <Route path="/benchmark" element={<RegionalBenchmark />} />
             <Route path="/report" element={<ReportGenerator />} />
+            <Route path="/leader-cockpit" element={<LeaderCockpit />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Layout>

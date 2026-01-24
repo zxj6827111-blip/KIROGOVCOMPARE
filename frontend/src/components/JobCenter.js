@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import './JobCenter.css';
 import { apiClient, API_BASE_URL } from '../apiClient';
-import { ListTodo, Trash2, RefreshCw, AlertTriangle, Ban, Eye, Download, RotateCw, Upload, FileDown } from 'lucide-react';
+import { Trash2, RefreshCw, AlertTriangle, Ban, Eye, Download, RotateCw, Upload, FileDown } from 'lucide-react';
 
 function JobCenter() {
     // Pagination
@@ -63,51 +63,7 @@ function JobCenter() {
         });
     };
 
-    // Load regions for filter
-    useEffect(() => {
-        const loadRegions = async () => {
-            try {
-                const resp = await apiClient.get('/regions');
-                const rows = resp.data?.data ?? resp.data?.regions ?? resp.data ?? [];
-                setRegions(Array.isArray(rows) ? rows : []);
-            } catch (err) {
-                console.error('Failed to load regions:', err);
-            }
-        };
-        loadRegions();
-    }, []);
-
-    // Load jobs when filters or page changes
-    useEffect(() => {
-        loadJobs();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [filters, currentPage]);
-
-    // Auto-refresh polling (keep current page)
-    useEffect(() => {
-        const intervalId = setInterval(() => {
-            loadJobs(true); // isBackground=true
-        }, 3000);
-        return () => clearInterval(intervalId);
-    }, [filters, currentPage]);
-
-    // Load download jobs when tab is 'download'
-    useEffect(() => {
-        if (activeTab === 'download') {
-            loadDownloadJobs();
-        }
-    }, [activeTab, downloadCurrentPage]);
-
-    // Auto-refresh for download jobs
-    useEffect(() => {
-        if (activeTab !== 'download') return;
-        const intervalId = setInterval(() => {
-            loadDownloadJobs(true);
-        }, 5000);
-        return () => clearInterval(intervalId);
-    }, [activeTab, downloadCurrentPage]);
-
-    const loadJobs = async (isBackground = false) => {
+    const loadJobs = useCallback(async (isBackground = false) => {
         if (!isBackground) setLoading(true);
         try {
             const params = {
@@ -131,10 +87,10 @@ function JobCenter() {
         } finally {
             if (!isBackground) setLoading(false);
         }
-    };
+    }, [currentPage, filters]);
 
     // Load download (PDF export) jobs
-    const loadDownloadJobs = async (isBackground = false) => {
+    const loadDownloadJobs = useCallback(async (isBackground = false) => {
         if (!isBackground) setDownloadLoading(true);
         try {
             const resp = await apiClient.get('/pdf-jobs', {
@@ -154,7 +110,50 @@ function JobCenter() {
         } finally {
             if (!isBackground) setDownloadLoading(false);
         }
-    };
+    }, [downloadCurrentPage]);
+
+    // Load regions for filter
+    useEffect(() => {
+        const loadRegions = async () => {
+            try {
+                const resp = await apiClient.get('/regions');
+                const rows = resp.data?.data ?? resp.data?.regions ?? resp.data ?? [];
+                setRegions(Array.isArray(rows) ? rows : []);
+            } catch (err) {
+                console.error('Failed to load regions:', err);
+            }
+        };
+        loadRegions();
+    }, []);
+
+    // Load jobs when filters or page changes
+    useEffect(() => {
+        loadJobs();
+    }, [loadJobs]);
+
+    // Auto-refresh polling (keep current page)
+    useEffect(() => {
+        const intervalId = setInterval(() => {
+            loadJobs(true); // isBackground=true
+        }, 3000);
+        return () => clearInterval(intervalId);
+    }, [loadJobs]);
+
+    // Load download jobs when tab is 'download'
+    useEffect(() => {
+        if (activeTab === 'download') {
+            loadDownloadJobs();
+        }
+    }, [activeTab, loadDownloadJobs]);
+
+    // Auto-refresh for download jobs
+    useEffect(() => {
+        if (activeTab !== 'download') return;
+        const intervalId = setInterval(() => {
+            loadDownloadJobs(true);
+        }, 5000);
+        return () => clearInterval(intervalId);
+    }, [activeTab, loadDownloadJobs]);
 
     const handleFilterChange = (key, value) => {
         setFilters((prev) => ({ ...prev, [key]: value }));

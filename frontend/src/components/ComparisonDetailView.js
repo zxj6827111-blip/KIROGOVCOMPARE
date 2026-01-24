@@ -20,7 +20,7 @@ const tokenizeText = (text) => {
 };
 
 const isPunctuation = (str) => {
-  return /[，。、；：？！“”‘’（）《》【】—…\.,;:\?!'"\(\)\[\]\-\s]/.test(str);
+  return /[-，。、；：？！“”‘’（）《》【】—….,;:?!'"()\[\]\s]/.test(str);
 };
 
 function calculateTextSimilarity(text1, text2) {
@@ -36,7 +36,6 @@ function calculateTextSimilarity(text1, text2) {
   // Simple intersection for speed in JS if Diff isn't fully available or too slow
   // But preferably use Diff.diffArrays if available
   // Fallback to simple set intersection if Diff lib heavy
-  const set1 = new Set(t1);
   const set2 = new Set(t2);
   let intersection = 0;
   t1.forEach(t => { if (set2.has(t)) intersection++; });
@@ -82,16 +81,12 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
-  const [printing, setPrinting] = useState(false);
-
   // Auto-print effect
   useEffect(() => {
     if (autoPrint && data && !loading && !error) {
       // Wait a brief moment for DOM info (DiffText) to paint
       const timer = setTimeout(() => {
-        setPrinting(true);
         window.print();
-        setPrinting(false);
       }, 800);
       return () => clearTimeout(timer);
     }
