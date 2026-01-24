@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import './JobCenter.css'; // Reuse existing styles
 import { apiClient } from '../apiClient';
-import { User, Plus, Edit, Trash2, Shield, Lock, MapPin, X, Check } from 'lucide-react';
+import { User, Plus, Edit, Trash2, X } from 'lucide-react';
 
 export default function UserManagement() {
     const [users, setUsers] = useState([]);

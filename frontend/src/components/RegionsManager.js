@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './RegionsManager.css';
 import { apiClient } from '../apiClient';
 import {
@@ -21,8 +21,6 @@ import {
 
 function RegionsManager() {
   const [regions, setRegions] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
 
   // Selection Path: Array of full region objects representing the "active" path.
   const [selectionPath, setSelectionPath] = useState([]);
@@ -141,13 +139,11 @@ function RegionsManager() {
     e.stopPropagation();
 
     showConfirm(`确定要删除 "${region.name}" 及其所有下级区域吗？`, async () => {
-      setLoading(true);
       try {
         await apiClient.delete(`/regions/${region.id}`);
         fetchData();
       } catch (err) {
         alert('删除失败: ' + (err.response?.data?.error || err.message));
-        setLoading(false);
       }
     });
   };
@@ -156,7 +152,6 @@ function RegionsManager() {
 
   // --- Data Fetching ---
   const fetchData = async () => {
-    setLoading(true);
     try {
       const [regionsResp, reportsResp] = await Promise.all([
         apiClient.get('/regions'),
@@ -175,9 +170,8 @@ function RegionsManager() {
       });
       setReportCountMap(counts);
     } catch (err) {
-      setError(err.message || '加载失败');
+      console.error('Failed to load regions:', err);
     } finally {
-      setLoading(false);
     }
   };
 
@@ -218,17 +212,17 @@ function RegionsManager() {
     return true;
   };
 
-  const getChildren = (parentId) => {
+  const getChildren = useCallback((parentId) => {
     return regions
       .filter(r => r.parent_id === parentId)
       .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
-  };
+  }, [regions]);
 
-  const getRootRegions = () => {
+  const getRootRegions = useCallback(() => {
     return regions
       .filter(r => !r.parent_id || r.level === 1)
       .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
-  };
+  }, [regions]);
 
   // --- Handlers ---
   const handleItemClick = (region, columnIndex) => {
@@ -370,7 +364,7 @@ function RegionsManager() {
     });
 
     return cols;
-  }, [regions, selectionPath]);
+  }, [getChildren, getRootRegions, selectionPath]);
 
   const lastSelected = selectionPath[selectionPath.length - 1];
   const showDetailPanel = lastSelected && isDepartment(lastSelected);

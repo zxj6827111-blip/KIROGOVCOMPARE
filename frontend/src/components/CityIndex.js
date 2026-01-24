@@ -1,18 +1,13 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import './CityIndex.css';
 import { apiClient } from '../apiClient';
 import {
   Search,
   CheckCircle,
   AlertCircle,
-  FileText,
-  CalendarDays,
-  ChevronRight,
-  Filter,
   BarChart,
   Eye,
   Trash2,
-  Download,
   Map as MapIcon,
   Plus,
   RefreshCw
@@ -90,54 +85,10 @@ function CityIndex({ onSelectReport, onViewComparison }) {
     window.history.replaceState({}, '', newUrl);
   }, [path]);
 
-  const fetchAll = async (isBackground = false) => {
-    if (!isBackground) {
-      setLoading(true);
-      setError('');
-    }
-    try {
-      const [regionsResp, reportsResp] = await Promise.all([
-        apiClient.get('/regions'),
-        apiClient.get('/reports'),
-      ]);
-      const regionRows = regionsResp.data?.data ?? regionsResp.data ?? [];
-      const reportRows = reportsResp.data?.data ?? reportsResp.data ?? [];
-
-      // Update state without flickering
-      setRegions(Array.isArray(regionRows) ? regionRows : []);
-      setReports(Array.isArray(reportRows) ? reportRows : []);
-
-      // Fetch consistency check status for all reports
-      if (Array.isArray(reportRows) && reportRows.length > 0) {
-        fetchCheckStatusForReports(reportRows);
-      }
-    } catch (err) {
-      if (!isBackground) {
-        const message = err.response?.data?.error || err.message || '请求失败';
-        setError(`加载城市或报告失败：${message} `);
-      }
-      console.error('Background fetch failed:', err);
-    } finally {
-      if (!isBackground) setLoading(false);
-    }
-  };
-
-  const handleRefresh = async () => {
-    await fetchAll(false);
-  };
-
-  // Auto-refresh polling every 30s
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchAll(true);
-    }, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
   // Fetch consistency check counts for reports (optimized with batch API)
   const [checkStatusLoaded, setCheckStatusLoaded] = useState(false);
 
-  const fetchCheckStatusForReports = async (reportList) => {
+  const fetchCheckStatusForReports = useCallback(async (reportList) => {
     setCheckStatusLoaded(false);
     if (reportList.length === 0) {
       setCheckStatusMap(new Map());
@@ -168,11 +119,55 @@ function CityIndex({ onSelectReport, onViewComparison }) {
     } finally {
       setCheckStatusLoaded(true);
     }
+  }, []);
+
+  const fetchAll = useCallback(async (isBackground = false) => {
+    if (!isBackground) {
+      setLoading(true);
+      setError('');
+    }
+    try {
+      const [regionsResp, reportsResp] = await Promise.all([
+        apiClient.get('/regions'),
+        apiClient.get('/reports'),
+      ]);
+      const regionRows = regionsResp.data?.data ?? regionsResp.data ?? [];
+      const reportRows = reportsResp.data?.data ?? reportsResp.data ?? [];
+
+      // Update state without flickering
+      setRegions(Array.isArray(regionRows) ? regionRows : []);
+      setReports(Array.isArray(reportRows) ? reportRows : []);
+
+      // Fetch consistency check status for all reports
+      if (Array.isArray(reportRows) && reportRows.length > 0) {
+        fetchCheckStatusForReports(reportRows);
+      }
+    } catch (err) {
+      if (!isBackground) {
+        const message = err.response?.data?.error || err.message || '请求失败';
+        setError(`加载城市或报告失败：${message} `);
+      }
+      console.error('Background fetch failed:', err);
+    } finally {
+      if (!isBackground) setLoading(false);
+    }
+  }, [fetchCheckStatusForReports]);
+
+  const handleRefresh = async () => {
+    await fetchAll(false);
   };
+
+  // Auto-refresh polling every 30s
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchAll(true);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [fetchAll]);
 
   useEffect(() => {
     fetchAll();
-  }, []);
+  }, [fetchAll]);
 
   const regionTree = useMemo(() => {
     const byParent = new Map();
@@ -207,13 +202,6 @@ function CityIndex({ onSelectReport, onViewComparison }) {
   const currentParentId = path.length ? path[path.length - 1] : null;
   const breadcrumb = path.map((id) => regions.find((r) => String(r.id) === String(id))).filter(Boolean);
   const currentRegion = breadcrumb[breadcrumb.length - 1] || null;
-
-  const levelLabel = (level) => {
-    if (level === 1) return '省级';
-    if (level === 2) return '市级';
-    if (level === 3) return '区县';
-    return '区域';
-  };
 
   const handleEnter = (regionId) => {
     setPath((prev) => [...prev, regionId]);
@@ -432,18 +420,6 @@ function CityIndex({ onSelectReport, onViewComparison }) {
     }
   };
 
-  // Count availability for tabs (to show counts or hide empty tabs if desired)
-  const tabCounts = useMemo(() => {
-    let district = 0;
-    let department = 0;
-    allCards.forEach(c => {
-      const type = getRegionType(c.name);
-      if (type === 'district' || type === 'town') district++;
-      else department++;
-    });
-    return { district, department, all: allCards.length };
-  }, [allCards]);
-
   return (
     <div className="city-index">
       <div className="header-row">
@@ -577,7 +553,6 @@ function CityIndex({ onSelectReport, onViewComparison }) {
               {visibleReports.map((r) => {
                   const region = regions.find(reg => reg.id === r.region_id);
                   const regionName = region?.name || '未知区域';
-                  const reportTitle = `${r.year}年${regionName} 政务公开年报`;
 
                   return (
                     <div

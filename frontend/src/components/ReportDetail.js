@@ -300,12 +300,14 @@ function ReportDetail({ reportId: propReportId, onBack }) {
       const parts = remainingText.split(numStr);
       if (parts.length > 1) {
         const newParts = [];
-        parts.forEach((part, idx) => {
+        for (let idx = 0; idx < parts.length; idx += 1) {
+          const part = parts[idx];
           if (part) newParts.push(part);
           if (idx < parts.length - 1) {
-            newParts.push(<mark key={`hl-${keyIndex++}`} className="text-warning">{numStr}</mark>);
+            newParts.push(<mark key={`hl-${keyIndex}`} className="text-warning">{numStr}</mark>);
+            keyIndex += 1;
           }
-        });
+        }
         // Convert back to components
         if (elements.length === 0) {
           elements.push(...newParts);

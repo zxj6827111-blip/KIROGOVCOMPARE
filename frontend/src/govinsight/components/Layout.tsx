@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Scale, FileText, Map, Building2, ChevronDown, Microscope, Briefcase, Activity,
   ChevronRight, Check, Printer, MousePointerClick
@@ -7,6 +7,8 @@ import {
 import { EntityProfile } from '../types';
 import { buildRegionTree, loadEntityData } from '../data';
 import { fetchOrgs } from '../api';
+import { getCurrentUser } from '../../apiClient';
+import { canAccessLeaderCockpit, isLeaderCockpitAdmin, isLeaderCockpitEnabled } from '../leader-cockpit/access';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -16,10 +18,12 @@ export const EntityContext = React.createContext<{
   entity: EntityProfile | null;
   setEntity: (e: EntityProfile) => void;
   isLoading: boolean;
+  openSelector?: () => void;
 }>({
   entity: null,
   setEntity: () => { },
-  isLoading: false
+  isLoading: false,
+  openSelector: undefined
 });
 
 // Helper to separate Geographic units (Districts, Streets, Towns) from Functional Departments
@@ -44,6 +48,11 @@ const partitionChildren = (children: EntityProfile[]) => {
 
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const user = getCurrentUser();
+  const canShowLeaderCockpit = canAccessLeaderCockpit(user)
+    && (isLeaderCockpitEnabled() || isLeaderCockpitAdmin(user));
+  const isLeaderCockpitRoute = location.pathname === '/leader-cockpit';
 
   const [regionTree, setRegionTree] = useState<EntityProfile[]>([]);
   const [currentEntity, setCurrentEntity] = useState<EntityProfile | null>(null);
@@ -172,6 +181,162 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     </div>
   );
 
+  const renderCascaderPanel = (panelClassName: string) => (
+    <div className={panelClassName}>
+      {/* Column 1: Province */}
+      <div className="w-48 min-w-[180px] border-r border-slate-100 overflow-y-auto bg-slate-50/50 backdrop-blur-sm">
+        <div className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider sticky top-0 bg-slate-50/90 backdrop-blur-md z-10 border-b border-slate-100">
+          1. Province
+        </div>
+        {regionTree.map((prov) => renderRow(
+          prov,
+          level1?.id === prov.id,
+          currentEntity?.id === prov.id,
+          () => { setLevel1(prov); setLevel2(null); setLevel3(null); },
+          true
+        ))}
+      </div>
+
+      {/* Column 2: City */}
+      <div className="w-48 min-w-[180px] border-r border-slate-100 overflow-y-auto bg-white/50 backdrop-blur-sm">
+        <div className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider sticky top-0 bg-white/90 backdrop-blur-md z-10 border-b border-slate-100">
+          2. City
+        </div>
+        {level1 ? (
+          level1.children?.map((city) => renderRow(
+            city,
+            level2?.id === city.id,
+            currentEntity?.id === city.id,
+            () => { setLevel2(city); setLevel3(null); },
+            !!city.children
+          ))
+        ) : (
+          <div className="p-6 text-center text-xs text-slate-400 flex flex-col items-center">
+            <MousePointerClick className="w-6 h-6 mb-2 opacity-50" />
+            Select a province
+          </div>
+        )}
+      </div>
+
+      {/* Column 3: District */}
+      <div className="w-72 min-w-[240px] border-r border-slate-100 overflow-y-auto bg-slate-50/50 backdrop-blur-sm">
+        <div className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider sticky top-0 bg-slate-50/90 backdrop-blur-md z-10 border-b border-slate-100">
+          3. District / County
+        </div>
+        {level2 ? (
+          level2.children && level2.children.length ? (() => {
+            const { geo, depts } = partitionChildren(level2.children ?? []);
+            return (
+              <>
+                {geo.length > 0 && geo.map((dist) => renderRow(
+                  dist,
+                  level3?.id === dist.id,
+                  currentEntity?.id === dist.id,
+                  () => { setLevel3(dist); },
+                  !!dist.children
+                ))}
+
+                {geo.length > 0 && depts.length > 0 && (
+                  <div className="px-3 py-1.5 bg-slate-100/50 text-[10px] text-slate-400 font-bold border-t border-b border-slate-100 mt-1">
+                    Departments
+                  </div>
+                )}
+
+                {depts.map((dist) => renderRow(
+                  dist,
+                  level3?.id === dist.id,
+                  currentEntity?.id === dist.id,
+                  () => { setLevel3(dist); },
+                  !!dist.children
+                ))}
+
+                {geo.length === 0 && depts.length === 0 && (
+                  <div className="p-4 text-center text-xs text-slate-400">No data</div>
+                )}
+              </>
+            );
+          })() : (
+            <div className="p-4 text-center text-xs text-slate-400">No children</div>
+          )
+        ) : (
+          <div className="p-6 text-center text-xs text-slate-400">Select a city</div>
+        )}
+      </div>
+
+      {/* Column 4: Department/Street */}
+      <div className="w-72 min-w-[240px] overflow-y-auto bg-white/50 backdrop-blur-sm">
+        <div className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider sticky top-0 bg-white/90 backdrop-blur-md z-10 border-b border-slate-100">
+          4. Department / Street
+        </div>
+        {level3 ? (
+          level3.children && level3.children.length ? (() => {
+            const { geo, depts } = partitionChildren(level3.children ?? []);
+            const renderItem = (dept: EntityProfile) => (
+              <div
+                key={dept.id}
+                onClick={() => handleSelectEntity(dept)}
+                title={dept.name}
+                className={`px-3 py-2 text-sm cursor-pointer flex items-center justify-between group transition-colors ${currentEntity?.id === dept.id
+                  ? 'bg-indigo-50 text-indigo-700 font-bold border-l-2 border-indigo-500'
+                  : 'text-slate-700 hover:bg-slate-50 hover:text-indigo-600'
+                  }`}
+              >
+                <div className="flex items-center min-w-0">
+                  {currentEntity?.id === dept.id && <Check className="w-3.5 h-3.5 mr-2 text-indigo-500 flex-shrink-0" />}
+                  <span className="truncate">{dept.name}</span>
+                </div>
+              </div>
+            );
+
+            if (geo.length === 0 && depts.length === 0) {
+              return (
+                <div className="p-6 flex flex-col items-center justify-center text-slate-400 h-full">
+                  <span className="text-xs mb-3 text-center">No data<br />(last level)</span>
+                  {level3 && currentEntity?.id !== level3.id && (
+                    <button
+                      onClick={() => handleSelectEntity(level3)}
+                      className="text-xs bg-indigo-600 text-white px-4 py-2 rounded-full hover:bg-indigo-700 shadow-md hover:shadow-lg transition-all"
+                    >
+                      Analyze {level3.name}
+                    </button>
+                  )}
+                </div>
+              );
+            }
+
+            return (
+              <>
+                {geo.length > 0 && geo.map(renderItem)}
+
+                {geo.length > 0 && depts.length > 0 && (
+                  <div className="px-3 py-1.5 bg-slate-100/50 text-[10px] text-slate-400 font-bold border-t border-b border-slate-100 mt-1">
+                    Departments
+                  </div>
+                )}
+
+                {depts.map(renderItem)}
+              </>
+            );
+          })() : (
+            <div className="p-6 flex flex-col items-center justify-center text-slate-400 h-full">
+              <span className="text-xs mb-3 text-center">No data<br />(last level)</span>
+              {level3 && currentEntity?.id !== level3.id && (
+                <button
+                  onClick={() => handleSelectEntity(level3)}
+                  className="text-xs bg-indigo-600 text-white px-4 py-2 rounded-full hover:bg-indigo-700 shadow-md hover:shadow-lg transition-all"
+                >
+                  Analyze {level3.name}
+                </button>
+              )}
+            </div>
+          )
+        ) : (
+          <div className="p-6 text-center text-xs text-slate-400">Select a district</div>
+        )}
+      </div>
+    </div>
+  );
+
   if (!currentEntity) {
     return (
       <div className="flex h-screen items-center justify-center bg-slate-50">
@@ -184,12 +349,13 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   }
 
   return (
-    <EntityContext.Provider value={{ entity: currentEntity, setEntity: setCurrentEntity, isLoading }}>
+    <EntityContext.Provider value={{ entity: currentEntity, setEntity: setCurrentEntity, isLoading, openSelector: () => setIsMenuOpen(true) }}>
       <div className="min-h-screen bg-[#f0f2f5] font-sans flex flex-col">
 
 
 
         {/* 3. Module Sub-Header & Context Switcher */}
+        {!isLeaderCockpitRoute && (
         <div className="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shrink-0 no-print sticky top-0 z-[2000] shadow-sm">
           {/* Left: Module Tabs */}
           <nav className="flex items-center space-x-1 overflow-x-auto">
@@ -212,6 +378,16 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
           {/* Right: Entity Switcher (Cascader) */}
           <div className="flex items-center space-x-4 ml-4" ref={menuRef}>
+            {canShowLeaderCockpit && (
+              <button
+                type="button"
+                onClick={() => navigate('/leader-cockpit')}
+                className="inline-flex items-center px-3 py-1.5 text-xs font-semibold rounded-md border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
+                title="领导驾驶舱（演示模式）"
+              >
+                领导驾驶舱（演示模式）
+              </button>
+            )}
             {/* Tech Spec Download Button - Moved here */}
 
 
@@ -403,24 +579,36 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             </div>
           </div>
         </div>
+        )}
+
+        {isLeaderCockpitRoute && isMenuOpen && (
+          <div className="fixed inset-0 z-[3000] flex items-start justify-center pt-24">
+            <div className="absolute inset-0 bg-black/30" onClick={() => setIsMenuOpen(false)}></div>
+            <div ref={menuRef} className="relative z-10">
+              {renderCascaderPanel('bg-white rounded-lg shadow-2xl border border-slate-200 flex overflow-hidden h-[520px] w-[980px] max-w-[94vw]')}
+            </div>
+          </div>
+        )}
 
         {/* 4. Main Content Area */}
-        <main className="flex-1 overflow-auto p-6">
+        <main className={isLeaderCockpitRoute ? 'flex-1 overflow-auto p-4' : 'flex-1 overflow-auto p-6'}>
           <div className="max-w-[1600px] mx-auto space-y-6">
             {/* Dynamic Title / Breadcrumb */}
-            <div className="flex items-center text-sm text-slate-500 mb-2 no-print">
-              <span>数据中心</span>
-              <ChevronRight className="w-4 h-4 mx-1" />
-              <span className="font-medium text-slate-800">
-                {subNavItems.find(i => i.path === location.pathname)?.label || '治理分析'}
-              </span>
-              {location.pathname === '/report' && (
-                <span className="ml-auto flex items-center text-blue-600 bg-blue-50 px-2 py-0.5 rounded text-xs">
-                  <Printer className="w-3 h-3 mr-1" />
-                  支持 A4 打印模式
+            {!isLeaderCockpitRoute && (
+              <div className="flex items-center text-sm text-slate-500 mb-2 no-print">
+                <span>数据中心</span>
+                <ChevronRight className="w-4 h-4 mx-1" />
+                <span className="font-medium text-slate-800">
+                  {subNavItems.find(i => i.path === location.pathname)?.label || '治理分析'}
                 </span>
-              )}
-            </div>
+                {location.pathname === '/report' && (
+                  <span className="ml-auto flex items-center text-blue-600 bg-blue-50 px-2 py-0.5 rounded text-xs">
+                    <Printer className="w-3 h-3 mr-1" />
+                    支持 A4 打印模式
+                  </span>
+                )}
+              </div>
+            )}
 
             {children}
           </div>
