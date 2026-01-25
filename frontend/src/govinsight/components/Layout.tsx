@@ -123,7 +123,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         setIsLoading(false);
       });
     }
-  }, [currentEntity]);
+  }, [currentEntity?.id]);
 
   // Close menu on click outside
   useEffect(() => {
