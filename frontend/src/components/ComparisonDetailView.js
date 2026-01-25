@@ -19,9 +19,7 @@ const tokenizeText = (text) => {
   return tokens;
 };
 
-const isPunctuation = (str) => {
-  return /[-，。、；：？！“”‘’（）《》【】—….,;:?!'"()\[\]\s]/.test(str);
-};
+const isPunctuation = (str) => /[-，。、；：？！“”‘’（）《》【】—….,;:?!'"()[\]\s]/.test(str);
 
 function calculateTextSimilarity(text1, text2) {
   if (!text1 && !text2) return 100;

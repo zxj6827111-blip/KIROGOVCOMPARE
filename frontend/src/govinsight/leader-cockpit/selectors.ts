@@ -12,10 +12,10 @@ import {
 import type {
   ActionPackTemplateInstance,
   AttributionItem,
-  EntityMetrics,
-  GovernanceSuggestion,
+  //   EntityMetrics,
+  //   GovernanceSuggestion,
   LeaderCockpitModel,
-  ManagementActionItem,
+  //   ManagementActionItem,
   MetricVariant,
   MetricValue,
   MissingType,
@@ -24,7 +24,7 @@ import type {
   StabilityLevel,
   ValueStatus,
 } from './types';
-import { STABILITY_RULES } from './riskRuleSet';
+// import { STABILITY_RULES } from './riskRuleSet';
 import { computeYoY, safeRate, safeShare } from './utils';
 import { percentile, robustGapP90P10 } from './utils/stats';
 
@@ -641,53 +641,9 @@ const classifyMissingType = (entity: EntityProfile, year: number): MissingType =
   return 'unknown';
 };
 
-const generateInterviewList = (entities: EntityMetrics[]): ManagementActionItem[] => {
-  return entities
-    .filter(e => e.riskLevel === 'red' || e.riskLevel === 'yellow')
-    .sort((a, b) => {
-      // Red first
-      if (a.riskLevel === 'red' && b.riskLevel !== 'red') return -1;
-      if (b.riskLevel === 'red' && a.riskLevel !== 'red') return 1;
-      // Then by N desc
-      return (b.acceptedTotal || 0) - (a.acceptedTotal || 0);
-    })
-    .slice(0, 5) // Top 5
-    .map(e => ({
-      id: `act-${e.id}`,
-      entityName: e.name,
-      reason: e.riskReason || '风险异常',
-      metrics: `公开率:${e.disclosureRate !== undefined ? e.disclosureRate.toFixed(1) + '%' : '-'}/纠错率:${e.correctionRate !== undefined ? e.correctionRate.toFixed(1) + '%' : '-'}`,
-    }));
-};
-
-const generateGovernanceSuggestions = (city: string): GovernanceSuggestion[] => {
-  return [
-    {
-      id: 'sugg-1',
-      title: '统一口径答复模板',
-      content: `针对${city}常见的信息公开申请类别，建立标准化答复口径库，降低“未按规定答复”比例。`,
-      kpi: '答复规范性提升30%',
-      ownerSuggestion: '市政府办公室/司法局',
-      cycle: '30天'
-    },
-    {
-      id: 'sugg-2',
-      title: '信息资产台账与责任机制',
-      content: '建立全量政府信息资产台账，明确各部门产生、保管义务，解决“本机关不掌握”滥用问题。',
-      kpi: '持有信息准确率100%',
-      ownerSuggestion: '数据局/各业务部门',
-      cycle: '60天'
-    },
-    {
-      id: 'sugg-3',
-      title: '复议案件复盘与闭环',
-      content: '建立季度复议败诉/纠错案件复盘会机制，将纠错结果纳入绩效考核。',
-      kpi: '纠错率下降5个百分点',
-      ownerSuggestion: '司法局',
-      cycle: '长期'
-    }
-  ];
-};
+// Unused functions commented out to fix lint
+// const generateInterviewList = ...
+// const generateGovernanceSuggestions = ...
 
 export const buildEntityComparisonModel = (
   cityEntity: EntityProfile | null,

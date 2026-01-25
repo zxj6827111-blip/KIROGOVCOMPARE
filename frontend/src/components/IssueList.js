@@ -66,14 +66,6 @@ function IssueList({ regionId, regionName, onBack, onSelectReport }) {
     const [filterMode, setFilterMode] = useState('issues'); // 'all' | 'issues'
     const [batchChecking, setBatchChecking] = useState(false);
 
-
-
-
-
-
-
-
-
     const fetchData = useCallback(async () => {
         setLoading(true);
 
