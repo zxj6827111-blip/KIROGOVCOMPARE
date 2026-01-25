@@ -20,12 +20,15 @@ export const DashboardHome: React.FC = () => {
   // State for Year Selection
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
 
+  const availableYearsKey = availableYears.join(',');
+
   // Update selected year when entity changes or availableYears changes
   React.useEffect(() => {
     if (availableYears.length > 0 && (!selectedYear || !availableYears.includes(selectedYear))) {
       setSelectedYear(availableYears[0]);
     }
-  }, [availableYears.join(','), selectedYear]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [availableYearsKey, selectedYear]);
 
   // Fallback to first available or 2024
   const currentYear = selectedYear || availableYears[0] || 2024;

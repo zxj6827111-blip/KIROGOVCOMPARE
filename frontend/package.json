@@ -25,11 +25,11 @@
     "@types/node": "^25.0.9",
     "@types/react": "^19.2.8",
     "@types/react-dom": "^19.2.3",
-    "typescript": "^5.9.3"
+    "typescript": "5.1.6"
   },
   "scripts": {
     "start": "set PORT=3001&& set HOST=0.0.0.0&& set WDS_SOCKET_HOST=localhost&& set DANGEROUSLY_DISABLE_HOST_CHECK=true&& react-scripts start",
-    "build": "react-scripts build",
+    "build": "node --max-old-space-size=2048 node_modules/react-scripts/bin/react-scripts.js build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },
