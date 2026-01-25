@@ -1,6 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend, ComposedChart, Area } from 'recharts';
+import type { Formatter as LegendFormatter, LegendPayload } from 'recharts/types/component/DefaultLegendContent';
+import type { Formatter as TooltipFormatter, NameType, Payload, ValueType } from 'recharts/types/component/DefaultTooltipContent';
 import type { YearSeries } from '../types';
+import { formatNumber, formatPercent } from '../utils';
+import { DEFAULT_OVERLAY_COMPARE } from '../riskPolicy';
 
 interface TrendSwitcherProps {
   pressure: YearSeries;
@@ -17,8 +21,23 @@ const buildChartData = (series: YearSeries) => {
 
 export const TrendSwitcher: React.FC<TrendSwitcherProps> = ({ pressure, quality, risk }) => {
   const [active, setActive] = useState<'pressure' | 'quality' | 'risk'>('pressure');
-  const [overlay, setOverlay] = useState(false);
-  const activeUnit = active === 'pressure' ? '件' : '%';
+  const [overlayEnabled, setOverlayEnabled] = useState(DEFAULT_OVERLAY_COMPARE);
+  const seriesMeta = {
+    pressure: { label: '压力', unit: '件', color: '#3b82f6' },
+    quality: { label: '质量', unit: '%', color: '#10b981' },
+    risk: { label: '风险', unit: '%', color: '#f43f5e' },
+  } as const;
+  const activeMeta = seriesMeta[active];
+  const activeLegendLabel = `${activeMeta.label}（${activeMeta.unit}）`;
+
+  const formatSeriesValue = (value: ValueType | undefined, unit?: string) => {
+    const normalized = Array.isArray(value) ? value[0] : value;
+    if (normalized === null || normalized === undefined || normalized === '') return '—';
+    const numericValue = typeof normalized === 'string' ? Number(normalized) : normalized;
+    if (Number.isNaN(numericValue)) return '—';
+    if (unit === '%') return formatPercent(numericValue, 1);
+    return unit ? `${formatNumber(numericValue)}${unit}` : formatNumber(numericValue);
+  };
 
   const dataBySeries = useMemo(() => ({
     pressure: buildChartData(pressure),
@@ -36,6 +55,25 @@ export const TrendSwitcher: React.FC<TrendSwitcherProps> = ({ pressure, quality,
     }));
   }, [pressure.points, dataBySeries]);
 
+  const overlayTooltipFormatter: TooltipFormatter<ValueType, NameType> = (
+    value,
+    name,
+    item: Payload<ValueType, NameType>
+  ) => {
+    const dataKey = typeof item?.dataKey === 'string' ? item.dataKey : undefined;
+    const metaKey = dataKey as keyof typeof seriesMeta | undefined;
+    const meta = metaKey ? seriesMeta[metaKey] : undefined;
+    const label = meta ? `${meta.label}（${meta.unit}）` : name;
+    return [formatSeriesValue(value, meta?.unit), label || ''];
+  };
+
+  const overlayLegendFormatter: LegendFormatter = (value, entry: LegendPayload) => {
+    const dataKey = typeof entry?.dataKey === 'string' ? entry.dataKey : undefined;
+    const metaKey = dataKey as keyof typeof seriesMeta | undefined;
+    const meta = metaKey ? seriesMeta[metaKey] : undefined;
+    return meta ? `${meta.label}（${meta.unit}）` : value;
+  };
+
   return (
     <div className="bg-white border border-slate-200 rounded-lg p-6 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
@@ -49,83 +87,83 @@ export const TrendSwitcher: React.FC<TrendSwitcherProps> = ({ pressure, quality,
               key={item.id}
               type="button"
               onClick={() => setActive(item.id)}
-              className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${
-                active === item.id && !overlay
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold border ${active === item.id && !overlayEnabled
                   ? 'bg-slate-900 text-white border-slate-900'
                   : 'bg-slate-50 text-slate-500 border-slate-200'
-              }`}
+                }`}
             >
               {item.label}
             </button>
           ))}
         </div>
-        <label className="flex items-center gap-2 text-xs text-slate-600">
+        <label className="flex items-center gap-2 text-xs text-slate-600 cursor-help" title="叠加会引入不同量纲/口径风险，默认关闭以保证可解释性">
           <input
             type="checkbox"
-            checked={overlay}
-            onChange={(e) => setOverlay(e.target.checked)}
+            checked={overlayEnabled}
+            onChange={(e) => setOverlayEnabled(e.target.checked)}
           />
           叠加对比（高级）
         </label>
       </div>
 
       <div className="h-72">
-        {!overlay && (
+        {!overlayEnabled && (
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={dataBySeries[active]}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
               <XAxis dataKey="year" stroke="#94a3b8" />
               <YAxis stroke="#94a3b8" />
-              <Tooltip />
+              <Tooltip formatter={(value) => [formatSeriesValue(value, activeMeta.unit), activeLegendLabel]} />
               <Line
                 type="monotone"
                 dataKey="value"
+                name={activeLegendLabel}
                 stroke="#2563eb"
                 strokeWidth={2}
                 dot={{ r: 4 }}
-                unit={activeUnit}
+                unit={activeMeta.unit}
               />
             </LineChart>
           </ResponsiveContainer>
         )}
-        {overlay && (
+        {overlayEnabled && (
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={combinedData}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
               <XAxis dataKey="year" stroke="#94a3b8" />
               <YAxis yAxisId="left" stroke="#94a3b8" />
               <YAxis yAxisId="right" orientation="right" stroke="#94a3b8" unit="%" />
-              <Tooltip />
-              <Legend />
+              <Tooltip formatter={overlayTooltipFormatter} />
+              <Legend formatter={overlayLegendFormatter} />
               <Area
                 yAxisId="left"
                 type="monotone"
                 dataKey="pressure"
-                name="压力（件）"
-                stroke="#3b82f6"
+                name={seriesMeta.pressure.label}
+                stroke={seriesMeta.pressure.color}
                 fill="#bfdbfe"
                 fillOpacity={0.5}
-                unit="件"
+                unit={seriesMeta.pressure.unit}
               />
               <Line
                 yAxisId="right"
                 type="monotone"
                 dataKey="quality"
-                name="质量（%）"
-                stroke="#10b981"
+                name={seriesMeta.quality.label}
+                stroke={seriesMeta.quality.color}
                 strokeWidth={2}
                 dot={{ r: 3 }}
-                unit="%"
+                unit={seriesMeta.quality.unit}
               />
               <Line
                 yAxisId="right"
                 type="monotone"
                 dataKey="risk"
-                name="风险（%）"
-                stroke="#f43f5e"
+                name={seriesMeta.risk.label}
+                stroke={seriesMeta.risk.color}
                 strokeWidth={2}
                 dot={{ r: 3 }}
-                unit="%"
+                unit={seriesMeta.risk.unit}
               />
             </ComposedChart>
           </ResponsiveContainer>

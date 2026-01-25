@@ -20,6 +20,7 @@ router.get('/annual-data', async (req, res) => {
   try {
     const yearParam = typeof req.query.year === 'string' ? req.query.year.trim() : '';
     const orgIdParam = typeof req.query.org_id === 'string' ? req.query.org_id.trim() : '';
+    const includeChildren = req.query.include_children === 'true';
 
     const conditions: string[] = [];
     const params: any[] = [];
@@ -40,15 +41,51 @@ router.get('/annual-data', async (req, res) => {
     }
 
     // Org ID filter - support both string format (city_1001) and numeric region_id
+    // Org ID filter - support both string format (city_1001) and numeric region_id
     if (orgIdParam) {
       // Check if it's a numeric ID
-      const numericId = Number(orgIdParam);
-      if (!Number.isNaN(numericId) && Number.isFinite(numericId)) {
-        // Numeric ID - match against the numeric part of org_id or direct region_id
-        conditions.push(`org_id LIKE $${paramIndex++}`);
-        params.push(`%_${numericId}`);
+      let numericId = Number(orgIdParam);
+      if (Number.isNaN(numericId) || !Number.isFinite(numericId)) {
+        // Try to extract from string
+        const match = orgIdParam.match(/(\d+)$/);
+        if (match) {
+          numericId = Number(match[1]);
+        }
+      }
+
+      if (!Number.isNaN(numericId) && numericId > 0) {
+        if (includeChildren) {
+          // fetch direct children IDs first to support grandchild data
+          const childrenRes = await pool.query('SELECT id FROM regions WHERE parent_id = $1', [numericId]);
+          const childIds = childrenRes.rows.map((r: any) => r.id);
+          const allParentIds = [numericId, ...childIds];
+
+          // condition: record's parent is one of these IDs (so record is child or grandchild)
+          // OR record IS one of these IDs (if using IDs as org_id, though usually import_...)
+          // Optimizing: just check parent_id column in stats view.
+          // Note: parent_id in stats view is usually a string (e.g. "824").
+
+          // We must be careful with parameter indexing. 
+          // We will generate placeholders like $2, $3...
+          const placeholders = allParentIds.map((_, i) => `$${paramIndex + i}`).join(', ');
+
+          conditions.push(`(
+            split_part(org_id, '_', 2) IN (${placeholders}) -- Matches org_id like 'city_721'
+            OR 
+            parent_id IN (${placeholders}) -- Matches parent_id column '721' or '824'
+          )`);
+
+          params.push(...allParentIds.map(String)); // Ensure strings for comparison if mixed types
+          paramIndex += allParentIds.length;
+
+        } else {
+          // Single org logic
+          conditions.push(`(org_id LIKE $${paramIndex} OR parent_id LIKE $${paramIndex})`);
+          params.push(`%_${numericId}`);
+          paramIndex++;
+        }
       } else {
-        // String ID - exact match
+        // Fallback for non-numeric strict match
         conditions.push(`org_id = $${paramIndex++}`);
         params.push(orgIdParam);
       }
@@ -99,7 +136,7 @@ router.get('/annual-data', async (req, res) => {
       FROM gov_open_annual_stats
       ${whereClause}
       ORDER BY year DESC, org_name ASC
-      LIMIT 500
+      LIMIT 2000
     `, params);
 
     const rows = result.rows;

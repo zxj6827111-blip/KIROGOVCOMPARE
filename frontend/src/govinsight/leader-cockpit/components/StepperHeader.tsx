@@ -1,4 +1,5 @@
 import React from 'react';
+import type { ViewLevel } from '../types';
 import { CityYearSelector } from './CityYearSelector';
 
 interface StepperHeaderProps {
@@ -12,6 +13,9 @@ interface StepperHeaderProps {
   years: number[];
   onYearChange: (year: number) => void;
   onOpenCitySelector?: () => void;
+  viewLevel: ViewLevel;
+  onViewLevelChange: (level: ViewLevel) => void;
+  onExit?: () => void;
 }
 
 export const StepperHeader: React.FC<StepperHeaderProps> = ({
@@ -25,6 +29,9 @@ export const StepperHeader: React.FC<StepperHeaderProps> = ({
   years,
   onYearChange,
   onOpenCitySelector,
+  viewLevel,
+  onViewLevelChange,
+  onExit,
 }) => {
   return (
     <div className="bg-white border border-slate-200 rounded-lg shadow-sm px-6 py-4 flex flex-col gap-4">
@@ -61,13 +68,26 @@ export const StepperHeader: React.FC<StepperHeaderProps> = ({
             );
           })}
         </div>
-        <CityYearSelector
-          cityName={cityName}
-          year={year}
-          years={years}
-          onYearChange={onYearChange}
-          onOpenCitySelector={onOpenCitySelector}
-        />
+        <div className="flex flex-wrap items-center gap-3">
+          <CityYearSelector
+            cityName={cityName}
+            year={year}
+            years={years}
+            onYearChange={onYearChange}
+            onOpenCitySelector={onOpenCitySelector}
+            viewLevel={viewLevel}
+            onViewLevelChange={onViewLevelChange}
+          />
+          {onExit && (
+            <button
+              type="button"
+              onClick={onExit}
+              className="px-3 py-1.5 text-xs font-semibold rounded border border-slate-200 text-slate-600 hover:bg-slate-50"
+            >
+              退出驾驶舱
+            </button>
+          )}
+        </div>
       </div>
       <div className="flex items-center justify-between">
         <button

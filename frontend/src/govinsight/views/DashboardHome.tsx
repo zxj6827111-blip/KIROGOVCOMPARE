@@ -15,10 +15,30 @@ export const DashboardHome: React.FC = () => {
 
   // 1. 智能获取最新年份（不再写死2024）
   // 如果数据库里只有2022年数据，就显示2022
-  const availableYears = entity?.data ? entity.data.map(d => d.year).sort((a, b) => b - a) : [];
+  const availableYears = entity?.data ? Array.from(new Set(entity.data.map(d => d.year))).sort((a, b) => b - a) : [];
+
+  // State for Year Selection
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
+
+  // Update selected year when entity changes or availableYears changes
+  React.useEffect(() => {
+    if (availableYears.length > 0 && (!selectedYear || !availableYears.includes(selectedYear))) {
+      setSelectedYear(availableYears[0]);
+    }
+  }, [availableYears.join(','), selectedYear]);
+
+  // Fallback to first available or 2024
+  const currentYear = selectedYear || availableYears[0] || 2024;
 
   // State for Quadrant Selection
   const [selectedNode, setSelectedNode] = useState<any>(null);
+
+  // State for Heat Map Filter (District vs Department)
+  const [heatMapFilter, setHeatMapFilter] = useState<'district' | 'department'>('district');
+
+  const isDistrict = (name: string) => {
+    return name.endsWith('区') || name.endsWith('县') || name.endsWith('市') || name.endsWith('开发区') || name.endsWith('园区') || name.endsWith('新区') || name.endsWith('新城');
+  };
 
   // Guard clause: If no data at all
   if (!entity || !entity.data || entity.data.length === 0) {
@@ -35,8 +55,6 @@ export const DashboardHome: React.FC = () => {
     );
   }
 
-  const currentYear = availableYears[0] || 2024; // Fallback if no data
-
   const currentData = entity.data.find(d => d.year === currentYear);
   const prevData = entity.data.find(d => d.year === currentYear - 1);
 
@@ -44,6 +62,15 @@ export const DashboardHome: React.FC = () => {
   if (!currentData) {
     return (
       <div className="p-10 text-center text-slate-500">
+        <div className="mb-4">
+          <select
+            value={currentYear}
+            onChange={(e) => setSelectedYear(Number(e.target.value))}
+            className="px-3 py-1.5 border border-slate-300 rounded text-sm bg-white"
+          >
+            {availableYears.map(y => <option key={y} value={y}>{y}年</option>)}
+          </select>
+        </div>
         未能找到 {currentYear} 年的数据记录
       </div>
     );
@@ -87,7 +114,10 @@ export const DashboardHome: React.FC = () => {
   const quadrantData = entity.children ? entity.children
     .map(child => {
       const d = child.data.find(x => x.year === currentYear);
-      if (!d) return null;
+      if (!d) {
+        console.log('[DashboardHome] Child', child.name, 'has no data for year', currentYear, '- available years:', child.data.map(x => x.year));
+        return null;
+      }
       return {
         name: child.name,
         x: d.applications.newReceived, // Workload
@@ -96,6 +126,10 @@ export const DashboardHome: React.FC = () => {
       };
     })
     .filter(Boolean) as any[] : [];
+
+  console.log('[DashboardHome] Entity children count:', entity.children?.length || 0);
+  console.log('[DashboardHome] Children with data:', entity.children?.filter(c => c.data && c.data.length > 0).length || 0);
+  console.log('[DashboardHome] quadrantData count:', quadrantData.length);
 
   const avgPressure = quadrantData.length > 0 ? quadrantData.reduce((acc, curr) => acc + curr.x, 0) / quadrantData.length : 0;
   const avgRisk = quadrantData.length > 0 ? quadrantData.reduce((acc, curr) => acc + curr.y, 0) / quadrantData.length : 0;
@@ -127,14 +161,37 @@ export const DashboardHome: React.FC = () => {
     }
   };
 
-  const sortedDistricts = entity.children ? [...entity.children].sort((a, b) => {
-    const da = a.data.find(x => x.year === currentYear);
-    const db = b.data.find(x => x.year === currentYear);
-    return (db?.applications.newReceived || 0) - (da?.applications.newReceived || 0);
-  }) : [];
+  const sortedDistricts = entity.children ? [...entity.children]
+    .filter(child => {
+      if (heatMapFilter === 'district') return isDistrict(child.name);
+      if (heatMapFilter === 'department') return !isDistrict(child.name);
+      return true;
+    })
+    .sort((a, b) => {
+      const da = a.data.find(x => x.year === currentYear);
+      const db = b.data.find(x => x.year === currentYear);
+      return (db?.applications.newReceived || 0) - (da?.applications.newReceived || 0);
+    }) : [];
 
   return (
     <div className="space-y-6">
+      {/* 0. Year Selector Row */}
+      <div className="flex justify-between items-center bg-white p-4 rounded-lg shadow-sm border border-slate-200">
+        <div className="flex items-center space-x-2">
+          <span className="text-sm font-bold text-slate-700">当前分析年份:</span>
+          <select
+            value={currentYear}
+            onChange={(e) => setSelectedYear(Number(e.target.value))}
+            className="px-3 py-1.5 border border-slate-300 rounded-md text-sm font-medium text-slate-700 bg-slate-50 hover:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+          >
+            {availableYears.map(y => <option key={y} value={y}>{y}年度</option>)}
+          </select>
+        </div>
+        <div className="text-xs text-slate-400">
+          {entity.children?.length || 0} 个下辖区域 | 数据更新至 {availableYears[0]}
+        </div>
+      </div>
+
       {/* 1. KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
@@ -209,11 +266,27 @@ export const DashboardHome: React.FC = () => {
         <div className="space-y-6">
           {entity.type === 'city' && (
             <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200 h-full flex flex-col">
-              <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center">
-                <Layers className="w-5 h-5 text-indigo-500 mr-2" />
-                区域受理量热力榜
-                <MetricTip content="依据表3'新收政府信息公开申请数量'排名" />
-              </h3>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-bold text-slate-800 flex items-center">
+                  <Layers className="w-5 h-5 text-indigo-500 mr-2" />
+                  区域受理量热力榜
+                  <MetricTip content="依据表3'新收政府信息公开申请数量'排名" />
+                </h3>
+                <div className="flex bg-slate-100 p-0.5 rounded-lg">
+                  <button
+                    onClick={() => setHeatMapFilter('department')}
+                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${heatMapFilter === 'department' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    部门
+                  </button>
+                  <button
+                    onClick={() => setHeatMapFilter('district')}
+                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${heatMapFilter === 'district' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    区县
+                  </button>
+                </div>
+              </div>
               <div className="flex-1 overflow-y-auto pr-2 space-y-2">
                 {sortedDistricts.map((dist, idx) => {
                   const d = dist.data.find(x => x.year === currentYear);

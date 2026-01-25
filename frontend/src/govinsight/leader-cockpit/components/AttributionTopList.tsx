@@ -17,6 +17,20 @@ export const AttributionTopList: React.FC<AttributionTopListProps> = ({ title, i
     );
   }
 
+  const getValueTitle = (item: AttributionItem) => {
+    if (item.valueStatus === 'MISSING') return '数据未接入/未统计';
+    if (item.value === 0) return '枚举项当年统计为0';
+    return undefined;
+  };
+
+  const getValueDisplay = (item: AttributionItem) => {
+    if (item.valueStatus === 'MISSING') return '—';
+    if (item.status !== 'ok') return getStatusLabel(item.status);
+    const valueText = item.value !== undefined ? formatNumber(item.value) : '—';
+    const shareText = item.share !== undefined ? formatPercent(item.share, 1) : '—';
+    return `${valueText}（${shareText}）`;
+  };
+
   return (
     <div className="bg-white border border-slate-200 rounded-lg p-4">
       <h4 className="text-sm font-semibold text-slate-800 mb-3">{title}</h4>
@@ -29,10 +43,8 @@ export const AttributionTopList: React.FC<AttributionTopListProps> = ({ title, i
               </span>
               <span className="text-slate-700">{item.label}</span>
             </div>
-            <div className="text-slate-600">
-              {item.status === 'ok'
-                ? `${formatNumber(item.value)}（${item.share !== undefined ? formatPercent(item.share, 1) : '—'}）`
-                : getStatusLabel(item.status)}
+            <div className="text-slate-600" title={getValueTitle(item)}>
+              {getValueDisplay(item)}
             </div>
           </div>
         ))}

@@ -4,6 +4,8 @@ import type { ActionPackTemplateInstance } from './types';
 
 export interface LeaderTaskPayload {
   cityId: string;
+  entityId?: string;      // 区县/部门 ID
+  entityName?: string;    // 区县/部门名称
   year: number;
   title: string;
   description: ActionPackTemplateInstance;

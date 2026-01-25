@@ -67,7 +67,7 @@ function IssueList({ regionId, regionName, onBack, onSelectReport }) {
     const [batchChecking, setBatchChecking] = useState(false);
 
 
-    const [batchChecking, setBatchChecking] = useState(false);
+
 
 
 
