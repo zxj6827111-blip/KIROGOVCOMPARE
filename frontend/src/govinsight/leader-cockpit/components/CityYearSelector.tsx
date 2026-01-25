@@ -1,5 +1,6 @@
 import React from 'react';
 import { ChevronDown } from 'lucide-react';
+import type { ViewLevel } from '../types';
 
 interface CityYearSelectorProps {
   cityName: string;
@@ -7,6 +8,8 @@ interface CityYearSelectorProps {
   years: number[];
   onYearChange: (year: number) => void;
   onOpenCitySelector?: () => void;
+  viewLevel: ViewLevel;
+  onViewLevelChange: (level: ViewLevel) => void;
 }
 
 export const CityYearSelector: React.FC<CityYearSelectorProps> = ({
@@ -15,6 +18,8 @@ export const CityYearSelector: React.FC<CityYearSelectorProps> = ({
   years,
   onYearChange,
   onOpenCitySelector,
+  viewLevel,
+  onViewLevelChange,
 }) => {
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -42,6 +47,28 @@ export const CityYearSelector: React.FC<CityYearSelectorProps> = ({
             ))}
           </select>
           <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2 top-1.5 pointer-events-none" />
+        </div>
+      </div>
+      <div className="flex items-center gap-2 text-xs">
+        <span className="text-slate-500">分析层级</span>
+        <div className="flex items-center rounded-full border border-slate-200 bg-slate-50 p-0.5">
+          {([
+            { id: 'city', label: '市级' },
+            { id: 'district', label: '区县' },
+            { id: 'department', label: '部门' },
+          ] as const).map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => onViewLevelChange(option.id)}
+              className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors ${viewLevel === option.id
+                  ? 'bg-slate-900 text-white'
+                  : 'text-slate-500 hover:text-slate-700'
+                }`}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
       </div>
     </div>

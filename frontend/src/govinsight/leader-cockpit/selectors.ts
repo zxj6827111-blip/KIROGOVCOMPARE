@@ -4,16 +4,29 @@ import {
   LEADER_COCKPIT_SERIES_YEARS,
 } from './config';
 import { metricDefinitions, metricEvidence } from './definitions';
+import {
+  assessRiskLevel,
+  getRiskReason,
+  MIN_N_FOR_RANKING
+} from './riskPolicy';
 import type {
   ActionPackTemplateInstance,
   AttributionItem,
+  EntityMetrics,
+  GovernanceSuggestion,
   LeaderCockpitModel,
+  ManagementActionItem,
   MetricVariant,
   MetricValue,
+  MissingType,
   ReasonCategory,
   ReasonItem,
+  StabilityLevel,
+  ValueStatus,
 } from './types';
+import { STABILITY_RULES } from './riskRuleSet';
 import { computeYoY, safeRate, safeShare } from './utils';
+import { percentile, robustGapP90P10 } from './utils/stats';
 
 const getSeriesYears = (year: number, span = LEADER_COCKPIT_SERIES_YEARS): number[] => {
   return Array.from({ length: span }, (_, idx) => year - (span - 1) + idx);
@@ -162,14 +175,16 @@ const buildReasonCategories = (
     prevValue?: number,
     categoryId?: string
   ): ReasonItem => {
-    const share = safeShare(value, totalAll);
+    const valueStatus: ReasonItem['valueStatus'] = value === undefined ? 'MISSING' : 'VALUE';
+    const share = valueStatus === 'VALUE' ? safeShare(value, totalAll) : { status: 'missing' as const };
     return {
       id,
       name,
       value,
+      valueStatus,
       share: share.status === 'ok' ? share.value : undefined,
-      status: value === undefined ? 'missing' : 'ok',
-      trend: computeYoY(value, prevValue),
+      status: valueStatus === 'VALUE' ? 'ok' : 'missing',
+      trend: valueStatus === 'VALUE' ? computeYoY(value, prevValue) : null,
       categoryId,
     };
   };
@@ -229,7 +244,7 @@ const buildReasonCategories = (
   ];
 
   const topReasons = [...itemsA, ...itemsB, ...itemsC]
-    .filter((item) => item.value !== undefined)
+    .filter((item) => item.valueStatus === 'VALUE')
     .sort((a, b) => (b.value || 0) - (a.value || 0))
     .slice(0, 5);
 
@@ -321,7 +336,10 @@ const buildAttributions = (
     id: item.id,
     label: item.name,
     value: item.value,
-    share: total ? (item.value || 0) / total * 100 : undefined,
+    valueStatus: item.valueStatus,
+    share: total && item.valueStatus === 'VALUE'
+      ? (item.value || 0) / total * 100
+      : undefined,
     status: item.status,
   }));
 };
@@ -477,13 +495,14 @@ export const buildLeaderCockpitModel = (
   const correctionConversionRate = safeRate(correctionCasesValue, current?.applications.newReceived);
   const correctionRate = safeRate(correctionCasesValue, disputeCasesValue);
 
+  const responseTypeValueStatus: ValueStatus = 'VALUE';
   const responseTypeAttributions: AttributionItem[] | undefined = current
     ? [
-      { id: 'public', label: '公开', value: current.applications.outcomes.public, status: 'ok' as const },
-      { id: 'partial', label: '部分公开', value: current.applications.outcomes.partial, status: 'ok' as const },
-      { id: 'notOpen', label: '不予公开', value: current.applications.outcomes.notOpen, status: 'ok' as const },
-      { id: 'unable', label: '无法提供', value: current.applications.outcomes.unable, status: 'ok' as const },
-      { id: 'ignore', label: '其他处理', value: current.applications.outcomes.ignore, status: 'ok' as const },
+      { id: 'public', label: '公开', value: current.applications.outcomes.public, status: 'ok' as const, valueStatus: responseTypeValueStatus },
+      { id: 'partial', label: '部分公开', value: current.applications.outcomes.partial, status: 'ok' as const, valueStatus: responseTypeValueStatus },
+      { id: 'notOpen', label: '不予公开', value: current.applications.outcomes.notOpen, status: 'ok' as const, valueStatus: responseTypeValueStatus },
+      { id: 'unable', label: '无法提供', value: current.applications.outcomes.unable, status: 'ok' as const, valueStatus: responseTypeValueStatus },
+      { id: 'ignore', label: '其他处理', value: current.applications.outcomes.ignore, status: 'ok' as const, valueStatus: responseTypeValueStatus },
     ].sort((a, b) => (b.value || 0) - (a.value || 0)).slice(0, 5)
     : undefined;
 
@@ -569,3 +588,322 @@ export const buildLeaderCockpitModel = (
 
   return model;
 };
+
+// Entity Classification Helpers
+const isDistrictName = (name: string): boolean => {
+  const districtSuffixes = ['区', '县', '开发区', '园区', '文旅区', '高新区'];
+  return districtSuffixes.some(suffix => name.endsWith(suffix));
+};
+
+const isDepartmentName = (name: string): boolean => {
+  const departmentSuffixes = ['局', '委员会', '委', '办', '中心', '院', '馆', '所', '署', '厅'];
+  return departmentSuffixes.some(suffix => name.endsWith(suffix));
+};
+
+type EntityType = 'district' | 'department' | 'unknown';
+
+const classifyEntity = (name: string): EntityType => {
+  if (isDistrictName(name)) return 'district';
+  if (isDepartmentName(name)) return 'department';
+  return 'unknown';
+};
+
+// Build Entity Comparison Model
+
+// ============================================================================
+// Logic Enhancements (Stability, Missing Type, Actions)
+// ============================================================================
+
+const assessStability = (n?: number, missingCount = 0): StabilityLevel => {
+  if (n === undefined) return 'low';
+  if (missingCount > 0 && n < 30) return 'low';
+
+  if (n >= 100 && missingCount === 0) return 'high';
+  if (n >= 30) return 'medium';
+  return 'low';
+};
+
+const classifyMissingType = (entity: EntityProfile, year: number): MissingType => {
+  // Simple heuristic based on data structure
+  const yearData = entity.data?.find(d => d.year === year);
+  if (!yearData) {
+    // Check if parent has data implies connection exists? 
+    // For now assuming if entity exists in system but no annual data -> not_reported
+    // But distinguishing from not_connected (no capability) is hard without backend flag.
+    // Fallback: Default to not_reported if we know the entity should have reports.
+    return 'not_reported';
+  }
+
+  // If yearData exists but specific fields are missing/null, handled at metric level.
+  // But for the EntityMetrics 'missingType' field, it usually refers to why the *row* is incomplete.
+  // If we reached here, we likely have partial data.
+  // We'll return 'unknown' if not explicitly handled.
+  return 'unknown';
+};
+
+const generateInterviewList = (entities: EntityMetrics[]): ManagementActionItem[] => {
+  return entities
+    .filter(e => e.riskLevel === 'red' || e.riskLevel === 'yellow')
+    .sort((a, b) => {
+      // Red first
+      if (a.riskLevel === 'red' && b.riskLevel !== 'red') return -1;
+      if (b.riskLevel === 'red' && a.riskLevel !== 'red') return 1;
+      // Then by N desc
+      return (b.acceptedTotal || 0) - (a.acceptedTotal || 0);
+    })
+    .slice(0, 5) // Top 5
+    .map(e => ({
+      id: `act-${e.id}`,
+      entityName: e.name,
+      reason: e.riskReason || '风险异常',
+      metrics: `公开率:${e.disclosureRate !== undefined ? e.disclosureRate.toFixed(1) + '%' : '-'}/纠错率:${e.correctionRate !== undefined ? e.correctionRate.toFixed(1) + '%' : '-'}`,
+    }));
+};
+
+const generateGovernanceSuggestions = (city: string): GovernanceSuggestion[] => {
+  return [
+    {
+      id: 'sugg-1',
+      title: '统一口径答复模板',
+      content: `针对${city}常见的信息公开申请类别，建立标准化答复口径库，降低“未按规定答复”比例。`,
+      kpi: '答复规范性提升30%',
+      ownerSuggestion: '市政府办公室/司法局',
+      cycle: '30天'
+    },
+    {
+      id: 'sugg-2',
+      title: '信息资产台账与责任机制',
+      content: '建立全量政府信息资产台账，明确各部门产生、保管义务，解决“本机关不掌握”滥用问题。',
+      kpi: '持有信息准确率100%',
+      ownerSuggestion: '数据局/各业务部门',
+      cycle: '60天'
+    },
+    {
+      id: 'sugg-3',
+      title: '复议案件复盘与闭环',
+      content: '建立季度复议败诉/纠错案件复盘会机制，将纠错结果纳入绩效考核。',
+      kpi: '纠错率下降5个百分点',
+      ownerSuggestion: '司法局',
+      cycle: '长期'
+    }
+  ];
+};
+
+export const buildEntityComparisonModel = (
+  cityEntity: EntityProfile | null,
+  year: number,
+  viewLevel: import('./types').ViewLevel,
+  calibration: {
+    disclosureMethod: import('./types').DisclosureMethod;
+    correctionMethod: import('./types').CorrectionMethod;
+    includesCarryOver: boolean;
+    enableStableSample: boolean;
+  } = {
+      disclosureMethod: 'substantive',
+      correctionMethod: 'reconsideration',
+      includesCarryOver: false,
+      enableStableSample: true
+    }
+): import('./types').EntityComparisonModel | null => {
+  if (!cityEntity || viewLevel === 'city') return null;
+
+  // Import risk assessment utilities
+  // const { assessRiskLevel, getRiskReason } = require('./utils/riskAssessment'); // Removed in favor of riskPolicy.ts
+  // const { MIN_N_FOR_RANKING } = require('./config'); // Removed in favor of riskPolicy.ts
+
+  // Filter children by view level
+  const targetType: EntityType = viewLevel === 'district' ? 'district' : 'department';
+  const filteredChildren = (cityEntity.children || []).filter(
+    child => classifyEntity(child.name) === targetType
+  );
+
+  console.log(`[buildEntityComparisonModel] ${viewLevel} view, calibration:`, calibration);
+
+  if (filteredChildren.length === 0) return null;
+
+  // Build metrics for each entity
+  const entities: import('./types').EntityMetrics[] = filteredChildren.map(child => {
+    const record = getRecord(child, year);
+
+    if (!record) {
+      return {
+        id: child.id,
+        name: child.name,
+        newApplicationsStatus: 'MISSING' as const,
+        acceptedTotalStatus: 'MISSING' as const,
+        disclosureRateStatus: 'MISSING' as const,
+        correctionRateStatus: 'MISSING' as const,
+        status: 'missing' as const,
+        riskLevel: 'missing' as const,
+        riskReason: '数据待接入',
+        isSampleSufficient: false,
+        missingType: classifyMissingType(child, year) // Classify missing type
+      };
+    }
+
+    // --- 1. Calculate Accepted Total (Calibration: includesCarryOver) ---
+    // If includesCarryOver is true, used totalHandled (New + CarriedOver)
+    // If false, use newReceived (New Only) - APPROXIMATION for demonstration
+    // NOTE: In strict logic, changing denominator might invalidate outcome numerators if outcomes include carried over cases.
+    // For this implementation, we will stick to totalHandled for RATE denominators to ensure < 100%,
+    // but we can change the "Accepted Total" display value.
+    const acceptedTotal = calibration.includesCarryOver
+      ? record.applications.totalHandled
+      : record.applications.newReceived;
+
+
+    // --- 2. Calculate Disclosure Rate (Calibration: disclosureMethod) ---
+    const outcomes = record.applications.outcomes;
+    const totalHandled = record.applications.totalHandled; // Always use full handled for rate denominator to be safe
+
+    let disclosureNumerator = 0;
+    if (calibration.disclosureMethod === 'substantive') {
+      // Substantive: Public + Partial
+      disclosureNumerator = sumValues(outcomes?.public, outcomes?.partial);
+    } else {
+      // Absolute: Public only
+      disclosureNumerator = outcomes?.public || 0;
+    }
+
+    const disclosureRate = safeRate(disclosureNumerator, totalHandled);
+
+
+    // --- 3. Calculate Correction Rate (Calibration: correctionMethod) ---
+    let correctionNumerator = 0;
+    let correctionDenominator = 0;
+
+    if (calibration.correctionMethod === 'reconsideration') {
+      // Reconsideration Only
+      correctionNumerator = record.disputes.reconsideration.corrected || 0;
+      correctionDenominator = record.disputes.reconsideration.total || 0;
+    } else {
+      // Comprehensive: Reconsideration + Litigation
+      correctionNumerator = sumValues(
+        record.disputes.reconsideration.corrected,
+        record.disputes.litigation.corrected
+      );
+      correctionDenominator = sumValues(
+        record.disputes.reconsideration.total,
+        record.disputes.litigation.total
+      );
+    }
+
+    const correctionRate = safeRate(correctionNumerator, correctionDenominator);
+
+    // Verify sample sufficiency using policy constant
+    const isSampleSufficient = acceptedTotal !== undefined && acceptedTotal >= MIN_N_FOR_RANKING;
+
+    const entityMetrics: import('./types').EntityMetrics = {
+      id: child.id,
+      name: child.name,
+      newApplications: record.applications.newReceived,
+      newApplicationsStatus: record.applications.newReceived !== undefined ? 'VALUE' as const : 'MISSING' as const,
+      acceptedTotal,
+      acceptedTotalStatus: acceptedTotal !== undefined ? 'VALUE' as const : 'MISSING' as const,
+      disclosureRate: disclosureRate.status === 'ok' ? disclosureRate.value : undefined,
+      disclosureRateStatus: disclosureRate.status === 'ok' ? 'VALUE' as const : 'MISSING' as const,
+      disclosureNumerator,     // New field
+      disclosureDenominator: totalHandled, // New field
+      correctionRate: correctionRate.status === 'ok' ? correctionRate.value : undefined,
+      correctionRateStatus: correctionRate.status === 'ok' ? 'VALUE' as const : 'MISSING' as const,
+      correctionNumerator,
+      correctionDenominator,
+      status: 'ok' as const,
+      isSampleSufficient,
+      stability: assessStability(acceptedTotal, (disclosureRate.status !== 'ok' || correctionRate.status !== 'ok') ? 1 : 0),
+    };
+
+    // Assess risk level
+    entityMetrics.riskLevel = assessRiskLevel(entityMetrics);
+    entityMetrics.riskReason = getRiskReason(entityMetrics, entityMetrics.riskLevel);
+
+    return entityMetrics;
+  });
+
+  // Calculate rankings (exclude MISSING and small samples if strict mode is on)
+  const strictSample = calibration.enableStableSample;
+
+  const rankByDisclosureRate = [...entities]
+    .filter(e => e.disclosureRateStatus === 'VALUE' && (strictSample ? e.isSampleSufficient : true))
+    .sort((a, b) => (b.disclosureRate || 0) - (a.disclosureRate || 0));
+
+  const rankByCorrectionRate = [...entities]
+    .filter(e => e.correctionRateStatus === 'VALUE' && (strictSample ? e.isSampleSufficient : true))
+    .sort((a, b) => (a.correctionRate || 0) - (b.correctionRate || 0)); // Lower is better
+
+  const rankByNewApplications = [...entities]
+    .filter(e => e.newApplicationsStatus === 'VALUE')
+    .sort((a, b) => (b.newApplications || 0) - (a.newApplications || 0));
+
+  // Calculate statistics
+  const validDisclosureRates = entities
+    .filter(e => e.disclosureRateStatus === 'VALUE')
+    .map(e => ({ rate: e.disclosureRate!, weight: e.acceptedTotal || 0 }));
+
+  const validCorrectionRates = entities
+    .filter(e => e.correctionRateStatus === 'VALUE')
+    .map(e => ({ rate: e.correctionRate!, weight: e.acceptedTotal || 0 }));
+
+  // Simple average
+  const avgDisclosureRate = validDisclosureRates.length > 0
+    ? validDisclosureRates.reduce((sum, item) => sum + item.rate, 0) / validDisclosureRates.length
+    : undefined;
+
+  const avgCorrectionRate = validCorrectionRates.length > 0
+    ? validCorrectionRates.reduce((sum, item) => sum + item.rate, 0) / validCorrectionRates.length
+    : undefined;
+
+  // Weighted average
+  const totalWeightDisclosure = validDisclosureRates.reduce((sum, item) => sum + item.weight, 0);
+  const avgDisclosureRateWeighted = totalWeightDisclosure > 0
+    ? validDisclosureRates.reduce((sum, item) => sum + item.rate * item.weight, 0) / totalWeightDisclosure
+    : undefined;
+
+  const totalWeightCorrection = validCorrectionRates.reduce((sum, item) => sum + item.weight, 0);
+  const avgCorrectionRateWeighted = totalWeightCorrection > 0
+    ? validCorrectionRates.reduce((sum, item) => sum + item.rate * item.weight, 0) / totalWeightCorrection
+    : undefined;
+
+  const maxDisclosureRate = validDisclosureRates.length > 0
+    ? Math.max(...validDisclosureRates.map(item => item.rate))
+    : undefined;
+
+  const minDisclosureRate = validDisclosureRates.length > 0
+    ? Math.min(...validDisclosureRates.map(item => item.rate))
+    : undefined;
+
+  const statistics = {
+    total: entities.length,
+    avgDisclosureRate,
+    avgDisclosureRateWeighted,
+    avgCorrectionRate,
+    avgCorrectionRateWeighted,
+    maxDisclosureRate,
+    minDisclosureRate,
+
+    // Robust Stats
+    disclosureRateP90: percentile(validDisclosureRates.map(v => v.rate), 0.9),
+    disclosureRateP10: percentile(validDisclosureRates.map(v => v.rate), 0.1),
+    disclosureRateGapP90P10: robustGapP90P10(validDisclosureRates.map(v => v.rate)),
+
+    // Coverage Stats
+    disclosureRateCoverage: `${validDisclosureRates.length}/${entities.length}`,
+    correctionRateCoverage: `${validCorrectionRates.length}/${entities.length}`,
+    reasonCoverage: `${entities.length}/${entities.length}`, // Placeholder for reason coverage
+  };
+
+  return {
+    city: { id: cityEntity.id, name: cityEntity.name },
+    year,
+    viewLevel,
+    entities,
+    rankings: {
+      byDisclosureRate: rankByDisclosureRate,
+      byCorrectionRate: rankByCorrectionRate,
+      byNewApplications: rankByNewApplications
+    },
+    statistics,
+    calibration,
+  };
+};
+
