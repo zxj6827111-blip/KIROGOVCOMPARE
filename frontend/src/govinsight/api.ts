@@ -11,14 +11,17 @@ const API_BASE = process.env.REACT_APP_API_URL || '';
  * 获取年度统计数据
  * @param year 年份 (可选)
  * @param orgId 单位ID (可选)
+ * @param includeChildren 是否包含子级单位数据 (可选)
  */
 export async function fetchAnnualData(
   year?: number,
-  orgId?: string
+  orgId?: string,
+  includeChildren?: boolean
 ): Promise<AnnualDataRecord[]> {
   const params = new URLSearchParams();
   if (year) params.set('year', String(year));
   if (orgId) params.set('org_id', orgId);
+  if (includeChildren) params.set('include_children', 'true');
 
   const url = `${API_BASE}/api/gov-insight/annual-data${params.toString() ? '?' + params.toString() : ''}`;
   const response = await fetch(url, { credentials: 'include' });
