@@ -16,3 +16,18 @@ export const LEADER_COCKPIT_CONNECTIONS: {
 } = {
   litigation: 'auto',
 };
+
+// 样本量护栏：排名最小样本量门槛
+export const MIN_N_FOR_RANKING = 30;
+
+// 风险分级阈值配置
+export const RISK_THRESHOLDS = {
+  disclosureRate: {
+    red: 60,    // 公开率 < 60% 为红牌
+    yellow: 70, // 公开率 60%-70% 为黄牌
+  },
+  correctionRate: {
+    red: 20,    // 纠错率 > 20% 为红牌
+    yellow: 15, // 纠错率 15%-20% 为黄牌
+  },
+};

@@ -22,6 +22,17 @@ export const Step2Reasons: React.FC<Step2ReasonsProps> = ({
   const [selectedReason, setSelectedReason] = useState<ReasonItem | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<ReasonCategory | null>(null);
 
+  const getReasonValueTitle = (reason: ReasonItem) => {
+    if (reason.valueStatus === 'MISSING') return '数据未接入/未统计';
+    if (reason.value === 0) return '枚举项当年统计为0';
+    return undefined;
+  };
+
+  const getReasonValueDisplay = (reason: ReasonItem) => {
+    if (reason.valueStatus === 'MISSING') return '—';
+    return formatNumber(reason.value);
+  };
+
   const topAttributions = useMemo(() => {
     return model.reasons.topReasons.map((reason) => ({
       id: reason.id,
@@ -29,6 +40,7 @@ export const Step2Reasons: React.FC<Step2ReasonsProps> = ({
       value: reason.value,
       share: reason.share,
       status: reason.status,
+      valueStatus: reason.valueStatus,
     }));
   }, [model.reasons.topReasons]);
 
@@ -118,9 +130,15 @@ export const Step2Reasons: React.FC<Step2ReasonsProps> = ({
               <div className="space-y-3 text-xs">
                 <div className="text-slate-700 font-semibold">{selectedReason.name}</div>
                 <div className="text-slate-500">归因分类：{selectedCategory?.name}</div>
-                <div className="text-slate-500">数量：{selectedReason.value !== undefined ? formatNumber(selectedReason.value) : '—'}</div>
+                <div className="text-slate-500" title={getReasonValueTitle(selectedReason)}>
+                  数量：{getReasonValueDisplay(selectedReason)}
+                </div>
                 <div className="text-slate-500">占比：{selectedReason.share !== undefined ? formatPercent(selectedReason.share, 1) : '—'}</div>
-                <div className="text-slate-500">趋势：{selectedReason.trend !== null && selectedReason.trend !== undefined ? `${selectedReason.trend >= 0 ? '+' : ''}${selectedReason.trend}%` : '暂无同比数据'}</div>
+                <div className="text-slate-500">
+                  趋势：{selectedReason.valueStatus === 'VALUE' && selectedReason.trend !== null && selectedReason.trend !== undefined
+                    ? `${selectedReason.trend >= 0 ? '+' : ''}${selectedReason.trend}%`
+                    : '暂无同比数据'}
+                </div>
                 <div className="pt-2">
                   <button
                     type="button"

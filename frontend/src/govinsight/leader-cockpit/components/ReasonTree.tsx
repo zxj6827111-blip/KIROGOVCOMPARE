@@ -8,6 +8,17 @@ interface ReasonTreeProps {
 }
 
 export const ReasonTree: React.FC<ReasonTreeProps> = ({ categories, onSelect }) => {
+  const getValueTitle = (item: ReasonItem) => {
+    if (item.valueStatus === 'MISSING') return '数据未接入/未统计';
+    if (item.value === 0) return '枚举项当年统计为0';
+    return undefined;
+  };
+
+  const getValueDisplay = (item: ReasonItem) => {
+    if (item.valueStatus === 'MISSING') return '—';
+    return formatNumber(item.value);
+  };
+
   return (
     <div className="space-y-4">
       {categories.map((category) => (
@@ -36,13 +47,13 @@ export const ReasonTree: React.FC<ReasonTreeProps> = ({ categories, onSelect }) 
                   <div className="text-xs text-slate-700">{item.name}</div>
                   <div className="text-[10px] text-slate-400">
                     占比 {item.share !== undefined ? formatPercent(item.share, 1) : '—'}
-                    {item.trend !== null && item.trend !== undefined && (
+                    {item.valueStatus === 'VALUE' && item.trend !== null && item.trend !== undefined && (
                       <span className="ml-2">同比 {item.trend >= 0 ? '+' : ''}{item.trend}%</span>
                     )}
                   </div>
                 </div>
-                <div className="text-xs font-semibold text-slate-700">
-                  {item.status === 'ok' ? formatNumber(item.value) : getStatusLabel(item.status)}
+                <div className="text-xs font-semibold text-slate-700" title={getValueTitle(item)}>
+                  {getValueDisplay(item)}
                 </div>
               </button>
             ))}

@@ -148,14 +148,145 @@ export const buildRegionTree = (items: OrgItem[]): EntityProfile[] => {
   return roots;
 };
 
+// Helper function to check if an entity name is a real "district" (区/县) vs a "department" (局/委员会)
+const isDistrictName = (name: string): boolean => {
+  // 扩展后缀列表,支持更多变体
+  const districtSuffixes = [
+    '区', '县', '市',  // 基本行政区划
+    '开发区', '园区', '文旅区', '高新区', '经开区', '工业园区',  // 开发区类
+    '新区', '示范区', '保税区', '自贸区',  // 特殊功能区
+    '镇', '乡', '街道', '办事处'  // 基层行政区划
+  ];
+  return districtSuffixes.some(suffix => name.endsWith(suffix));
+};
+
 // Async data loader (Lazy load data for an entity)
 export const loadEntityData = async (entity: EntityProfile): Promise<EntityProfile> => {
   try {
-    const records = await fetchAnnualData(undefined, entity.id);
-    const annualData = records.map(transformYearData).sort((a, b) => a.year - b.year);
+    const targetId = entity.id.trim().toLowerCase();
+    console.log('[loadEntityData] %cSTART', 'background: #222; color: #bada55', {
+      id: entity.id,
+      name: entity.name,
+      normalizedId: targetId
+    });
+
+    // Fetch data for the entity AND its children in one call
+    const records = await fetchAnnualData(undefined, entity.id, true);
+    console.log('[loadEntityData] Received', records.length, 'total records from API');
+
+    if (records.length > 0) {
+      console.log('[loadEntityData] First record raw:', records[0]);
+    }
+
+    // Separate records using normalized IDs for robustness
+    const entityRecords = records.filter(r => r.org_id?.trim().toLowerCase() === targetId);
+
+    // Child records: parent_id matches targetId
+    // 修复: 不再依赖isDistrictName,而是使用org_type或parent_id关系
+    // Child records filtering and mapping
+    const validChildIds = new Set(entity.children?.map(c => c.id.trim().toLowerCase()));
+
+    const relevantRecords = records.filter(r => {
+      const oid = r.org_id?.trim().toLowerCase();
+      const pid = r.parent_id?.trim().toLowerCase();
+
+      // Case 1: Record is a known child (Direct Match)
+      if (oid && validChildIds.has(oid)) return true;
+
+      // Case 2: Record is a child of a known child (Grandchild Match)
+      if (pid && validChildIds.has(pid)) return true;
+
+      return false;
+    });
+
+    console.log('[loadEntityData] Match Results:', {
+      ownRecords: entityRecords.length,
+      relevantRecords: relevantRecords.length,
+      method: 'Extended Parent/Child Search'
+    });
+
+    // Group children records by the District ID (effective ID)
+    const childRecordsMap = new Map<string, AnnualDataRecord[]>();
+
+    relevantRecords.forEach(r => {
+      const oid = r.org_id?.trim().toLowerCase() || '';
+      const pid = r.parent_id?.trim().toLowerCase() || '';
+
+      let effectiveId = '';
+
+      if (validChildIds.has(oid)) {
+        effectiveId = oid;
+      } else if (validChildIds.has(pid)) {
+        effectiveId = pid;
+      }
+
+      if (effectiveId) {
+        if (!childRecordsMap.has(effectiveId)) {
+          childRecordsMap.set(effectiveId, []);
+        }
+        childRecordsMap.get(effectiveId)!.push(r);
+      }
+    });
+
+    // Helper to prioritize "Government" records if multiple exist for same year
+    const prioritizeGovernment = (a: AnnualDataRecord, b: AnnualDataRecord) => {
+      const score = (rec: AnnualDataRecord) => {
+        const name = rec.org_name || '';
+        if (name.includes('人民政府') || name.includes('管委会')) return 2;
+        if (name.includes('政府办') || name.includes('办公室')) return 1;
+        return 0;
+      };
+      return score(b) - score(a); // High score first
+    };
+
+    // Sort records within each district group
+    childRecordsMap.forEach((recs, key) => {
+      recs.sort(prioritizeGovernment);
+    });
+
+    // Transform entity data
+    const annualData = entityRecords.map(transformYearData).sort((a, b) => a.year - b.year);
+
+    // Build children
+    const childrenFromAPI: EntityProfile[] = [];
+    childRecordsMap.forEach((recs, orgId) => {
+      const firstRec = recs[0];
+      const childData = recs.map(transformYearData).sort((a, b) => a.year - b.year);
+
+      const existingChild = entity.children?.find(c => c.id.trim().toLowerCase() === orgId);
+
+      childrenFromAPI.push({
+        id: existingChild?.id || orgId,
+        name: firstRec.org_name,
+        type: (firstRec.org_type || 'district') as EntityType,
+        data: childData,
+        children: existingChild?.children || [],
+        parentPath: [...(entity.parentPath || []), entity.name]
+      });
+    });
+
+    // Merge (only keep districts)
+    const mergedChildren = [...childrenFromAPI];
+    entity.children?.forEach(existingChild => {
+      const normalizedChildId = existingChild.id.trim().toLowerCase();
+      if (!childRecordsMap.has(normalizedChildId) && isDistrictName(existingChild.name)) {
+        mergedChildren.push({
+          ...existingChild,
+          data: existingChild.data || []
+        });
+      }
+    });
+
+    console.log('[loadEntityData] %cFINISH', 'background: #222; color: #bada55', {
+      totalChildren: mergedChildren.length,
+      withData: mergedChildren.filter(c => c.data.length > 0).length,
+      names: mergedChildren.map(c => c.name)
+    });
+
     return {
       ...entity,
-      data: annualData
+      data: annualData,
+      children: mergedChildren
     };
   } catch (err) {
     console.warn(`Failed to load data for ${entity.name}`, err);

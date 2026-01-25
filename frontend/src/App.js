@@ -4,6 +4,7 @@ import Login from './components/Login';
 import UploadReport from './components/UploadReport';
 
 import ReportDetail from './components/ReportDetail';
+import Logo from './components/Logo';
 import CityIndex from './components/CityIndex';
 import RegionsManager from './components/RegionsManager';
 import ComparisonHistory from './components/ComparisonHistory';
@@ -153,10 +154,7 @@ function App() {
   return (
     <div className="app">
       <header className="header">
-        <div className="header-content">
-          <h1>政府信息公开年度报告差异比对系统</h1>
-          <p>后台管理系统</p>
-        </div>
+        <Logo />
         <div className="header-user">
           {/* User Management moved to header, replacing NotificationCenter as requested */}
           {(user.permissions?.manage_users || user.username === 'admin' || user.id === 1) && (
