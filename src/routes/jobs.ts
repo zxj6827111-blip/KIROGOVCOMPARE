@@ -452,14 +452,87 @@ function determineVersionStatus(jobs: Array<{ status: string; kind: string }>): 
  * Helper: Delete a specific version and all its related data
  */
 async function deleteVersion(versionId: number) {
-    // 1. Delete associated jobs
-    await pool.query('DELETE FROM jobs WHERE version_id = $1', [versionId]);
+    console.log(`[deleteVersion] Starting deletion for version ${versionId}`);
 
-    // 2. Delete parse results
-    await pool.query('DELETE FROM report_version_parses WHERE report_version_id = $1', [versionId]);
+    try {
+        // 0. Check if this version is the active version of any report
+        console.log(`[deleteVersion] Checking if version ${versionId} is active for any report`);
+        const activeCheckResult = await pool.query(
+            'SELECT id, region_id, year FROM reports WHERE active_version_id = $1',
+            [versionId]
+        );
 
-    // 3. Delete the version itself
-    await pool.query('DELETE FROM report_versions WHERE id = $1', [versionId]);
+        if (activeCheckResult.rowCount && activeCheckResult.rowCount > 0) {
+            const report = activeCheckResult.rows[0];
+            console.log(`[deleteVersion] Version ${versionId} is active for report ${report.id}. Setting active_version_id to NULL.`);
+            await pool.query('UPDATE reports SET active_version_id = NULL WHERE id = $1', [report.id]);
+        }
+
+        // 1. Delete cells data
+        console.log(`[deleteVersion] Deleting cells for version ${versionId}`);
+        const cellsResult = await pool.query('DELETE FROM cells WHERE version_id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${cellsResult.rowCount} cells for version ${versionId}`);
+
+        // 2. Delete fact tables data
+        console.log(`[deleteVersion] Deleting fact_active_disclosure for version ${versionId}`);
+        const factActiveResult = await pool.query('DELETE FROM fact_active_disclosure WHERE version_id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${factActiveResult.rowCount} fact_active_disclosure records`);
+
+        console.log(`[deleteVersion] Deleting fact_application for version ${versionId}`);
+        const factAppResult = await pool.query('DELETE FROM fact_application WHERE version_id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${factAppResult.rowCount} fact_application records`);
+
+        console.log(`[deleteVersion] Deleting fact_legal_proceeding for version ${versionId}`);
+        const factLegalResult = await pool.query('DELETE FROM fact_legal_proceeding WHERE version_id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${factLegalResult.rowCount} fact_legal_proceeding records`);
+
+        // 3. Delete quality issues
+        console.log(`[deleteVersion] Deleting quality_issues for version ${versionId}`);
+        const qualityResult = await pool.query('DELETE FROM quality_issues WHERE version_id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${qualityResult.rowCount} quality_issues for version ${versionId}`);
+
+        // 4. Delete notifications
+        console.log(`[deleteVersion] Deleting notifications for version ${versionId}`);
+        const notifResult = await pool.query('DELETE FROM notifications WHERE related_version_id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${notifResult.rowCount} notifications for version ${versionId}`);
+
+        // 5. Delete consistency check runs (CASCADE)
+        console.log(`[deleteVersion] Deleting consistency check runs for version ${versionId}`);
+        const consistencyRunsResult = await pool.query('DELETE FROM report_consistency_runs WHERE report_version_id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${consistencyRunsResult.rowCount} consistency runs for version ${versionId}`);
+
+        // 6. Delete associated jobs
+        console.log(`[deleteVersion] Deleting jobs for version ${versionId}`);
+        const jobsResult = await pool.query('DELETE FROM jobs WHERE version_id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${jobsResult.rowCount} jobs for version ${versionId}`);
+
+        // 7. Delete parse results
+        console.log(`[deleteVersion] Deleting parse results for version ${versionId}`);
+        const parseResult = await pool.query('DELETE FROM report_version_parses WHERE report_version_id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${parseResult.rowCount} parse results for version ${versionId}`);
+
+        // 8. Delete consistency check items
+        console.log(`[deleteVersion] Deleting consistency check items for version ${versionId}`);
+        const consistencyResult = await pool.query('DELETE FROM report_consistency_items WHERE report_version_id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${consistencyResult.rowCount} consistency items for version ${versionId}`);
+
+        // 4. Delete the version itself
+        console.log(`[deleteVersion] Deleting version record ${versionId}`);
+        const versionResult = await pool.query('DELETE FROM report_versions WHERE id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${versionResult.rowCount} version records for version ${versionId}`);
+
+        console.log(`[deleteVersion] ✅ Successfully completed deletion for version ${versionId}`);
+    } catch (error: any) {
+        console.error(`[deleteVersion] ❌ Error deleting version ${versionId}:`, error);
+        console.error(`[deleteVersion] Error details:`, {
+            message: error.message,
+            code: error.code,
+            detail: error.detail,
+            constraint: error.constraint,
+            table: error.table
+        });
+        throw error; // Re-throw to be caught by the caller
+    }
 }
 
 /**
