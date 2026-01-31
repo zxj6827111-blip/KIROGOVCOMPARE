@@ -541,9 +541,11 @@ router.delete('/task/:jobId', requirePermission('manage_jobs'), async (req, res)
     try {
         const jobId = Number(req.params.jobId);
         if (Number.isNaN(jobId)) {
+            console.error(`[Delete Task] Invalid job_id: ${req.params.jobId}`);
             return res.status(400).json({ error: 'Invalid job_id' });
         }
 
+        console.log(`[Delete Task] Attempting to delete job ${jobId}`);
         const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
 
         // 1. Get job details ensuring region permission
@@ -556,39 +558,61 @@ router.delete('/task/:jobId', requirePermission('manage_jobs'), async (req, res)
         const jobs = jobRes.rows;
 
         if (jobs.length === 0) {
+            console.error(`[Delete Task] Job ${jobId} not found`);
             return res.status(404).json({ error: 'Job not found' });
         }
         const job = jobs[0];
+        console.log(`[Delete Task] Found job ${jobId}, kind: ${job.kind}, version_id: ${job.version_id}, region_id: ${job.region_id}`);
 
         // Check permission
         if (!isRegionAllowed(job.region_id, allowedRegionIds)) {
+            console.error(`[Delete Task] Permission denied for job ${jobId}, region ${job.region_id}`);
             return res.status(403).json({ error: 'forbidden' });
         }
 
-        if (job.kind === 'pdf_export') {
-            if (job.file_path && fs.existsSync(job.file_path)) {
-                try {
-                    fs.unlinkSync(job.file_path);
-                } catch (e) {
-                    console.warn('Failed to delete PDF file:', e);
+        try {
+            if (job.kind === 'pdf_export') {
+                console.log(`[Delete Task] Deleting PDF export job ${jobId}`);
+                if (job.file_path && fs.existsSync(job.file_path)) {
+                    try {
+                        fs.unlinkSync(job.file_path);
+                        console.log(`[Delete Task] Deleted PDF file: ${job.file_path}`);
+                    } catch (e) {
+                        console.warn(`[Delete Task] Failed to delete PDF file ${job.file_path}:`, e);
+                    }
+                }
+                await pool.query('DELETE FROM jobs WHERE id = $1', [jobId]);
+                console.log(`[Delete Task] Successfully deleted PDF job ${jobId}`);
+            } else {
+                if (job.version_id) {
+                    console.log(`[Delete Task] Deleting version ${job.version_id} for job ${jobId}`);
+                    await deleteVersion(job.version_id);
+                    console.log(`[Delete Task] Successfully deleted Version ${job.version_id} via job ${jobId}`);
+                } else {
+                    console.log(`[Delete Task] Deleting orphan job ${jobId}`);
+                    await pool.query('DELETE FROM jobs WHERE id = $1', [jobId]);
+                    console.log(`[Delete Task] Successfully deleted orphan job ${jobId}`);
                 }
             }
-            await pool.query('DELETE FROM jobs WHERE id = $1', [jobId]);
-            console.log(`[Delete Task] Deleted PDF job ${jobId}`);
-        } else {
-            if (job.version_id) {
-                await deleteVersion(job.version_id);
-                console.log(`[Delete Task] Deleted Version ${job.version_id} via job ${jobId}`);
-            } else {
-                await pool.query('DELETE FROM jobs WHERE id = $1', [jobId]);
-                console.log(`[Delete Task] Deleted orphan job ${jobId}`);
-            }
-        }
 
-        return res.json({ message: 'Task deleted successfully' });
-    } catch (error) {
-        console.error('Error deleting task:', error);
-        return res.status(500).json({ error: 'Internal server error' });
+            return res.json({ message: 'Task deleted successfully' });
+        } catch (deleteError: any) {
+            console.error(`[Delete Task] Database error while deleting job ${jobId}:`, deleteError);
+            console.error(`[Delete Task] Error details:`, {
+                message: deleteError.message,
+                code: deleteError.code,
+                detail: deleteError.detail,
+                constraint: deleteError.constraint,
+                table: deleteError.table
+            });
+            return res.status(500).json({
+                error: 'Database error while deleting task',
+                details: deleteError.message
+            });
+        }
+    } catch (error: any) {
+        console.error(`[Delete Task] Unexpected error:`, error);
+        return res.status(500).json({ error: 'Internal server error', details: error.message });
     }
 });
 
