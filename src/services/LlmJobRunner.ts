@@ -6,6 +6,7 @@ import { materializeService } from './data-center/MaterializeService';
 import { ingestionBatchService } from './data-center/IngestionBatchService';
 import axios from 'axios';
 import { summarizeDiff } from '../utils/jsonDiff';
+import { calculateReportMetrics } from '../utils/reportAnalysis';
 
 interface QueuedJob {
   id: number;
@@ -594,12 +595,10 @@ export class LlmJobRunner {
     // 1. Calculate Diff
     const diff = summarizeDiff(leftJson, rightJson);
 
-    // 2. Calculate Similarity (0-100)
-    const diffKeys = Object.keys(diff.changed).length;
-    const totalKeys = Object.keys(leftJson).length + Object.keys(rightJson).length;
-    // Simple similarity metric: (1 - diffs/total) * 100
-    // Prevent div/0
-    const similarity = totalKeys === 0 ? 100 : Math.max(0, Math.floor(100 * (1 - (diffKeys * 2) / (totalKeys || 1))));
+    // 2. Calculate text similarity and data linkage check status using proper text analysis
+    const metrics = calculateReportMetrics(leftJson, rightJson);
+    const similarity = metrics.similarity;
+    const checkStatus = metrics.checkStatus || '正常';
 
     // 3. Save Results
     await pool.query(
@@ -608,8 +607,8 @@ export class LlmJobRunner {
     );
 
     await pool.query(
-      `UPDATE comparisons SET similarity = $1, check_status = 'completed' WHERE id = $2`,
-      [similarity, comparison.id]
+      `UPDATE comparisons SET similarity = $1, check_status = $2, updated_at = NOW() WHERE id = $3`,
+      [similarity, checkStatus, comparison.id]
     );
 
     await pool.query(`

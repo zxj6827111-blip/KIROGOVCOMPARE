@@ -20,7 +20,7 @@ function UploadReport() {
   const [unitName, setUnitName] = useState('');
   const [file, setFile] = useState(null);
   const [, setTextContent] = useState(''); // Only setter used
-  const [model, setModel] = useState('qwen3-235b');
+  const [model, setModel] = useState('qwen2.5-72b');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [isDragging, setIsDragging] = useState(false);
@@ -504,8 +504,13 @@ function UploadReport() {
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
               >
-                <option value="qwen3-235b">通义千问 Qwen3-235B (ModelScope)</option>
-                <option value="mimo-v2">小米 MiMo V2 (极速版)</option>
+                <option value="qwen2.5-72b">通义千问 Qwen2.5-72B (推荐-ModelScope)</option>
+                <option value="zhipu/glm-4.7-flash">智谱 GLM-4.7-Flash (官方)</option>
+                <option value="glm-4.7-flash">智谱 GLM-4.7-Flash (ModelScope)</option>
+                <option value="glm-4.6">智谱 GLM-4.6 (ModelScope)</option>
+                <option value="mimo-v2">小米 MiMo-V2-Flash (ModelScope)</option>
+                <option value="qwen3-30b">通义千问 Qwen3-30B (ModelScope)</option>
+                <option value="deepseek-r1-32b">DeepSeek R1-32B (ModelScope)</option>
                 <option value="deepseek-v3">DeepSeek V3.2 (ModelScope)</option>
                 <option value="gemini/gemini-2.5-flash">Gemini 2.5 Flash</option>
                 <option value="gemini/gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>

@@ -59,6 +59,7 @@ async function fixSchema() {
     console.log('📋 Fixing comparisons table...');
     await addColumnIfNotExists(client, 'comparisons', 'similarity', 'INTEGER DEFAULT 0');
     await addColumnIfNotExists(client, 'comparisons', 'check_status', 'TEXT');
+    await addColumnIfNotExists(client, 'comparisons', 'updated_at', 'TIMESTAMPTZ DEFAULT NOW()');
     
     console.log('\n📋 Fixing comparison_exports table...');
     await createTableIfNotExists(client, 'comparison_exports', `

@@ -6,9 +6,13 @@ CREATE TABLE IF NOT EXISTS comparisons (
   year_b INTEGER NOT NULL,
   left_report_id BIGINT NOT NULL REFERENCES reports(id),
   right_report_id BIGINT NOT NULL REFERENCES reports(id),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(region_id, year_a, year_b)
 );
+
+ALTER TABLE comparisons
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 CREATE TABLE IF NOT EXISTS comparison_results (
   id BIGSERIAL PRIMARY KEY,

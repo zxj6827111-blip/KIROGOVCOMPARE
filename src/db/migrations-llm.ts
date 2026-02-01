@@ -100,8 +100,12 @@ CREATE TABLE IF NOT EXISTS comparisons (
   similarity INTEGER,
   check_status VARCHAR(50),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(region_id, year_a, year_b)
 );
+
+ALTER TABLE comparisons
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 CREATE TABLE IF NOT EXISTS comparison_results (
   id BIGSERIAL PRIMARY KEY,

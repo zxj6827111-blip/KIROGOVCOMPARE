@@ -94,8 +94,8 @@ router.get('/', async (req, res) => {
             params.push(String(dbStatus));
         }
 
-        // Exclude 'checks' jobs from the main list
-        conditions.push(`j.kind != 'checks'`);
+        // Only show 'parse' kind jobs in the main list (materialize/checks are sub-tasks shown in detail page)
+        conditions.push(`j.kind = 'parse'`);
 
         // DATA SCOPE FILTER
         const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
@@ -271,8 +271,46 @@ router.get('/:version_id', async (req, res) => {
         // Aggregate status
         const aggregatedStatus = determineVersionStatus(jobs);
 
-        // Get current progress
-        const currentJob = jobs.find((j: any) => j.status === 'running' || j.status === 'queued') || jobs[jobs.length - 1];
+        // Get current progress - only consider core jobs (parse, materialize, checks), not compare jobs
+        const coreJobs = jobs.filter((j: any) => ['parse', 'materialize', 'checks'].includes(j.kind));
+        const currentCoreJob = coreJobs.find((j: any) => j.status === 'running' || j.status === 'queued') || coreJobs[coreJobs.length - 1];
+
+        // Calculate overall progress based on step_code to sync with 5-step UI progress
+        // Steps: RECEIVED(20%) -> ENQUEUED(40%) -> PARSING(40-80%) -> POSTPROCESS(80-100%) -> DONE(100%)
+        let overallProgress = 0;
+        if (currentCoreJob) {
+            const stepCode = currentCoreJob.step_code;
+            const jobProgress = currentCoreJob.progress || 0;
+
+            switch (stepCode) {
+                case 'RECEIVED':
+                    overallProgress = 20;
+                    break;
+                case 'ENQUEUED':
+                case 'QUEUED':
+                    overallProgress = 40;
+                    break;
+                case 'PARSING':
+                    // AI parsing: 40% to 80% (40% range)
+                    overallProgress = 40 + Math.round((jobProgress / 100) * 40);
+                    break;
+                case 'POSTPROCESS':
+                    // Post processing: 80% to 100% (20% range)
+                    overallProgress = 80 + Math.round((jobProgress / 100) * 20);
+                    break;
+                case 'DONE':
+                    overallProgress = 100;
+                    break;
+                default:
+                    // Fallback: use job progress directly
+                    overallProgress = jobProgress;
+            }
+        }
+        // Ensure all core jobs completed means 100%
+        const allCoreCompleted = coreJobs.length > 0 && coreJobs.every((j: any) => j.status === 'succeeded');
+        if (allCoreCompleted) {
+            overallProgress = 100;
+        }
 
         return res.json({
             version_id: version.version_id,
@@ -282,14 +320,14 @@ router.get('/:version_id', async (req, res) => {
             unit_name: version.unit_name,
             file_name: version.file_name,
             status: aggregatedStatus,
-            progress: currentJob?.progress || 0,
-            step_code: currentJob?.step_code || 'QUEUED',
-            step_name: currentJob?.step_name || '等待处理',
-            attempt: currentJob?.attempt || 1,
-            provider: currentJob?.provider,
-            model: currentJob?.model,
-            error_code: currentJob?.error_code,
-            error_message: currentJob?.error_message,
+            progress: overallProgress,
+            step_code: currentCoreJob?.step_code || 'QUEUED',
+            step_name: currentCoreJob?.step_name || '等待处理',
+            attempt: currentCoreJob?.attempt || 1,
+            provider: currentCoreJob?.provider,
+            model: currentCoreJob?.model,
+            error_code: currentCoreJob?.error_code,
+            error_message: currentCoreJob?.error_message,
             created_at: version.created_at,
             updated_at: version.created_at,
             jobs,
