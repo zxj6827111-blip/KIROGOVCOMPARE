@@ -35,6 +35,7 @@ const STEPS = {
 
 const POLL_INTERVAL_MS = 5000; // 5秒轮询间隔，避免API速率限制
 const POST_JOB_COOLDOWN_MS = Number(process.env.LLM_POST_JOB_COOLDOWN_MS || 50000); // 任务完成后的冷却时间（默认50秒，适应魔搭社区限制）
+const COMPARE_CONCURRENCY = 5; // 比对任务并发数
 
 export class LlmJobRunner {
   private running = false;
@@ -44,6 +45,7 @@ export class LlmJobRunner {
   private parsedJsonColumnExists: boolean | null = null;
   private currentAbortController: AbortController | null = null;
   private currentJobId: number | null = null;
+  private compareWorkersActive = 0; // 当前活跃的比对任务数
 
   start(): void {
     if (this.running) {
@@ -364,6 +366,9 @@ export class LlmJobRunner {
     this.processing = true;
 
     try {
+      // 先尝试启动比对任务的并发处理
+      await this.processCompareJobsConcurrently();
+
       const job = await this.claimNextJob();
       if (!job) {
         return;
@@ -372,7 +377,8 @@ export class LlmJobRunner {
       await this.processJob(job);
 
       // 任务完成后添加冷却时间，避免过快调用 API 触发速率限制
-      if (POST_JOB_COOLDOWN_MS > 0) {
+      // 但 compare 任务是本地处理，不需要冷却
+      if (POST_JOB_COOLDOWN_MS > 0 && job.kind !== 'compare') {
         console.log(`[JobRunner] Cooling down for ${POST_JOB_COOLDOWN_MS}ms before next job...`);
         await new Promise(resolve => setTimeout(resolve, POST_JOB_COOLDOWN_MS));
       }
@@ -380,6 +386,72 @@ export class LlmJobRunner {
       this.processing = false;
       this.scheduleNextTick();
     }
+  }
+
+  // 并发处理比对任务
+  private async processCompareJobsConcurrently(): Promise<void> {
+    // 计算可以启动的worker数量
+    const availableSlots = COMPARE_CONCURRENCY - this.compareWorkersActive;
+    if (availableSlots <= 0) return;
+
+    // 获取多个比对任务
+    const jobs = await this.claimCompareJobs(availableSlots);
+    if (jobs.length === 0) return;
+
+    console.log(`[JobRunner] Starting ${jobs.length} concurrent compare workers (active: ${this.compareWorkersActive}/${COMPARE_CONCURRENCY})`);
+
+    // 并发启动任务处理（不等待完成）
+    for (const job of jobs) {
+      this.compareWorkersActive++;
+      this.runCompareWorker(job).finally(() => {
+        this.compareWorkersActive--;
+      });
+    }
+  }
+
+  // 单个比对worker
+  private async runCompareWorker(job: QueuedJob): Promise<void> {
+    try {
+      await this.processCompareJob(job);
+    } catch (error: any) {
+      console.error(`[CompareWorker] Job ${job.id} failed:`, error.message);
+      await pool.query(`
+        UPDATE jobs 
+        SET status = 'failed',
+            error_message = $1,
+            finished_at = NOW()
+        WHERE id = $2`, [error.message, job.id]);
+    }
+  }
+
+  // 批量获取比对任务
+  private async claimCompareJobs(limit: number): Promise<QueuedJob[]> {
+    const selectResult = await pool.query(`
+      SELECT id, report_id, comparison_id
+      FROM jobs 
+      WHERE status = 'queued' AND kind = 'compare'
+      ORDER BY created_at ASC
+      LIMIT $1
+      FOR UPDATE SKIP LOCKED`, [limit]);
+
+    if (selectResult.rows.length === 0) return [];
+
+    const jobIds = selectResult.rows.map((r: any) => r.id);
+    await pool.query(`
+      UPDATE jobs
+      SET status = 'running', 
+          started_at = NOW()
+      WHERE id = ANY($1::int[])`, [jobIds]);
+
+    return selectResult.rows.map((row: any) => ({
+      id: row.id,
+      kind: 'compare',
+      report_id: row.report_id,
+      version_id: null,
+      comparison_id: row.comparison_id,
+      retry_count: 0,
+      max_retries: 1,
+    }));
   }
 
   private async claimNextJob(): Promise<QueuedJob | null> {
