@@ -6,6 +6,7 @@ import { materializeService } from './data-center/MaterializeService';
 import { ingestionBatchService } from './data-center/IngestionBatchService';
 import axios from 'axios';
 import { summarizeDiff } from '../utils/jsonDiff';
+import { calculateReportMetrics } from '../utils/reportAnalysis';
 
 interface QueuedJob {
   id: number;
@@ -33,7 +34,7 @@ const STEPS = {
 };
 
 const POLL_INTERVAL_MS = 5000; // 5秒轮询间隔，避免API速率限制
-const POST_JOB_COOLDOWN_MS = 3000; // 任务完成后的冷却时间
+const POST_JOB_COOLDOWN_MS = Number(process.env.LLM_POST_JOB_COOLDOWN_MS || 50000); // 任务完成后的冷却时间（默认50秒，适应魔搭社区限制）
 
 export class LlmJobRunner {
   private running = false;
@@ -545,7 +546,7 @@ export class LlmJobRunner {
     if (job.version_id) {
       await this.generateNotificationIfNeeded(job.version_id);
 
-      // Auto-trigger comparison with previous year's report
+      // Auto-trigger comparison with neighbor years (previous/next)
       // IMPORTANT: Run this BEFORE marking job as succeeded, so we can see logs/errors if it fails
       try {
         console.log(`[Job ${job.id}] Attempting to trigger auto-comparison...`);
@@ -594,12 +595,10 @@ export class LlmJobRunner {
     // 1. Calculate Diff
     const diff = summarizeDiff(leftJson, rightJson);
 
-    // 2. Calculate Similarity (0-100)
-    const diffKeys = Object.keys(diff.changed).length;
-    const totalKeys = Object.keys(leftJson).length + Object.keys(rightJson).length;
-    // Simple similarity metric: (1 - diffs/total) * 100
-    // Prevent div/0
-    const similarity = totalKeys === 0 ? 100 : Math.max(0, Math.floor(100 * (1 - (diffKeys * 2) / (totalKeys || 1))));
+    // 2. Calculate text similarity and data linkage check status using proper text analysis
+    const metrics = calculateReportMetrics(leftJson, rightJson);
+    const similarity = metrics.similarity;
+    const checkStatus = metrics.checkStatus || '正常';
 
     // 3. Save Results
     await pool.query(
@@ -608,8 +607,8 @@ export class LlmJobRunner {
     );
 
     await pool.query(
-      `UPDATE comparisons SET similarity = $1, check_status = 'completed' WHERE id = $2`,
-      [similarity, comparison.id]
+      `UPDATE comparisons SET similarity = $1, check_status = $2, updated_at = NOW() WHERE id = $3`,
+      [similarity, checkStatus, comparison.id]
     );
 
     await pool.query(`
@@ -727,7 +726,7 @@ export class LlmJobRunner {
   }
 
   /**
-   * Auto-trigger a comparison job against the previous year's report
+   * Auto-trigger comparison jobs against neighbor years (previous/next).
    * This is called after consistency checks are done.
    */
   private async triggerAutoComparison(versionId: number, reportId: number | null): Promise<void> {
@@ -741,56 +740,64 @@ export class LlmJobRunner {
       return;
     }
 
-    const prevYear = currentReport.year - 1;
-    console.log(`[AutoCompare] Triggered for Report ${reportId} (${currentReport.unit_name}, ${currentReport.year}). Looking for year ${prevYear}...`);
+    const currentYear = Number(currentReport.year);
+    const neighborYears = [currentYear - 1, currentYear + 1];
 
-    // 2. Find previous year's active report for same region
-    const prevRes = await pool.query(`
+    for (const targetYear of neighborYears) {
+      if (!Number.isFinite(targetYear)) {
+        continue;
+      }
+
+      console.log(`[AutoCompare] Triggered for Report ${reportId} (${currentReport.unit_name}, ${currentYear}). Looking for year ${targetYear}...`);
+
+      // 2. Find neighbor year's active report for same region
+      const targetRes = await pool.query(`
         SELECT id
         FROM reports
         WHERE region_id = $1 AND year = $2 AND active_version_id IS NOT NULL
         LIMIT 1
-    `, [currentReport.region_id, prevYear]);
+      `, [currentReport.region_id, targetYear]);
 
-    const prevReport = prevRes.rows[0];
-    if (!prevReport) {
-      console.log(`[AutoCompare] No active report found for region ${currentReport.region_id} in year ${prevYear}. Skipping comparison.`);
-      return;
-    }
+      const targetReport = targetRes.rows[0];
+      if (!targetReport) {
+        console.log(`[AutoCompare] No active report found for region ${currentReport.region_id} in year ${targetYear}. Skipping comparison.`);
+        continue;
+      }
 
-    console.log(`[AutoCompare] Found previous report ${prevReport.id}. Creating comparison job...`);
+      console.log(`[AutoCompare] Found report ${targetReport.id} for year ${targetYear}. Creating comparison job...`);
 
-    // 3. Create or Update Comparison Record
-    // We want year_a = min, year_b = max to keep it ordered
-    const yearA = Math.min(prevYear, currentReport.year);
-    const yearB = Math.max(prevYear, currentReport.year);
-    const reportA = prevYear < currentReport.year ? prevReport.id : reportId;
-    const reportB = prevYear < currentReport.year ? reportId : prevReport.id;
+      // 3. Create or Update Comparison Record
+      // We want year_a = min, year_b = max to keep it ordered
+      const yearA = Math.min(currentYear, targetYear);
+      const yearB = Math.max(currentYear, targetYear);
+      const reportA = currentYear < targetYear ? reportId : targetReport.id;
+      const reportB = currentYear < targetYear ? targetReport.id : reportId;
 
-    // Upsert comparison
-    const compRes = await pool.query(`
+      // Upsert comparison
+      const compRes = await pool.query(`
         INSERT INTO comparisons (region_id, year_a, year_b, left_report_id, right_report_id, check_status)
         VALUES ($1, $2, $3, $4, $5, 'pending')
         ON CONFLICT (region_id, year_a, year_b)
         DO UPDATE SET left_report_id = $4, right_report_id = $5, check_status = 'pending', updated_at = NOW()
         RETURNING id
-    `, [currentReport.region_id, yearA, yearB, reportA, reportB]);
+      `, [currentReport.region_id, yearA, yearB, reportA, reportB]);
 
-    const comparisonId = compRes.rows[0].id;
+      const comparisonId = compRes.rows[0].id;
 
-    // 4. Enqueue Comparison Job
-    // Check if job already exists
-    const jobRes = await pool.query(`
+      // 4. Enqueue Comparison Job
+      // Check if job already exists
+      const jobRes = await pool.query(`
         SELECT id FROM jobs
         WHERE comparison_id = $1 AND kind = 'compare' AND status IN ('queued', 'running')
-    `, [comparisonId]);
+      `, [comparisonId]);
 
-    if (jobRes.rows.length === 0) {
-      await pool.query(`
-        INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, comparison_id)
-        VALUES ($1, $2, 'compare', 'queued', 0, 'QUEUED', '等待比对', $3)
-      `, [reportId, versionId, comparisonId]);
-      console.log(`[AutoCompare] Enqueued comparison job for comparison ${comparisonId}`);
+      if (jobRes.rows.length === 0) {
+        await pool.query(`
+          INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, comparison_id)
+          VALUES ($1, $2, 'compare', 'queued', 0, 'QUEUED', $4, $3)
+        `, [reportId, versionId, comparisonId, STEPS.QUEUED.name]);
+        console.log(`[AutoCompare] Enqueued comparison job for comparison ${comparisonId}`);
+      }
     }
   }
 }

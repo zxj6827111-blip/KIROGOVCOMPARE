@@ -409,33 +409,38 @@ const Table4View = ({ data, highlightCells = [] }) => {
 
   return (
     <div className="comparison-table-container">
-      <table className="comparison-table text-center">
+      <table className="comparison-table text-center table-fixed">
+        <colgroup>
+          {Array.from({ length: 15 }).map((_, i) => (
+            <col key={i} style={{ width: '6.66%' }} />
+          ))}
+        </colgroup>
         <thead>
           <tr>
             <th colSpan={5} className="text-center">行政复议</th>
             <th colSpan={10} className="text-center">行政诉讼</th>
           </tr>
           <tr>
-            <th rowSpan={2} width="8%">结果维持</th>
-            <th rowSpan={2} width="8%">结果纠正</th>
-            <th rowSpan={2} width="8%">其他结果</th>
-            <th rowSpan={2} width="8%">尚未审结</th>
-            <th rowSpan={2} width="8%">总计</th>
+            <th rowSpan={2}>结果维持</th>
+            <th rowSpan={2}>结果纠正</th>
+            <th rowSpan={2}>其他结果</th>
+            <th rowSpan={2}>尚未审结</th>
+            <th rowSpan={2}>总计</th>
             <th colSpan={5} className="text-center">未经复议直接起诉</th>
             <th colSpan={5} className="text-center">复议后起诉</th>
           </tr>
           <tr>
             {/* Sub-headers */}
-            <th width="8%">结果维持</th>
-            <th width="8%">结果纠正</th>
-            <th width="8%">其他结果</th>
-            <th width="8%">尚未审结</th>
-            <th width="8%">总计</th>
-            <th width="8%">结果维持</th>
-            <th width="8%">结果纠正</th>
-            <th width="8%">其他结果</th>
-            <th width="8%">尚未审结</th>
-            <th width="8%">总计</th>
+            <th>结果维持</th>
+            <th>结果纠正</th>
+            <th>其他结果</th>
+            <th>尚未审结</th>
+            <th>总计</th>
+            <th>结果维持</th>
+            <th>结果纠正</th>
+            <th>其他结果</th>
+            <th>尚未审结</th>
+            <th>总计</th>
           </tr>
         </thead>
         <tbody>

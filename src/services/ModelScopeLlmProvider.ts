@@ -25,11 +25,13 @@ export class ModelScopeLlmProvider implements LlmProvider {
 
     // Mapping of frontend short codes to real ModelScope Model IDs
     private static readonly MODEL_MAP: Record<string, string> = {
-        'qwen3-235b': 'Qwen/Qwen3-235B-A22B-Instruct-2507',
-        'qwen3-30b': 'Qwen/Qwen2.5-32B-Instruct',
+        'qwen2.5-72b': 'Qwen/Qwen2.5-72B-Instruct',
+        'glm-4.7-flash': 'ZhipuAI/GLM-4.7-Flash',
+        'glm-4.6': 'ZhipuAI/GLM-4.6',
+        'mimo-v2': 'XiaomiMiMo/MiMo-V2-Flash',
+        'qwen3-30b': 'Qwen/Qwen3-30B-A3B-Instruct-2507',
         'deepseek-v3': 'deepseek-ai/DeepSeek-V3.2',
         'deepseek-r1-32b': 'deepseek-ai/DeepSeek-R1-Distill-Qwen-32B',
-        'mimo-v2': 'XiaomiMiMo/MiMo-V2-Flash',
     };
 
     private resolveModelId(shortName: string): string {

@@ -94,8 +94,8 @@ router.get('/', async (req, res) => {
             params.push(String(dbStatus));
         }
 
-        // Exclude 'checks' jobs from the main list
-        conditions.push(`j.kind != 'checks'`);
+        // Only show 'parse' kind jobs in the main list (materialize/checks are sub-tasks shown in detail page)
+        conditions.push(`j.kind = 'parse'`);
 
         // DATA SCOPE FILTER
         const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
@@ -271,8 +271,46 @@ router.get('/:version_id', async (req, res) => {
         // Aggregate status
         const aggregatedStatus = determineVersionStatus(jobs);
 
-        // Get current progress
-        const currentJob = jobs.find((j: any) => j.status === 'running' || j.status === 'queued') || jobs[jobs.length - 1];
+        // Get current progress - only consider core jobs (parse, materialize, checks), not compare jobs
+        const coreJobs = jobs.filter((j: any) => ['parse', 'materialize', 'checks'].includes(j.kind));
+        const currentCoreJob = coreJobs.find((j: any) => j.status === 'running' || j.status === 'queued') || coreJobs[coreJobs.length - 1];
+
+        // Calculate overall progress based on step_code to sync with 5-step UI progress
+        // Steps: RECEIVED(20%) -> ENQUEUED(40%) -> PARSING(40-80%) -> POSTPROCESS(80-100%) -> DONE(100%)
+        let overallProgress = 0;
+        if (currentCoreJob) {
+            const stepCode = currentCoreJob.step_code;
+            const jobProgress = currentCoreJob.progress || 0;
+
+            switch (stepCode) {
+                case 'RECEIVED':
+                    overallProgress = 20;
+                    break;
+                case 'ENQUEUED':
+                case 'QUEUED':
+                    overallProgress = 40;
+                    break;
+                case 'PARSING':
+                    // AI parsing: 40% to 80% (40% range)
+                    overallProgress = 40 + Math.round((jobProgress / 100) * 40);
+                    break;
+                case 'POSTPROCESS':
+                    // Post processing: 80% to 100% (20% range)
+                    overallProgress = 80 + Math.round((jobProgress / 100) * 20);
+                    break;
+                case 'DONE':
+                    overallProgress = 100;
+                    break;
+                default:
+                    // Fallback: use job progress directly
+                    overallProgress = jobProgress;
+            }
+        }
+        // Ensure all core jobs completed means 100%
+        const allCoreCompleted = coreJobs.length > 0 && coreJobs.every((j: any) => j.status === 'succeeded');
+        if (allCoreCompleted) {
+            overallProgress = 100;
+        }
 
         return res.json({
             version_id: version.version_id,
@@ -282,14 +320,14 @@ router.get('/:version_id', async (req, res) => {
             unit_name: version.unit_name,
             file_name: version.file_name,
             status: aggregatedStatus,
-            progress: currentJob?.progress || 0,
-            step_code: currentJob?.step_code || 'QUEUED',
-            step_name: currentJob?.step_name || '等待处理',
-            attempt: currentJob?.attempt || 1,
-            provider: currentJob?.provider,
-            model: currentJob?.model,
-            error_code: currentJob?.error_code,
-            error_message: currentJob?.error_message,
+            progress: overallProgress,
+            step_code: currentCoreJob?.step_code || 'QUEUED',
+            step_name: currentCoreJob?.step_name || '等待处理',
+            attempt: currentCoreJob?.attempt || 1,
+            provider: currentCoreJob?.provider,
+            model: currentCoreJob?.model,
+            error_code: currentCoreJob?.error_code,
+            error_message: currentCoreJob?.error_message,
             created_at: version.created_at,
             updated_at: version.created_at,
             jobs,
@@ -452,14 +490,87 @@ function determineVersionStatus(jobs: Array<{ status: string; kind: string }>): 
  * Helper: Delete a specific version and all its related data
  */
 async function deleteVersion(versionId: number) {
-    // 1. Delete associated jobs
-    await pool.query('DELETE FROM jobs WHERE version_id = $1', [versionId]);
+    console.log(`[deleteVersion] Starting deletion for version ${versionId}`);
 
-    // 2. Delete parse results
-    await pool.query('DELETE FROM report_version_parses WHERE report_version_id = $1', [versionId]);
+    try {
+        // 0. Check if this version is the active version of any report
+        console.log(`[deleteVersion] Checking if version ${versionId} is active for any report`);
+        const activeCheckResult = await pool.query(
+            'SELECT id, region_id, year FROM reports WHERE active_version_id = $1',
+            [versionId]
+        );
 
-    // 3. Delete the version itself
-    await pool.query('DELETE FROM report_versions WHERE id = $1', [versionId]);
+        if (activeCheckResult.rowCount && activeCheckResult.rowCount > 0) {
+            const report = activeCheckResult.rows[0];
+            console.log(`[deleteVersion] Version ${versionId} is active for report ${report.id}. Setting active_version_id to NULL.`);
+            await pool.query('UPDATE reports SET active_version_id = NULL WHERE id = $1', [report.id]);
+        }
+
+        // 1. Delete cells data
+        console.log(`[deleteVersion] Deleting cells for version ${versionId}`);
+        const cellsResult = await pool.query('DELETE FROM cells WHERE version_id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${cellsResult.rowCount} cells for version ${versionId}`);
+
+        // 2. Delete fact tables data
+        console.log(`[deleteVersion] Deleting fact_active_disclosure for version ${versionId}`);
+        const factActiveResult = await pool.query('DELETE FROM fact_active_disclosure WHERE version_id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${factActiveResult.rowCount} fact_active_disclosure records`);
+
+        console.log(`[deleteVersion] Deleting fact_application for version ${versionId}`);
+        const factAppResult = await pool.query('DELETE FROM fact_application WHERE version_id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${factAppResult.rowCount} fact_application records`);
+
+        console.log(`[deleteVersion] Deleting fact_legal_proceeding for version ${versionId}`);
+        const factLegalResult = await pool.query('DELETE FROM fact_legal_proceeding WHERE version_id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${factLegalResult.rowCount} fact_legal_proceeding records`);
+
+        // 3. Delete quality issues
+        console.log(`[deleteVersion] Deleting quality_issues for version ${versionId}`);
+        const qualityResult = await pool.query('DELETE FROM quality_issues WHERE version_id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${qualityResult.rowCount} quality_issues for version ${versionId}`);
+
+        // 4. Delete notifications
+        console.log(`[deleteVersion] Deleting notifications for version ${versionId}`);
+        const notifResult = await pool.query('DELETE FROM notifications WHERE related_version_id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${notifResult.rowCount} notifications for version ${versionId}`);
+
+        // 5. Delete consistency check runs (CASCADE)
+        console.log(`[deleteVersion] Deleting consistency check runs for version ${versionId}`);
+        const consistencyRunsResult = await pool.query('DELETE FROM report_consistency_runs WHERE report_version_id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${consistencyRunsResult.rowCount} consistency runs for version ${versionId}`);
+
+        // 6. Delete associated jobs
+        console.log(`[deleteVersion] Deleting jobs for version ${versionId}`);
+        const jobsResult = await pool.query('DELETE FROM jobs WHERE version_id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${jobsResult.rowCount} jobs for version ${versionId}`);
+
+        // 7. Delete parse results
+        console.log(`[deleteVersion] Deleting parse results for version ${versionId}`);
+        const parseResult = await pool.query('DELETE FROM report_version_parses WHERE report_version_id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${parseResult.rowCount} parse results for version ${versionId}`);
+
+        // 8. Delete consistency check items
+        console.log(`[deleteVersion] Deleting consistency check items for version ${versionId}`);
+        const consistencyResult = await pool.query('DELETE FROM report_consistency_items WHERE report_version_id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${consistencyResult.rowCount} consistency items for version ${versionId}`);
+
+        // 4. Delete the version itself
+        console.log(`[deleteVersion] Deleting version record ${versionId}`);
+        const versionResult = await pool.query('DELETE FROM report_versions WHERE id = $1', [versionId]);
+        console.log(`[deleteVersion] Deleted ${versionResult.rowCount} version records for version ${versionId}`);
+
+        console.log(`[deleteVersion] ✅ Successfully completed deletion for version ${versionId}`);
+    } catch (error: any) {
+        console.error(`[deleteVersion] ❌ Error deleting version ${versionId}:`, error);
+        console.error(`[deleteVersion] Error details:`, {
+            message: error.message,
+            code: error.code,
+            detail: error.detail,
+            constraint: error.constraint,
+            table: error.table
+        });
+        throw error; // Re-throw to be caught by the caller
+    }
 }
 
 /**
@@ -541,9 +652,11 @@ router.delete('/task/:jobId', requirePermission('manage_jobs'), async (req, res)
     try {
         const jobId = Number(req.params.jobId);
         if (Number.isNaN(jobId)) {
+            console.error(`[Delete Task] Invalid job_id: ${req.params.jobId}`);
             return res.status(400).json({ error: 'Invalid job_id' });
         }
 
+        console.log(`[Delete Task] Attempting to delete job ${jobId}`);
         const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
 
         // 1. Get job details ensuring region permission
@@ -556,39 +669,61 @@ router.delete('/task/:jobId', requirePermission('manage_jobs'), async (req, res)
         const jobs = jobRes.rows;
 
         if (jobs.length === 0) {
+            console.error(`[Delete Task] Job ${jobId} not found`);
             return res.status(404).json({ error: 'Job not found' });
         }
         const job = jobs[0];
+        console.log(`[Delete Task] Found job ${jobId}, kind: ${job.kind}, version_id: ${job.version_id}, region_id: ${job.region_id}`);
 
         // Check permission
         if (!isRegionAllowed(job.region_id, allowedRegionIds)) {
+            console.error(`[Delete Task] Permission denied for job ${jobId}, region ${job.region_id}`);
             return res.status(403).json({ error: 'forbidden' });
         }
 
-        if (job.kind === 'pdf_export') {
-            if (job.file_path && fs.existsSync(job.file_path)) {
-                try {
-                    fs.unlinkSync(job.file_path);
-                } catch (e) {
-                    console.warn('Failed to delete PDF file:', e);
+        try {
+            if (job.kind === 'pdf_export') {
+                console.log(`[Delete Task] Deleting PDF export job ${jobId}`);
+                if (job.file_path && fs.existsSync(job.file_path)) {
+                    try {
+                        fs.unlinkSync(job.file_path);
+                        console.log(`[Delete Task] Deleted PDF file: ${job.file_path}`);
+                    } catch (e) {
+                        console.warn(`[Delete Task] Failed to delete PDF file ${job.file_path}:`, e);
+                    }
+                }
+                await pool.query('DELETE FROM jobs WHERE id = $1', [jobId]);
+                console.log(`[Delete Task] Successfully deleted PDF job ${jobId}`);
+            } else {
+                if (job.version_id) {
+                    console.log(`[Delete Task] Deleting version ${job.version_id} for job ${jobId}`);
+                    await deleteVersion(job.version_id);
+                    console.log(`[Delete Task] Successfully deleted Version ${job.version_id} via job ${jobId}`);
+                } else {
+                    console.log(`[Delete Task] Deleting orphan job ${jobId}`);
+                    await pool.query('DELETE FROM jobs WHERE id = $1', [jobId]);
+                    console.log(`[Delete Task] Successfully deleted orphan job ${jobId}`);
                 }
             }
-            await pool.query('DELETE FROM jobs WHERE id = $1', [jobId]);
-            console.log(`[Delete Task] Deleted PDF job ${jobId}`);
-        } else {
-            if (job.version_id) {
-                await deleteVersion(job.version_id);
-                console.log(`[Delete Task] Deleted Version ${job.version_id} via job ${jobId}`);
-            } else {
-                await pool.query('DELETE FROM jobs WHERE id = $1', [jobId]);
-                console.log(`[Delete Task] Deleted orphan job ${jobId}`);
-            }
-        }
 
-        return res.json({ message: 'Task deleted successfully' });
-    } catch (error) {
-        console.error('Error deleting task:', error);
-        return res.status(500).json({ error: 'Internal server error' });
+            return res.json({ message: 'Task deleted successfully' });
+        } catch (deleteError: any) {
+            console.error(`[Delete Task] Database error while deleting job ${jobId}:`, deleteError);
+            console.error(`[Delete Task] Error details:`, {
+                message: deleteError.message,
+                code: deleteError.code,
+                detail: deleteError.detail,
+                constraint: deleteError.constraint,
+                table: deleteError.table
+            });
+            return res.status(500).json({
+                error: 'Database error while deleting task',
+                details: deleteError.message
+            });
+        }
+    } catch (error: any) {
+        console.error(`[Delete Task] Unexpected error:`, error);
+        return res.status(500).json({ error: 'Internal server error', details: error.message });
     }
 });
 

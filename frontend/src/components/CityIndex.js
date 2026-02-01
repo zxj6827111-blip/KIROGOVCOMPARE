@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import './CityIndex.css';
 import { apiClient } from '../apiClient';
 import {
@@ -436,6 +436,9 @@ function CityIndex({ onSelectReport, onViewComparison }) {
           </button>
           <button className="ghost-btn" onClick={() => (window.location.href = '/regions')}>
             <MapIcon size={16} /> 区域管理
+          </button>
+          <button className="ghost-btn" onClick={() => (window.location.href = '/report-maintenance')}>
+            <AlertCircle size={16} /> 年报维护
           </button>
           <button className="primary-btn" onClick={() => (window.location.href = '/upload')}>
             <Plus size={16} /> 录入新报告

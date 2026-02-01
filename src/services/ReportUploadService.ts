@@ -63,7 +63,12 @@ function resolveProviderAndModel(modelInput?: string): { provider: string; model
     return { provider: 'gemini', model: input.replace('gemini/', '') };
   }
 
-  // 2. Qwen / DeepSeek -> ModelScope
+  // 2. Explicit Zhipu Official prefix (智谱官方 API)
+  if (input.startsWith('zhipu/')) {
+    return { provider: 'zhipu', model: input.replace('zhipu/', '') };
+  }
+
+  // 3. Qwen / DeepSeek / MiMo -> ModelScope
   if (
     input.includes('qwen') ||
     input.includes('deepseek') ||
@@ -72,7 +77,12 @@ function resolveProviderAndModel(modelInput?: string): { provider: string; model
     return { provider: 'modelscope', model: modelInput }; // Keep original case for model ID if needed
   }
 
-  // 3. Fallback or generic
+  // 4. GLM models without zhipu/ prefix -> ModelScope (for backward compatibility)
+  if (input.includes('glm')) {
+    return { provider: 'modelscope', model: modelInput };
+  }
+
+  // 5. Fallback to default provider
   if (process.env.LLM_PROVIDER === 'modelscope') {
     return { provider: 'modelscope', model: modelInput };
   }

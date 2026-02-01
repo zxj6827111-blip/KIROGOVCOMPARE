@@ -13,6 +13,7 @@ import pdfJobsRouter from './routes/pdf-jobs';
 import authRouter from './routes/auth';
 import usersRouter from './routes/users';
 import issuesSummaryRouter from './routes/issues-summary';
+import reportMaintenanceRouter from './routes/report-maintenance';
 import dataCenterRouter from './routes/data-center';
 import govInsightRouter from './routes/gov-insight';
 import { createRateLimiter, createRedisStore } from './middleware/rateLimit';
@@ -91,6 +92,7 @@ export function createLlmApp(): express.Express {
   app.use('/api', require('./routes/consistency').default);
   app.use('/api', issuesSummaryRouter);
   app.use('/api', dataCenterRouter);
+  app.use('/api/report-maintenance', reportMaintenanceRouter);
   app.use('/api/pdf-jobs', pdfJobsRouter);
 
   app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

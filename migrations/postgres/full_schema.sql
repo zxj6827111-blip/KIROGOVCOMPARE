@@ -127,17 +127,18 @@ CREATE INDEX IF NOT EXISTS idx_report_versions_report_active
 ON report_versions(report_id, is_active);
 
 CREATE TABLE IF NOT EXISTS comparisons (
-  id BIGSERIAL PRIMARY KEY,
-  region_id BIGINT NOT NULL REFERENCES regions(id),
-  year_a INTEGER NOT NULL,
-  year_b INTEGER NOT NULL,
-  left_report_id BIGINT NOT NULL REFERENCES reports(id),
-  right_report_id BIGINT NOT NULL REFERENCES reports(id),
-  similarity INTEGER,
-  check_status VARCHAR(50),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE(region_id, year_a, year_b)
-);
+    id BIGSERIAL PRIMARY KEY,
+    region_id BIGINT NOT NULL REFERENCES regions(id),
+    year_a INTEGER NOT NULL,
+    year_b INTEGER NOT NULL,
+    left_report_id BIGINT NOT NULL REFERENCES reports(id),
+    right_report_id BIGINT NOT NULL REFERENCES reports(id),
+    similarity INTEGER,
+    check_status VARCHAR(50),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(region_id, year_a, year_b)
+  );
 
 CREATE TABLE IF NOT EXISTS comparison_results (
   id BIGSERIAL PRIMARY KEY,
