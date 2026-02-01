@@ -15,6 +15,7 @@ import UserManagement from './components/UserManagement';
 import JobCenter from './components/JobCenter';
 import JobDetail from './components/JobDetail';
 import IssueList from './components/IssueList';
+import ReportMaintenance from './components/ReportMaintenance';
 
 import DataCenterReportsList from './components/datacenter/DataCenterReportsList';
 import DataCenterReportDetail from './components/datacenter/DataCenterReportDetail';
@@ -137,6 +138,9 @@ function App() {
         onBack={() => navigate('/catalog')}
         onSelectReport={(reportId) => navigate(`/catalog/reports/${reportId}`)}
       />;
+    }
+    if (pathname === '/report-maintenance') {
+      return <ReportMaintenance onBack={() => navigate('/catalog')} />;
     }
     if (pathname.startsWith('/comparison/')) {
       // Extract ID from /comparison/:id
