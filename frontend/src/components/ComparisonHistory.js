@@ -148,8 +148,7 @@ function ComparisonHistory() {
   // 初始加载：只在组件首次挂载时执行
   useEffect(() => {
     fetchComparisons();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fetchComparisons]);
 
   const toggleNode = (nodeId) => {
     setExpandedNodes(prev => {
