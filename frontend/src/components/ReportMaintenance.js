@@ -13,19 +13,50 @@ import {
     CheckCircle
 } from 'lucide-react';
 
-function ReportMaintenance({ onBack }) {
+function ReportMaintenance({ onBack, onNavigate }) {
+
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [data, setData] = useState(null);
     const [exporting, setExporting] = useState(false);
 
+    // URL 参数初始化 helper
+    const getInitialParams = () => {
+        const params = new URLSearchParams(window.location.search);
+        const urlYear = params.get('year');
+        const urlRegionId = params.get('main_region_id'); // Use distinct param name to avoid conflict with 'region' used by CityIndex if shared, but here it is separate page usually. 
+        // Logic: if we are on /report-maintenance, we own the params.
+        // User asked to return to "screening page" state.
+
+        return {
+            year: urlYear ? Number(urlYear) : (new Date().getFullYear() - 1),
+            regionId: urlRegionId ? Number(urlRegionId) : null
+        };
+    };
+
+    const initialParams = useMemo(() => getInitialParams(), []);
+
     // 筛选条件
-    const [year, setYear] = useState(new Date().getFullYear() - 1);
-    const [regionId, setRegionId] = useState(null);
+    const [year, setYear] = useState(initialParams.year);
+    const [regionId, setRegionId] = useState(initialParams.regionId);
 
     // 区域数据
     const [regions, setRegions] = useState([]);
     const [regionPath, setRegionPath] = useState([]); // 级联选择路径
+
+    // Sync State to URL
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        params.set('year', year);
+        if (regionId) {
+            params.set('main_region_id', regionId);
+        } else {
+            params.delete('main_region_id');
+        }
+        const newUrl = `${window.location.pathname}?${params.toString()}`;
+        window.history.replaceState({}, '', newUrl);
+    }, [year, regionId]);
+
 
     // 年份列表
     const years = useMemo(() => {
@@ -50,6 +81,22 @@ function ReportMaintenance({ onBack }) {
         };
         fetchRegions();
     }, []);
+
+    // Rebuild Region Path from ID (for restoring Cascade state)
+    useEffect(() => {
+        if (regions.length > 0 && regionId && regionPath.length === 0) {
+            const regionMap = new Map(regions.map(r => [r.id, r]));
+            const path = [];
+            let curr = regionMap.get(regionId);
+            while (curr) {
+                path.unshift(curr.id);
+                curr = regionMap.get(curr.parent_id);
+            }
+            if (path.length > 0) {
+                setRegionPath(path);
+            }
+        }
+    }, [regions, regionId, regionPath.length]);
 
     // 构建区域树
     const regionTree = useMemo(() => {
@@ -255,6 +302,10 @@ function ReportMaintenance({ onBack }) {
                         <span className="summary-label">内容为空</span>
                         <span className="summary-value">{data.empty_count}</span>
                     </div>
+                    <div className="summary-card text-empty">
+                        <span className="summary-label">文字为空</span>
+                        <span className="summary-value">{data.text_empty_count || 0}</span>
+                    </div>
                 </div>
             )}
 
@@ -296,17 +347,21 @@ function ReportMaintenance({ onBack }) {
                             {data.regions.map((region, idx) => (
                                 <tr key={region.region_id} className={region.status}>
                                     <td>{idx + 1}</td>
-                                    <td className="region-name">{region.region_name}</td>
+                                    <td
+                                        className="region-name clickable"
+                                        onClick={() => onNavigate && onNavigate(`/catalog?region=${region.region_id}`)}
+                                        title="点击跳转到区域详情"
+                                    >
+                                        {region.region_name}
+                                    </td>
                                     <td>{getLevelName(region.level)}</td>
                                     <td className="parent-path">{region.parent_path || '-'}</td>
                                     <td>{region.year}年</td>
                                     <td>
                                         <span className={`status-badge ${region.status}`}>
-                                            {region.status === 'missing' ? (
-                                                <><AlertTriangle size={14} /> 未上传</>
-                                            ) : (
-                                                <><FileX size={14} /> 内容为空</>
-                                            )}
+                                            {region.status === 'missing' && <><AlertTriangle size={14} /> 未上传</>}
+                                            {region.status === 'empty' && <><FileX size={14} /> 内容为空</>}
+                                            {region.status === 'text_empty' && <><FileX size={14} /> 文字为空</>}
                                         </span>
                                     </td>
                                 </tr>

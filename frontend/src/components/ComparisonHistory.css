@@ -151,6 +151,24 @@
     border-color: #fca5a5;
 }
 
+/* 一键比对按钮 */
+.batch-create-btn {
+    background-color: #fef3c7;
+    border-color: #fcd34d;
+    color: #b45309;
+}
+
+.batch-create-btn:hover:not(:disabled) {
+    background-color: #fde68a;
+    border-color: #fbbf24;
+    color: #92400e;
+}
+
+.batch-create-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
 .alert.error {
     padding: 12px;
     background-color: #fee2e2;

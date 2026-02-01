@@ -127,17 +127,57 @@ router.get('/', authMiddleware, async (req: AuthRequest, res) => {
         const results: any[] = [];
         let missingCount = 0;
         let emptyCount = 0;
+        let textEmptyCount = 0;
 
         for (const region of regionsResult) {
             const report = reportsByRegion.get(region.id);
-            let status: 'missing' | 'empty' | null = null;
+            let status: 'missing' | 'empty' | 'text_empty' | null = null;
 
             if (!report) {
                 status = 'missing';
                 missingCount++;
-            } else if (isEmptyReport(report)) {
-                status = 'empty';
-                emptyCount++;
+            } else {
+                // Helper to check if JSON has meaningful content (sections or tables)
+                const hasEffectiveContent = (parsed: any): boolean => {
+                    if (!parsed || typeof parsed !== 'object') return false;
+                    const hasSections = Array.isArray(parsed.sections) && parsed.sections.length > 0;
+                    const hasTables = parsed.tables && typeof parsed.tables === 'object' && Object.keys(parsed.tables).length > 0;
+                    return hasSections || hasTables;
+                };
+
+                // Check if JSON data is effectively empty
+                // We now require actual sections or tables to be present. 
+                // Just having 'metadata', 'error' keys etc is considered empty.
+                const isJsonEmpty = !report.active_version_id ||
+                    !report.parsed_json ||
+                    !hasEffectiveContent(report.parsed_json);
+
+                // Check if Text content is effectively empty
+                // Note: We only consider text empty if JSON is NOT empty (otherwise it falls into the main 'empty' category)
+                // Helper to check if text content exists in parsed sections
+                const hasParsedTextContent = (parsed: any): boolean => {
+                    if (!parsed || !parsed.sections || !Array.isArray(parsed.sections)) return false;
+                    let totalLen = 0;
+                    for (const s of parsed.sections) {
+                        // Defensive check for null/malformed section objects
+                        if (!s) continue;
+                        if (s.content && typeof s.content === 'string') {
+                            totalLen += s.content.length;
+                        }
+                        if (totalLen > 100) return true;
+                    }
+                    return totalLen > 100;
+                };
+
+                const isTextEmpty = (!report.raw_text || report.raw_text.trim().length < 100) && (!hasParsedTextContent(report.parsed_json));
+
+                if (isJsonEmpty) {
+                    status = 'empty';
+                    emptyCount++;
+                } else if (isTextEmpty) {
+                    status = 'text_empty';
+                    textEmptyCount++;
+                }
             }
 
             if (status) {
@@ -154,10 +194,12 @@ router.get('/', authMiddleware, async (req: AuthRequest, res) => {
             }
         }
 
-        // 按状态和层级排序：未上传优先，层级低的优先
+        // 按状态和层级排序：未上传 > 内容为空 > 文字为空，层级低的优先
         results.sort((a, b) => {
             if (a.status !== b.status) {
-                return a.status === 'missing' ? -1 : 1;
+                // Fixed order: missing, empty, text_empty
+                const order = { 'missing': 0, 'empty': 1, 'text_empty': 2 };
+                return (order[a.status as keyof typeof order] || 99) - (order[b.status as keyof typeof order] || 99);
             }
             return a.level - b.level;
         });
@@ -168,6 +210,7 @@ router.get('/', authMiddleware, async (req: AuthRequest, res) => {
                 total: results.length,
                 missing_count: missingCount,
                 empty_count: emptyCount,
+                text_empty_count: textEmptyCount,
                 regions: results
             }
         });
@@ -284,11 +327,47 @@ router.get('/export', authMiddleware, async (req: AuthRequest, res) => {
         for (const region of regionsResult) {
             const report = reportsByRegion.get(region.id);
             let status: string | null = null;
+
             if (!report) {
                 status = '未上传';
-            } else if (isEmptyReport(report)) {
-                status = '内容为空';
+            } else {
+                // Helper to check if JSON has meaningful content
+                const hasEffectiveContent = (parsed: any): boolean => {
+                    if (!parsed || typeof parsed !== 'object') return false;
+                    const hasSections = Array.isArray(parsed.sections) && parsed.sections.length > 0;
+                    const hasTables = parsed.tables && typeof parsed.tables === 'object' && Object.keys(parsed.tables).length > 0;
+                    return hasSections || hasTables;
+                };
+
+                const isJsonEmpty = !report.active_version_id ||
+                    !report.parsed_json ||
+                    !hasEffectiveContent(report.parsed_json);
+
+
+                // Helper to check if text content exists in parsed sections
+                const hasParsedTextContent = (parsed: any): boolean => {
+                    if (!parsed || !parsed.sections || !Array.isArray(parsed.sections)) return false;
+                    let totalLen = 0;
+                    for (const s of parsed.sections) {
+                        // Defensive check for null/malformed section objects
+                        if (!s) continue;
+                        if (s.content && typeof s.content === 'string') {
+                            totalLen += s.content.length;
+                        }
+                        if (totalLen > 100) return true;
+                    }
+                    return totalLen > 100;
+                };
+
+                const isTextEmpty = (!report.raw_text || report.raw_text.trim().length < 100) && (!hasParsedTextContent(report.parsed_json));
+
+                if (isJsonEmpty) {
+                    status = '内容为空';
+                } else if (isTextEmpty) {
+                    status = '文字为空';
+                }
             }
+
             if (status) {
                 results.push({
                     region_name: region.name,

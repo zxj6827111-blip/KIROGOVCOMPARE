@@ -292,6 +292,136 @@ router.post('/comparisons', authMiddleware, async (req, res) => {
   }
 });
 
+/**
+ * POST /comparisons/batch-create - 批量创建比对任务
+ * 为所有有连续两年年报但尚未创建比对任务的区域批量生成比对任务
+ */
+router.post('/comparisons/batch-create', authMiddleware, async (req, res) => {
+  try {
+    const user = (req as any).user;
+
+    // 构建权限过滤条件
+    let allowedRegionCondition = '';
+    let allowedParams: any[] = [];
+
+    if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
+      const scopeNames = user.dataScope.regions;
+      const idsQuery = `
+        WITH RECURSIVE allowed_ids AS (
+          SELECT id FROM regions WHERE name = ANY($1::text[])
+          UNION ALL
+          SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
+        )
+        SELECT id FROM allowed_ids
+      `;
+      try {
+        const allowedRowsRes = await pool.query(idsQuery, [scopeNames]);
+        const allowedIds = allowedRowsRes.rows.map((r: any) => r.id);
+        if (allowedIds.length > 0) {
+          allowedRegionCondition = `AND r1.region_id = ANY($1::int[])`;
+          allowedParams = [allowedIds];
+        } else {
+          return res.json({ success: true, created_count: 0, skipped_count: 0, message: '无权限访问任何区域' });
+        }
+      } catch (e) {
+        console.error('Error calculating scope IDs in batch create:', e);
+        return res.status(403).json({ error: '无权限访问' });
+      }
+    }
+
+    // 查询所有符合条件的区域-年份对：
+    // 1. 同一区域同时存在连续两年的报告
+    // 2. 两份报告都已完成解析（有 active_version_id 且 parsed_json 不为空）
+    // 3. 尚未创建比对任务
+    const candidatesQuery = `
+      WITH consecutive_reports AS (
+        SELECT 
+          r1.region_id,
+          r1.year as year_a,
+          r1.id as left_report_id,
+          r2.year as year_b, 
+          r2.id as right_report_id
+        FROM reports r1
+        JOIN reports r2 ON r1.region_id = r2.region_id AND r2.year = r1.year + 1
+        JOIN report_versions rv1 ON rv1.id = r1.active_version_id
+        JOIN report_versions rv2 ON rv2.id = r2.active_version_id
+        WHERE rv1.parsed_json IS NOT NULL 
+          AND rv2.parsed_json IS NOT NULL
+          AND jsonb_typeof(rv1.parsed_json) = 'object'
+          AND jsonb_typeof(rv2.parsed_json) = 'object'
+          ${allowedRegionCondition}
+      )
+      SELECT cr.region_id, cr.year_a, cr.year_b, cr.left_report_id, cr.right_report_id
+      FROM consecutive_reports cr
+      LEFT JOIN comparisons c ON c.region_id = cr.region_id 
+        AND c.year_a = cr.year_a AND c.year_b = cr.year_b
+      WHERE c.id IS NULL
+      ORDER BY cr.region_id, cr.year_a;
+    `;
+
+    const candidatesRes = await pool.query(candidatesQuery, allowedParams);
+    const candidates = candidatesRes.rows;
+
+    if (candidates.length === 0) {
+      return res.json({
+        success: true,
+        created_count: 0,
+        skipped_count: 0,
+        message: '没有符合条件的待比对区域（所有有连续年报的区域都已创建比对任务）'
+      });
+    }
+
+    let createdCount = 0;
+    let skippedCount = 0;
+    const errors: string[] = [];
+
+    // 批量创建比对任务
+    for (const candidate of candidates) {
+      try {
+        // 创建 comparison 记录
+        const comparisonRes = await pool.query(`
+          INSERT INTO comparisons (region_id, year_a, year_b, left_report_id, right_report_id)
+          VALUES ($1, $2, $3, $4, $5)
+          ON CONFLICT(region_id, year_a, year_b) DO NOTHING
+          RETURNING id;
+        `, [candidate.region_id, candidate.year_a, candidate.year_b, candidate.left_report_id, candidate.right_report_id]);
+
+        if (comparisonRes.rows.length > 0) {
+          const comparisonId = comparisonRes.rows[0].id;
+
+          // 创建 job 记录
+          await pool.query(`
+            INSERT INTO jobs (report_id, kind, status, progress, comparison_id)
+            VALUES ($1, 'compare', 'queued', 0, $2);
+          `, [candidate.left_report_id, comparisonId]);
+
+          createdCount++;
+        } else {
+          // ON CONFLICT 触发，说明已存在
+          skippedCount++;
+        }
+      } catch (err: any) {
+        console.error(`Failed to create comparison for region ${candidate.region_id}:`, err);
+        errors.push(`区域${candidate.region_id} (${candidate.year_a}-${candidate.year_b}): ${err.message}`);
+        skippedCount++;
+      }
+    }
+
+    return res.json({
+      success: true,
+      created_count: createdCount,
+      skipped_count: skippedCount,
+      total_candidates: candidates.length,
+      message: `成功创建 ${createdCount} 个比对任务${skippedCount > 0 ? `，跳过 ${skippedCount} 个` : ''}`,
+      errors: errors.length > 0 ? errors : undefined
+    });
+
+  } catch (error: any) {
+    console.error('Error in batch create comparisons:', error);
+    return res.status(500).json({ error: '批量创建失败: ' + error.message });
+  }
+});
+
 router.get('/comparisons', authMiddleware, async (req, res) => {
   try {
     const { region_id, year_a, year_b } = req.query;
@@ -361,7 +491,9 @@ router.get('/comparisons', authMiddleware, async (req, res) => {
         c.year_a,
         c.year_b,
         c.left_report_id,
-        c.right_report_id
+        c.right_report_id,
+        c.similarity,
+        c.check_status
       FROM comparisons c
       ${whereClause}
       ORDER BY c.id DESC;
@@ -375,6 +507,8 @@ router.get('/comparisons', authMiddleware, async (req, res) => {
       year_b: row.year_b,
       left_report_id: row.left_report_id,
       right_report_id: row.right_report_id,
+      similarity: row.similarity,
+      checkStatus: row.check_status,
       latest_job: await buildLatestJob(row.id),
     })));
 
@@ -393,7 +527,7 @@ router.get('/comparisons/:id', authMiddleware, async (req, res) => {
     }
 
     const comparisonRes = await pool.query(`
-      SELECT id, region_id, year_a, year_b, left_report_id, right_report_id
+      SELECT id, region_id, year_a, year_b, left_report_id, right_report_id, similarity, check_status
       FROM comparisons
       WHERE id = $1
       LIMIT 1;
@@ -444,6 +578,8 @@ router.get('/comparisons/:id', authMiddleware, async (req, res) => {
       year_b: comparison.year_b,
       left_report_id: comparison.left_report_id,
       right_report_id: comparison.right_report_id,
+      similarity: comparison.similarity,
+      checkStatus: comparison.check_status,
       latest_job: await buildLatestJob(comparison.id),
       diff_json: diffJson,
     });

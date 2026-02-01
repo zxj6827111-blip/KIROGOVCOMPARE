@@ -13,7 +13,8 @@ import {
   Download,
   ChevronDown,
   ChevronRight,
-  AlertCircle
+  AlertCircle,
+  Zap
 } from 'lucide-react';
 
 function ComparisonHistory() {
@@ -28,6 +29,7 @@ function ComparisonHistory() {
   const [yearFilter, setYearFilter] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
   const [showIssuesOnly, setShowIssuesOnly] = useState(false); // Filter for issues only
+  const [batchCreating, setBatchCreating] = useState(false); // Batch create comparisons loading state
 
   // Tree structure state
   const [treeData, setTreeData] = useState([]);
@@ -89,7 +91,7 @@ function ComparisonHistory() {
 
         if (!hasComparisons && !hasChildComparisons) return null;
 
-        const issueCount = comps.filter(c => c.checkStatus && c.checkStatus !== '正常').length;
+        const issueCount = comps.filter(c => (c.checkStatus && c.checkStatus !== '正常') || (c.similarity && c.similarity > 60)).length;
         const childIssueCount = children.reduce((sum, c) => sum + c.totalIssues, 0);
 
         return {
@@ -274,6 +276,36 @@ function ComparisonHistory() {
     alert(`已删除 ${successCount} 条记录`);
   };
 
+  // 一键比对：批量创建比对任务
+  const handleBatchCreate = async () => {
+    if (!window.confirm('将为所有有连续两年年报但尚未创建比对任务的区域批量生成比对任务，确定继续？')) {
+      return;
+    }
+
+    setBatchCreating(true);
+    try {
+      const resp = await apiClient.post('/comparisons/batch-create');
+      const data = resp.data;
+
+      if (data.success) {
+        if (data.created_count > 0) {
+          alert(`${data.message}`);
+          // 刷新列表
+          fetchComparisons();
+        } else {
+          alert(data.message || '没有符合条件的待比对区域');
+        }
+      } else {
+        alert('批量创建失败：' + (data.error || '未知错误'));
+      }
+    } catch (err) {
+      const message = err.response?.data?.error || err.message || '批量创建失败';
+      alert(`批量创建失败：${message}`);
+    } finally {
+      setBatchCreating(false);
+    }
+  };
+
   const formatDate = (dateStr) => {
     if (!dateStr) return '—';
     try {
@@ -290,7 +322,7 @@ function ComparisonHistory() {
 
     // Apply showIssuesOnly filter
     const filteredComps = showIssuesOnly
-      ? (node.comparisons || []).filter(c => c.checkStatus && c.checkStatus !== '正常')
+      ? (node.comparisons || []).filter(c => (c.checkStatus && c.checkStatus !== '正常') || (c.similarity && c.similarity > 60))
       : (node.comparisons || []);
     const hasComps = filteredComps.length > 0;
 
@@ -438,9 +470,24 @@ function ComparisonHistory() {
             <AlertCircle size={16} />
             {showIssuesOnly ? '显示全部' : '只看问题'}
           </button>
-        </div>
-
-        <div className="header-actions" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button
+            onClick={handleBatchCreate}
+            disabled={batchCreating || loading}
+            className="batch-create-btn iconic-btn"
+            title="为所有有连续两年年报但未比对的区域批量创建比对任务"
+          >
+            <Zap size={16} className={batchCreating ? 'spin' : ''} />
+            {batchCreating ? '创建中...' : '一键比对'}
+          </button>
+          <button
+            onClick={fetchComparisons}
+            disabled={loading}
+            className="refresh-btn iconic-btn"
+            title="刷新列表"
+          >
+            <RefreshCw size={16} className={loading ? 'spin' : ''} />
+            {loading ? '刷新中...' : '刷新'}
+          </button>
           {selectedIds.length > 0 && (
             <>
               <button onClick={handleBatchDownload} className="batch-btn download-btn">
@@ -451,10 +498,6 @@ function ComparisonHistory() {
               </button>
             </>
           )}
-          <button onClick={fetchComparisons} disabled={loading} className="refresh-btn iconic-btn">
-            <RefreshCw size={16} className={loading ? 'spin' : ''} />
-            {loading ? '刷新中...' : '刷新'}
-          </button>
         </div>
       </div>
 

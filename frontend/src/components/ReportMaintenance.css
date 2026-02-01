@@ -334,6 +334,18 @@
     font-weight: 600;
 }
 
+.results-table .region-name.clickable {
+    color: var(--primary, #2563eb);
+    cursor: pointer;
+    text-decoration: none;
+    transition: color 0.2s;
+}
+
+.results-table .region-name.clickable:hover {
+    color: #1d4ed8;
+    text-decoration: underline;
+}
+
 .results-table .parent-path {
     color: var(--color-text-secondary, #64748b);
     font-size: 13px;
@@ -357,6 +369,23 @@
 .status-badge.empty {
     background: #fef3c7;
     color: #d97706;
+}
+
+.status-badge.text_empty {
+    background: #ede9fe;
+    color: #7c3aed;
+}
+
+.summary-card.text-empty .summary-value {
+    color: #8b5cf6;
+}
+
+.results-table tbody tr.text_empty {
+    background: #f5f3ff;
+}
+
+.results-table tbody tr.text_empty:hover {
+    background: #ede9fe;
 }
 
 /* Alert */

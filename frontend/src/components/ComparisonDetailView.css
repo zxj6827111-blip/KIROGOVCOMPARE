@@ -82,15 +82,18 @@ table.comparison-table {
     overflow-x: auto;
 }
 
-.text-center {
+.text-center,
+.comparison-table .text-center {
     text-align: center;
 }
 
-.text-right {
+.text-right,
+.comparison-table .text-right {
     text-align: right;
 }
 
-.text-left {
+.text-left,
+.comparison-table .text-left {
     text-align: left;
 }
 

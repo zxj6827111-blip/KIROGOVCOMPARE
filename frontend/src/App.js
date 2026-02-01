@@ -140,7 +140,7 @@ function App() {
       />;
     }
     if (pathname === '/report-maintenance') {
-      return <ReportMaintenance onBack={() => navigate('/catalog')} />;
+      return <ReportMaintenance onBack={() => navigate('/catalog')} onNavigate={navigate} />;
     }
     if (pathname.startsWith('/comparison/')) {
       // Extract ID from /comparison/:id
