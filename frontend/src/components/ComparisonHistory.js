@@ -14,142 +14,109 @@ import {
   ChevronDown,
   ChevronRight,
   AlertCircle,
-  Zap
+  Zap,
+  Loader
 } from 'lucide-react';
 
 function ComparisonHistory() {
-  const [comparisons, setComparisons] = useState([]);
-  const [loading, setLoading] = useState(true); // 初始为 true，避免首次渲染显示空状态
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
   const [selectedComparisonId, setSelectedComparisonId] = useState(null);
 
   const [regionFilter, setRegionFilter] = useState('');
   const [yearFilter, setYearFilter] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
-  const [showIssuesOnly, setShowIssuesOnly] = useState(false); // Filter for issues only
-  const [batchCreating, setBatchCreating] = useState(false); // Batch create comparisons loading state
+  const [showIssuesOnly, setShowIssuesOnly] = useState(false);
+  const [batchCreating, setBatchCreating] = useState(false);
 
-  // Tree structure state
+  // Server-side tree structure state
   const [treeData, setTreeData] = useState([]);
+  const [grandTotal, setGrandTotal] = useState(0);
+  const [grandTotalIssues, setGrandTotalIssues] = useState(0);
   const [expandedNodes, setExpandedNodes] = useState(new Set());
-  const [viewMode, setViewMode] = useState('tree'); // 'tree' | 'flat'
-  const [isTreeReady, setIsTreeReady] = useState(false); // Prevents flicker
 
-  // Fetch comparisons and build tree in one go to prevent flicker
-  const fetchComparisons = useCallback(async () => {
+  // Lazy-loaded comparisons per region: { regionId: { data: [...], loading: boolean, loaded: boolean } }
+  const [regionComparisons, setRegionComparisons] = useState({});
+
+  // Fetch tree structure from server (no individual comparisons)
+  // preserveCache: if true, don't clear regionComparisons (used after delete/modify)
+  const fetchTree = useCallback(async (preserveCache = false) => {
     setLoading(true);
     setError('');
-    // Keep isTreeReady=true if likely refreshing, to show stale data instead of loading screen
-    // But if we are searching (changing filters), maybe we SHOULD show loading?
-    // User wants smooth transition. Stale data (old tree) -> New data (new tree).
-    // So we invoke API, prepare everything, then swap.
-    setIsTreeReady(prev => !regionFilter && !yearFilter ? false : prev);
 
     try {
-      // 1. Fetch Comparison Data
-      const params = new URLSearchParams({
-        page: page,
-        pageSize: 100,
-      });
+      const params = new URLSearchParams();
       if (regionFilter) params.append('region_name', regionFilter);
       if (yearFilter) params.append('year', yearFilter);
+      if (showIssuesOnly) params.append('showIssuesOnly', 'true');
 
-      const resp = await apiClient.get(`/comparisons/history?${params.toString()}`);
-      const rawComparisons = resp.data?.data || [];
-      const totalPagesVal = resp.data?.totalPages || 1;
+      const resp = await apiClient.get(`/comparisons/tree?${params.toString()}`);
+      const data = resp.data;
 
-      // 2. Fetch Regions for Tree
-      const regionsResp = await apiClient.get('/regions');
-      const regionsList = regionsResp.data?.data || [];
-      const regionMap = new Map();
-      regionsList.forEach(r => regionMap.set(r.id, r));
+      setTreeData(data.tree || []);
+      setGrandTotal(data.grandTotal || 0);
+      setGrandTotalIssues(data.grandTotalIssues || 0);
 
-      // 3. Build Tree Structure (Sync)
-      const compByRegion = new Map();
-      rawComparisons.forEach(c => {
-        if (!compByRegion.has(c.regionId)) {
-          compByRegion.set(c.regionId, []);
+      // Only auto-expand on initial load (when no nodes are expanded)
+      setExpandedNodes(prev => {
+        if (prev.size === 0 && data.tree && data.tree.length > 0) {
+          const firstLevelIds = data.tree.map(n => n.id);
+          return new Set(firstLevelIds);
         }
-        compByRegion.get(c.regionId).push(c);
+        return prev;
       });
 
-      const buildNode = (regionId) => {
-        const region = regionMap.get(regionId);
-        if (!region) return null;
-
-        const comps = compByRegion.get(regionId) || [];
-        const children = regionsList
-          .filter(r => r.parent_id === regionId)
-          .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
-          .map(r => buildNode(r.id))
-          .filter(Boolean);
-
-        const hasComparisons = comps.length > 0;
-        const hasChildComparisons = children.some(c => c.hasComparisons);
-
-        if (!hasComparisons && !hasChildComparisons) return null;
-
-        const issueCount = comps.filter(c => (c.checkStatus && c.checkStatus !== '正常') || (c.similarity && c.similarity > 60)).length;
-        const childIssueCount = children.reduce((sum, c) => sum + c.totalIssues, 0);
-
-        return {
-          id: regionId,
-          name: region.name,
-          level: region.level,
-          comparisons: comps,
-          children: children,
-          hasComparisons: hasComparisons || hasChildComparisons,
-          totalIssues: issueCount + childIssueCount,
-          totalComparisons: comps.length + children.reduce((sum, c) => sum + c.totalComparisons, 0)
-        };
-      };
-
-      const rootNodes = regionsList
-        .filter(r => !r.parent_id || r.parent_id === 0)
-        .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
-        .map(r => buildNode(r.id))
-        .filter(Boolean);
-
-      // 4. ATOMIC UPDATE: Set all states at once
-      setComparisons(rawComparisons);
-      setTotalPages(totalPagesVal);
-      setTreeData(rootNodes);
-
-      // Auto-expand logic
-      if (regionFilter && regionFilter.trim()) {
-        const expandedSet = new Set();
-        const expandMatchedNodes = (nodes) => {
-          nodes.forEach(node => {
-            if (node.totalComparisons > 0) expandedSet.add(node.id);
-            if (node.children?.length > 0) expandMatchedNodes(node.children);
-          });
-        };
-        expandMatchedNodes(rootNodes);
-        setExpandedNodes(expandedSet);
-      } else {
-        const firstLevelIds = rootNodes.map(n => n.id);
-        setExpandedNodes(new Set(firstLevelIds));
+      // Clear loaded comparisons only when filters change (not on refresh)
+      if (!preserveCache) {
+        setRegionComparisons({});
       }
-
-      setIsTreeReady(true);
     } catch (err) {
-      console.error('Failed to fetch/build:', err);
+      console.error('Failed to fetch tree:', err);
       const message = err.response?.data?.error || err.message || '加载失败';
       setError(`加载失败：${message}`);
-      // Fallback
-      setViewMode('flat');
     } finally {
       setLoading(false);
     }
-  }, [page, regionFilter, yearFilter]);
+  }, [regionFilter, yearFilter, showIssuesOnly]);
 
-  // 初始加载：只在组件首次挂载时执行
+  // Fetch comparisons for a specific region (lazy loading)
+  const fetchRegionComparisons = useCallback(async (regionId) => {
+    // Mark as loading
+    setRegionComparisons(prev => ({
+      ...prev,
+      [regionId]: { ...prev[regionId], loading: true }
+    }));
+
+    try {
+      const params = new URLSearchParams({
+        region_id: regionId,
+        pageSize: 100
+      });
+      if (yearFilter) params.append('year', yearFilter);
+      if (showIssuesOnly) params.append('showIssuesOnly', 'true');
+
+      const resp = await apiClient.get(`/comparisons/by-region?${params.toString()}`);
+      const comparisons = resp.data?.data || [];
+
+      setRegionComparisons(prev => ({
+        ...prev,
+        [regionId]: { data: comparisons, loading: false, loaded: true }
+      }));
+    } catch (err) {
+      console.error('Failed to fetch region comparisons:', err);
+      setRegionComparisons(prev => ({
+        ...prev,
+        [regionId]: { data: [], loading: false, loaded: true, error: err.message }
+      }));
+    }
+  }, [yearFilter, showIssuesOnly]);
+
+  // Initial load
   useEffect(() => {
-    fetchComparisons();
-  }, [fetchComparisons]);
+    fetchTree();
+  }, [fetchTree]);
 
+  // Toggle node expansion and trigger lazy load if needed
   const toggleNode = (nodeId) => {
     setExpandedNodes(prev => {
       const newSet = new Set(prev);
@@ -157,6 +124,11 @@ function ComparisonHistory() {
         newSet.delete(nodeId);
       } else {
         newSet.add(nodeId);
+        // Trigger lazy load if not already loaded
+        const regionState = regionComparisons[nodeId];
+        if (!regionState?.loaded && !regionState?.loading) {
+          fetchRegionComparisons(nodeId);
+        }
       }
       return newSet;
     });
@@ -166,7 +138,26 @@ function ComparisonHistory() {
     if (!window.confirm('确定要删除这条比对记录吗？')) return;
     try {
       await apiClient.delete(`/comparisons/${id}`);
-      fetchComparisons();
+
+      // Remove from local cache immediately for instant UI update
+      setRegionComparisons(prev => {
+        const updated = { ...prev };
+        Object.keys(updated).forEach(regionId => {
+          if (updated[regionId]?.data) {
+            updated[regionId] = {
+              ...updated[regionId],
+              data: updated[regionId].data.filter(c => c.id !== id)
+            };
+          }
+        });
+        return updated;
+      });
+
+      // Also remove from selected
+      setSelectedIds(prev => prev.filter(i => i !== id));
+
+      // Refresh tree to get updated stats (but preserve cache)
+      fetchTree(true);
     } catch (err) {
       const message = err.response?.data?.error || err.message || '删除失败';
       alert(`删除失败：${message}`);
@@ -174,8 +165,7 @@ function ComparisonHistory() {
   };
 
   const handleSearch = () => {
-    setPage(1);
-    fetchComparisons();
+    fetchTree();
   };
 
   const handleViewDetail = (comparison) => {
@@ -207,7 +197,17 @@ function ComparisonHistory() {
     }
   };
 
-  // Selection handlers
+  // Selection handlers - need to collect all loaded comparisons
+  const getAllLoadedComparisons = () => {
+    const all = [];
+    Object.values(regionComparisons).forEach(region => {
+      if (region.data) {
+        all.push(...region.data);
+      }
+    });
+    return all;
+  };
+
   const toggleSelect = (id) => {
     setSelectedIds(prev =>
       prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
@@ -215,10 +215,11 @@ function ComparisonHistory() {
   };
 
   const toggleSelectAll = () => {
-    if (selectedIds.length === comparisons.length) {
+    const allComps = getAllLoadedComparisons();
+    if (selectedIds.length === allComps.length && allComps.length > 0) {
       setSelectedIds([]);
     } else {
-      setSelectedIds(comparisons.map(c => c.id));
+      setSelectedIds(allComps.map(c => c.id));
     }
   };
 
@@ -231,9 +232,10 @@ function ComparisonHistory() {
 
     if (!window.confirm(`确定要批量导出 ${selectedIds.length} 个比对报告吗？`)) return;
 
+    const allComps = getAllLoadedComparisons();
     let successCount = 0;
     for (const id of selectedIds) {
-      const c = comparisons.find(comp => comp.id === id);
+      const c = allComps.find(comp => comp.id === id);
       if (c) {
         try {
           await apiClient.post('/pdf-jobs', {
@@ -271,7 +273,7 @@ function ComparisonHistory() {
     }
 
     setSelectedIds([]);
-    fetchComparisons();
+    fetchTree();
     alert(`已删除 ${successCount} 条记录`);
   };
 
@@ -289,8 +291,7 @@ function ComparisonHistory() {
       if (data.success) {
         if (data.created_count > 0) {
           alert(`${data.message}`);
-          // 刷新列表
-          fetchComparisons();
+          fetchTree();
         } else {
           alert(data.message || '没有符合条件的待比对区域');
         }
@@ -314,19 +315,21 @@ function ComparisonHistory() {
     }
   };
 
-  // Render tree node with its comparisons
+  // Render tree node with lazy-loaded comparisons
   const renderTreeNode = (node, depth = 0) => {
     const isExpanded = expandedNodes.has(node.id);
     const hasChildren = node.children && node.children.length > 0;
-
-    // Apply showIssuesOnly filter
-    const filteredComps = showIssuesOnly
-      ? (node.comparisons || []).filter(c => (c.checkStatus && c.checkStatus !== '正常') || (c.similarity && c.similarity > 60))
-      : (node.comparisons || []);
-    const hasComps = filteredComps.length > 0;
+    const regionState = regionComparisons[node.id] || { data: [], loading: false, loaded: false };
+    const comparisons = regionState.data || [];
+    const isLoadingComps = regionState.loading;
 
     // When filtering by issues, skip nodes with no issues
     if (showIssuesOnly && node.totalIssues === 0) return null;
+
+    // Filter comparisons for issues only if needed
+    const filteredComps = showIssuesOnly
+      ? comparisons.filter(c => (c.checkStatus && c.checkStatus !== '正常') || (c.similarity && c.similarity > 60))
+      : comparisons;
 
     return (
       <React.Fragment key={node.id}>
@@ -335,7 +338,7 @@ function ComparisonHistory() {
           <td colSpan="8">
             <div className="region-header-content" style={{ paddingLeft: depth * 24 }}>
               <span className="expand-icon">
-                {(hasChildren || hasComps) && (isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />)}
+                {(hasChildren || node.totalComparisons > 0) && (isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />)}
               </span>
               <span className="region-name">{node.name}</span>
               <span className="region-stats">
@@ -350,8 +353,19 @@ function ComparisonHistory() {
           </td>
         </tr>
 
-        {/* Comparisons under this region */}
-        {isExpanded && hasComps && filteredComps.map(c => (
+        {/* Loading indicator for this node's comparisons */}
+        {isExpanded && isLoadingComps && (
+          <tr className="loading-row">
+            <td colSpan="8" style={{ paddingLeft: (depth + 1) * 24 }}>
+              <span className="loading-indicator">
+                <Loader size={14} className="spin" /> 加载比对记录中...
+              </span>
+            </td>
+          </tr>
+        )}
+
+        {/* Comparisons under this region (lazy loaded) */}
+        {isExpanded && !isLoadingComps && filteredComps.map(c => (
           <tr key={c.id} className={`comparison-row level-${node.level} ${selectedIds.includes(c.id) ? 'selected-row' : ''}`}>
             <td style={{ paddingLeft: (depth + 1) * 24 }}>
               <input
@@ -479,7 +493,7 @@ function ComparisonHistory() {
             {batchCreating ? '创建中...' : '一键比对'}
           </button>
           <button
-            onClick={fetchComparisons}
+            onClick={fetchTree}
             disabled={loading}
             className="refresh-btn iconic-btn"
             title="刷新列表"
@@ -501,23 +515,23 @@ function ComparisonHistory() {
       </div>
 
       {/* Summary Stats */}
-      {!loading && comparisons.length > 0 && (
+      {!loading && grandTotal > 0 && (
         <div className="summary-bar">
           <span className="summary-item">
-            共 <strong>{comparisons.length}</strong> 份比对记录
+            共 <strong>{grandTotal}</strong> 份比对记录
           </span>
           <span className="summary-item issue">
             <AlertCircle size={14} />
-            <strong>{comparisons.filter(c => c.checkStatus && c.checkStatus !== '正常').length}</strong> 份存在问题
+            <strong>{grandTotalIssues}</strong> 份存在问题
           </span>
         </div>
       )}
 
       {error && <div className="alert error">{error}</div>}
 
-      {loading && comparisons.length === 0 ? (
+      {loading ? (
         <div className="loading-state">加载中...</div>
-      ) : comparisons.length === 0 ? (
+      ) : grandTotal === 0 ? (
         <div className="empty-state">
           <p>暂无比对记录</p>
           <p className="hint">上传年报后，系统将自动生成与上一年的比对报告。</p>
@@ -530,7 +544,7 @@ function ComparisonHistory() {
                 <th style={{ width: '40px' }}>
                   <input
                     type="checkbox"
-                    checked={selectedIds.length === comparisons.length && comparisons.length > 0}
+                    checked={selectedIds.length > 0 && selectedIds.length === getAllLoadedComparisons().length}
                     onChange={toggleSelectAll}
                     title="全选/取消全选"
                   />
@@ -545,83 +559,13 @@ function ComparisonHistory() {
               </tr>
             </thead>
             <tbody>
-              {viewMode === 'tree' && isTreeReady && treeData.length > 0 ? (
+              {treeData.length > 0 ? (
                 treeData.map(node => renderTreeNode(node, 0))
-              ) : viewMode === 'tree' && !isTreeReady ? (
-                <tr><td colSpan="8" style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>构建层级结构中...</td></tr>
               ) : (
-                comparisons.map((c) => (
-                  <tr key={c.id} className={selectedIds.includes(c.id) ? 'selected-row' : ''}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.includes(c.id)}
-                        onChange={() => toggleSelect(c.id)}
-                      />
-                    </td>
-                    <td>{c.regionName || '未知'}</td>
-                    <td>{c.yearA}</td>
-                    <td>{c.yearB}</td>
-                    <td>{formatDate(c.createdAt)}</td>
-                    <td>
-                      {c.similarity != null ? <span className="font-bold">{c.similarity}%</span> : <span className="text-gray-400">-</span>}
-                    </td>
-                    <td>
-                      {c.checkStatus?.startsWith('异常') ? <span className="text-red-600 font-bold">{c.checkStatus}</span> :
-                        c.checkStatus === '正常' ? <span className="text-green-600">正常</span> :
-                          <span className="text-gray-400">-</span>}
-                    </td>
-                    <td>
-                      <div className="actions">
-                        <button
-                          className="icon-btn view"
-                          onClick={() => handleViewDetail(c)}
-                          title="查看详情"
-                        >
-                          <Eye size={16} />
-                          <span>查看</span>
-                        </button>
-                        <button
-                          className="icon-btn print"
-                          onClick={() => handleExportPdf(c.id, `${c.regionName || '未知地区'} ${c.yearA}-${c.yearB} 年报对比`)}
-                          title="打印导出"
-                        >
-                          <Printer size={16} />
-                          <span>打印</span>
-                        </button>
-                        <button
-                          className="icon-btn delete"
-                          onClick={() => handleDelete(c.id)}
-                          title="删除记录"
-                        >
-                          <Trash2 size={16} />
-                          <span>删除</span>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                <tr><td colSpan="8" style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>暂无数据</td></tr>
               )}
             </tbody>
           </table>
-
-          {totalPages > 1 && (
-            <div className="pagination">
-              <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
-                disabled={page === 1}
-              >
-                上一页
-              </button>
-              <span>第 {page} / {totalPages} 页</span>
-              <button
-                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                disabled={page === totalPages}
-              >
-                下一页
-              </button>
-            </div>
-          )}
         </>
       )}
     </div>

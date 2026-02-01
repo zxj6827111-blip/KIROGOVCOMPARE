@@ -147,6 +147,342 @@ router.get('/history', authMiddleware, async (req: AuthRequest, res: Response) =
 });
 
 /**
+ * GET /api/comparisons/tree
+ * Get hierarchical tree structure with aggregate statistics (server-side tree building)
+ * Returns tree skeleton without individual comparison records for fast initial load
+ */
+router.get('/tree', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const showIssuesOnly = req.query.showIssuesOnly === 'true';
+    const yearFilter = req.query.year ? Number(req.query.year) : undefined;
+    const regionNameFilter = req.query.region_name as string;
+
+    // DATA SCOPE FILTER - Get allowed region IDs
+    let allowedRegionIds: number[] | null = null;
+    const user = req.user;
+    if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
+      const scopeNames = user.dataScope.regions;
+      const scopeIdsQuery = `
+        WITH RECURSIVE allowed_ids AS (
+            SELECT id FROM regions WHERE name = ANY($1::text[])
+            UNION ALL
+            SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
+        )
+        SELECT id FROM allowed_ids
+      `;
+      try {
+        const allowedRowsRes = await pool.query(scopeIdsQuery, [scopeNames]);
+        allowedRegionIds = allowedRowsRes.rows.map((row: any) => row.id);
+        if (allowedRegionIds.length === 0) {
+          return res.json({ tree: [], grandTotal: 0, grandTotalIssues: 0 });
+        }
+      } catch (e) {
+        console.error('Error calculating scope IDs in tree:', e);
+        return res.json({ tree: [], grandTotal: 0, grandTotalIssues: 0 });
+      }
+    }
+
+    // 1. Fetch all regions
+    const regionsRes = await pool.query(`
+      SELECT id, name, parent_id, level, sort_order
+      FROM regions
+      ORDER BY level ASC, sort_order ASC, name ASC
+    `);
+    const allRegions = regionsRes.rows;
+
+    // Filter regions by allowed IDs if data scope is set
+    const regions = allowedRegionIds
+      ? allRegions.filter((r: any) => allowedRegionIds!.includes(r.id))
+      : allRegions;
+
+    // Also include parent regions that are needed for hierarchy but not in scope
+    const regionIds = new Set(regions.map((r: any) => r.id));
+    const additionalParentIds = new Set<number>();
+    for (const region of regions) {
+      let parentId = region.parent_id;
+      while (parentId && !regionIds.has(parentId)) {
+        additionalParentIds.add(parentId);
+        const parent = allRegions.find((r: any) => r.id === parentId);
+        if (parent) {
+          parentId = parent.parent_id;
+        } else {
+          break;
+        }
+      }
+    }
+    const parentRegions = allRegions.filter((r: any) => additionalParentIds.has(r.id));
+    const combinedRegions = [...regions, ...parentRegions];
+
+    // 2. Build conditions for comparison aggregation
+    const conditions: string[] = [];
+    const params: any[] = [];
+    let paramIndex = 1;
+
+    if (allowedRegionIds) {
+      conditions.push(`c.region_id = ANY($${paramIndex++}::int[])`);
+      params.push(allowedRegionIds);
+    }
+    if (yearFilter && !isNaN(yearFilter)) {
+      conditions.push(`(c.year_a = $${paramIndex++} OR c.year_b = $${paramIndex++})`);
+      params.push(yearFilter);
+      params.push(yearFilter);
+    }
+    if (regionNameFilter) {
+      conditions.push(`r.name LIKE $${paramIndex++}`);
+      params.push(`%${regionNameFilter}%`);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // 3. Get aggregated counts per region
+    const statsRes = await pool.query(`
+      SELECT 
+        c.region_id,
+        COUNT(*) as total_comparisons,
+        COUNT(*) FILTER (WHERE (c.check_status IS NOT NULL AND c.check_status != '正常') OR (c.similarity IS NOT NULL AND c.similarity > 60)) as total_issues
+      FROM comparisons c
+      LEFT JOIN regions r ON c.region_id = r.id
+      ${whereClause}
+      GROUP BY c.region_id
+    `, params);
+
+    const statsMap = new Map<number, { total: number; issues: number }>();
+    for (const row of statsRes.rows) {
+      statsMap.set(row.region_id, {
+        total: parseInt(row.total_comparisons) || 0,
+        issues: parseInt(row.total_issues) || 0
+      });
+    }
+
+    // 4. Build tree structure
+    interface TreeNode {
+      id: number;
+      name: string;
+      level: number;
+      totalComparisons: number;
+      totalIssues: number;
+      children: TreeNode[];
+    }
+
+    const regionMap = new Map<number, any>();
+    for (const r of combinedRegions) {
+      regionMap.set(r.id, r);
+    }
+
+    // Recursive function to build node and accumulate stats from children
+    const buildNode = (regionId: number, visited: Set<number> = new Set()): TreeNode | null => {
+      if (visited.has(regionId)) return null; // Prevent cycles
+      visited.add(regionId);
+
+      const region = regionMap.get(regionId);
+      if (!region) return null;
+
+      // Find children
+      const children: TreeNode[] = [];
+      for (const r of combinedRegions) {
+        if (r.parent_id === regionId) {
+          const childNode = buildNode(r.id, visited);
+          if (childNode) {
+            children.push(childNode);
+          }
+        }
+      }
+
+      // Sort children by sort_order then name
+      children.sort((a, b) => {
+        const regionA = regionMap.get(a.id);
+        const regionB = regionMap.get(b.id);
+        const orderA = regionA?.sort_order || 0;
+        const orderB = regionB?.sort_order || 0;
+        if (orderA !== orderB) return orderA - orderB;
+        return a.name.localeCompare(b.name);
+      });
+
+      // Get direct stats for this region
+      const directStats = statsMap.get(regionId) || { total: 0, issues: 0 };
+
+      // Accumulate from children
+      let totalComparisons = directStats.total;
+      let totalIssues = directStats.issues;
+      for (const child of children) {
+        totalComparisons += child.totalComparisons;
+        totalIssues += child.totalIssues;
+      }
+
+      // If showIssuesOnly and no issues in subtree, skip
+      if (showIssuesOnly && totalIssues === 0) {
+        return null;
+      }
+
+      // Skip nodes with no comparisons in subtree (unless they have children with comparisons)
+      if (totalComparisons === 0 && children.length === 0) {
+        return null;
+      }
+
+      return {
+        id: regionId,
+        name: region.name,
+        level: region.level || 1,
+        totalComparisons,
+        totalIssues,
+        children
+      };
+    };
+
+    // Find root nodes (no parent or parent not in our set)
+    const rootNodes: TreeNode[] = [];
+    for (const r of combinedRegions) {
+      if (!r.parent_id || r.parent_id === 0 || !regionMap.has(r.parent_id)) {
+        const node = buildNode(r.id);
+        if (node) {
+          rootNodes.push(node);
+        }
+      }
+    }
+
+    // Sort root nodes
+    rootNodes.sort((a, b) => {
+      const regionA = regionMap.get(a.id);
+      const regionB = regionMap.get(b.id);
+      const orderA = regionA?.sort_order || 0;
+      const orderB = regionB?.sort_order || 0;
+      if (orderA !== orderB) return orderA - orderB;
+      return a.name.localeCompare(b.name);
+    });
+
+    // Calculate grand totals
+    let grandTotal = 0;
+    let grandTotalIssues = 0;
+    for (const node of rootNodes) {
+      grandTotal += node.totalComparisons;
+      grandTotalIssues += node.totalIssues;
+    }
+
+    res.json({
+      tree: rootNodes,
+      grandTotal,
+      grandTotalIssues
+    });
+  } catch (error) {
+    console.error('Error fetching comparison tree:', error);
+    res.status(500).json({ error: '获取比对树结构失败' });
+  }
+});
+
+/**
+ * GET /api/comparisons/by-region
+ * Get paginated comparisons for a specific region (lazy loading for tree nodes)
+ */
+router.get('/by-region', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const regionId = req.query.region_id ? Number(req.query.region_id) : undefined;
+    if (!regionId || isNaN(regionId)) {
+      return res.status(400).json({ error: '缺少有效的 region_id 参数' });
+    }
+
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize as string) || 50));
+    const offset = (page - 1) * pageSize;
+    const showIssuesOnly = req.query.showIssuesOnly === 'true';
+    const yearFilter = req.query.year ? Number(req.query.year) : undefined;
+
+    // DATA SCOPE CHECK
+    const user = req.user;
+    if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
+      const scopeNames = user.dataScope.regions;
+      const scopeIdsQuery = `
+        WITH RECURSIVE allowed_ids AS (
+            SELECT id FROM regions WHERE name = ANY($1::text[])
+            UNION ALL
+            SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
+        )
+        SELECT id FROM allowed_ids
+      `;
+      try {
+        const allowedRowsRes = await pool.query(scopeIdsQuery, [scopeNames]);
+        const allowedIds = allowedRowsRes.rows.map((row: any) => row.id);
+        if (!allowedIds.includes(regionId)) {
+          return res.status(403).json({ error: '无权限访问该地区' });
+        }
+      } catch (e) {
+        console.error('Error calculating scope IDs in by-region:', e);
+        return res.status(403).json({ error: '无权限访问该地区' });
+      }
+    }
+
+    // Build conditions
+    const conditions: string[] = [`c.region_id = $1`];
+    const params: any[] = [regionId];
+    let paramIndex = 2;
+
+    if (showIssuesOnly) {
+      conditions.push(`(c.check_status IS NOT NULL AND c.check_status != '正常')`);
+    }
+    if (yearFilter && !isNaN(yearFilter)) {
+      conditions.push(`(c.year_a = $${paramIndex++} OR c.year_b = $${paramIndex++})`);
+      params.push(yearFilter);
+      params.push(yearFilter);
+    }
+
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
+
+    // Get total count
+    const countRes = await pool.query(`
+      SELECT COUNT(*) as total 
+      FROM comparisons c 
+      ${whereClause}
+    `, params);
+    const total = parseInt(countRes.rows[0]?.total) || 0;
+
+    // Get paginated results
+    const limitIndex = paramIndex++;
+    const offsetIndex = paramIndex++;
+    const queryParams = [...params, pageSize, offset];
+
+    const comparisonsRes = await pool.query(`
+      SELECT 
+        c.id,
+        c.region_id,
+        c.year_a,
+        c.year_b,
+        c.left_report_id,
+        c.right_report_id,
+        c.similarity,
+        c.check_status,
+        c.created_at,
+        r.name as region_name
+      FROM comparisons c
+      LEFT JOIN regions r ON c.region_id = r.id
+      ${whereClause}
+      ORDER BY c.year_b DESC, c.year_a DESC, c.created_at DESC
+      LIMIT $${limitIndex} OFFSET $${offsetIndex}
+    `, queryParams);
+
+    res.json({
+      data: comparisonsRes.rows.map((c: any) => ({
+        id: c.id,
+        regionId: c.region_id,
+        regionName: c.region_name || '未知地区',
+        yearA: c.year_a,
+        yearB: c.year_b,
+        leftReportId: c.left_report_id,
+        rightReportId: c.right_report_id,
+        similarity: c.similarity,
+        checkStatus: c.check_status,
+        createdAt: c.created_at,
+      })),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    });
+  } catch (error) {
+    console.error('Error fetching comparisons by region:', error);
+    res.status(500).json({ error: '获取地区比对记录失败' });
+  }
+});
+
+/**
  * GET /api/comparisons/grouped
  * Get comparisons grouped by region for card-style display
  */

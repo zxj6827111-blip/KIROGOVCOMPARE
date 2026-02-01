@@ -678,3 +678,24 @@
         padding: 6px;
     }
 }
+
+/* Loading Row for Lazy Loading */
+.loading-row td {
+    padding: 16px;
+    text-align: left;
+    color: #64748b;
+    background: #fafafa;
+    border-bottom: 1px solid #f1f5f9;
+}
+
+.loading-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    color: #64748b;
+}
+
+.loading-indicator svg {
+    color: #3b82f6;
+}
