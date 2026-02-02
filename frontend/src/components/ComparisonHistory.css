@@ -696,6 +696,25 @@
     color: #64748b;
 }
 
+
 .loading-indicator svg {
     color: #3b82f6;
+}
+
+.summary-item.failure {
+    color: #d32f2f;
+}
+
+.summary-item.failure strong {
+    color: #d32f2f;
+}
+
+.clickable {
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+
+.clickable:hover {
+    opacity: 0.8;
+    text-decoration: underline;
 }

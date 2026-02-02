@@ -620,6 +620,10 @@ router.post('/create', authMiddleware, async (req: AuthRequest, res: Response) =
       return res.status(400).json({ error: '缺少必要参数' });
     }
 
+    if (Number(year_a) === Number(year_b)) {
+      return res.status(400).json({ error: '不允许同年度比较：year_a 和 year_b 必须不同' });
+    }
+
     // Check if comparison already exists
     const existingRes = await pool.query(`
       SELECT id FROM comparisons 
@@ -1058,6 +1062,89 @@ router.get('/:id/exports', authMiddleware, async (req: AuthRequest, res: Respons
   } catch (error) {
     console.error('Error fetching exports:', error);
     res.status(500).json({ error: '获取导出记录失败' });
+  }
+});
+
+
+/**
+ * GET /api/comparisons/failed-jobs
+ * Get list of failed comparison jobs
+ */
+router.get('/failed-jobs', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    // Query with fallback: try comparison first, then report_id if comparison_id is missing
+    const failedJobsRes = await pool.query(`
+      SELECT 
+        j.id as job_id,
+        j.comparison_id,
+        j.report_id,
+        j.error_message, 
+        j.created_at,
+        j.finished_at,
+        COALESCE(c.year_a, rep.year) as year_a,
+        COALESCE(c.year_b, rep.year) as year_b,
+        COALESCE(r1.name, r2.name, '未知地区') as region_name
+      FROM jobs j
+      LEFT JOIN comparisons c ON j.comparison_id = c.id
+      LEFT JOIN regions r1 ON c.region_id = r1.id
+      LEFT JOIN reports rep ON j.report_id = rep.id
+      LEFT JOIN regions r2 ON rep.region_id = r2.id
+      WHERE j.kind = 'compare' AND j.status = 'failed'
+      ORDER BY j.finished_at DESC
+    `);
+
+    res.json(failedJobsRes.rows.map((row: any) => ({
+      id: row.job_id,
+      comparisonId: row.comparison_id,
+      regionName: row.region_name || '未知地区',
+      yearA: row.year_a || '?',
+      yearB: row.year_b || '?',
+      errorMessage: row.error_message,
+      failedAt: row.finished_at
+    })));
+  } catch (error) {
+    console.error('Error fetching failed jobs:', error);
+    res.status(500).json({ error: '获取失败任务失败' });
+  }
+});
+
+/**
+ * POST /api/comparisons/retry-jobs
+ * Retry failed comparison jobs
+ */
+router.post('/retry-jobs', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const { jobIds, all } = req.body;
+
+    let result;
+    if (all) {
+      result = await pool.query(`
+        UPDATE jobs 
+        SET status = 'queued', 
+            error_message = NULL,
+            started_at = NULL,
+            finished_at = NULL,
+            retry_count = 0
+        WHERE kind = 'compare' AND status = 'failed'
+      `);
+    } else if (Array.isArray(jobIds) && jobIds.length > 0) {
+      result = await pool.query(`
+        UPDATE jobs 
+        SET status = 'queued', 
+            error_message = NULL,
+            started_at = NULL,
+            finished_at = NULL,
+            retry_count = 0
+        WHERE kind = 'compare' AND status = 'failed' AND id = ANY($1::int[])
+      `, [jobIds]);
+    } else {
+      return res.status(400).json({ error: '请选择要重试的任务' });
+    }
+
+    res.json({ success: true, count: result.rowCount });
+  } catch (error) {
+    console.error('Error retrying jobs:', error);
+    res.status(500).json({ error: '重试任务失败' });
   }
 });
 

@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import './ComparisonHistory.css';
 import { apiClient } from '../apiClient';
 import ComparisonDetailView from './ComparisonDetailView';
+import CompareFailureModal from './CompareFailureModal';
 import {
   MapPin,
   Calendar,
@@ -29,6 +30,10 @@ function ComparisonHistory() {
   const [showIssuesOnly, setShowIssuesOnly] = useState(false);
   const [batchCreating, setBatchCreating] = useState(false);
 
+  // New state for failure modal
+  const [showFailureModal, setShowFailureModal] = useState(false);
+  const [failedJobCount, setFailedJobCount] = useState(0);
+
   // Server-side tree structure state
   const [treeData, setTreeData] = useState([]);
   const [grandTotal, setGrandTotal] = useState(0);
@@ -38,6 +43,16 @@ function ComparisonHistory() {
   // Lazy-loaded comparisons per region: { regionId: { data: [...], loading: boolean, loaded: boolean } }
   const [regionComparisons, setRegionComparisons] = useState({});
 
+  const fetchFailedCount = useCallback(async () => {
+    try {
+      const res = await apiClient.get('/comparisons/failed-jobs');
+      const jobs = res.data || [];
+      setFailedJobCount(jobs.length);
+    } catch (err) {
+      console.error('Failed to fetch failed jobs count', err);
+    }
+  }, []);
+
   // Fetch tree structure from server (no individual comparisons)
   // preserveCache: if true, don't clear regionComparisons (used after delete/modify)
   const fetchTree = useCallback(async (preserveCache = false) => {
@@ -45,6 +60,7 @@ function ComparisonHistory() {
     setError('');
 
     try {
+      // 1. Fetch Tree Data
       const params = new URLSearchParams();
       if (regionFilter) params.append('region_name', regionFilter);
       if (yearFilter) params.append('year', yearFilter);
@@ -70,6 +86,10 @@ function ComparisonHistory() {
       if (!preserveCache) {
         setRegionComparisons({});
       }
+
+      // 2. Fetch Failed Jobs Count
+      fetchFailedCount();
+
     } catch (err) {
       console.error('Failed to fetch tree:', err);
       const message = err.response?.data?.error || err.message || '加载失败';
@@ -77,7 +97,7 @@ function ComparisonHistory() {
     } finally {
       setLoading(false);
     }
-  }, [regionFilter, yearFilter, showIssuesOnly]);
+  }, [regionFilter, yearFilter, showIssuesOnly, fetchFailedCount]);
 
   // Fetch comparisons for a specific region (lazy loading)
   const fetchRegionComparisons = useCallback(async (regionId) => {
@@ -515,15 +535,27 @@ function ComparisonHistory() {
       </div>
 
       {/* Summary Stats */}
-      {!loading && grandTotal > 0 && (
+      {!loading && (grandTotal > 0 || failedJobCount > 0) && (
         <div className="summary-bar">
           <span className="summary-item">
             共 <strong>{grandTotal}</strong> 份比对记录
           </span>
-          <span className="summary-item issue">
-            <AlertCircle size={14} />
-            <strong>{grandTotalIssues}</strong> 份存在问题
-          </span>
+          {grandTotalIssues > 0 && (
+            <span className="summary-item issue">
+              <AlertCircle size={14} />
+              <strong>{grandTotalIssues}</strong> 份存在问题
+            </span>
+          )}
+          {failedJobCount > 0 && (
+            <span
+              className="summary-item failure clickable"
+              onClick={() => setShowFailureModal(true)}
+              title="点击查看并重试失败任务"
+            >
+              <AlertCircle size={14} />
+              <strong>{failedJobCount}</strong> 份比对失败
+            </span>
+          )}
         </div>
       )}
 
@@ -568,6 +600,15 @@ function ComparisonHistory() {
           </table>
         </>
       )}
+
+      <CompareFailureModal
+        isOpen={showFailureModal}
+        onClose={() => setShowFailureModal(false)}
+        onJobRetried={() => {
+          fetchFailedCount();
+          // Optional: refresh tree if successful retries created new valid records immediately (unlikely, they go to queue first)
+        }}
+      />
     </div>
   );
 }

@@ -641,8 +641,8 @@ export class LlmJobRunner {
   }
 
   private async processCompareJob(job: QueuedJob): Promise<void> {
-    if (!job.comparison_id || !job.report_id) {
-      throw new Error('Compare job missing comparison or report reference');
+    if (!job.comparison_id) {
+      throw new Error('Compare job missing comparison_id');
     }
 
     let comparison: any;
@@ -842,6 +842,12 @@ export class LlmJobRunner {
       // We want year_a = min, year_b = max to keep it ordered
       const yearA = Math.min(currentYear, targetYear);
       const yearB = Math.max(currentYear, targetYear);
+
+      if (yearA === yearB) {
+        console.log(`[AutoCompare] Skipping same-year comparison for region ${currentReport.region_id}, year ${yearA}`);
+        continue;
+      }
+
       const reportA = currentYear < targetYear ? reportId : targetReport.id;
       const reportB = currentYear < targetYear ? targetReport.id : reportId;
 
