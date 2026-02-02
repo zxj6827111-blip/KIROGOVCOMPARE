@@ -263,57 +263,42 @@ function IssueList({ regionId, regionName, onBack, onSelectReport }) {
         }
 
 
-        if (!window.confirm(`确认对当前筛选的 ${issueReportIds.length} 份问题报告进行一键校验？`)) return;
-
-
-
-
+        if (!window.confirm(`确认对当前筛选的 ${issueReportIds.length} 份问题报告进行一键校验？\n(系统将以 50 份为一组分批处理，防止超时)`)) return;
 
         setBatchChecking(true);
+        let totalProcessed = 0;
+        let totalSkipped = 0;
+        let totalFailed = 0;
 
-
-        try {
-
-
-            const resp = await apiClient.post('/reports/batch-checks/run', { report_ids: issueReportIds });
-
-
-            const data = resp.data || {};
-
-
-            const processed = data.processed || 0;
-
-
-            const skipped = data.skipped || 0;
-
-
-            const failed = data.failed || 0;
-
-
-            await fetchData();
-
-
-            alert(`一键校验完成：成功 ${processed}，跳过 ${skipped}，失败 ${failed}`);
-
-
-        } catch (err) {
-
-
-            const message = err.response?.data?.error || err.message || '一键校验失败';
-
-
-            alert(message);
-
-
-        } finally {
-
-
-            setBatchChecking(false);
-
-
+        const CHUNK_SIZE = 50;
+        const reportIds = [...issueReportIds];
+        const chunks = [];
+        for (let i = 0; i < reportIds.length; i += CHUNK_SIZE) {
+            chunks.push(reportIds.slice(i, i + CHUNK_SIZE));
         }
 
+        try {
+            for (let i = 0; i < chunks.length; i++) {
+                const chunk = chunks[i];
+                console.log(`Processing batch ${i + 1}/${chunks.length}...`);
+                const resp = await apiClient.post('/reports/batch-checks/run', { report_ids: chunk });
+                const data = resp.data || {};
 
+                totalProcessed += (data.processed || 0);
+                totalSkipped += (data.skipped || 0);
+                totalFailed += (data.failed || 0);
+            }
+
+            await fetchData();
+            alert(`一键校验完成：\n成功：${totalProcessed}\n跳过：${totalSkipped}\n失败：${totalFailed}`);
+        } catch (err) {
+            const message = err.response?.data?.error || err.message || '一键校验失败';
+            console.error('Batch check error:', err);
+            await fetchData();
+            alert(`校验过程中断 (504 超时或网络问题)：${message}\n\n已成功处理：${totalProcessed} 份。\n提示：后端可能仍在处理剩下的任务，请几分钟后刷新页面检查问题总数。`);
+        } finally {
+            setBatchChecking(false);
+        }
     };
 
 
