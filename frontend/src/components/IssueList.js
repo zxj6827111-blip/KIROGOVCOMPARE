@@ -230,35 +230,15 @@ function IssueList({ regionId, regionName, onBack, onSelectReport }) {
 
 
     const issueReportIds = useMemo(() => {
-
-
         const ids = new Set();
-
-
         filteredRegions.forEach(region => {
-
-
             (region.reports || []).forEach(report => {
-
-
-                if (report.issue_count > 0) {
-
-
-                    ids.add(report.report_id);
-
-
-                }
-
-
+                // Include ALL reports in the current view, not just those with issues.
+                // This allows running the check on reports that haven't been checked yet.
+                ids.add(report.report_id);
             });
-
-
         });
-
-
         return Array.from(ids);
-
-
     }, [filteredRegions]);
 
 

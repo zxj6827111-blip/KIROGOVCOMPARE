@@ -5,7 +5,7 @@ import { saveAIReport, fetchAIReport } from '../api';
 import {
   Printer, Sparkles, Target,
   TrendingUp, AlertOctagon, CheckCircle2, Bot, Cpu, Settings,
-  Server, Shield, Activity, X, Zap, BrainCircuit, AlertTriangle, FileDown, Bookmark
+  Server, Shield, X, Zap, BrainCircuit, AlertTriangle, FileDown, Bookmark, ClipboardCheck
 } from 'lucide-react';
 import {
   ReportTrendChart, ReportOutcomeChart, ReportRiskChart, ReportSourceChart, ReportAdminActionChart
@@ -132,7 +132,7 @@ export const ReportGenerator: React.FC = () => {
             setReportData(parsed);
             setEngine('gemini');
             setSaveStatus('saved');
-            // Don't return - still try cloud to sync status
+            // Don't retur-till try cloud to sync status
           }
         } catch (e) {
           console.warn("[ReportLoader] Invalid cache", e);
@@ -198,14 +198,14 @@ export const ReportGenerator: React.FC = () => {
     let md = `# ${year}年度政务公开工作绩效评估与风险研判报告\n`;
     md += `**评估对象**: ${entity?.name || '未知单位'}\n`;
     md += `**生成时间**: ${date}\n`;
-    md += `**生成引擎**: ${engine === 'gemini' ? getModelDisplayName(modelConfig.model) : '互政AI(Local)'}\n\n`;
+    md += `**生成引擎**: ${engine === 'gemini' ? 'AI 审计辅助系统' : '规则分析引擎'}\n\n`;
 
     md += `## 一、总体研判与核心指标\n\n${reportData.summary}\n\n`;
 
     md += `## 二、专家深度点评\n\n`;
-    md += `### 亮点与成绩\n`;
+    md += `### 审计工作底稿\n`;
     reportData.critique?.strengths?.forEach(s => md += `- ${s.replace(/<[^>]*>?/gm, '')}\n`); // simple strip tags
-    md += `\n### 短板与不足\n`;
+    md += `\n### 重点风险揭示\n`;
     reportData.critique?.weaknesses?.forEach(w => md += `- ${w.replace(/<[^>]*>?/gm, '')}\n`);
 
     md += `\n## 三、${year + 1}年工作计划建议\n\n`;
@@ -242,36 +242,83 @@ export const ReportGenerator: React.FC = () => {
         provinceAverage: provinceAvg.data.find((d: any) => d.year === year)
       });
 
-      // UPGRADED PROMPT FOR DRY GOODS AND DEEP POLICY AUDIT
+      // UPGRADED PROMPT v3.0: AUDIT EXPERT (USER FEEDBACK OPTIMIZED)
       const prompt = `
-        角色设定：你是一名以“严谨、犀利、唯实”著称的资深政务公开绩效评估专家，也是法治政府建设的第三方审计员。你的工作是基于提供的数据，为"${entity?.name || '未知单位'}"撰写一份《${year}年度政务公开工作体检报告》。
+        # 政务公开工作绩效评估与风险研判报告 生成总提示词 v3.0
+        # 目标：给政府主管领导可转发、可督办、可核验；PDF正文“零英文字符”（不得出现任何A–Z字母）。
 
-        **核心原则（违反即废稿）：**
-        1.  **拒绝废话**：严禁使用“高度重视”、“显著成绩”、“稳步推进”等无实质内容的套话。每一句话都必须有数据支撑或逻辑推演。
-        2.  **数据为王**：必须引用 dataContext 中的具体数字。例如，不要说“申请量增加”，要说“申请量同比增长7.2%（增加21件）”。
-        3.  **问题导向**：报告的价值在于发现问题。对于“复议被纠错”、“败诉”、“超期办理”等负面指标，必须进行深度的归因分析（是制度缺失？还是人员懈怠？）。
-        4.  **操作性强**：建议必须具体到“谁来做”、“怎么做”、“做到什么程度”。
+        ========================
+        0. 角色与输出对象
+        ========================
+        你是一名以“严谨、犀利、唯实”著称的资深政务公开绩效评估专家，也是法治政府建设第三方审计员。
+        输出对象：政府主管领导（正式内参，可转发、可督办）。
+        写作风格：专业、克制、可核验；允许尖锐，但禁止情绪化、网感、口语化。
 
-        **写作要求（请严格按照JSON Schema输出）：**
+        ========================
+        1) 字段引用与数字格式（强制规则）
+        ========================
+        【数字格式】
+        - 报告中所有数字必须使用 **阿拉伯数字**（如 "3153"），禁止使用中文数字（如 "三千一百五十三"）。
+        
+        【字段引用】
+        - 报告正文提及数据字段时，仅使用中文名称。
+        - 🚫 **严禁**将字段编码（如〔30101〕）输出到正文中。编码仅作为你内部查找数据的索引，**不可**出现在最终生成的文本中。
 
-        1.  **summary (总体研判)**：
-            -   **第一段（体量与负荷）**：精准描述全年工作量（依申请公开数、行政处罚数等），计算同比变化，判断行政压力是“激增”还是“回落”。
-            -   **第二段（质效与风险）**：聚焦“结转下年度办理”及“复议纠错率”。如果结转量大，必须提出警示。如果复议纠错多，必须定性为“法治隐患”。
-            -   **第三段（定性评价）**：基于上述分析，给出一个犀利的总体评价（如“有量无质”、“风险高企”、“平稳规范”），并给出年度评分建议（优/良/中/差）。
-            -   **字数**：500字左右，分段清晰。
+        ========================
+        2) 🚫一票否决红线（违反任一条：废稿）
+        ========================
+        1. **彻底去水印/去模型痕迹**：禁止出现任何模型信息、系统接口、测试域名等。
+        2. **隐形自检**：必须执行自检，但自检结果**不要**输出在summary字段中，仅在内部确认无误后继续生成。
+        3. **禁情绪化词**：禁用“崩塌、破防”等，改用“结构性缺陷、办理能力承压”。
+        4. **这3点必须满足**：阿拉伯数字、无英文字母、无字段编码〔xxxxx〕。
 
-        2.  **critique (专家点评)**：
-            -   **strengths (亮点)**：只写真正的干货。例如：某项指标优于全省平均值，或零复议纠错。不要写常规工作。若无明显亮点，甚至可以写“本年度无显著创新”。
-            -   **weaknesses (不足 - 重点)**：这是报告的灵魂。请从“法律风险”、“行政效能”、“数据质量”三个维度挖掘。例如：滥用“过程性信息”拒不公开、滥用延期审理等。
-            -   *注意：必须生成至少2条亮点和2条不足。*
+        ========================
+        3) 评级规则表（必须严格执行）
+        ========================
+        请根据以下规则对单位进行风险评级：
+        
+        - **A级（优）**：行政复议纠错率 < 10% 且 无程序性逾期案件。
+        - **B级（警 - 黄色预警）**：行政复议案量同比增速 > 50% 或 程序性逾期案件 > 0例。
+        - **C级（差 - 红色预警）**：行政复议纠错率 > 30% 或 行政诉讼败诉率 > 20%。
 
-        3.  **futurePlan (2025年整改建议)**：
-            -   针对上述不足，提出3条具体的整改计划。
-            -   **Title**：四字或六字行动指令（如“清零积案存量”、“规范答复口径”）。
-            -   **Content**：具体措施 + 预期KPI。例如：“建立复议案件周报制，确保2025年纠错率下降至5%以内”。
-            -   *注意：必须生成3条建议。*
+        若未触发上述任何阈值，默认为“B级（及格/需进一步观察）”。
 
-        数据上下文：${dataContext}
+        ========================
+        ✅ 输出结构要求 (JSON)
+        ========================
+        
+        **JSON Output Mapping (MANDATORY):**
+        - **summary**: 
+            开始直接输出“**总体结论与风险分级**”（无编号）。
+            内容严格按以下格式输出（保留方括号标题）：
+            
+            【区域政务公开水平概览】
+            （在此处生成一段不超过80字的概括性语句，对该区域整体政务公开水平进行定性评价，例如“整体运行平稳，但法治化水平有待从个案纠错向源头治理转型”等）。
+
+            【评级与依据】
+            当前评级：[等级]（[预警标签]）
+            评级规则表：
+            - A级（优）：行政复议纠错率<10% 且 无程序性逾期案件。
+            - B级（警）：行政复议案量同比增速>50% 或 程序性逾期案件>0例。
+            - C级（差）：行政复议纠错率>30% 或 行政诉讼败诉率>20%。
+
+            【风险预警阈值与处置机制】
+            1. 阈值A：行政复议纠错率 >15%（当前值[XX]%，[已触发/未触发]）。
+            - 处置：启动败诉案件提级复核机制。
+            2. 阈值B：信息不存在（无卷）占比 >20%（当前值[XX]%，[已触发/未触发]）。
+            - 处置：开展档案检索路径专项审计。
+
+        - **critique.strengths**: 
+            输出“**亮点与成绩**”（不要带“二、”前缀）。
+            列出3条基于数据的正面业绩（使用阿拉伯数字）。
+        - **critique.weaknesses**: 
+            输出“**重点风险揭示**”（不要带“三、”前缀）。
+            列出3条具体的风险点或短板（使用阿拉伯数字，不要出现字段编码）。
+        - **futurePlan**: 
+            输出“**下一步工作建议**”（不要带“四、”前缀）。
+            包含3个具体任务（Title=行动指令, Content=具体措施+KPI）。
+
+        数据上下文（JSON）：${dataContext}
       `;
 
       let requestConfig: any = {
@@ -348,7 +395,7 @@ export const ReportGenerator: React.FC = () => {
         // 1. Cache to Session (Fast Fallback)
         try {
           if (entity?.id && year) {
-            const cacheKey = `report_cache_${entity.id}_${year}`;
+            const cacheKey = `report_cache_${entity.id}_${year} `;
             sessionStorage.setItem(cacheKey, JSON.stringify(result));
           }
         } catch (e) {
@@ -375,7 +422,7 @@ export const ReportGenerator: React.FC = () => {
 
       if (error.message === "TIMEOUT") {
         errorMsg = "请求超时";
-        errorDetail = `模型在 ${TIMEOUT_LIMIT / 1000} 秒内未响应。Gemini Pro 思维链模式可能需要较长时间(3-10分钟)，请检查网络是否稳定，或切换至 'Flash' 模型以获得更快速度。`;
+        errorDetail = `模型在 ${TIMEOUT_LIMIT / 1000} 秒内未响应。Gemini Pro 思维链模式可能需要较长时间(-0分钟)，请检查网络是否稳定，或切换至 'Flash' 模型以获得更快速度。`;
       } else if (error.message.includes("fetch") || error.message.includes("Network")) {
         errorMsg = "网络连接失败";
         errorDetail = "无法连接到 Google API。请确保您的网络环境支持访问 'generativelanguage.googleapis.com' (通常需要VPN/代理)。";
@@ -387,10 +434,10 @@ export const ReportGenerator: React.FC = () => {
         errorDetail = "Google Gemini 服务当前负载过高，请稍后重试，或尝试使用 'Flash' 模型。";
       } else {
         // Show raw error for debugging
-        errorDetail = `错误详情: ${error.message || JSON.stringify(error)}`;
+        errorDetail = `错误详情: ${error.message || JSON.stringify(error)} `;
       }
 
-      alert(`⚠️ ${errorMsg}\n\n${errorDetail}\n\n已为您自动切换回本地规则引擎，以保证演示继续。`);
+      alert(`⚠️ ${errorMsg} \n\n${errorDetail} \n\n已为您自动切换回本地规则引擎，以保证演示继续。`);
       setReportData(null); // Clear data on error
     } finally {
       setIsGenerating(false);
@@ -454,11 +501,11 @@ export const ReportGenerator: React.FC = () => {
             <td className="py-3 pl-2 font-medium text-slate-700">依申请公开新收量 (件)</td>
             <td className="py-3 text-right font-bold text-slate-900">{fmt(current.applications.newReceived)}</td>
             <td className="py-3 text-right text-slate-500">{prev.applications.newReceived > 0 ? fmt(prev.applications.newReceived) : '-'}</td>
-            <td className={`py-3 text-right font-medium ${current.applications.newReceived > prev.applications.newReceived ? 'text-rose-600' : 'text-emerald-600'}`}>
+            <td className={`py-3 text-right font-medium ${current.applications.newReceived > prev.applications.newReceived ? 'text-rose-600' : 'text-emerald-600'} `}>
               {diffPct(current.applications.newReceived, prev.applications.newReceived)}
             </td>
             <td className="py-3 text-center">
-              <span className={`px-2 py-0.5 rounded text-[10px] font-medium border ${current.applications.newReceived > prev.applications.newReceived * 1.2 ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+              <span className={`px-2 py-0.5 rounded text-[10px] font-medium border ${current.applications.newReceived > prev.applications.newReceived * 1.2 ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'} `}>
                 {current.applications.newReceived > prev.applications.newReceived * 1.2 ? '压力激增' : '平稳运行'}
               </span>
             </td>
@@ -489,7 +536,7 @@ export const ReportGenerator: React.FC = () => {
                 const curr = (current.disputes.reconsideration.corrected + current.disputes.litigation.corrected) / (current.disputes.reconsideration.total + current.disputes.litigation.total || 1) * 100;
                 const last = (prev.disputes.reconsideration.corrected + prev.disputes.litigation.corrected) / (prev.disputes.reconsideration.total + prev.disputes.litigation.total || 1) * 100;
                 const d = curr - last;
-                return d > 0 ? `+${d.toFixed(1)} pp` : `${d.toFixed(1)} pp`;
+                return d > 0 ? `+ ${d.toFixed(1)} pp` : `${d.toFixed(1)} pp`;
               })()}
             </td>
             <td className="py-3 text-center">
@@ -525,7 +572,7 @@ export const ReportGenerator: React.FC = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <button
                     onClick={() => setModelConfig({ ...modelConfig, deployment: 'local' })}
-                    className={`p-3 rounded-lg border text-sm font-medium flex items-center justify-center ${modelConfig.deployment === 'local' ? 'border-indigo-600 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-600' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                    className={`p-3 rounded-lg border text-sm font-medium flex items-center justify-center ${modelConfig.deployment === 'local' ? 'border-indigo-600 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-600' : 'border-slate-200 text-slate-600 hover:bg-slate-50'} `}
                   >
                     <Server className="w-4 h-4 mr-2" />
                     本地私有化部署
@@ -535,7 +582,7 @@ export const ReportGenerator: React.FC = () => {
                       setModelConfig({ ...modelConfig, deployment: 'cloud' });
                       setEngine('gemini');
                     }}
-                    className={`p-3 rounded-lg border text-sm font-medium flex items-center justify-center ${modelConfig.deployment === 'cloud' ? 'border-indigo-600 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-600' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                    className={`p-3 rounded-lg border text-sm font-medium flex items-center justify-center ${modelConfig.deployment === 'cloud' ? 'border-indigo-600 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-600' : 'border-slate-200 text-slate-600 hover:bg-slate-50'} `}
                   >
                     <Bot className="w-4 h-4 mr-2" />
                     政务云API调用
@@ -567,24 +614,8 @@ export const ReportGenerator: React.FC = () => {
               </div>
 
               {/* Hardware Stats Simulation */}
-              <div className="bg-slate-900 rounded-lg p-4 text-slate-300 font-mono text-xs">
-                <div className="flex justify-between items-center mb-3 border-b border-slate-700 pb-2">
-                  <span className="text-slate-400">HARDWARE MONITOR</span>
-                  <span className="text-emerald-400 flex items-center"><Activity className="w-3 h-3 mr-1" /> ONLINE</span>
-                </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span>MODEL:</span>
-                    <span className="text-white">{modelConfig.model}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span>THINKING BUDGET:</span>
-                    <span className={modelConfig.thinkingBudget > 0 ? "text-yellow-400" : "text-slate-500"}>
-                      {modelConfig.thinkingBudget > 0 ? `${modelConfig.thinkingBudget} Tokens` : 'DISABLED'}
-                    </span>
-                  </div>
-                </div>
-              </div>
+              {/* Hardware Stats Simulation (Hidden by user request) */}
+              {/* <div className="bg-slate-900 rounded-lg p-4 text-slate-300 font-mono text-xs">...</div> */}
 
             </div>
             <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-end">
@@ -606,7 +637,7 @@ export const ReportGenerator: React.FC = () => {
         <div className="bg-white p-1 rounded-lg border border-slate-200 shadow-sm flex">
           <button
             onClick={() => setEngine('rule')}
-            className={`flex-1 flex items-center justify-center py-2 text-xs font-bold rounded-md transition-all ${engine === 'rule' ? 'bg-slate-800 text-white shadow' : 'text-slate-500 hover:bg-slate-50'}`}
+            className={`flex-1 flex items-center justify-center py-2 text-sm font-bold rounded-md transition-all ${engine === 'rule' ? 'bg-slate-800 text-white shadow' : 'text-slate-500 hover:bg-slate-50'} `}
           >
             <Server className="w-3 h-3 mr-1.5" />
             规则引擎
@@ -616,7 +647,7 @@ export const ReportGenerator: React.FC = () => {
               setEngine('gemini');
               setModelConfig(c => ({ ...c, deployment: 'cloud' }));
             }}
-            className={`flex-1 flex items-center justify-center py-2 text-xs font-bold rounded-md transition-all ${engine === 'gemini' ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow' : 'text-slate-500 hover:bg-slate-50'}`}
+            className={`flex-1 flex items-center justify-center py-2 text-sm font-bold rounded-md transition-all ${engine === 'gemini' ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow' : 'text-slate-500 hover:bg-slate-50'} `}
           >
             <BrainCircuit className="w-3 h-3 mr-1.5" />
             AI 大模型
@@ -624,7 +655,7 @@ export const ReportGenerator: React.FC = () => {
         </div>
 
         {/* Model Info Card */}
-        <div className={`p-4 rounded-lg shadow-md border relative group transition-colors duration-300 ${engine === 'gemini' ? 'bg-indigo-900 border-indigo-700' : 'bg-slate-800 border-slate-700'}`}>
+        <div className={`p-4 rounded-lg shadow-md border relative group transition-colors duration-200 ${engine === 'gemini' ? 'bg-indigo-900 border-indigo-700' : 'bg-slate-800 border-slate-700'} `}>
           <button
             onClick={() => setShowConfig(true)}
             className="absolute top-3 right-3 p-1.5 rounded-md text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
@@ -634,7 +665,7 @@ export const ReportGenerator: React.FC = () => {
           </button>
 
           <div className="flex items-center mb-3">
-            <Cpu className={`w-5 h-5 mr-2 ${engine === 'gemini' ? 'text-pink-400' : 'text-indigo-400'}`} />
+            <Cpu className={`w-8 h-8 mr-3 ${engine === 'gemini' ? 'text-pink-400' : 'text-indigo-400'} `} />
             <h3 className="font-bold text-white text-sm">
               {engine === 'gemini' ? '云端算力全开' : '本地模型运行中'}
             </h3>
@@ -642,7 +673,7 @@ export const ReportGenerator: React.FC = () => {
           <div className="space-y-2 text-xs text-slate-300">
             <div className="flex justify-between items-center">
               <span>当前内核:</span>
-              <span className={`font-mono font-bold truncate max-w-[130px] ${engine === 'gemini' ? 'text-pink-300' : 'text-indigo-300'}`} title={modelConfig.model}>
+              <span className={`font-mono font-bold truncate max-w-[130px] ${engine === 'gemini' ? 'text-pink-300' : 'text-indigo-300'} `} title={modelConfig.model}>
                 {engine === 'gemini' ? getModelDisplayName(modelConfig.model) : '互政AI(Local)'}
               </span>
             </div>
@@ -664,15 +695,13 @@ export const ReportGenerator: React.FC = () => {
             )}
           </div>
           <div className="mt-3 pt-3 border-t border-white/10 text-[10px] text-slate-400 leading-tight">
-            {engine === 'gemini'
-              ? '* 数据加密传输至 Google Vertex AI。请确保网络环境支持 API 连接。'
-              : '* 数据存储于本地机房，符合《政务数据安全管理条例》。'}
+            {/* Disclaimer hidden by user request */}
           </div>
         </div>
 
         <div className="bg-white p-5 rounded-lg shadow-sm border border-slate-200">
           <div className="flex items-center mb-4">
-            <div className={`p-2 rounded-lg mr-3 shadow-md ${engine === 'gemini' ? 'bg-gradient-to-br from-pink-500 to-indigo-600 shadow-indigo-200' : 'bg-slate-700 shadow-slate-200'}`}>
+            <div className={`p-2 rounded-lg mr-3 shadow-md ${engine === 'gemini' ? 'bg-gradient-to-br from-pink-500 to-indigo-600 shadow-indigo-200' : 'bg-slate-700 shadow-slate-200'} `}>
               <Sparkles className="w-5 h-5 text-white" />
             </div>
             <div>
@@ -705,13 +734,13 @@ export const ReportGenerator: React.FC = () => {
               className={`w-full py-3 rounded-lg text-sm font-bold text-white transition-all shadow-md active:scale-95 flex items-center justify-center relative overflow-hidden ${isGenerating
                 ? 'bg-slate-400 cursor-not-allowed'
                 : (engine === 'gemini' ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:shadow-lg hover:shadow-indigo-200' : 'bg-slate-800 hover:bg-slate-900')
-                }`}
+                } `}
             >
               {isGenerating ? (
                 <>
                   <Sparkles className="w-4 h-4 mr-2 animate-spin" />
                   <span className="mr-1">{engine === 'gemini' ? '思考中' : '生成中'}</span>
-                  <span className={`font-mono px-1.5 rounded text-xs ml-1 min-w-[30px] text-center ${elapsedTime > 30 ? 'bg-red-500/20 text-red-100' : 'bg-black/10'}`}>
+                  <span className={`font-mono py-0.5 rounded text-xs ml-2 min-w-[30px] text-center ${elapsedTime > 30 ? 'bg-red-500/20 text-red-100' : 'bg-black/10'} `}>
                     {elapsedTime.toFixed(1)}s
                   </span>
                 </>
@@ -751,44 +780,44 @@ export const ReportGenerator: React.FC = () => {
             {/* 内联打印样式 - 确保分页控制生效 */}
             <style>
               {`
-                @media print {
+      @media print {
                   /* 隐藏非打印元素 */
-                  .no-print, 
+                  .no-print,
                   .gov-dashboard-root > div > div:first-child,
-                  nav, header, footer {
-                    display: none !important;
-                  }
-                  
-                  /* 页面设置 */
-                  @page {
-                    size: A4 portrait;
-                    margin: 10mm;
-                  }
-                  
-                  /* 重置布局 */
-                  html, body {
-                    width: 210mm !important;
-                    background: white !important;
-                    margin: 0 !important;
-                    padding: 0 !important;
-                    -webkit-print-color-adjust: exact !important;
-                    print-color-adjust: exact !important;
-                  }
-                  
-                  /* 报告容器 */
-                  #printable-report {
-                    width: 210mm !important;
-                    margin: 0 !important;
-                    padding: 0 !important;
-                    box-shadow: none !important;
-                    display: block !important;
-                    overflow: visible !important;
-                  }
+  nav, header, footer {
+  display: none!important;
+}
 
-                  /* 内容页内边距（首节与后续页保持一致） */
-                  #printable-report .print-content {
-                    padding: 8mm 18mm 18mm !important;
-                  }
+/* 页面设置 */
+@page {
+  size: A4 portrait;
+  margin: 10mm;
+}
+
+/* 重置布局 */
+html, body {
+  width: 210mm!important;
+  background: white!important;
+  margin: 0!important;
+  padding: 0!important;
+  -webkit-print-color-adjust: exact!important;
+  print-color-adjust: exact!important;
+}
+
+/* 报告容器 */
+#printable-report {
+  width: 210mm!important;
+  margin: 0!important;
+  padding: 0!important;
+  box-shadow: none!important;
+  display: block!important;
+  overflow: visible!important;
+}
+
+/* 内容页内边距（首节与后续页保持一致） */
+#printable-report .print-content {
+  padding: 8mm 18mm 18mm!important;
+}
 
                   /* 封面页高度适配打印可视区域，避免内容溢出到下一页 */
                   .print-cover {
@@ -797,53 +826,53 @@ export const ReportGenerator: React.FC = () => {
                     padding: 16mm 18mm !important;
                   }
 
-                  /* 降低打印渲染负担，提升预览加载速度 */
-                  #printable-report * {
-                    animation: none !important;
-                    transition: none !important;
-                    box-shadow: none !important;
-                    filter: none !important;
+/* 降低打印渲染负担，提升预览加载速度 */
+#printable-report * {
+  animation: none!important;
+  transition: none!important;
+  box-shadow: none!important;
+filter: none!important;
                   }
 
-                  #printable-report svg {
-                    overflow: visible !important;
-                  }
-                  
+#printable-report svg {
+  overflow: visible!important;
+}
+
                   /* 封面页分页 */
                   .print-cover {
-                    page-break-after: always !important;
-                    break-after: page !important;
-                  }
-                  
+  page-break-after: always!important;
+  break-after: page!important;
+}
+
                   /* 章节分页 - 新起一页 */
                   .print-section-break {
                     page-break-before: always !important;
                     break-before: page !important;
                     padding-top: 8mm !important;
                   }
-                  
+
                   /* 避免跨页截断 */
                   .print-avoid-break {
                     page-break-inside: avoid !important;
                     break-inside: avoid !important;
                   }
-                  
+
                   /* 隐藏左侧控制面板 */
-                  .gov-dashboard-root .flex.gap-6 > .w-72 {
+                  .gov-dashboard-root.flex.gap-6 > .w-72 {
                     display: none !important;
                   }
-                  
+
                   /* 预览容器全宽 */
-                  .gov-dashboard-root .flex.gap-6 {
+                  .gov-dashboard-root.flex.gap-6 {
                     display: block !important;
                   }
                   
-                  .gov-dashboard-root .flex.gap-6 > .flex-1 {
+                  .gov-dashboard-root.flex.gap-6 > .flex-1 {
                     background: white !important;
                     padding: 0 !important;
                   }
                 }
-              `}
+`}
             </style>
             <div id="printable-report" className="bg-white w-[210mm] min-h-[297mm] shadow-2xl text-slate-800 leading-relaxed animate-in fade-in zoom-in-95 duration-500 flex flex-col relative group">
 
@@ -875,7 +904,7 @@ export const ReportGenerator: React.FC = () => {
                     {year}年度政务公开工作<br />
                     <span className={engine === 'gemini' ? 'text-indigo-600' : 'text-slate-600'}>绩效评估与风险研判报告</span>
                   </h1>
-                  <div className={`w-24 h-1.5 mx-auto rounded-full mb-8 ${engine === 'gemini' ? 'bg-indigo-600' : 'bg-slate-600'}`}></div>
+                  <div className={`w-24 h-1.5 mx-auto rounded-full mb-8 ${engine === 'gemini' ? 'bg-indigo-600' : 'bg-slate-600'} `}></div>
                   <h3 className="text-xl text-slate-500 font-medium">{entity?.name || '未知单位'}</h3>
                 </div>
 
@@ -888,59 +917,61 @@ export const ReportGenerator: React.FC = () => {
                 {/* 1. Executive Summary - 首页内容，不需要break-before */}
                 <section className="mb-12 break-inside-avoid print-section">
                   <div className="flex items-center mb-6">
-                    <span className={`flex items-center justify-center w-8 h-8 rounded-lg text-white font-bold mr-3 shadow-md font-mono ${engine === 'gemini' ? 'bg-indigo-600 shadow-indigo-200' : 'bg-slate-700 shadow-slate-200'}`}>01</span>
+                    <span className={`flex items-center justify-center w-8 h-8 rounded-lg text-white font-bold mr-3 shadow-md font-mono ${engine === 'gemini' ? 'bg-indigo-600 shadow-indigo-200' : 'bg-slate-700 shadow-slate-200'} `}>01</span>
                     <h2 className="text-xl font-bold text-slate-900">总体研判与核心指标</h2>
                   </div>
 
                   <SummaryTable />
 
-                  <div className="relative p-8 bg-slate-50 rounded-xl border border-slate-200 text-justify text-sm leading-8 text-slate-700">
-                    {/* Decorative Quote Icon */}
-                    <div className="absolute top-4 left-4 text-slate-200 transform -scale-x-100">
-                      <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor"><path d="M14.017 21L14.017 18C14.017 16.896 14.384 16.035 15.118 15.417C15.852 14.8 16.875 14.491 18.188 14.491L18.785 14.491L18.785 12.592C18.785 11.896 18.575 11.235 18.156 10.609C17.737 9.984 17.151 9.671 16.4 9.671L15.939 9.671L15.939 6.811L16.273 6.811C17.788 6.811 19.043 7.324 20.038 8.35C21.033 9.376 21.531 10.749 21.531 12.469L21.531 21L14.017 21ZM5 21L5 18C5 16.896 5.367 16.035 6.101 15.417C6.835 14.8 7.858 14.491 9.171 14.491L9.768 14.491L9.768 12.592C9.768 11.896 9.558 11.235 9.139 10.609C8.72 9.984 8.134 9.671 7.383 9.671L6.922 9.671L6.922 6.811L7.256 6.811C8.771 6.811 10.026 7.324 11.021 8.35C12.016 9.376 12.514 10.749 12.514 12.469L12.514 21L5 21Z" /></svg>
-                    </div>
-                    <div className="relative z-10 whitespace-pre-line">
-                      <RenderText text={reportData.summary} />
-                    </div>
-                  </div>
+                  {/* Summary removed from here, moving to Expert Critique section */}
                 </section>
 
                 {/* 2. Expert Critique - 新起一页 */}
                 <section className="mb-12 print-section-break print-avoid-break">
                   <div className="flex items-center mb-6">
-                    <span className={`flex items-center justify-center w-8 h-8 rounded-lg text-white font-bold mr-3 shadow-md font-mono ${engine === 'gemini' ? 'bg-indigo-600 shadow-indigo-200' : 'bg-slate-700 shadow-slate-200'}`}>02</span>
+                    <span className={`flex items-center justify-center w-8 h-8 rounded-lg text-white font-bold mr-3 shadow-md font-mono ${engine === 'gemini' ? 'bg-indigo-600 shadow-indigo-200' : 'bg-slate-700 shadow-slate-200'} `}>02</span>
                     <h2 className="text-xl font-bold text-slate-900">专家深度点评</h2>
                   </div>
 
+                  {/* Overall Conclusion Moved Here */}
+                  <div className="mb-8 p-6 bg-slate-50 rounded-xl border border-slate-200 shadow-sm print-avoid-break">
+                    <h4 className="flex items-center text-blue-700 font-bold mb-4 pb-2 border-b-2 border-blue-100">
+                      <ClipboardCheck className="w-5 h-5 mr-2" /> 总体结论与风险分级
+                    </h4>
+                    <div className="relative z-10 whitespace-pre-line text-slate-700 text-sm leading-relaxed">
+                      <RenderText text={reportData.summary} />
+                    </div>
+                  </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8 print-avoid-break">
-                    {/* Strengths */}
+                    {/* Strengths / Highlights */}
                     <div>
                       <h4 className="flex items-center text-emerald-700 font-bold mb-4 pb-2 border-b-2 border-emerald-100">
                         <TrendingUp className="w-5 h-5 mr-2" /> 亮点与成绩
                       </h4>
-                      <ul className="space-y-4">
-                        {reportData.critique?.strengths?.map((s: string, i: number) => (
-                          <li key={i} className="flex items-start text-sm leading-6 text-slate-700 bg-white p-3 rounded-lg border border-slate-100 shadow-sm print-avoid-break">
-                            <CheckCircle2 className="w-5 h-5 mr-3 mt-0.5 text-emerald-500 flex-shrink-0" />
-                            <span dangerouslySetInnerHTML={{ __html: s }}></span>
-                          </li>
+                      <div className="space-y-4">
+                        {reportData.critique.strengths.map((point: string, i: number) => (
+                          <div key={i} className="flex items-start">
+                            <CheckCircle2 className="w-5 h-5 text-emerald-500 mr-3 mt-0.5 flex-shrink-0" />
+                            <p className="text-slate-700 text-sm leading-relaxed whitespace-pre-wrap">{point}</p>
+                          </div>
                         ))}
-                      </ul>
+                      </div>
                     </div>
 
-                    {/* Weaknesses */}
+                    {/* Risks / Weaknesses */}
                     <div>
                       <h4 className="flex items-center text-rose-700 font-bold mb-4 pb-2 border-b-2 border-rose-100">
-                        <AlertOctagon className="w-5 h-5 mr-2" /> 短板与不足
+                        <AlertOctagon className="w-5 h-5 mr-2" /> 重点风险揭示
                       </h4>
-                      <ul className="space-y-4">
-                        {reportData.critique?.weaknesses?.map((w: string, i: number) => (
-                          <li key={i} className="flex items-start text-sm leading-6 text-slate-700 bg-white p-3 rounded-lg border border-slate-100 shadow-sm print-avoid-break">
-                            <div className="w-1.5 h-1.5 rounded-full bg-rose-500 mr-3 mt-2 flex-shrink-0"></div>
-                            <span dangerouslySetInnerHTML={{ __html: w }}></span>
-                          </li>
+                      <div className="space-y-4">
+                        {reportData.critique.weaknesses.map((point: string, i: number) => (
+                          <div key={i} className="flex items-start">
+                            <div className="w-2 h-2 rounded-full bg-rose-500 mr-3 mt-2 flex-shrink-0"></div>
+                            <p className="text-slate-700 text-sm leading-relaxed whitespace-pre-wrap">{point}</p>
+                          </div>
                         ))}
-                      </ul>
+                      </div>
                     </div>
                   </div>
                 </section>
@@ -948,7 +979,7 @@ export const ReportGenerator: React.FC = () => {
                 {/* 3. Visual Analysis - 新起一页，每个图表独立避免跨页 */}
                 <section className="mb-12 print-section-break">
                   <div className="flex items-center mb-6">
-                    <span className={`flex items-center justify-center w-8 h-8 rounded-lg text-white font-bold mr-3 shadow-md font-mono ${engine === 'gemini' ? 'bg-indigo-600 shadow-indigo-200' : 'bg-slate-700 shadow-slate-200'}`}>03</span>
+                    <span className={`flex items-center justify-center w-8 h-8 rounded-lg text-white font-bold mr-3 shadow-md font-mono ${engine === 'gemini' ? 'bg-indigo-600 shadow-indigo-200' : 'bg-slate-700 shadow-slate-200'} `}>03</span>
                     <h2 className="text-xl font-bold text-slate-900">重点领域可视分析</h2>
                   </div>
 
@@ -975,14 +1006,14 @@ export const ReportGenerator: React.FC = () => {
                 {/* 4. Future Plan - 新起一页 */}
                 <section className="mb-12 print-section-break">
                   <div className="flex items-center mb-8">
-                    <span className={`flex items-center justify-center w-8 h-8 rounded-lg text-white font-bold mr-3 shadow-md font-mono ${engine === 'gemini' ? 'bg-indigo-600 shadow-indigo-200' : 'bg-slate-700 shadow-slate-200'}`}>04</span>
+                    <span className={`flex items-center justify-center w-8 h-8 rounded-lg text-white font-bold mr-3 shadow-md font-mono ${engine === 'gemini' ? 'bg-indigo-600 shadow-indigo-200' : 'bg-slate-700 shadow-slate-200'} `}>04</span>
                     <h2 className="text-xl font-bold text-slate-900">{year + 1}年 工作计划建议</h2>
                   </div>
 
                   <div className="space-y-6">
                     {reportData.futurePlan?.map((plan: any, idx: number) => (
                       <div key={idx} className="flex items-start p-5 bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-                        <div className={`flex-shrink-0 w-10 h-10 rounded-full font-bold flex items-center justify-center text-lg mr-5 border ${engine === 'gemini' ? 'bg-indigo-50 text-indigo-600 border-indigo-100' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>
+                        <div className={`flex-shrink-0 w-8 h-8 rounded-full font-bold flex items-center justify-center text-lg mr-4 border ${engine === 'gemini' ? 'bg-indigo-50 text-indigo-600 border-indigo-100' : 'bg-slate-50 text-slate-600 border-slate-200'} `}>
                           {idx + 1}
                         </div>
                         <div>
@@ -1102,8 +1133,8 @@ export const ReportGenerator: React.FC = () => {
 
                 {/* Footer */}
                 <div className="pt-8 flex justify-between text-[10px] text-slate-400 border-t border-slate-200 font-mono">
-                  <span>CLASSIFICATION: INTERNAL USE ONLY</span>
-                  <span>GENERATED BY {engine === 'gemini' ? 'GOOGLE VERTEX AI' : 'GOVINSIGHT PRO'} v4.2</span>
+                  <span>保密等级：内部参阅</span>
+                  <span>报告编号：GA-AR-{year}-{entity?.id || '000'}</span>
                 </div>
               </div>
             </div>
@@ -1118,9 +1149,8 @@ export const ReportGenerator: React.FC = () => {
             <p className="max-w-md text-center text-sm text-slate-500 leading-relaxed">
               {engine === 'gemini' ? (
                 <>
-                  当前模式：<span className="font-semibold text-pink-600">Gemini 3.0 Pro (Thinking Mode)</span>
-                  <br />将实时调用 Google Cloud 算力，进行深度逻辑推演，
-                  <br />生成具备高政治站位与专业归因分析的报告。
+                  {/* Text hidden by request */}
+                  {/* <span className="font-semibold text-pink-600">Gemini 3.0 Pro (Thinking Mode)</span> */}
                 </>
               ) : (
                 <>
@@ -1133,10 +1163,10 @@ export const ReportGenerator: React.FC = () => {
             <button
               onClick={handleGenerate}
               disabled={isGenerating}
-              className={`mt-8 px-8 py-3 text-white text-sm font-bold rounded-full shadow-lg transition-all active:scale-95 flex items-center ${engine === 'gemini'
+              className={`m- p- p- tex-hite tex-m fon-old rounde-ull shado-g transitio-ll active: scal-5 flex item-enter ${engine === 'gemini'
                 ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:shadow-indigo-300'
                 : 'bg-slate-800 hover:bg-slate-900 shadow-slate-300'
-                }`}
+                } `}
             >
               {isGenerating ? <Sparkles className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
               {engine === 'gemini' ? '调用大模型生成' : '开始生成'}
@@ -1150,6 +1180,6 @@ export const ReportGenerator: React.FC = () => {
           </div>
         )}
       </div>
-    </div>
+    </div >
   );
 };
