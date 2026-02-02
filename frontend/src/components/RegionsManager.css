@@ -22,9 +22,9 @@
 
 /* Individual Column */
 .miller-column {
-  flex: 0 0 320px;
-  /* Fixed width */
-  width: 320px;
+  flex: 0 0 400px;
+  /* Fixed width increased for longer names */
+  width: 400px;
   background: #ffffff;
   border-right: 1px solid #e2e8f0;
   /* Slate-200 */
