@@ -518,3 +518,33 @@
         flex: 1;
     }
 }
+
+/* Tree View Styles */
+.region-tree {
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: var(--shadow-sm, 0 1px 3px rgba(0, 0, 0, 0.1));
+    overflow: hidden;
+    border: 1px solid var(--border-color, #e5e7eb);
+}
+
+.region-node {
+    border-bottom: 1px solid var(--border-color, #f1f5f9);
+}
+
+.region-node:last-child {
+    border-bottom: none;
+}
+
+.region-children {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Reports inside the tree */
+.region-reports {
+    background-color: #f8fafc;
+    border-top: 1px solid #f1f5f9;
+}
