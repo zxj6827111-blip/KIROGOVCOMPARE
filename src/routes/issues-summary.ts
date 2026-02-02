@@ -23,10 +23,8 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
         let allowedRegionIds: number[] | null = [];
         if ((req.user as any)?.role === 'admin' || req.user?.username === 'System Admin') {
             allowedRegionIds = null; // null means ALL access
-            console.log('[IssuesSummary] User is admin/System Admin, allowing all regions');
         } else {
             allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
-            console.log(`[IssuesSummary] User ${req.user?.username} allowed regions count: ${allowedRegionIds?.length}`);
         }
 
         // Build recursive CTE to get all descendant regions
@@ -35,44 +33,36 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
         if (regionId) {
             const regionTreeQuery = `
             WITH RECURSIVE region_tree AS (
-              SELECT id, name, parent_id, level FROM regions WHERE id = $1
+              SELECT id, name, parent_id, level, sort_order FROM regions WHERE id = $1
               UNION ALL
-              SELECT r.id, r.name, r.parent_id, r.level
+              SELECT r.id, r.name, r.parent_id, r.level, r.sort_order
               FROM regions r
               INNER JOIN region_tree rt ON r.parent_id = rt.id
             )
-            SELECT id, name, level FROM region_tree
+            SELECT id, name, parent_id, level, sort_order FROM region_tree
             `;
             const result = await pool.query(regionTreeQuery, [regionId]);
             regionsResult = result.rows;
         } else {
             // Get all regions
-            const regionAllQuery = `SELECT id, name, level FROM regions`;
+            const regionAllQuery = `SELECT id, name, parent_id, level, sort_order FROM regions`;
             const result = await pool.query(regionAllQuery);
             regionsResult = result.rows;
         }
-
-        console.log(`[IssuesSummary] Total regions found: ${regionsResult.length}`);
 
         // Apply data scope filtering
         if (allowedRegionIds && allowedRegionIds.length > 0) {
             regionsResult = regionsResult.filter((r: any) => allowedRegionIds!.includes(r.id));
         } else if (allowedRegionIds && allowedRegionIds.length === 0 && (req.user as any)?.role !== 'admin') {
             // User has no access and is not admin
-            console.log('[IssuesSummary] No allowed regions for user');
-            return res.json({ data: { total_issues: 0, regions: [] } });
+            return res.json({ data: { total_issues: 0, tree: [] } });
         }
 
-        console.log(`[IssuesSummary] Filtered regions count: ${regionsResult.length}`);
-
         if (regionsResult.length === 0) {
-            return res.json({ data: { total_issues: 0, regions: [] } });
+            return res.json({ data: { total_issues: 0, tree: [] } });
         }
 
         const regionIds = regionsResult.map((r: any) => r.id);
-        const regionMap = new Map(regionsResult.map((r: any) => [String(r.id), r]));
-
-        console.log(`[IssuesSummary] Region IDs count: ${regionIds.length}`);
 
         // Use ANY for potentially large lists
         const reportsQuery = `
@@ -90,30 +80,25 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
 
         const reportsResultRes = await pool.query(reportsQuery, [regionIds]);
         const reportsResult = reportsResultRes.rows;
-        console.log(`[IssuesSummary] Base reports found: ${reportsResult.length}`);
 
-        if (reportsResult.length === 0) {
-            return res.json({ data: { total_issues: 0, regions: [] } });
+        let itemsResult: any[] = [];
+        if (reportsResult.length > 0) {
+            // JS-BASED AGGREGATION: Fetch all items and count in memory
+            const versionIds = reportsResult.map((r: any) => r.version_id);
+
+            const itemsQuery = `
+                SELECT *
+                FROM report_consistency_items 
+                WHERE report_version_id = ANY($1::int[])
+            `;
+
+            const itemsResultRes = await pool.query(itemsQuery, [versionIds]);
+            itemsResult = itemsResultRes.rows;
         }
-
-        // JS-BASED AGGREGATION: Fetch all items and count in memory
-        const versionIds = reportsResult.map((r: any) => r.version_id);
-
-        const itemsQuery = `
-            SELECT *
-            FROM report_consistency_items 
-            WHERE report_version_id = ANY($1::int[])
-        `;
-
-        const itemsResultRes = await pool.query(itemsQuery, [versionIds]);
-        const itemsResult = itemsResultRes.rows;
-        console.log(`[IssuesSummary] Total consistency items fetched: ${itemsResult.length}`);
 
         // Perform counting in JS
         const issuesByVersion = new Map<string, number>();
         const issueBreakdown = new Map<string, { visual: number; structure: number; quality: number }>();
-
-        let debugFailCount = 0;
 
         for (const item of itemsResult) {
             const statusStr = (item.auto_status || item.status || '').toString().toUpperCase();
@@ -123,7 +108,6 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
             if (isFail && !isDismissed) {
                 const vid = String(item.report_version_id);
                 issuesByVersion.set(vid, (issuesByVersion.get(vid) || 0) + 1);
-                debugFailCount++;
 
                 // Update breakdown
                 if (!issueBreakdown.has(vid)) {
@@ -138,8 +122,6 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
                 else counts.quality++;
             }
         }
-
-        console.log(`[IssuesSummary] Total JS-calculated FAIL items: ${debugFailCount}`);
 
         // Assign counts back to reports
         reportsResult.forEach((r: any) => {
@@ -165,39 +147,83 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
             });
         }
 
-        // Build final response - only include regions with reports
-        const regions: any[] = [];
-        let totalIssues = 0;
+        // Build Tree Structure
+        // Use String keys for safer matching between regionsResult (numbers usually) and regionReportsMap keys (strings)
+        const nodeMap = new Map<string, any>();
 
-        for (const [rId, reports] of regionReportsMap) {
-            const region = regionMap.get(rId);
+        // Initialize nodes
+        regionsResult.forEach((r: any) => {
+            nodeMap.set(String(r.id), {
+                region_id: r.id,
+                region_name: r.name,
+                region_level: r.level,
+                parent_id: r.parent_id,
+                sort_order: r.sort_order,
+                own_issues: 0,
+                subtree_issues: 0,
+                reports: [],
+                children: []
+            });
+        });
 
-            if (!region) {
-                continue;
-            }
-
-            const regionIssues = reports.reduce((sum: number, r: any) => sum + r.issue_count, 0);
-            totalIssues += regionIssues;
-
-            if (reports.length > 0) {
-                regions.push({
-                    region_id: Number(rId),
-                    region_name: region.name,
-                    region_level: region.level,
-                    total_issues: regionIssues,
-                    reports: reports.sort((a: any, b: any) => b.year - a.year) // Sort by year descending
-                });
+        // Fill data
+        // Iterate regionReportsMap which has String keys
+        for (const [rIdStr, reports] of regionReportsMap) {
+            const node = nodeMap.get(rIdStr);
+            if (node) {
+                node.reports = reports.sort((a: any, b: any) => b.year - a.year);
+                node.own_issues = reports.reduce((sum: number, r: any) => sum + r.issue_count, 0);
             }
         }
 
-        // Sort regions: those with issues first, then by issue count desc
-        regions.sort((a, b) => b.total_issues - a.total_issues);
+        // Construct Hierarchy
+        const roots: any[] = [];
+
+        nodeMap.forEach((node) => {
+            const parentId = String(node.parent_id);
+            // Check if parent exists in our map
+            if (node.parent_id && nodeMap.has(parentId)) {
+                nodeMap.get(parentId).children.push(node);
+            } else {
+                // Root of the current result set
+                roots.push(node);
+            }
+        });
+
+        // calculate subtree issues
+        const calculateSubtreeStats = (node: any): number => {
+            let sum = node.own_issues;
+            if (node.children && node.children.length > 0) {
+                for (const child of node.children) {
+                    sum += calculateSubtreeStats(child);
+                }
+
+                // Now sort children
+                node.children.sort((a: any, b: any) => {
+                    if (b.subtree_issues !== a.subtree_issues) return b.subtree_issues - a.subtree_issues;
+                    if (a.sort_order !== b.sort_order) return (a.sort_order || 0) - (b.sort_order || 0);
+                    return a.region_name.localeCompare(b.region_name);
+                });
+            }
+            node.subtree_issues = sum;
+            return sum;
+        };
+
+        let totalIssues = 0;
+        roots.forEach(root => {
+            totalIssues += calculateSubtreeStats(root);
+        });
+
+        // Sort roots
+        roots.sort((a: any, b: any) => {
+            if (b.subtree_issues !== a.subtree_issues) return b.subtree_issues - a.subtree_issues;
+            return (a.region_name || '').localeCompare(b.region_name || '');
+        });
 
         return res.json({
             data: {
                 total_issues: totalIssues,
-                region_count: regions.length,
-                regions
+                tree: roots
             }
         });
 
