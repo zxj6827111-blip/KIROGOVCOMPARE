@@ -166,7 +166,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   started_at TIMESTAMPTZ,
   finished_at TIMESTAMPTZ,
-  comparison_id BIGINT REFERENCES comparisons(id) ON DELETE SET NULL,
+  comparison_id BIGINT REFERENCES comparisons(id) ON DELETE CASCADE,
   export_title TEXT,
   file_name TEXT,
   file_path TEXT,

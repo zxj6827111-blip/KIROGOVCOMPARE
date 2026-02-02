@@ -208,6 +208,10 @@ router.post('/comparisons', authMiddleware, async (req, res) => {
     yearA = Math.min(leftReport.year, rightReport.year);
     yearB = Math.max(leftReport.year, rightReport.year);
 
+    if (yearA === yearB) {
+      return res.status(400).json({ error: '不允许同年度比较：两份报告必须来自不同年份' });
+    }
+
     const user = (req as any).user;
     if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
       const scopeNames = user.dataScope.regions;
@@ -377,6 +381,12 @@ router.post('/comparisons/batch-create', authMiddleware, async (req, res) => {
 
     // 批量创建比对任务
     for (const candidate of candidates) {
+      if (candidate.year_a === candidate.year_b) {
+        console.log(`[BatchCreate] Skipping invalid same-year candidate:`, candidate);
+        skippedCount++;
+        continue;
+      }
+
       try {
         // 创建 comparison 记录
         const comparisonRes = await pool.query(`
