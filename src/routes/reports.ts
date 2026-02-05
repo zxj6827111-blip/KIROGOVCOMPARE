@@ -605,7 +605,154 @@ router.get('/reports', authMiddleware, async (req: AuthRequest, res) => {
   }
 });
 
-// Batch check status endpoint
+async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['user']) {
+  let filteredIds = reportIds.filter((id) => Number.isFinite(id) && id > 0);
+  if (filteredIds.length === 0) {
+    return {};
+  }
+
+  const allowedRegionIds = await getAllowedRegionIdsAsync(user);
+  if (allowedRegionIds) {
+    if (allowedRegionIds.length === 0) {
+      return {};
+    }
+    const allowedRes = await pool.query(`
+        SELECT id FROM reports
+        WHERE id = ANY($1::int[])
+          AND region_id = ANY($2::int[]);
+      `, [filteredIds, allowedRegionIds]);
+    filteredIds = allowedRes.rows.map((row: any) => row.id);
+    if (filteredIds.length === 0) {
+      return {};
+    }
+  }
+
+  // Get active version_ids for these reports + parsed_json + cached check stats
+  const versionRes = await pool.query(`
+      SELECT
+        r.id as report_id,
+        rv.id as version_id,
+        rv.parsed_json,
+        rv.check_total,
+        rv.check_visual,
+        rv.check_structure,
+        rv.check_quality,
+        rv.checks_updated_at
+      FROM reports r
+      JOIN report_versions rv ON rv.id = r.active_version_id
+      WHERE r.id = ANY($1::int[])
+    `, [filteredIds]);
+
+  const versionRows = versionRes.rows;
+  const versionMap = new Map(versionRows.map((v: any) => [v.report_id, v.version_id]));
+
+  // Check which versions have actual content
+  const contentMap = new Map<number, boolean>();
+  for (const v of versionRows) {
+    let hasContent = false;
+    const parsed = parseDbJson(v.parsed_json);
+    if (parsed) {
+      if (Array.isArray(parsed.sections) && parsed.sections.length > 0) {
+        hasContent = true;
+      } else if (parsed.tables && typeof parsed.tables === 'object' && Object.keys(parsed.tables).length > 0) {
+        hasContent = true;
+      } else if (parsed.report_type || parsed.basic_info || parsed.year) {
+        hasContent = true;
+      }
+    }
+    contentMap.set(v.report_id, hasContent);
+  }
+
+  const result: Record<string, any> = {};
+
+  const missingVersionIds: number[] = [];
+  for (const row of versionRows) {
+    const reportId = Number(row.report_id);
+    const checked = !!row.checks_updated_at;
+    if (!checked) {
+      missingVersionIds.push(Number(row.version_id));
+    }
+    result[String(reportId)] = {
+      has_content: contentMap.get(reportId) ?? false,
+      checked,
+      total: checked ? Number(row.check_total || 0) : null,
+      visual: checked ? Number(row.check_visual || 0) : null,
+      structure: checked ? Number(row.check_structure || 0) : null,
+      quality: checked ? Number(row.check_quality || 0) : null
+    };
+  }
+
+  // Backfill cached stats for versions that have checks but no cached counts yet
+  if (missingVersionIds.length > 0) {
+    const countsRes = await pool.query(`
+      WITH counts AS (
+        SELECT
+          report_version_id,
+          COUNT(*) FILTER (
+            WHERE auto_status = 'FAIL'
+              AND (human_status != 'dismissed' OR human_status IS NULL)
+          ) AS total,
+          COUNT(*) FILTER (
+            WHERE auto_status = 'FAIL'
+              AND group_key = 'visual'
+              AND (human_status != 'dismissed' OR human_status IS NULL)
+          ) AS visual,
+          COUNT(*) FILTER (
+            WHERE auto_status = 'FAIL'
+              AND group_key = 'quality'
+              AND (human_status != 'dismissed' OR human_status IS NULL)
+          ) AS quality,
+          COUNT(*) FILTER (
+            WHERE auto_status = 'FAIL'
+              AND group_key IN ('structure','table2','table3','table4','text')
+              AND (human_status != 'dismissed' OR human_status IS NULL)
+          ) AS structure
+        FROM report_consistency_items
+        WHERE report_version_id = ANY($1::int[])
+        GROUP BY report_version_id
+      )
+      UPDATE report_versions rv
+      SET check_total = counts.total,
+          check_visual = counts.visual,
+          check_structure = counts.structure,
+          check_quality = counts.quality,
+          checks_updated_at = NOW()
+      FROM counts
+      WHERE rv.id = counts.report_version_id
+      RETURNING counts.*
+    `, [missingVersionIds]);
+
+    const countsMap = new Map<number, any>();
+    for (const row of countsRes.rows || []) {
+      countsMap.set(Number(row.report_version_id), row);
+    }
+
+    for (const row of versionRows) {
+      const versionId = Number(row.version_id);
+      const reportId = Number(row.report_id);
+      if (!row.checks_updated_at && countsMap.has(versionId)) {
+        const counts = countsMap.get(versionId);
+        const total = Number(counts.total || 0);
+        const visual = Number(counts.visual || 0);
+        const structure = Number(counts.structure || 0);
+        const quality = Number(counts.quality || 0);
+
+        result[String(reportId)] = {
+          has_content: contentMap.get(reportId) ?? false,
+          checked: true,
+          total,
+          visual,
+          structure,
+          quality
+        };
+      }
+    }
+  }
+
+  return result;
+}
+
+// Batch check status endpoint (GET for backward compatibility)
 router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
   try {
     const reportIdsParam = req.query.report_ids;
@@ -613,108 +760,27 @@ router.get('/reports/batch-check-status', authMiddleware, async (req, res) => {
       return res.status(400).json({ error: 'report_ids query parameter required' });
     }
 
-    let reportIds = reportIdsParam.split(',').map(id => Number(id.trim())).filter(id => !isNaN(id) && id > 0);
-    if (reportIds.length === 0) {
-      return res.json({});
-    }
-
-    const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
-    if (allowedRegionIds) {
-      if (allowedRegionIds.length === 0) {
-        return res.json({});
-      }
-      const allowedRes = await pool.query(`
-        SELECT id FROM reports
-        WHERE id = ANY($1::int[])
-          AND region_id = ANY($2::int[]);
-      `, [reportIds, allowedRegionIds]);
-      reportIds = allowedRes.rows.map((row: any) => row.id);
-      if (reportIds.length === 0) {
-        return res.json({});
-      }
-    }
-
-    // Get active version_ids for these reports + check parsed_json
-    const versionRes = await pool.query(`
-      SELECT r.id as report_id, rv.id as version_id, rv.parsed_json
-      FROM reports r
-      JOIN report_versions rv ON rv.id = r.active_version_id
-      WHERE r.id = ANY($1::int[])
-    `, [reportIds]);
-
-    const versionRows = versionRes.rows;
-    const versionMap = new Map(versionRows.map((v: any) => [v.report_id, v.version_id]));
-
-    // Check which versions have actual content
-    const contentMap = new Map<number, boolean>();
-    for (const v of versionRows) {
-      let hasContent = false;
-      const parsed = parseDbJson(v.parsed_json);
-      if (parsed) {
-        if (Array.isArray(parsed.sections) && parsed.sections.length > 0) {
-          hasContent = true;
-        } else if (parsed.tables && typeof parsed.tables === 'object' && Object.keys(parsed.tables).length > 0) {
-          hasContent = true;
-        } else if (parsed.report_type || parsed.basic_info || parsed.year) {
-          hasContent = true;
-        }
-      }
-      contentMap.set(v.report_id, hasContent);
-    }
-
-    const versionIds = Array.from(versionMap.values());
-    if (versionIds.length === 0) {
-      return res.json({});
-    }
-
-    const groupCountsRes = await pool.query(`
-      SELECT report_version_id, group_key, COUNT(*) as cnt
-      FROM report_consistency_items
-      WHERE report_version_id = ANY($1::int[])
-        AND auto_status = 'FAIL'
-        AND (human_status != 'dismissed' OR human_status IS NULL)
-      GROUP BY report_version_id, group_key
-    `, [versionIds]);
-
-    const typedGroupCounts = groupCountsRes.rows;
-
-    const result: Record<string, any> = {};
-
-    for (const [reportId, versionId] of versionMap) {
-      result[String(reportId)] = {
-        total: 0,
-        visual: 0,
-        structure: 0,
-        quality: 0,
-        has_content: contentMap.get(reportId) ?? false
-      };
-    }
-
-    const versionToReport = new Map<number, number>();
-    for (const [rid, vid] of versionMap) {
-      versionToReport.set(Number(vid), Number(rid));
-    }
-
-    for (const gc of typedGroupCounts) {
-      const vid = Number(gc.report_version_id);
-      const reportId = versionToReport.get(vid);
-      if (reportId) {
-        const key = String(reportId);
-        const cnt = Number(gc.cnt);
-        result[key].total += cnt;
-        if (gc.group_key === 'visual') {
-          result[key].visual += cnt;
-        } else if (['structure', 'table2', 'table3', 'table4', 'text'].includes(gc.group_key)) {
-          result[key].structure += cnt;
-        } else if (gc.group_key === 'quality') {
-          result[key].quality += cnt;
-        }
-      }
-    }
-
+    const reportIds = reportIdsParam.split(',').map(id => Number(id.trim())).filter(id => !isNaN(id) && id > 0);
+    const result = await buildBatchCheckStatus(reportIds, (req as AuthRequest).user);
     return res.json(result);
   } catch (error: any) {
     console.error('Error in batch-check-status:', error);
+    return res.status(500).json({ error: 'internal_server_error', message: error.message });
+  }
+});
+
+// Batch check status endpoint (POST to avoid 414 URI too long)
+router.post('/reports/batch-check-status', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const reportIdsRaw = req.body?.report_ids;
+    if (!Array.isArray(reportIdsRaw) || reportIdsRaw.length === 0) {
+      return res.status(400).json({ error: 'report_ids is required' });
+    }
+    const reportIds = reportIdsRaw.map((id: any) => Number(id)).filter((id: number) => Number.isFinite(id) && id > 0);
+    const result = await buildBatchCheckStatus(reportIds, req.user);
+    return res.json(result);
+  } catch (error: any) {
+    console.error('Error in batch-check-status POST:', error);
     return res.status(500).json({ error: 'internal_server_error', message: error.message });
   }
 });

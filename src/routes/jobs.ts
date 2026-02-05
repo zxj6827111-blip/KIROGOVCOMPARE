@@ -204,6 +204,81 @@ router.get('/', async (req, res) => {
     }
 });
 
+/**
+ * GET /api/jobs/task/:jobId
+ * Get a single job by job_id (used for polling)
+ */
+router.get('/task/:jobId', async (req, res) => {
+    try {
+        const jobId = Number(req.params.jobId);
+        if (Number.isNaN(jobId)) {
+            return res.status(400).json({ error: 'Invalid job_id' });
+        }
+
+        const jobRes = await pool.query(`
+          SELECT 
+            j.id AS job_id,
+            j.version_id,
+            j.report_id,
+            j.kind,
+            j.status,
+            j.progress,
+            j.step_code,
+            j.step_name,
+            j.attempt,
+            j.provider,
+            j.model,
+            j.error_code,
+            j.error_message,
+            j.created_at,
+            j.started_at,
+            j.finished_at,
+            r.region_id,
+            r.year,
+            r.unit_name
+          FROM jobs j
+          JOIN reports r ON j.report_id = r.id
+          WHERE j.id = $1
+          LIMIT 1;
+        `, [jobId]);
+
+        const job = jobRes.rows[0];
+        if (!job) {
+            return res.status(404).json({ error: 'Job not found' });
+        }
+
+        const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
+        if (!isRegionAllowed(job.region_id, allowedRegionIds)) {
+            return res.status(403).json({ error: 'forbidden' });
+        }
+
+        const displayStatus = job.status === 'running' ? 'processing' : job.status;
+        return res.json({
+            job_id: job.job_id,
+            version_id: job.version_id,
+            report_id: job.report_id,
+            region_id: job.region_id,
+            year: job.year,
+            unit_name: job.unit_name,
+            kind: job.kind,
+            status: displayStatus,
+            progress: job.progress || 0,
+            step_code: job.step_code || 'QUEUED',
+            step_name: job.step_name || '绛夊緟澶勭悊',
+            attempt: job.attempt || 1,
+            provider: job.provider,
+            model: job.model,
+            error_code: job.error_code,
+            error_message: job.error_message,
+            created_at: job.created_at,
+            updated_at: job.finished_at || job.started_at || job.created_at,
+        });
+    } catch (error) {
+        console.error('Error getting job by id:', error);
+        return res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 
 /**
  * GET /api/jobs/:version_id

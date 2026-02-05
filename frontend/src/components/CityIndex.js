@@ -93,19 +93,28 @@ function CityIndex({ onSelectReport, onViewComparison }) {
     }
 
     try {
-      const reportIds = reportList.map(r => r.report_id || r.id).filter(id => id).join(',');
-      if (!reportIds) {
+      const reportIds = reportList.map(r => r.report_id || r.id).filter(id => id);
+      if (!reportIds.length) {
         setCheckStatusMap(new Map());
         setCheckStatusLoaded(true);
         return;
       }
-      const resp = await apiClient.get(`/reports/batch-check-status?report_ids=${reportIds}`);
-      const statusData = resp.data || {};
+      const chunkSize = 200;
+      const chunks = [];
+      for (let i = 0; i < reportIds.length; i += chunkSize) {
+        chunks.push(reportIds.slice(i, i + chunkSize));
+      }
+      const responses = await Promise.all(
+        chunks.map((chunk) => apiClient.post('/reports/batch-check-status', { report_ids: chunk }))
+      );
 
-      // Convert to Map - statusData now contains {total, visual, structure, quality, has_content}
+      // Merge results into a single Map
       const statusMap = new Map();
-      Object.entries(statusData).forEach(([reportId, counts]) => {
-        statusMap.set(Number(reportId), counts);
+      responses.forEach((resp) => {
+        const statusData = resp.data || {};
+        Object.entries(statusData).forEach(([reportId, counts]) => {
+          statusMap.set(Number(reportId), counts);
+        });
       });
 
       setCheckStatusMap(statusMap);
@@ -599,8 +608,12 @@ function CityIndex({ onSelectReport, onViewComparison }) {
                           return <span className="status-pill gray">⚪ 无内容</span>;
                         }
 
+                        if (checkStatus?.checked === false) {
+                          return <span className="status-pill gray">⚪ 未校验</span>;
+                        }
+
                         if (typeof checkStatus?.total !== 'number') {
-                          return <span className="status-pill gray">⚪ 未解析</span>;
+                          return <span className="status-pill gray">⚪ 未校验</span>;
                         }
 
                         if (checkStatus.total === 0) {

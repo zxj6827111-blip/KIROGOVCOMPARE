@@ -209,7 +209,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const pollJob = async (jobId, { timeoutMs = 120000, intervalMs = 1500 } = {}) => {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
-      const resp = await apiClient.get(`/jobs/${jobId}`);
+      const resp = await apiClient.get(`/jobs/task/${jobId}`);
       const status = (resp.data?.status || '').toLowerCase();
       if (status === 'succeeded' || status === 'failed') {
         return resp.data;

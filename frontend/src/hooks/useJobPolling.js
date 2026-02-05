@@ -36,7 +36,7 @@ export function useJobPolling(jobId, options = {}) {
 
     const fetchJob = async () => {
       try {
-        const response = await apiClient.get(`/jobs/${jobId}`);
+        const response = await apiClient.get(`/jobs/task/${jobId}`);
         if (cancelled) return;
 
         const data = response.data;
