@@ -24,23 +24,19 @@ function CityIndex({ onSelectReport, onViewComparison }) {
   const getRegionType = (name) => {
     if (!name) return 'department';
 
-    // Strict Suffix Check for Level 2 (Districts) and Level 3 (Towns/Streets)
+    // Level 1: Province
+    if (name.endsWith('省') || name.endsWith('自治区') || name.endsWith('直辖市')) {
+      return 'province';
+    }
 
-    // Town/Street level: Must END with or contain specific identifiers that denote a region
-    // "街道", "办事处", "镇", "乡" are strong indicators.
-    // User: "只要带镇、区、街道的都归纳到街道/乡镇... 其他都归纳到部门"
-    // CAUTION: "区" is also in "District".
-    // Let's separate based on commonly accepted suffixes.
-
-    // 1. Street/Town (Level 3)
+    // Level 3: Town/Street
     // Suffixes: 街道, 街道办事处, 镇, 乡
     if (name.endsWith('街道') || name.endsWith('办事处') || name.endsWith('镇') || name.endsWith('乡')) {
       return 'town'; // internal type for granularity, will map to 'district' tab logic if needed or separate
     }
 
-    // 2. District/County (Level 2)
+    // Level 2/3: District/County/City
     // Suffixes: 区, 县, 市, 新区
-    // MUST END WITH these to avoid "市财政局" (starts with 市) being matched.
     if (name.endsWith('区') || name.endsWith('县') || name.endsWith('市') || name.endsWith('新区')) {
       return 'district';
     }
@@ -298,7 +294,14 @@ function CityIndex({ onSelectReport, onViewComparison }) {
   };
 
   const getCardLabel = (region) => {
+    // 1. Priority: Explicit Level
+    if (region.level === 1) return '省级';
+    if (region.level === 2) return '地市';
+    if (region.level === 3) return '区县';
+    if (region.level === 4) return '街道/乡镇';
+
     const type = getRegionType(region.name);
+    if (type === 'province') return '省级';
     if (type === 'town') {
       return '街道/乡镇';
     }
@@ -335,9 +338,9 @@ function CityIndex({ onSelectReport, onViewComparison }) {
       if (activeTab === 'all') return true;
       const type = getRegionType(c.name);
 
-      // 'district' tab includes 'district' AND 'town' (administrative regions)
+      // 'district' tab includes 'district', 'town', AND 'province' (administrative regions)
       if (activeTab === 'district') {
-        return type === 'district' || type === 'town';
+        return type === 'district' || type === 'town' || type === 'province';
       }
 
       if (activeTab === 'department') return type === 'department';
@@ -554,87 +557,95 @@ function CityIndex({ onSelectReport, onViewComparison }) {
 
             <div className="report-grid">
               {visibleReports.map((r) => {
-                  const region = regions.find(reg => reg.id === r.region_id);
-                  const regionName = region?.name || '未知区域';
+                const region = regions.find(reg => reg.id === r.region_id);
+                const regionName = region?.name || '未知区域';
 
-                  return (
-                    <div
-                      key={r.report_id}
-                      className={`report-card ${selectedForCompare.includes(r.report_id) ? 'selected' : ''}`}
-                      onClick={() => onSelectReport?.(r.report_id)}
-                    >
-                      {/* ZONE 1: Header */}
-                      <div className="report-card-header">
-                        <div className="header-top">
-                          <input
-                            type="checkbox"
-                            checked={selectedForCompare.includes(r.report_id)}
-                            onChange={(e) => toggleReportSelection(e, r.report_id)}
-                            onClick={(e) => e.stopPropagation()}
-                            className="report-checkbox"
-                          />
-                          <span className="year-badge">{r.year}年度</span>
-                        </div>
-                        <h4 className="report-title-text">{regionName}政务公开年报</h4>
+                return (
+                  <div
+                    key={r.report_id}
+                    className={`report-card ${selectedForCompare.includes(r.report_id) ? 'selected' : ''}`}
+                    onClick={() => onSelectReport?.(r.report_id)}
+                  >
+                    {/* ZONE 1: Header */}
+                    <div className="report-card-header">
+                      <div className="header-top">
+                        <input
+                          type="checkbox"
+                          checked={selectedForCompare.includes(r.report_id)}
+                          onChange={(e) => toggleReportSelection(e, r.report_id)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="report-checkbox"
+                        />
+                        <span className="year-badge">{r.year}年度</span>
                       </div>
+                      <h4 className="report-title-text">{regionName}政务公开年报</h4>
+                    </div>
 
-                      {/* ZONE 2: Status */}
-                      <div className="report-card-status">
-                        {(() => {
-                          const reportId = Number(r.report_id || r.id);
-                          const checkStatus = checkStatusMap.get(reportId);
+                    {/* ZONE 2: Status */}
+                    <div className="report-card-status">
+                      {(() => {
+                        const reportId = Number(r.report_id || r.id);
+                        const checkStatus = checkStatusMap.get(reportId);
 
-                          if (!checkStatusLoaded && !checkStatus) {
-                            return <span className="status-pill loading">加载中...</span>;
-                          }
+                        if (!checkStatusLoaded && !checkStatus) {
+                          return <span className="status-pill loading">加载中...</span>;
+                        }
 
-                          if (checkStatus?.has_content === false) {
-                            return <span className="status-pill gray">⚪ 无内容</span>;
-                          }
+                        if (!checkStatus && checkStatusLoaded) {
+                          return <span className="status-pill gray">⚪ 未解析</span>;
+                        }
 
-                          if (!checkStatus || checkStatus.total === 0) {
-                            return (
-                              <span className="status-pill green">
-                                <CheckCircle size={14} />
-                                <span>无问题发现</span>
-                              </span>
-                            );
-                          }
+                        if (checkStatus?.has_content === false) {
+                          return <span className="status-pill gray">⚪ 无内容</span>;
+                        }
 
+                        if (typeof checkStatus?.total !== 'number') {
+                          return <span className="status-pill gray">⚪ 未解析</span>;
+                        }
+
+                        if (checkStatus.total === 0) {
                           return (
-                            <span className="status-pill red">
-                              <AlertCircle size={14} />
-                              <span>发现 {checkStatus.total} 个问题</span>
+                            <span className="status-pill green">
+                              <CheckCircle size={14} />
+                              <span>无问题发现</span>
                             </span>
                           );
-                        })()}
-                      </div>
+                        }
 
-                      {/* ZONE 3: Footer Actions */}
-                      <div className="report-card-footer">
-                        <div className="footer-date">{r.created_at?.slice(0, 10)}</div>
-                        <div className="footer-actions">
-                          <button
-                            className="action-btn-ghost blue"
-                            onClick={(e) => { e.stopPropagation(); onSelectReport?.(r.report_id); }}
-                            title="查看详情"
-                          >
-                            <Eye size={16} />
-                            <span>查看</span>
-                          </button>
-                          <button
-                            className="action-btn-ghost red"
-                            onClick={(e) => handleDeleteReport(e, r.report_id)}
-                            title="删除报告"
-                          >
-                            <Trash2 size={16} />
-                            <span>删除</span>
-                          </button>
-                        </div>
+                        return (
+                          <span className="status-pill red">
+                            <AlertCircle size={14} />
+                            <span>发现 {checkStatus.total} 个问题</span>
+                          </span>
+                        );
+                      })()}
+                    </div>
+
+                    {/* ZONE 3: Footer Actions */}
+                    <div className="report-card-footer">
+                      <div className="footer-date">{r.created_at?.slice(0, 10)}</div>
+                      <div className="footer-actions">
+                        <button
+                          className="action-btn-ghost blue"
+                          onClick={(e) => { e.stopPropagation(); onSelectReport?.(r.report_id); }}
+                          title="查看详情"
+                        >
+                          <Eye size={16} />
+                          <span>查看</span>
+                        </button>
+                        <button
+                          className="action-btn-ghost red"
+                          onClick={(e) => handleDeleteReport(e, r.report_id)}
+                          title="删除报告"
+                        >
+                          <Trash2 size={16} />
+                          <span>删除</span>
+                        </button>
                       </div>
                     </div>
-                  );
-                })}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )
@@ -659,7 +670,12 @@ function CityIndex({ onSelectReport, onViewComparison }) {
                     className={`tab-btn ${activeTab === 'district' ? 'active' : ''}`}
                     onClick={() => setActiveTab('district')}
                   >
-                    {currentRegion?.level === 3 ? '街道/乡镇' : '区县'}
+                    {(() => {
+                      if (!currentRegion) return '省份';
+                      if (currentRegion.level === 1) return '地市';
+                      if (currentRegion.level === 3) return '街道/乡镇';
+                      return '区县';
+                    })()}
                   </button>
                   <button
                     className={`tab-btn ${activeTab === 'department' ? 'active' : ''}`}
@@ -689,11 +705,17 @@ function CityIndex({ onSelectReport, onViewComparison }) {
                 {filteredCards.map((region) => {
                   const total = countWithDescendants(region.id);
                   const directReports = reportCountMap.get(region.id) || 0;
-                  const type = getRegionType(region.name);
+                  let type = getRegionType(region.name);
+                  if (region.level === 1) type = 'province';
+
+                  // Find parent name for display
+                  const parentRegion = regions.find(r => r.id === region.parent_id);
+                  const parentName = parentRegion ? parentRegion.name : '中国';
+
                   return (
                     <div key={region.id} className={`city-card type-${type}`} onClick={() => handleEnter(region.id)}>
                       <div className="city-meta">
-                        <div className="city-country">{region.province || '中国'}</div>
+                        <div className="city-country">{parentName}</div>
                         <div className="city-level">{getCardLabel(region)}</div>
                       </div>
                       <h3 className="city-name">{region.name}</h3>

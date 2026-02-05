@@ -52,11 +52,13 @@ CREATE TABLE IF NOT EXISTS ingestion_batches (
   success_count INTEGER DEFAULT 0,
   fail_count INTEGER DEFAULT 0,
   status TEXT DEFAULT 'processing',
-  completed_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ,
+  stats_refreshed_at TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_batch_created ON ingestion_batches(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_batch_status ON ingestion_batches(status);
+ALTER TABLE ingestion_batches ADD COLUMN IF NOT EXISTS stats_refreshed_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS report_versions (
   id BIGSERIAL PRIMARY KEY,
@@ -273,6 +275,55 @@ ALTER TABLE regions ADD COLUMN IF NOT EXISTS sort_order INTEGER;
 ALTER TABLE comparisons ADD COLUMN IF NOT EXISTS similarity INTEGER;
 ALTER TABLE comparisons ADD COLUMN IF NOT EXISTS check_status VARCHAR(50);
 
+-- ---------------------------------------------------------------------------
+-- Consistency triggers: keep active_version_id and is_active aligned
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION enforce_active_version_belongs()
+RETURNS trigger AS $$
+BEGIN
+  IF NEW.active_version_id IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1
+      FROM report_versions rv
+      WHERE rv.id = NEW.active_version_id
+        AND rv.report_id = NEW.id
+    ) THEN
+      RAISE EXCEPTION 'active_version_id % does not belong to report %', NEW.active_version_id, NEW.id;
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_reports_active_version_check ON reports;
+CREATE TRIGGER trg_reports_active_version_check
+BEFORE UPDATE OF active_version_id ON reports
+FOR EACH ROW
+EXECUTE FUNCTION enforce_active_version_belongs();
+
+CREATE OR REPLACE FUNCTION sync_report_versions_active()
+RETURNS trigger AS $$
+BEGIN
+  IF NEW.active_version_id IS NULL THEN
+    UPDATE report_versions
+    SET is_active = false
+    WHERE report_id = NEW.id;
+  ELSE
+    UPDATE report_versions
+    SET is_active = (id = NEW.active_version_id)
+    WHERE report_id = NEW.id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_reports_sync_active ON reports;
+CREATE TRIGGER trg_reports_sync_active
+AFTER UPDATE OF active_version_id ON reports
+FOR EACH ROW
+EXECUTE FUNCTION sync_report_versions_active();
+
 -- Data Center Phase 1 tables (Postgres)
 CREATE TABLE IF NOT EXISTS metric_dictionary (
   id BIGSERIAL PRIMARY KEY,
@@ -469,10 +520,14 @@ INSERT INTO metric_dictionary (
   ('derived_risk_score', 1, 'Derived risk score', 'Risk score = high*3 + medium*2 + low*1 + missing_fact_tables*1 + materialize_failed*2', 'score', TRUE, 'derived', 'derived_risk_score', NULL, 'missing_fact_tables counts any fact table with zero rows, materialize_failed applies when latest materialize job not in done/succeeded/success')
 ON CONFLICT DO NOTHING;
 
--- GovInsight VIEW: gov_open_annual_stats
+-- GovInsight MATERIALIZED VIEW: gov_open_annual_stats
 -- 政务公开智慧治理大屏数据聚合视图
-DROP VIEW IF EXISTS gov_open_annual_stats;
-CREATE VIEW gov_open_annual_stats AS
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_class WHERE relname='gov_open_annual_stats' AND relkind='m') THEN
+    DROP VIEW IF EXISTS gov_open_annual_stats;
+    DROP MATERIALIZED VIEW IF EXISTS gov_open_annual_stats;
+    CREATE MATERIALIZED VIEW gov_open_annual_stats AS
  WITH RECURSIVE base AS (
          SELECT r.id AS report_id,
             reg.id AS region_id,
@@ -617,6 +672,17 @@ CREATE VIEW gov_open_annual_stats AS
      LEFT JOIN active_disclosure_pivot ad ON (((ad.report_id = b.report_id) AND (ad.version_id = b.version_id))))
      LEFT JOIN application_pivot ap ON (((ap.report_id = b.report_id) AND (ap.version_id = b.version_id))))
      LEFT JOIN legal_pivot lp ON (((lp.report_id = b.report_id) AND (lp.version_id = b.version_id))));
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_gov_open_annual_stats_year
+  ON gov_open_annual_stats(year);
+CREATE INDEX IF NOT EXISTS idx_gov_open_annual_stats_year_org_name
+  ON gov_open_annual_stats(year, org_name);
+CREATE INDEX IF NOT EXISTS idx_gov_open_annual_stats_org_id
+  ON gov_open_annual_stats(org_id);
+CREATE INDEX IF NOT EXISTS idx_gov_open_annual_stats_parent_id
+  ON gov_open_annual_stats(parent_id);
 `;
 
 export async function runLLMMigrations(): Promise<void> {
@@ -653,6 +719,32 @@ export async function runLLMMigrations(): Promise<void> {
 
     if ((repairRes.rowCount ?? 0) > 0) {
       console.log(`[Migrations] Fixed data integrity for ${repairRes.rowCount} reports (linked to valid versions)`);
+    }
+
+    // 2. Sync is_active to match reports.active_version_id (best-effort)
+    await pool.query(`
+      UPDATE report_versions rv
+      SET is_active = (rv.id = r.active_version_id)
+      FROM reports r
+      WHERE rv.report_id = r.id
+        AND r.active_version_id IS NOT NULL;
+    `);
+
+    await pool.query(`
+      UPDATE report_versions rv
+      SET is_active = false
+      WHERE rv.report_id IN (SELECT id FROM reports WHERE active_version_id IS NULL);
+    `);
+
+    // 3. Create unique active version index (after normalization)
+    try {
+      await pool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_report_versions_active
+        ON report_versions(report_id)
+        WHERE is_active = true;
+      `);
+    } catch (indexError: any) {
+      console.error('[Migrations] Failed to create uq_report_versions_active index:', indexError?.message || indexError);
     }
 
   } catch (error: any) {

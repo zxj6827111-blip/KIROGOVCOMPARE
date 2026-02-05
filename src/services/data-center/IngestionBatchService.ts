@@ -1,6 +1,7 @@
 
 import pool from '../../config/database-llm';
 import { v4 as uuidv4 } from 'uuid';
+import { govInsightStatsService } from '../GovInsightStatsService';
 
 export interface BatchStats {
     id: number;
@@ -30,7 +31,7 @@ export class IngestionBatchService {
      * Update batch statistics after a job completes.
      */
     async updateBatchStats(batchId: number): Promise<void> {
-        // Recalculate stats from report_versions and jobs
+        // Recalculate stats from jobs
         const result = await pool.query(
             `WITH stats AS (
          SELECT 
@@ -54,9 +55,34 @@ export class IngestionBatchService {
            ELSE NULL
          END
        FROM stats
-       WHERE id = $1`,
+       WHERE id = $1
+       RETURNING id, status, completed_at, stats_refreshed_at`,
             [batchId]
         );
+
+        const batch = result.rows?.[0];
+        if (!batch) {
+            return;
+        }
+
+        const isCompleted = batch.status === 'completed' && batch.completed_at;
+        const alreadyRefreshed = !!batch.stats_refreshed_at;
+
+        if (isCompleted && !alreadyRefreshed) {
+            const refreshed = await govInsightStatsService.refreshAnnualStats({
+                reason: 'batch_complete',
+                batchId: batch.id,
+            });
+
+            if (refreshed) {
+                await pool.query(
+                    `UPDATE ingestion_batches
+                     SET stats_refreshed_at = NOW()
+                     WHERE id = $1 AND stats_refreshed_at IS NULL`,
+                    [batch.id]
+                );
+            }
+        }
     }
 
     /**
