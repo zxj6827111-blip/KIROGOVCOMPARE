@@ -30,7 +30,7 @@ cp .env.example .env
 4. **初始化数据库**
 ```bash
 npm run build
-npm run migrate
+# Migrations run automatically on first start (index-llm.ts -> runLLMMigrations).
 ```
 
 5. **启动开发服务器**
@@ -174,10 +174,17 @@ npm install
 
 3. **运行迁移**
 ```bash
-npm run migrate
+# Migrations run automatically on start (index-llm.ts -> runLLMMigrations).
 ```
 
 4. **重启服务**
 ```bash
 npm run restart
 ```
+
+## GovInsight Materialized View
+
+- The dashboard API uses the materialized view `gov_open_annual_stats`.
+- Refresh after data ingestion to keep the dashboard current.
+- Manual refresh: `REFRESH MATERIALIZED VIEW gov_open_annual_stats;`
+- Current backend refresh policy: single upload refreshes after materialize succeeds; batch upload refreshes once when the batch is completed.

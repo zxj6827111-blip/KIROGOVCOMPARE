@@ -755,3 +755,9 @@ client_max_body_size 100M;
 1. 查看后端日志: `pm2 logs`
 2. 检查 Nginx 错误日志: `/var/log/nginx/error.log`
 3. 确认所有服务运行状态: `systemctl status postgresql redis-server nginx`
+
+## GovInsight Materialized View
+
+- The dashboard API uses the materialized view `gov_open_annual_stats`.
+- After restoring data on a new server, run: `REFRESH MATERIALIZED VIEW gov_open_annual_stats;`
+- Current backend refresh policy: single upload refreshes after materialize succeeds; batch upload refreshes once when the batch is completed.

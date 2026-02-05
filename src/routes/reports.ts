@@ -177,6 +177,94 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
   }
 });
 
+// Re-run parse for an existing report (enqueue a parse job)
+router.post('/reports/:id/parse', authMiddleware, requirePermission('upload_reports'), async (req: AuthRequest, res) => {
+  try {
+    const reportId = Number(req.params.id);
+    if (!reportId || Number.isNaN(reportId) || !Number.isInteger(reportId) || reportId < 1) {
+      return res.status(400).json({ error: 'report_id 无效' });
+    }
+
+    // Data scope check
+    const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
+    if (allowedRegionIds) {
+      if (allowedRegionIds.length === 0) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+    }
+
+    const reportRes = await pool.query(
+      `SELECT r.id, r.region_id, r.active_version_id
+       FROM reports r
+       WHERE r.id = $1
+       LIMIT 1`,
+      [reportId]
+    );
+    const report = reportRes.rows[0];
+    if (!report) {
+      return res.status(404).json({ error: 'report 不存在' });
+    }
+
+    if (allowedRegionIds && !allowedRegionIds.includes(report.region_id)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    let versionId = report.active_version_id as number | null;
+    if (!versionId) {
+      const latestRes = await pool.query(
+        `SELECT id FROM report_versions
+         WHERE report_id = $1
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [reportId]
+      );
+      versionId = latestRes.rows?.[0]?.id ?? null;
+    }
+
+    if (!versionId) {
+      return res.status(404).json({ error: 'report_version 不存在' });
+    }
+
+    const versionRes = await pool.query(
+      `SELECT provider, model, ingestion_batch_id
+       FROM report_versions
+       WHERE id = $1
+       LIMIT 1`,
+      [versionId]
+    );
+    const versionRow = versionRes.rows?.[0] || {};
+
+    // If a parse job is already queued/running, return it
+    const existingJobRes = await pool.query(
+      `SELECT id, status FROM jobs
+       WHERE report_id = $1
+         AND version_id = $2
+         AND kind = 'parse'
+         AND status IN ('queued', 'running')
+       ORDER BY id DESC
+       LIMIT 1`,
+      [reportId, versionId]
+    );
+    const existingJob = existingJobRes.rows?.[0];
+    if (existingJob?.id) {
+      return res.json({ job_id: existingJob.id, status: existingJob.status, reused: true });
+    }
+
+    const jobRes = await pool.query(
+      `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model, ingestion_batch_id)
+       VALUES ($1, $2, 'parse', 'queued', 0, $3, $4, $5)
+       RETURNING id`,
+      [reportId, versionId, versionRow.provider ?? null, versionRow.model ?? null, versionRow.ingestion_batch_id ?? null]
+    );
+    const jobId = jobRes.rows[0]?.id;
+
+    return res.json({ job_id: jobId, status: 'queued' });
+  } catch (error) {
+    console.error('Error re-parsing report:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.post('/reports/text', authMiddleware, requirePermission('upload_reports'), express.json({ limit: '10mb' }), async (req: AuthRequest, res) => {
   try {
     const regionId = Number(req.body?.region_id);
