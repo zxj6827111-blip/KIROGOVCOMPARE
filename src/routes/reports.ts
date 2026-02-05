@@ -27,6 +27,17 @@ function parseDbJson(value: any): any {
   }
 }
 
+function hasParsedContent(parsed: any): boolean {
+  if (!parsed) return false;
+  if (Array.isArray(parsed)) return parsed.length > 0;
+  if (typeof parsed !== 'object') return false;
+  if (Array.isArray(parsed.sections) && parsed.sections.length > 0) return true;
+  if (parsed.tables && typeof parsed.tables === 'object' && Object.keys(parsed.tables).length > 0) return true;
+  if (parsed.report_type || parsed.basic_info || parsed.year) return true;
+  // Fallback: any non-empty object counts as content
+  return Object.keys(parsed).length > 0;
+}
+
 const upload = multer({
   storage: multer.diskStorage({
     destination: tempDir,
@@ -568,17 +579,8 @@ router.get('/reports', authMiddleware, async (req: AuthRequest, res) => {
 
     return res.json({
       data: result.rows.map((row) => {
-        let hasContent = false;
         const parsed = parseDbJson(row.parsed_json);
-        if (parsed) {
-          if (Array.isArray(parsed.sections) && parsed.sections.length > 0) {
-            hasContent = true;
-          } else if (parsed.tables && typeof parsed.tables === 'object' && Object.keys(parsed.tables).length > 0) {
-            hasContent = true;
-          } else if (parsed.report_type || parsed.basic_info || parsed.year) {
-            hasContent = true;
-          }
-        }
+        const hasContent = hasParsedContent(parsed);
 
         return {
           report_id: row.report_id,
@@ -649,18 +651,8 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
   // Check which versions have actual content
   const contentMap = new Map<number, boolean>();
   for (const v of versionRows) {
-    let hasContent = false;
     const parsed = parseDbJson(v.parsed_json);
-    if (parsed) {
-      if (Array.isArray(parsed.sections) && parsed.sections.length > 0) {
-        hasContent = true;
-      } else if (parsed.tables && typeof parsed.tables === 'object' && Object.keys(parsed.tables).length > 0) {
-        hasContent = true;
-      } else if (parsed.report_type || parsed.basic_info || parsed.year) {
-        hasContent = true;
-      }
-    }
-    contentMap.set(v.report_id, hasContent);
+    contentMap.set(v.report_id, hasParsedContent(parsed));
   }
 
   const result: Record<string, any> = {};
