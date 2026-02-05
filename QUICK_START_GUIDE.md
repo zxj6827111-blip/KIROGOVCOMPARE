@@ -524,3 +524,9 @@ docker-compose logs app | grep ERROR
 **版本**: 1.0.0  
 **状态**: ✅ 生产就绪
 
+
+## GovInsight Materialized View
+
+- The dashboard API uses the materialized view `gov_open_annual_stats`.
+- Manual refresh (if needed): `REFRESH MATERIALIZED VIEW gov_open_annual_stats;`
+- Current backend refresh policy: single upload refreshes after materialize succeeds; batch upload refreshes once when the batch is completed.
