@@ -29,6 +29,7 @@ function parseDbJson(value: any): any {
 
 function hasParsedContent(parsed: any): boolean {
   if (!parsed) return false;
+  if (typeof parsed === 'string') return parsed.trim().length > 0;
   if (Array.isArray(parsed)) return parsed.length > 0;
   if (typeof parsed !== 'object') return false;
   if (Array.isArray(parsed.sections) && parsed.sections.length > 0) return true;
@@ -564,6 +565,11 @@ router.get('/reports', authMiddleware, async (req: AuthRequest, res) => {
         r.unit_name,
         rv.id AS active_version_id,
         rv.parsed_json,
+        CASE
+          WHEN rv.parsed_json IS NULL THEN false
+          WHEN rv.parsed_json::text IN ('{}', 'null', '\"\"') THEN false
+          ELSE true
+        END AS has_content_db,
         (SELECT j.id FROM jobs j WHERE j.report_id = r.id ORDER BY j.id DESC LIMIT 1) AS job_id,
         (SELECT j.status FROM jobs j WHERE j.report_id = r.id ORDER BY j.id DESC LIMIT 1) AS job_status,
         (SELECT j.progress FROM jobs j WHERE j.report_id = r.id ORDER BY j.id DESC LIMIT 1) AS job_progress,
@@ -580,7 +586,7 @@ router.get('/reports', authMiddleware, async (req: AuthRequest, res) => {
     return res.json({
       data: result.rows.map((row) => {
         const parsed = parseDbJson(row.parsed_json);
-        const hasContent = hasParsedContent(parsed);
+        const hasContent = typeof row.has_content_db === 'boolean' ? row.has_content_db : hasParsedContent(parsed);
 
         return {
           report_id: row.report_id,
@@ -635,6 +641,11 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
         r.id as report_id,
         rv.id as version_id,
         rv.parsed_json,
+        CASE
+          WHEN rv.parsed_json IS NULL THEN false
+          WHEN rv.parsed_json::text IN ('{}', 'null', '\"\"') THEN false
+          ELSE true
+        END AS has_content_db,
         rv.check_total,
         rv.check_visual,
         rv.check_structure,
@@ -651,6 +662,10 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
   // Check which versions have actual content
   const contentMap = new Map<number, boolean>();
   for (const v of versionRows) {
+    if (typeof v.has_content_db === 'boolean') {
+      contentMap.set(v.report_id, v.has_content_db);
+      continue;
+    }
     const parsed = parseDbJson(v.parsed_json);
     contentMap.set(v.report_id, hasParsedContent(parsed));
   }
