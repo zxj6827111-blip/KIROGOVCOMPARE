@@ -84,6 +84,50 @@ async function refreshComparisonStatusForReport(reportId: number): Promise<void>
   }
 }
 
+async function refreshCachedStatsForVersion(reportVersionId: number): Promise<void> {
+  const countsRes = await pool.query(`
+    SELECT
+      COUNT(*) FILTER (
+        WHERE auto_status = 'FAIL'
+          AND (human_status != 'dismissed' OR human_status IS NULL)
+      ) AS total,
+      COUNT(*) FILTER (
+        WHERE auto_status = 'FAIL'
+          AND group_key = 'visual'
+          AND (human_status != 'dismissed' OR human_status IS NULL)
+      ) AS visual,
+      COUNT(*) FILTER (
+        WHERE auto_status = 'FAIL'
+          AND group_key = 'quality'
+          AND (human_status != 'dismissed' OR human_status IS NULL)
+      ) AS quality,
+      COUNT(*) FILTER (
+        WHERE auto_status = 'FAIL'
+          AND group_key IN ('structure','table2','table3','table4','text')
+          AND (human_status != 'dismissed' OR human_status IS NULL)
+      ) AS structure
+    FROM report_consistency_items
+    WHERE report_version_id = $1
+  `, [reportVersionId]);
+
+  const row = countsRes.rows?.[0] || {};
+  await pool.query(`
+    UPDATE report_versions
+    SET check_total = $2,
+        check_visual = $3,
+        check_structure = $4,
+        check_quality = $5,
+        checks_updated_at = NOW()
+    WHERE id = $1
+  `, [
+    reportVersionId,
+    Number(row.total || 0),
+    Number(row.visual || 0),
+    Number(row.structure || 0),
+    Number(row.quality || 0),
+  ]);
+}
+
 /**
  * GET /reports/:id/checks - Get consistency checks for a report
  */
@@ -274,6 +318,7 @@ router.patch('/reports/:id/checks/items/:itemId', async (req, res) => {
       const itemRowsRes = await pool.query('SELECT report_version_id FROM report_consistency_items WHERE id = $1 LIMIT 1', [itemId]);
       const reportVersionId = itemRowsRes.rows[0]?.report_version_id;
       if (reportVersionId) {
+        await refreshCachedStatsForVersion(Number(reportVersionId));
         const reportRowsRes = await pool.query('SELECT report_id FROM report_versions WHERE id = $1 LIMIT 1', [reportVersionId]);
         const reportId = reportRowsRes.rows[0]?.report_id;
         if (reportId) {
@@ -281,7 +326,7 @@ router.patch('/reports/:id/checks/items/:itemId', async (req, res) => {
         }
       }
     } catch (refreshError) {
-      console.warn('[Consistency] Failed to refresh comparison status:', refreshError);
+      console.warn('[Consistency] Failed to refresh cached stats or comparison status:', refreshError);
     }
 
     res.json({ success: true });

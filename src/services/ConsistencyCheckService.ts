@@ -1095,6 +1095,23 @@ export class ConsistencyCheckService {
       WHERE id = $2;
     `, [JSON.stringify(summary), runId]);
 
+        // Cache aggregated counts on report_versions for fast lookup
+        const failItems = items.filter(i => i.autoStatus === 'FAIL');
+        const visualCount = failItems.filter(i => i.groupKey === 'visual').length;
+        const qualityCount = failItems.filter(i => i.groupKey === 'quality').length;
+        const structureCount = failItems.filter(i => ['structure', 'table2', 'table3', 'table4', 'text'].includes(i.groupKey)).length;
+        const totalCount = failItems.length;
+
+        await pool.query(`
+      UPDATE report_versions
+      SET check_total = $2,
+          check_visual = $3,
+          check_structure = $4,
+          check_quality = $5,
+          checks_updated_at = NOW()
+      WHERE id = $1;
+    `, [reportVersionId, totalCount, visualCount, structureCount, qualityCount]);
+
         return { runId, items };
     }
 }

@@ -258,6 +258,11 @@ ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS changed_fields_summary TEXT
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS state TEXT NOT NULL DEFAULT 'parsed';
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS created_by BIGINT;
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS ingestion_batch_id BIGINT REFERENCES ingestion_batches(id);
+ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS check_total INTEGER;
+ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS check_visual INTEGER;
+ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS check_structure INTEGER;
+ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS check_quality INTEGER;
+ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS checks_updated_at TIMESTAMPTZ;
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS export_title TEXT;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS file_name TEXT;
