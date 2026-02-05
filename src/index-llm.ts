@@ -10,25 +10,37 @@ dotenv.config();
 
 const app = createLlmApp();
 const PORT = process.env.PORT || 3000;
+const WORKER_ONLY = process.env.LLM_WORKER_ONLY === '1';
+const ENABLE_JOB_RUNNER = process.env.LLM_ENABLE_JOB_RUNNER !== '0';
+const RUN_MIGRATIONS = process.env.LLM_RUN_MIGRATIONS !== '0';
 
 // Start server
 async function start(): Promise<void> {
   try {
     console.log(`Starting LLM ingestion system with ${dbType} database...`);
 
-    // Run migrations
-    await runLLMMigrations();
+    // Run migrations (can be disabled for worker-only processes)
+    if (RUN_MIGRATIONS) {
+      await runLLMMigrations();
+    }
 
-    llmJobRunner.start();
+    if (ENABLE_JOB_RUNNER) {
+      llmJobRunner.start();
+    }
 
     // Start PDF export worker for background PDF generation
     startPdfExportWorker();
 
-    app.listen(PORT, () => {
-      console.log(`LLM API server running on port ${PORT}`);
+    if (!WORKER_ONLY) {
+      app.listen(PORT, () => {
+        console.log(`LLM API server running on port ${PORT}`);
+        console.log(`Database type: ${dbType}`);
+        console.log(`Health check: http://localhost:${PORT}/api/health`);
+      });
+    } else {
+      console.log('LLM worker-only mode: HTTP server disabled.');
       console.log(`Database type: ${dbType}`);
-      console.log(`Health check: http://localhost:${PORT}/api/health`);
-    });
+    }
   } catch (error) {
     console.error('Failed to start server:', redactSensitive(error));
     process.exit(1);

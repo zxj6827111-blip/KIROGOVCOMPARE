@@ -254,6 +254,10 @@
   height: 4px;
 }
 
+.city-card.type-province::before {
+  background: #8b5cf6;
+}
+
 .city-card.type-district::before {
   background: #3b82f6;
 }

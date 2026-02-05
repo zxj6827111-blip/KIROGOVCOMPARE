@@ -4,6 +4,7 @@ import { createLlmProvider } from './LlmProviderFactory';
 import { consistencyCheckService } from './ConsistencyCheckService';
 import { materializeService } from './data-center/MaterializeService';
 import { ingestionBatchService } from './data-center/IngestionBatchService';
+import { govInsightStatsService } from './GovInsightStatsService';
 import axios from 'axios';
 import { summarizeDiff } from '../utils/jsonDiff';
 import { calculateReportMetrics } from '../utils/reportAnalysis';
@@ -34,8 +35,30 @@ const STEPS = {
 };
 
 const POLL_INTERVAL_MS = 5000; // 5秒轮询间隔，避免API速率限制
-const POST_JOB_COOLDOWN_MS = Number(process.env.LLM_POST_JOB_COOLDOWN_MS || 50000); // 任务完成后的冷却时间（默认50秒，适应魔搭社区限制）
+const POST_JOB_COOLDOWN_MS = Number(process.env.LLM_POST_JOB_COOLDOWN_MS || 10000); // Cooldown after parse jobs (default 10s) to avoid API rate limits.
 const COMPARE_CONCURRENCY = 5; // 比对任务并发数
+
+const WORKER_MODE = (process.env.LLM_WORKER_MODE || 'all').toLowerCase().trim();
+
+function resolveAllowedKinds(mode: string): Set<string> {
+  if (!mode || mode === 'all') {
+    return new Set(['parse', 'materialize', 'checks', 'compare']);
+  }
+  if (mode.includes(',')) {
+    return new Set(mode.split(',').map((k) => k.trim()).filter(Boolean));
+  }
+  if (mode === 'materialize' || mode === 'materialize-checks' || mode === 'checks-materialize') {
+    return new Set(['materialize', 'checks']);
+  }
+  if (mode === 'parse' || mode === 'checks' || mode === 'compare') {
+    return new Set([mode]);
+  }
+  // Fallback: treat as single kind
+  return new Set([mode]);
+}
+
+const ALLOWED_KINDS = resolveAllowedKinds(WORKER_MODE);
+const ALLOWED_KIND_LIST = Array.from(ALLOWED_KINDS);
 
 export class LlmJobRunner {
   private running = false;
@@ -56,6 +79,7 @@ export class LlmJobRunner {
     this.recoverRunningJobs();
 
     this.running = true;
+    console.log(`[JobRunner] Worker mode: ${WORKER_MODE} (kinds: ${ALLOWED_KIND_LIST.join(', ') || 'none'})`);
     this.scheduleNextTick();
   }
 
@@ -378,7 +402,7 @@ export class LlmJobRunner {
 
       // 任务完成后添加冷却时间，避免过快调用 API 触发速率限制
       // 但 compare 任务是本地处理，不需要冷却
-      if (POST_JOB_COOLDOWN_MS > 0 && job.kind !== 'compare') {
+      if (POST_JOB_COOLDOWN_MS > 0 && job.kind === 'parse') {
         console.log(`[JobRunner] Cooling down for ${POST_JOB_COOLDOWN_MS}ms before next job...`);
         await new Promise(resolve => setTimeout(resolve, POST_JOB_COOLDOWN_MS));
       }
@@ -390,6 +414,9 @@ export class LlmJobRunner {
 
   // 并发处理比对任务
   private async processCompareJobsConcurrently(): Promise<void> {
+    if (!ALLOWED_KINDS.has('compare')) {
+      return;
+    }
     // 计算可以启动的worker数量
     const availableSlots = COMPARE_CONCURRENCY - this.compareWorkersActive;
     if (availableSlots <= 0) return;
@@ -459,9 +486,10 @@ export class LlmJobRunner {
     const selectResult = await pool.query(`
         SELECT id FROM jobs 
         WHERE status = 'queued' AND kind != 'pdf_export'
-        ORDER BY (CASE kind WHEN 'parse' THEN 0 WHEN 'materialize' THEN 1 WHEN 'checks' THEN 2 WHEN 'compare' THEN 3 ELSE 9 END) ASC, created_at ASC
+          AND kind = ANY($1::text[])
+        ORDER BY (CASE kind WHEN 'materialize' THEN 0 WHEN 'checks' THEN 1 WHEN 'parse' THEN 2 WHEN 'compare' THEN 3 ELSE 9 END) ASC, created_at ASC
         LIMIT 1
-        FOR UPDATE SKIP LOCKED`);
+        FOR UPDATE SKIP LOCKED`, [ALLOWED_KIND_LIST]);
 
     if (selectResult.rows.length === 0) {
       return null;
@@ -546,9 +574,23 @@ export class LlmJobRunner {
       throw new Error(`Materialization failed: ${materializeResult.error}`);
     }
 
-    // Update batch stats if applicable
-    if (job.ingestion_batch_id) {
-      await ingestionBatchService.updateBatchStats(Number(job.ingestion_batch_id));
+    // CRITICAL FIX: Update active_version_id AFTER materialize succeeds.
+    // Guard against out-of-order materialize completion (older versions finishing later).
+    // Only promote if this version is still marked as the report's current candidate.
+    const updateRes = await pool.query(
+      `UPDATE reports
+       SET active_version_id = $1, updated_at = NOW()
+       WHERE id = $2
+         AND EXISTS (
+           SELECT 1 FROM report_versions rv
+           WHERE rv.id = $1 AND rv.report_id = $2 AND rv.is_active = true
+         )`,
+      [job.version_id, job.report_id]
+    );
+    if (updateRes.rowCount === 0) {
+      console.log(`[Job ${job.id}] Skip updating active_version_id for report ${job.report_id} (version ${job.version_id} no longer active candidate)`);
+    } else {
+      console.log(`[Job ${job.id}] Updated active_version_id to ${job.version_id} for report ${job.report_id}`);
     }
 
     await pool.query(
@@ -561,6 +603,17 @@ export class LlmJobRunner {
          WHERE id = $4`,
       [STEPS.DONE.progress, STEPS.DONE.code, STEPS.DONE.name, job.id]
     );
+
+    // Update batch stats or refresh GovInsight stats depending on upload mode
+    if (job.ingestion_batch_id) {
+      await ingestionBatchService.updateBatchStats(Number(job.ingestion_batch_id));
+    } else {
+      await govInsightStatsService.refreshAnnualStats({
+        reason: 'single_upload',
+        reportId: job.report_id ?? undefined,
+        versionId: job.version_id ?? undefined,
+      });
+    }
 
     let existingChecksJob: { id?: number } | undefined;
     const checksResult = await pool.query(

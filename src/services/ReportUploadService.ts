@@ -182,11 +182,13 @@ export class ReportUploadService {
       throw new Error('version_not_created');
     }
 
-    // Update active pointer for the report
-    await pool.query(
-      `UPDATE reports SET active_version_id = $1, updated_at = NOW() WHERE id = $2`,
-      [versionId, report.id]
-    );
+    // NOTE: We no longer update active_version_id here.
+    // active_version_id will be updated AFTER materialize job succeeds,
+    // ensuring it only points to versions with actual fact table data.
+    // This prevents the dashboard from showing zero values for new uploads.
+    // See: LlmJobRunner.ts processMaterializeJob()
+
+    // Mark this version as active for the report_versions table
     await pool.query(
       `UPDATE report_versions SET is_active = false WHERE report_id = $1 AND id != $2`,
       [report.id, versionId]
@@ -308,10 +310,10 @@ export class ReportUploadService {
       throw new Error('version_not_created');
     }
 
-    await pool.query(
-      `UPDATE reports SET active_version_id = $1, updated_at = NOW() WHERE id = $2`,
-      [versionId, report.id]
-    );
+    // NOTE: We no longer update active_version_id here.
+    // active_version_id will be updated AFTER materialize job succeeds.
+    // See: LlmJobRunner.ts processMaterializeJob()
+
     await pool.query(
       `UPDATE report_versions SET is_active = false WHERE report_id = $1 AND id != $2`,
       [report.id, versionId]
