@@ -1,17 +1,12 @@
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './UploadReport.css';
 import { apiClient } from '../apiClient';
 import BatchUpload from './BatchUpload';
 import RegionCascader from './RegionCascader';
-import {
-  FileText,
-  FolderOpen,
-  AlertTriangle,
-  UploadCloud
-} from 'lucide-react';
+import { FileText, FolderOpen, AlertTriangle, UploadCloud } from 'lucide-react';
 
-const extractField = (payload, key) => payload?.[key] || payload?.[key.replace(/_./g, (m) => m[1].toUpperCase())];
+const extractField = (payload, key) =>
+  payload?.[key] || payload?.[key.replace(/_./g, (m) => m[1].toUpperCase())];
 
 function UploadReport() {
   const [regions, setRegions] = useState([]);
@@ -20,7 +15,7 @@ function UploadReport() {
   const [unitName, setUnitName] = useState('');
   const [file, setFile] = useState(null);
   const [, setTextContent] = useState(''); // Only setter used
-  const [model, setModel] = useState('deepseek-v3');
+  const [model, setModel] = useState('gemini/gemini-2.5-flash');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [isDragging, setIsDragging] = useState(false);
@@ -40,13 +35,13 @@ function UploadReport() {
         const roots = [];
 
         // 1. Initialize map and children
-        rows.forEach(r => {
+        rows.forEach((r) => {
           r.children = [];
           regionMap.set(r.id, r);
         });
 
         // 2. Build tree
-        rows.forEach(r => {
+        rows.forEach((r) => {
           if (r.parent_id && regionMap.has(r.parent_id)) {
             regionMap.get(r.parent_id).children.push(r);
           } else {
@@ -57,14 +52,14 @@ function UploadReport() {
         // 3. Sort siblings by ID (preserves creation order/chronology as requested)
         const sortNodes = (nodes) => {
           nodes.sort((a, b) => a.id - b.id);
-          nodes.forEach(n => sortNodes(n.children));
+          nodes.forEach((n) => sortNodes(n.children));
         };
         sortNodes(roots);
 
         // 4. Flatten
         const sortedRows = [];
         const traverse = (nodes) => {
-          nodes.forEach(n => {
+          nodes.forEach((n) => {
             const { children, ...rest } = n;
             sortedRows.push(rest);
             traverse(n.children);
@@ -81,64 +76,67 @@ function UploadReport() {
   }, []);
 
   // Auto-match region based on unit name (Hierarchical Matching)
-  const autoMatchRegion = useCallback((name) => {
-    if (!name || !regions.length) return;
+  const autoMatchRegion = useCallback(
+    (name) => {
+      if (!name || !regions.length) return;
 
-    // Create a temporary map for lookups (optimization: could be memoized if regions large)
-    const regionMap = new Map();
-    regions.forEach(r => regionMap.set(r.id, r));
+      // Create a temporary map for lookups (optimization: could be memoized if regions large)
+      const regionMap = new Map();
+      regions.forEach((r) => regionMap.set(r.id, r));
 
-    let bestMatchId = null;
-    let maxScore = -1;
+      let bestMatchId = null;
+      let maxScore = -1;
 
-    // 预处理搜索词
-    const searchName = name.replace(/(?:人民政府|办事处|委员会|政府|总局)$/g, '');
+      // 预处理搜索词
+      const searchName = name.replace(/(?:人民政府|办事处|委员会|政府|总局)$/g, '');
 
-    regions.forEach(r => {
-      // 1. 基础名称匹配
-      let dbName = r.name.replace(/(?:人民政府|办事处|委员会|政府|总局)$/g, '');
+      regions.forEach((r) => {
+        // 1. 基础名称匹配
+        let dbName = r.name.replace(/(?:人民政府|办事处|委员会|政府|总局)$/g, '');
 
-      if (dbName.length < 2 && !searchName.includes(dbName)) return;
+        if (dbName.length < 2 && !searchName.includes(dbName)) return;
 
-      let score = 0;
+        let score = 0;
 
-      if (searchName.includes(dbName)) {
-        score += 10;
-        score += dbName.length * 0.5;
-      } else if (dbName.includes(searchName)) {
-        score += 5;
-      } else {
-        return;
-      }
-
-      // 2. 祖先上下文匹配
-      let curr = r;
-      let depth = 0;
-      while (curr.parent_id && regionMap.has(curr.parent_id) && depth < 10) {
-        const parent = regionMap.get(curr.parent_id);
-        const parentName = parent.name.replace(/(?:人民政府|办事处|委员会|政府)$/g, '');
-
-        if (searchName.includes(parentName)) {
-          score += 20; // 匹配到一级祖先奖励20分
+        if (searchName.includes(dbName)) {
+          score += 10;
+          score += dbName.length * 0.5;
+        } else if (dbName.includes(searchName)) {
+          score += 5;
+        } else {
+          return;
         }
-        curr = parent;
-        depth++;
-      }
 
-      if (score > maxScore) {
-        maxScore = score;
-        bestMatchId = r.id;
-      } else if (score === maxScore) {
-        if (r.level > (regionMap.get(bestMatchId)?.level || 0)) {
+        // 2. 祖先上下文匹配
+        let curr = r;
+        let depth = 0;
+        while (curr.parent_id && regionMap.has(curr.parent_id) && depth < 10) {
+          const parent = regionMap.get(curr.parent_id);
+          const parentName = parent.name.replace(/(?:人民政府|办事处|委员会|政府)$/g, '');
+
+          if (searchName.includes(parentName)) {
+            score += 20; // 匹配到一级祖先奖励20分
+          }
+          curr = parent;
+          depth++;
+        }
+
+        if (score > maxScore) {
+          maxScore = score;
           bestMatchId = r.id;
+        } else if (score === maxScore) {
+          if (r.level > (regionMap.get(bestMatchId)?.level || 0)) {
+            bestMatchId = r.id;
+          }
         }
-      }
-    });
+      });
 
-    if (bestMatchId) {
-      setRegionId(String(bestMatchId));
-    }
-  }, [regions]);
+      if (bestMatchId) {
+        setRegionId(String(bestMatchId));
+      }
+    },
+    [regions]
+  );
 
   // Extract year from filename
   const extractYearFromFilename = (filename) => {
@@ -282,7 +280,6 @@ function UploadReport() {
       if (file.type === 'application/pdf' || filename.toLowerCase().endsWith('.pdf')) {
         // For PDF files, we'll just show a placeholder message
         setTextContent('[ PDF 文件已选择，将由后端进行解析 ]');
-
       } else if (file.type === 'text/html' || filename.toLowerCase().endsWith('.html')) {
         // Read HTML file content
         const text = await file.text();
@@ -298,7 +295,12 @@ function UploadReport() {
             autoMatchRegion(extractedName);
           }
         }
-      } else if (file.type === 'text/plain' || filename.toLowerCase().endsWith('.txt') || filename.toLowerCase().endsWith('.md') || filename.toLowerCase().endsWith('.markdown')) {
+      } else if (
+        file.type === 'text/plain' ||
+        filename.toLowerCase().endsWith('.txt') ||
+        filename.toLowerCase().endsWith('.md') ||
+        filename.toLowerCase().endsWith('.markdown')
+      ) {
         // Read TXT/Markdown file content directly
         const text = await file.text();
         setTextContent(text.slice(0, 10000));
@@ -372,7 +374,10 @@ function UploadReport() {
             const detailResp = await apiClient.get(`/reports/${existing.report_id || existing.id}`);
             const detail = detailResp.data;
             // 后端返回结构: detail.active_version.parsed_json
-            const parsedJson = detail.active_version?.parsed_json || detail.parsed_json || detail.latest_version?.parsed_json;
+            const parsedJson =
+              detail.active_version?.parsed_json ||
+              detail.parsed_json ||
+              detail.latest_version?.parsed_json;
             const hasContent = parsedJson && Object.keys(parsedJson).length > 0;
             setEmptyReport(!hasContent);
           } catch (detailErr) {
@@ -441,7 +446,6 @@ function UploadReport() {
           window.location.href = `/jobs/${uploadResult.versionId}`;
         }
       }, 1000);
-
     } catch (error) {
       const status = error.response?.status;
       if (status === 409) {
@@ -473,8 +477,6 @@ function UploadReport() {
     setMessage('');
   };
 
-
-
   return (
     <div className="upload-report-page">
       {/* 标签页切换 */}
@@ -500,16 +502,12 @@ function UploadReport() {
             {/* AI 模型选择 - 结构与批量一致 */}
             <div className="form-section">
               <label>AI 模型</label>
-              <select
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-              >
-                <option value="deepseek-v3">DeepSeek V3.2 (ModelScope)</option>
-                <option value="zhipu/glm-4.7-flash">智谱 GLM-4.7-Flash (官方)</option>
-                <option value="glm-4.7-flash">智谱 GLM-4.7-Flash (ModelScope)</option>
-                <option value="gemini/gemini-2.5-flash">Gemini 2.5 Flash</option>
-                <option value="gemini/gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
-                <option value="gemini/gemini-2.5-pro">Gemini 2.5 Pro</option>
+              <select value={model} onChange={(e) => setModel(e.target.value)}>
+                <option value="gemini/gemini-2.5-flash">GEMINI2.5FLASH</option>
+                <option value="nvidia/deepseek-ai/deepseek-v3.2">DeepSeek V3.2 (NVIDIA)</option>
+                <option value="nvidia/moonshotai/kimi-k2.5">Kimi k2.5 (NVIDIA)</option>
+                <option value="modelscope/Qwen/Qwen3-235B-A22B-Instruct-2507">Qwen3 235B (modelscope)</option>
+                <option value="modelscope/kimi-k2.5">Kimi k2.5 (modelscope)</option>
               </select>
             </div>
 
@@ -530,7 +528,9 @@ function UploadReport() {
               />
               {file ? (
                 <div className="file-info" onClick={(e) => e.stopPropagation()}>
-                  <span className="file-icon"><FileText size={24} /></span>
+                  <span className="file-icon">
+                    <FileText size={24} />
+                  </span>
                   <span className="file-name">{file.name}</span>
                   {duplicate && (
                     <span className={`duplicate-badge ${emptyReport ? 'empty' : ''}`}>
@@ -543,7 +543,9 @@ function UploadReport() {
                   <div className="upload-icon-wrapper">
                     <UploadCloud size={48} />
                   </div>
-                  <p className="upload-title"><strong>点击上传</strong> 或 <strong>拖拽文件至此</strong></p>
+                  <p className="upload-title">
+                    <strong>点击上传</strong> 或 <strong>拖拽文件至此</strong>
+                  </p>
                   <p className="hint">支持 PDF、HTML、TXT 或 Markdown 文件</p>
                 </div>
               )}
@@ -561,7 +563,9 @@ function UploadReport() {
             </div>
 
             <div className="form-section">
-              <label>所属区域 <span className="label-hint">(自动匹配或手动选择)</span></label>
+              <label>
+                所属区域 <span className="label-hint">(自动匹配或手动选择)</span>
+              </label>
               <RegionCascader
                 regions={regions}
                 value={regionId}
@@ -571,7 +575,9 @@ function UploadReport() {
 
             {/* Messages */}
             {message && (
-              <div className={`message ${message.startsWith('❌') ? 'error' : message.startsWith('⚠️') ? 'warning' : 'success'} `}>
+              <div
+                className={`message ${message.startsWith('❌') ? 'error' : message.startsWith('⚠️') ? 'warning' : 'success'} `}
+              >
                 {message}
               </div>
             )}
@@ -580,17 +586,18 @@ function UploadReport() {
             <div className="form-actions">
               {message.startsWith('✅') ? (
                 // Success state - show confirm button that resets form
-                <button
-                  type="button"
-                  className="btn-primary"
-                  onClick={handleCancel}
-                >
+                <button type="button" className="btn-primary" onClick={handleCancel}>
                   确定
                 </button>
               ) : (
                 // Normal state - show upload buttons
                 <>
-                  <button type="button" className="btn-cancel" onClick={handleCancel} disabled={loading}>
+                  <button
+                    type="button"
+                    className="btn-cancel"
+                    onClick={handleCancel}
+                    disabled={loading}
+                  >
                     取消
                   </button>
                   <button

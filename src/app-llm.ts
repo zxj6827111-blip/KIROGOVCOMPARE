@@ -94,6 +94,7 @@ export function createLlmApp(): express.Express {
   app.use('/api', dataCenterRouter);
   app.use('/api/report-maintenance', reportMaintenanceRouter);
   app.use('/api/pdf-jobs', pdfJobsRouter);
+  app.use('/api/ai', require('./routes/ai').default);
 
   app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     console.error('Error:', redactSensitive(err));

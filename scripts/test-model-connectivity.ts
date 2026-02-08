@@ -15,6 +15,7 @@ const models = [
     'qwen3-30b',             // ModelScope
     'deepseek-r1-32b',       // ModelScope
     'deepseek-v3',           // ModelScope
+    'kimi-k2.5',             // ModelScope
     'gemini/gemini-2.5-flash',
     'gemini/gemini-2.5-flash-lite',
     'gemini/gemini-2.5-pro',
@@ -56,7 +57,9 @@ async function runTest() {
                 input.includes('qwen') ||
                 input.includes('deepseek') ||
                 input.includes('mimo') ||
-                input.includes('glm')
+                input.includes('glm') ||
+                input.includes('kimi') ||
+                input.includes('moonshot')
             ) {
                 providerName = 'modelscope';
             }

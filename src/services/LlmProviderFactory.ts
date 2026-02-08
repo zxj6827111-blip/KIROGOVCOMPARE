@@ -1,10 +1,11 @@
 import { LlmProvider, LlmProviderError } from './LlmProvider';
 import { GeminiLlmProvider } from './GeminiLlmProvider';
 import { ModelScopeLlmProvider } from './ModelScopeLlmProvider';
+import { NvidiaLlmProvider } from './NvidiaLlmProvider';
 import { ZhipuLlmProvider } from './ZhipuLlmProvider';
 import { StubLlmProvider } from './StubLlmProvider';
 
-export type SupportedLlmProvider = 'stub' | 'gemini' | 'modelscope' | 'zhipu';
+export type SupportedLlmProvider = 'stub' | 'gemini' | 'modelscope' | 'zhipu' | 'nvidia' | 'deepseek' | 'kimi';
 
 function resolveProviderName(): SupportedLlmProvider {
   const provider = (process.env.LLM_PROVIDER || 'stub').toLowerCase();
@@ -16,6 +17,9 @@ function resolveProviderName(): SupportedLlmProvider {
   }
   if (provider === 'zhipu') {
     return 'zhipu';
+  }
+  if (provider === 'nvidia' || provider === 'deepseek' || provider === 'kimi') {
+    return provider as SupportedLlmProvider;
   }
   return 'stub';
 }
@@ -44,6 +48,18 @@ export function createLlmProvider(providerName?: string, modelName?: string): Ll
     }
 
     return new ModelScopeLlmProvider(apiKey, model);
+  }
+
+  if (provider === 'nvidia' || provider === 'deepseek' || provider === 'kimi') {
+    const apiKey = process.env.NVIDIA_API_KEY;
+    // Default to DeepSeek V3.2 if not specified
+    const model = modelName || 'deepseek-ai/deepseek-v3.2';
+
+    if (!apiKey) {
+      throw new LlmProviderError('NVIDIA_API_KEY is required for Nvidia/DeepSeek provider', 'nvidia_missing_api_key');
+    }
+
+    return new NvidiaLlmProvider(apiKey, model);
   }
 
   if (provider === 'zhipu') {
