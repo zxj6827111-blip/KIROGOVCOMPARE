@@ -148,9 +148,19 @@ export class ReportUploadService {
     );
     const existingVersion = versionResult.rows[0];
 
-    const isHtml = payload.mimeType === 'text/html' || payload.originalName.toLowerCase().endsWith('.html') || payload.originalName.toLowerCase().endsWith('.htm');
-    const isTxt = payload.mimeType === 'text/plain' || payload.originalName.toLowerCase().endsWith('.txt');
-    const extension = isHtml ? '.html' : (isTxt ? '.txt' : '.pdf');
+    const lowerName = payload.originalName.toLowerCase();
+    const hasHtmlExt = lowerName.endsWith('.html') || lowerName.endsWith('.htm');
+    const hasMdExt = lowerName.endsWith('.md') || lowerName.endsWith('.markdown');
+    const hasTxtExt = lowerName.endsWith('.txt');
+    const isHtml = payload.mimeType === 'text/html' || hasHtmlExt;
+    const isMd = payload.mimeType === 'text/markdown' || payload.mimeType === 'text/x-markdown' || hasMdExt;
+    // Browsers may upload .md as text/plain. Keep .md precedence over .txt.
+    const isTxt = !isMd && (payload.mimeType === 'text/plain' || hasTxtExt);
+
+    let extension = '.pdf';
+    if (isHtml) extension = '.html';
+    else if (isTxt) extension = '.txt';
+    else if (isMd) extension = '.md';
 
     const storageRelativeDir = path.join('data', 'uploads', `${payload.regionId}`, `${payload.year}`);
     const storageRelative = path.join(storageRelativeDir, `${fileHash}${extension}`);

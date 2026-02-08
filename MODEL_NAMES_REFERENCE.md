@@ -3,17 +3,14 @@
 根据 ModelScope API 文档，常用模型名称格式如下：
 
 ## Qwen 系列
-- `Qwen/Qwen3-235B-Instruct` ✓ 正确
-- `Qwen/Qwen3-30B-Instruct` 
-- `Qwen/Qwen2.5-72B-Instruct`
+- `Qwen/Qwen3-235B-Instruct` ✓ 正确 (当前主力)
 
 ## GLM 系列
-- `ZhipuAI/glm-4-plus` ✓ 正确（ModelScope上的GLM-4）
-- `ZhipuAI/glm-4-9b`
+- `ZhipuAI/glm-4-plus` ✓ 正确
+- `ZhipuAI/GLM-4.7-Flash` ✓ 正确 (ModelScope 极速版)
 
 ## DeepSeek 系列
-- `deepseek-ai/DeepSeek-V3`
-- `deepseek-ai/DeepSeek-R1-Distill-Qwen-32B`
+- `deepseek-ai/DeepSeek-V3` ✓ 强烈推荐 (平衡性最好)
 
 ## 您当前的配置完全正确！
 

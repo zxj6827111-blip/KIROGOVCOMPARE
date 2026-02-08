@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import './CityIndex.css';
 import { apiClient } from '../apiClient';
 import {
@@ -13,12 +13,22 @@ import {
   RefreshCw
 } from 'lucide-react';
 
+// Global cache to persist data across component remounts (e.g., navigating back from detail page)
+// This prevents the "loading..." flash when returning to the list
+const globalCache = {
+  regions: null,
+  reports: null,
+  checkStatusMap: null,
+  lastFetch: 0,
+};
+
 function CityIndex({ onSelectReport, onViewComparison }) {
-  const [regions, setRegions] = useState([]);
-  const [reports, setReports] = useState([]);
-  const [loading, setLoading] = useState(false);
+  // Initialize from cache if available
+  const [regions, setRegions] = useState(() => globalCache.regions || []);
+  const [reports, setReports] = useState(() => globalCache.reports || []);
+  const [loading, setLoading] = useState(() => !globalCache.reports); // Only show loading if no cached data
   const [error, setError] = useState('');
-  const [checkStatusMap, setCheckStatusMap] = useState(new Map()); // 报告ID => 勾稽问题数量
+  const [checkStatusMap, setCheckStatusMap] = useState(() => globalCache.checkStatusMap || new Map()); // 报告ID => 勾稽问题数量
 
   // Determine region type based on naming convention
   const getRegionType = (name) => {
@@ -82,12 +92,14 @@ function CityIndex({ onSelectReport, onViewComparison }) {
   }, [path]);
 
   // Fetch consistency check counts for reports (optimized with batch API)
-  const [checkStatusLoaded, setCheckStatusLoaded] = useState(false);
+  const [checkStatusLoaded, setCheckStatusLoaded] = useState(() => globalCache.checkStatusMap ? true : false);
 
   const fetchCheckStatusForReports = useCallback(async (reportList) => {
-    setCheckStatusLoaded(false);
+    // Don't reset checkStatusLoaded if we already have cached data
+    // This prevents "loading" flicker when returning from detail page
     if (reportList.length === 0) {
       setCheckStatusMap(new Map());
+      globalCache.checkStatusMap = new Map();
       setCheckStatusLoaded(true);
       return;
     }
@@ -96,6 +108,7 @@ function CityIndex({ onSelectReport, onViewComparison }) {
       const reportIds = reportList.map(r => r.report_id || r.id).filter(id => id);
       if (!reportIds.length) {
         setCheckStatusMap(new Map());
+        globalCache.checkStatusMap = new Map();
         setCheckStatusLoaded(true);
         return;
       }
@@ -118,16 +131,19 @@ function CityIndex({ onSelectReport, onViewComparison }) {
       });
 
       setCheckStatusMap(statusMap);
+      globalCache.checkStatusMap = statusMap; // Update global cache
+      setCheckStatusLoaded(true);
     } catch (err) {
       console.error('Failed to fetch batch check status:', err);
-      setCheckStatusMap(new Map()); // Empty map on error
-    } finally {
+      // On error, keep existing data instead of clearing
       setCheckStatusLoaded(true);
     }
   }, []);
 
   const fetchAll = useCallback(async (isBackground = false) => {
-    if (!isBackground) {
+    // Only show loading if we have no cached data
+    const hasCachedData = globalCache.reports && globalCache.reports.length > 0;
+    if (!isBackground && !hasCachedData) {
       setLoading(true);
       setError('');
     }
@@ -139,22 +155,33 @@ function CityIndex({ onSelectReport, onViewComparison }) {
       const regionRows = regionsResp.data?.data ?? regionsResp.data ?? [];
       const reportRows = reportsResp.data?.data ?? reportsResp.data ?? [];
 
-      // Update state without flickering
-      setRegions(Array.isArray(regionRows) ? regionRows : []);
-      setReports(Array.isArray(reportRows) ? reportRows : []);
+      // Update state immediately - reports render first
+      const regionsArr = Array.isArray(regionRows) ? regionRows : [];
+      const reportsArr = Array.isArray(reportRows) ? reportRows : [];
 
-      // Fetch consistency check status for all reports
-      if (Array.isArray(reportRows) && reportRows.length > 0) {
-        fetchCheckStatusForReports(reportRows);
+      setRegions(regionsArr);
+      setReports(reportsArr);
+
+      // Update global cache
+      globalCache.regions = regionsArr;
+      globalCache.reports = reportsArr;
+      globalCache.lastFetch = Date.now();
+
+      // IMPORTANT: Set loading=false BEFORE fetching check status
+      // This allows report cards to render immediately while check status loads in background
+      if (!isBackground) setLoading(false);
+
+      // Fetch consistency check status in background (non-blocking)
+      if (reportsArr.length > 0) {
+        fetchCheckStatusForReports(reportsArr);
       }
     } catch (err) {
       if (!isBackground) {
         const message = err.response?.data?.error || err.message || '请求失败';
         setError(`加载城市或报告失败：${message} `);
+        setLoading(false);
       }
       console.error('Background fetch failed:', err);
-    } finally {
-      if (!isBackground) setLoading(false);
     }
   }, [fetchCheckStatusForReports]);
 

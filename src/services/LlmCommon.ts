@@ -73,7 +73,7 @@ export function buildSystemInstruction(): string {
     const table3 = buildTable3Skeleton();
     const system = [
         'You are a professional assistant for extracting structured data from Chinese Government Information Disclosure Annual Reports (政府信息公开工作年度报告).',
-        'Your task is to analyze the OCR text provided by the user and return a JSON object representing the FULL document structure.',
+        'Your task is to analyze the text/Markdown provided by the user and return a JSON object representing the FULL document structure.',
         '',
         'CRITICAL RULE: Return ONLY valid JSON. No markdown formatting.',
         '',
@@ -153,12 +153,12 @@ export async function loadUserText(absolutePath: string, request: LlmParseReques
     // PDF Handling
     if (lower.endsWith('.pdf')) {
         try {
-            const parsed = await PdfParseService.parsePDF(absolutePath, String(request.reportId));
-            if (parsed.success && parsed.document?.extracted_text) {
+            const parsed = await PdfParseService.parsePDFToMarkdown(absolutePath, String(request.reportId));
+            if (parsed.success && parsed.markdown) {
                 return {
-                    text: parsed.document.extracted_text,
+                    text: parsed.markdown,
                     metadata: {
-                        visual_border_missing: parsed.document.metadata.visual_border_missing,
+                        visual_border_missing: parsed.metadata?.visual_border_missing,
                         format: 'pdf'
                     }
                 };
@@ -171,7 +171,7 @@ export async function loadUserText(absolutePath: string, request: LlmParseReques
 
     // HTML Handling
     if (lower.endsWith('.html') || lower.endsWith('.htm')) {
-        const parsed = await HtmlParseService.parseHtml(absolutePath);
+        const parsed = await HtmlParseService.parseHtmlToMarkdown(absolutePath);
         if (parsed.success && parsed.extracted_text) {
             return {
                 text: parsed.extracted_text,
@@ -188,7 +188,7 @@ export async function loadUserText(absolutePath: string, request: LlmParseReques
     if (lower.endsWith('.txt') || lower.endsWith('.md') || lower.endsWith('.json')) {
         try {
             const content = fs.readFileSync(absolutePath, 'utf-8');
-            return { text: content, metadata: { format: 'text' } };
+            return { text: content, metadata: { format: lower.endsWith('.md') ? 'markdown' : 'text' } };
         } catch (error) {
             return { text: `Text read failed. File metadata: ${JSON.stringify(request)}`, metadata: {} };
         }

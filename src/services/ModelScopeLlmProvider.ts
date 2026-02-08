@@ -25,13 +25,8 @@ export class ModelScopeLlmProvider implements LlmProvider {
 
     // Mapping of frontend short codes to real ModelScope Model IDs
     private static readonly MODEL_MAP: Record<string, string> = {
-        'qwen2.5-72b': 'Qwen/Qwen2.5-72B-Instruct',
         'glm-4.7-flash': 'ZhipuAI/GLM-4.7-Flash',
-        'glm-4.6': 'ZhipuAI/GLM-4.6',
-        'mimo-v2': 'XiaomiMiMo/MiMo-V2-Flash',
-        'qwen3-30b': 'Qwen/Qwen3-30B-A3B-Instruct-2507',
         'deepseek-v3': 'deepseek-ai/DeepSeek-V3.2',
-        'deepseek-r1-32b': 'deepseek-ai/DeepSeek-R1-Distill-Qwen-32B',
     };
 
     private resolveModelId(shortName: string): string {
@@ -49,7 +44,7 @@ export class ModelScopeLlmProvider implements LlmProvider {
 
         const systemInstructionText = buildSystemInstruction() +
             '\nIMPORTANT: For "text" sections (Section 1, 5, 6), you MUST extract the FULL text content from the original document. Do NOT summarize. Do NOT use placeholders like "..." or "Wait for user content". If the text is present in the document, return it verbatim.\n' +
-            'IMPORTANT: For Tables (Section 2, 3, 4), if a cell is explicitly "Empty" or contains "/", please output "0" for consistency, but try to infer if it means "0". If the document context implies it is "missing data", output "0" but note that we prefer data availability.';
+            'IMPORTANT: Preserve special markers exactly. If a cell contains "/", "-", "—", or "空", output the same string. If a cell is blank, output null or "". Only output 0 when the cell explicitly shows "0".';
 
         const loaded = await loadUserText(absolutePath, request);
         let userText = loaded.text;
@@ -150,6 +145,7 @@ export class ModelScopeLlmProvider implements LlmProvider {
                 provider: this.provider,
                 model: this.model,
                 output,
+                sourceText: userText,
             };
 
         } catch (error) {
@@ -229,6 +225,7 @@ export class ModelScopeLlmProvider implements LlmProvider {
                         provider: this.provider,
                         model: this.model,
                         output,
+                        sourceText: userText,
                     };
                 } catch (backupError: any) {
                     console.error('[ModelScope] Backup key also failed:', backupError.message);

@@ -45,7 +45,7 @@ export class ZhipuLlmProvider implements LlmProvider {
 
         const systemInstructionText = buildSystemInstruction() +
             '\nIMPORTANT: For "text" sections (Section 1, 5, 6), you MUST extract the FULL text content from the original document. Do NOT summarize. Do NOT use placeholders like "..." or "Wait for user content". If the text is present in the document, return it verbatim.\n' +
-            'IMPORTANT: For Tables (Section 2, 3, 4), if a cell is explicitly "Empty" or contains "/", please output "0" for consistency, but try to infer if it means "0". If the document context implies it is "missing data", output "0" but note that we prefer data availability.';
+            'IMPORTANT: Preserve special markers exactly. If a cell contains "/", "-", "—", or "空", output the same string. If a cell is blank, output null or "". Only output 0 when the cell explicitly shows "0".';
 
         const loaded = await loadUserText(absolutePath, request);
         let userText = loaded.text;
@@ -121,6 +121,7 @@ export class ZhipuLlmProvider implements LlmProvider {
                 provider: this.provider,
                 model: this.model,
                 output,
+                sourceText: userText,
             };
 
         } catch (error: any) {

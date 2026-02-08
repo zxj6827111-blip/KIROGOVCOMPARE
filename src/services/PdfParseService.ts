@@ -101,7 +101,7 @@ function buildLineText(lineItems: Array<TextItem & { __x: number; __y: number; _
 
   if (!parts.length) return '';
 
-  const numericish = (t: string) => /^\d+(\.\d+)?$/.test(t) || /^\d+(,\d{3})*(\.\d+)?$/.test(t);
+  const numericish = (t: string) => /^\d+(\.?\d+)?$/.test(t) || /^\d+(,\d{3})*(\.?\d+)?$/.test(t);
   const flatText = parts.join(' ');
   const tokens = flatText.split(/\s+/g).filter(Boolean);
   const numericCount = tokens.filter(numericish).length;
@@ -112,12 +112,17 @@ function buildLineText(lineItems: Array<TextItem & { __x: number; __y: number; _
   const colBreaks = gaps.filter((g) => g > 18).length;
   const tableLike = !hasDateNarrative && (colBreaks >= 2 || (colBreaks >= 1 && (hasCountWords || numericCount >= 3)));
 
+  // Use Markdown table format for table-like content
+  if (tableLike && parts.length >= 3) {
+    // Format as Markdown table row
+    return '| ' + parts.join(' | ') + ' |';
+  }
+
+  // Non-table content: join normally
   let out = parts[0];
   for (let i = 1; i < parts.length; i++) {
     const gap = gaps[i - 1] ?? 0;
-    if (gap > 18 && tableLike) {
-      out = out.trimEnd() + ' | ' + parts[i];
-    } else if (gap > 1) {
+    if (gap > 1) {
       const sep = isMostlyCjk(parts[i - 1]) && isMostlyCjk(parts[i]) ? '' : ' ';
       out += sep + parts[i];
     } else {
@@ -125,7 +130,7 @@ function buildLineText(lineItems: Array<TextItem & { __x: number; __y: number; _
     }
   }
 
-  return out.replace(/\s+\|\s+/g, ' | ').replace(/\s{2,}/g, ' ').trim();
+  return out.replace(/\s{2,}/g, ' ').trim();
 }
 
 function isHeadingLine(line: string): boolean {
@@ -156,23 +161,109 @@ function splitIntoSections(lines: string[]): PdfSection[] {
   let paragraphBuf: string[] = [];
   let tableBuf: string[] = [];
 
+  // Identify table type based on content
+  const identifyTableType = (rows: string[][]): { type: string; title: string } | null => {
+    const flatText = rows.map(r => r.join(' ')).join(' ').toLowerCase();
+
+    // 表四：行政复议、行政诉讼
+    if (flatText.includes('行政复议') || flatText.includes('行政诉讼')) {
+      return { type: 'table_4', title: '## 表四：政府信息公开行政复议、行政诉讼情况' };
+    }
+
+    // 表三：申请情况
+    if (flatText.includes('本年新收') || flatText.includes('上年结转') ||
+      flatText.includes('予以公开') || flatText.includes('自然人')) {
+      return { type: 'table_3', title: '## 表三：收到和处理政府信息公开申请情况' };
+    }
+
+    // 表二：主动公开
+    if (flatText.includes('规章') || flatText.includes('规范性文件') ||
+      flatText.includes('行政许可') || flatText.includes('行政处罚')) {
+      return { type: 'table_2', title: '## 表二：主动公开政府信息情况' };
+    }
+
+    return null;
+  };
+
+  // Check if this is Table 4 (complex multi-header)
+  const isTable4Complex = (rows: string[][]): boolean => {
+    const flatText = rows.map(r => r.join(' ')).join(' ');
+    return flatText.includes('行政复议') && flatText.includes('行政诉讼');
+  };
+
+  // Convert Table 4 to split format
+  const convertTable4ToSplitFormat = (rows: string[][]): string => {
+    let result = '\n## 表四：政府信息公开行政复议、行政诉讼情况\n\n';
+
+    // Find data row (usually last row with mostly numbers)
+    let dataRow: string[] = [];
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const row = rows[i];
+      const numericCount = row.filter(c => /^\d+$/.test(c)).length;
+      if (numericCount >= 5) {
+        dataRow = row;
+        break;
+      }
+    }
+
+    if (dataRow.length >= 15) {
+      const headers = ['结果维持', '结果纠正', '其他结果', '尚未审结', '总计'];
+
+      result += '### 行政复议\n';
+      result += '| ' + headers.join(' | ') + ' |\n';
+      result += '|' + headers.map(() => '---').join('|') + '|\n';
+      result += '| ' + dataRow.slice(0, 5).join(' | ') + ' |\n\n';
+
+      result += '### 行政诉讼（未经复议直接起诉）\n';
+      result += '| ' + headers.join(' | ') + ' |\n';
+      result += '|' + headers.map(() => '---').join('|') + '|\n';
+      result += '| ' + dataRow.slice(5, 10).join(' | ') + ' |\n\n';
+
+      result += '### 行政诉讼（复议后起诉）\n';
+      result += '| ' + headers.join(' | ') + ' |\n';
+      result += '|' + headers.map(() => '---').join('|') + '|\n';
+      result += '| ' + dataRow.slice(10, 15).join(' | ') + ' |\n';
+    } else {
+      // Fallback to normal format
+      result += '| ' + rows[0]?.join(' | ') + ' |\n';
+      result += '|' + (rows[0] || []).map(() => '---').join('|') + '|\n';
+      for (let i = 1; i < rows.length; i++) {
+        result += '| ' + rows[i].join(' | ') + ' |\n';
+      }
+    }
+
+    return result;
+  };
+
   const flushTable = () => {
     if (!tableBuf.length) return;
     const rows = tableBuf
-      .map((row) => row.split('|').map((c) => c.trim()).filter(Boolean))
-      .filter((cells) => cells.length >= 2);
+      .map((row) => row.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim()))
+      .filter((cells) => {
+        if (cells.length < 2) return false;
+        const isSeparator = cells.every((c) => c === '' || /^[-:\s]+$/.test(c));
+        return !isSeparator;
+      });
     if (!rows.length) {
       tableBuf = [];
       return;
     }
-    const maxCols = rows.reduce((acc, r) => Math.max(acc, r.length), 0);
-    current.tables.push({
-      title: null,
-      columns: maxCols,
-      rows: rows.map((cells) => ({
-        cells: Array.from({ length: maxCols }).map((_, idx) => ({ content: cells[idx] ?? '' })),
-      })),
-    });
+
+    // Check if this is Table 4 and needs special handling
+    if (isTable4Complex(rows)) {
+      const splitFormat = convertTable4ToSplitFormat(rows);
+      current.content.push({ text: splitFormat });
+    } else {
+      const tableInfo = identifyTableType(rows);
+      const maxCols = rows.reduce((acc, r) => Math.max(acc, r.length), 0);
+      current.tables.push({
+        title: tableInfo?.title || null,
+        columns: maxCols,
+        rows: rows.map((cells) => ({
+          cells: Array.from({ length: maxCols }).map((_, idx) => ({ content: cells[idx] ?? '' })),
+        })),
+      });
+    }
     tableBuf = [];
   };
 
@@ -187,7 +278,11 @@ function splitIntoSections(lines: string[]): PdfSection[] {
     // remove leading/trailing space
     const trimmed = line.trim();
 
-    const isTableRow = trimmed.includes(' | ') && trimmed.split('|').length >= 3;
+    // Detect Markdown table row (starts and ends with |)
+    const isMarkdownTableRow = /^\|.*\|$/.test(trimmed) && trimmed.split('|').length >= 3;
+    // Also detect old format with | separators
+    const isOldTableRow = !isMarkdownTableRow && trimmed.includes(' | ') && trimmed.split('|').length >= 3;
+    const isTableRow = isMarkdownTableRow || isOldTableRow;
     const isBlank = trimmed === '';
 
     if (isHeadingLine(trimmed)) {
@@ -206,7 +301,9 @@ function splitIntoSections(lines: string[]): PdfSection[] {
 
     if (isTableRow) {
       flushParagraph();
-      tableBuf.push(trimmed);
+      // Normalize to Markdown format
+      const normalizedRow = isMarkdownTableRow ? trimmed : '| ' + trimmed.split(' | ').join(' | ') + ' |';
+      tableBuf.push(normalizedRow);
       continue;
     }
 
@@ -220,7 +317,62 @@ function splitIntoSections(lines: string[]): PdfSection[] {
   return sections.length ? sections : [{ title: '正文', content: [], tables: [] }];
 }
 
+function buildMarkdownTable(table: PdfTable): string {
+  const rows = table.rows.map((r) => r.cells.map((c) => c.content ?? ''));
+  if (!rows.length) return '';
+  let out = '| ' + rows[0].join(' | ') + ' |\n';
+  out += '|' + rows[0].map(() => '---').join('|') + '|\n';
+  for (let i = 1; i < rows.length; i++) {
+    out += '| ' + rows[i].join(' | ') + ' |\n';
+  }
+  return out.trimEnd();
+}
+
+function buildExtractedTextFromSections(sections: PdfSection[]): string {
+  const lines: string[] = [];
+  for (const section of sections) {
+    if (section.title) lines.push(section.title);
+    for (const para of section.content) {
+      if (para.text) lines.push(para.text);
+    }
+    for (const table of section.tables) {
+      if (table.title) lines.push(table.title);
+      const tableText = buildMarkdownTable(table);
+      if (tableText) lines.push(tableText);
+    }
+    lines.push('');
+  }
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 export class PdfParseService {
+  buildMarkdownFromDocument(document: PdfDocument): string {
+    if (!document) return '';
+    const fromSections = buildExtractedTextFromSections(document.sections || []);
+    return fromSections || document.extracted_text || '';
+  }
+
+  async parsePDFToMarkdown(filePath: string, assetId?: string): Promise<{
+    success: boolean;
+    markdown?: string;
+    metadata?: PdfDocument['metadata'];
+    error?: string;
+    document?: PdfDocument;
+  }> {
+    const parsed = await this.parsePDF(filePath, assetId);
+    if (!parsed.success || !parsed.document) {
+      return { success: false, error: parsed.error };
+    }
+
+    const markdown = this.buildMarkdownFromDocument(parsed.document);
+    return {
+      success: true,
+      markdown,
+      metadata: parsed.document.metadata,
+      document: parsed.document,
+    };
+  }
+
   async parsePDF(filePath: string, _assetId?: string): Promise<ParseResult> {
     try {
       const data = new Uint8Array(await fs.readFile(filePath));
@@ -358,8 +510,9 @@ export class PdfParseService {
         }
       }
 
-      const extractedText = allLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
       const sections = splitIntoSections(allLines);
+      const reconstructedText = buildExtractedTextFromSections(sections);
+      const extractedText = reconstructedText || allLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 
       // Enhanced border detection: check if table regions have strokes
       let visual_border_missing = false;

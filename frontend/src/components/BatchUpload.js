@@ -24,7 +24,7 @@ const extractYearFromFilename = (filename) => {
 // 从文件名提取区域名
 const extractRegionFromFilename = (filename) => {
     // Remove extension and date suffix
-    let name = filename.replace(/\.(pdf|html|htm|txt)$/i, '');
+    let name = filename.replace(/\.(pdf|html|htm|txt|md|markdown)$/i, '');
     // Remove date patterns like _2025-12-30 or -2025-12-30
     name = name.replace(/[-_]\d{4}-\d{2}-\d{2}$/, '');
 
@@ -91,7 +91,7 @@ function BatchUpload({ onClose, isEmbedded = false }) {
     const [isProcessing, setIsProcessing] = useState(false);
     const [currentIndex, setCurrentIndex] = useState(-1);
     const [isDragging, setIsDragging] = useState(false);
-    const [model, setModel] = useState('qwen2.5-72b');
+    const [model, setModel] = useState('deepseek-v3');
     const [editingId, setEditingId] = useState(null);
     const [, setBatchId] = useState(null); // Only setter used for batch tracking
     const fileInputRef = useRef(null);
@@ -519,18 +519,12 @@ function BatchUpload({ onClose, isEmbedded = false }) {
                         onChange={(e) => setModel(e.target.value)}
                         disabled={isProcessing}
                     >
-                        <option value="qwen2.5-72b">通义千问 Qwen2.5-72B (推荐-ModelScope)</option>
+                        <option value="deepseek-v3">DeepSeek V3.2 (ModelScope)</option>
                         <option value="zhipu/glm-4.7-flash">智谱 GLM-4.7-Flash (官方)</option>
                         <option value="glm-4.7-flash">智谱 GLM-4.7-Flash (ModelScope)</option>
-                        <option value="glm-4.6">智谱 GLM-4.6 (ModelScope)</option>
-                        <option value="mimo-v2">小米 MiMo-V2-Flash (ModelScope)</option>
-                        <option value="qwen3-30b">通义千问 Qwen3-30B (ModelScope)</option>
-                        <option value="deepseek-r1-32b">DeepSeek R1-32B (ModelScope)</option>
-                        <option value="deepseek-v3">DeepSeek V3.2 (ModelScope)</option>
                         <option value="gemini/gemini-2.5-flash">Gemini 2.5 Flash</option>
                         <option value="gemini/gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
                         <option value="gemini/gemini-2.5-pro">Gemini 2.5 Pro</option>
-                        <option value="gemini/gemini-3-flash">互政AI-flash</option>
                     </select>
                 </div>
 
@@ -546,7 +540,7 @@ function BatchUpload({ onClose, isEmbedded = false }) {
                         type="file"
                         ref={fileInputRef}
                         onChange={handleFileInputChange}
-                        accept=".pdf,.html,.txt"
+                        accept=".pdf,.html,.txt,.md,.markdown"
                         multiple
                         style={{ display: 'none' }}
                         disabled={isProcessing}
@@ -554,7 +548,7 @@ function BatchUpload({ onClose, isEmbedded = false }) {
                     <div className="drop-hint">
                         <span className="upload-icon"><UploadCloud size={48} strokeWidth={1.5} /></span>
                         <p><strong>点击选择多个文件</strong> 或 <strong>拖拽文件至此</strong></p>
-                        <p className="hint">支持 PDF、HTML 或 TXT 文件，最多 {MAX_FILES} 个</p>
+                        <p className="hint">支持 PDF、HTML、TXT 或 Markdown 文件，最多 {MAX_FILES} 个</p>
                     </div>
                 </div>
 
