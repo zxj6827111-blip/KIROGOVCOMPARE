@@ -21,6 +21,60 @@ function stripMarkdownJsonFences(text: string): string {
     .trim();
 }
 
+/**
+ * 清理 Markdown 标题符号（#, ##, ###等）和表格分隔符
+ * 在 LLM 解析后调用，用于清理最终存入数据库的文本内容
+ */
+function cleanMarkdownSymbols(text: string): string {
+  if (!text || typeof text !== 'string') return text;
+
+  return text
+    // 移除标题符号 # ## ### #### 等（保留标题文字）
+    .replace(/^#{1,6}\s+/gm, '')
+    // 移除 Markdown 表格分隔行 |---|---|
+    .replace(/^\|[-:\s|]+\|$/gm, '')
+    // 清理表格行首尾的 | 符号（可选，取决于您希望的最终格式）
+    // .replace(/^\|\s*/gm, '').replace(/\s*\|$/gm, '')
+    .trim();
+}
+
+/**
+ * 递归清理解析结果中所有文本字段的 Markdown 符号
+ */
+function cleanParsedResult(obj: any): any {
+  if (obj === null || obj === undefined) return obj;
+
+  if (typeof obj === 'string') {
+    return cleanMarkdownSymbols(obj);
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(item => cleanParsedResult(item));
+  }
+
+  if (typeof obj === 'object') {
+    const cleaned: any = {};
+    for (const key of Object.keys(obj)) {
+      const value = obj[key];
+      // 如果字段名匹配目标，则强制进行清理（字符串会被清理，对象会递归）
+      if (key === 'content' || key === 'title' || key === 'text' || key === 'raw_text') {
+        cleaned[key] = cleanParsedResult(value);
+      } else {
+        // 如果字段名不匹配，但值是对象或数组，仍需递归查找内部的目标字段
+        if (typeof value === 'object' && value !== null) {
+          cleaned[key] = cleanParsedResult(value);
+        } else {
+          // 其他基本类型（数字、布尔值、非目标字段的字符串）保持不变
+          cleaned[key] = value;
+        }
+      }
+    }
+    return cleaned;
+  }
+
+  return obj;
+}
+
 function buildTable3Skeleton(): any {
   const results = {
     granted: 0,
@@ -75,9 +129,21 @@ function buildSystemInstruction(): string {
   const table3 = buildTable3Skeleton();
   const system = [
     'You are a professional assistant for extracting structured data from Chinese Government Information Disclosure Annual Reports (政府信息公开工作年度报告).',
-    'Your task is to analyze the OCR text provided by the user and return a JSON object representing the FULL document structure.',
+    'Your task is to analyze the text/Markdown provided by the user and return a JSON object representing the FULL document structure.',
     '',
     'CRITICAL RULE: Return ONLY valid JSON. No markdown formatting.',
+    '',
+    '=== INPUT FORMAT RECOGNITION ===',
+    'The input may contain:',
+    '1. Markdown tables with | separators (e.g., | 项目 | 数值 |)',
+    '2. Section headers like "## 表二：..." or "### 行政复议"',
+    '3. Table type identifiers like "[TABLE_2]", "表三：", etc.',
+    '',
+    'For TABLE_4 (行政复议、行政诉讼情况), the input may be SPLIT into 3 separate sub-tables:',
+    '- ### 行政复议 (5 columns: 结果维持, 结果纠正, 其他结果, 尚未审结, 总计)',
+    '- ### 行政诉讼（未经复议直接起诉）(5 columns)',
+    '- ### 行政诉讼（复议后起诉）(5 columns)',
+    'You MUST recognize this split format and correctly map to reviewLitigationData.',
     '',
     'SECTIONS TO EXTRACT:',
     '1. Overall Situation (一、总体情况) -> type: "text"',
@@ -104,19 +170,49 @@ function buildSystemInstruction(): string {
     '=== CRITICAL DATA EXTRACTION RULES ===',
     'For ALL table cells (table_2, table_3, table_4):',
     '1. If a cell contains a NUMBER, extract it as a number (integer).',
-    '2. If a cell contains "/" or "-" or "—", extract it AS THE STRING "/" or "-" or "—". DO NOT convert to 0.',
+    '2. If a cell contains "/" or "-" or "—" or "空", extract it AS THE STRING "/" or "-" or "空". DO NOT convert to 0.',
     '3. If a cell is BLANK or EMPTY, extract it as null or empty string "". DO NOT convert to 0.',
     '4. Only use 0 when the cell explicitly shows "0".',
     '',
     'This is CRITICAL for data quality auditing. We need to distinguish between:',
     '- A cell that explicitly has value 0',
     '- A cell that is blank/empty (represents missing data)',
-    '- A cell that contains "/" or "-" (represents not applicable)',
+    '- A cell that contains "/" or "-" or "空" (represents not applicable)',
     '',
+    '=== TABLE_3 STRUCTURE (申请情况表) ===',
+    'Look for keywords: 本年新收, 上年结转, 予以公开, 部分公开, 不予公开, 自然人, 法人/其他组织',
+    'Column headers typically: 项目 | 自然人 | 商业企业 | 科研机构 | 公益组织 | 法律服务机构 | 其他 | 总计',
     'CRITICAL for table_3 (Structure below):',
     JSON.stringify(table3, null, 2),
     '',
-    'Administrative Review/Litigation (table_4) extract into reviewLitigationData:',
+    '=== TABLE_4 STRUCTURE (复议诉讼表) ===',
+    'This table may appear in TWO formats:',
+    '',
+    'FORMAT A - Single large table with multi-row headers (complex):',
+    '| | 行政复议 | | | | | 行政诉讼 | ... |',
+    '',
+    'FORMAT B - SPLIT into 3 sub-tables (preferred, easier to parse):',
+    '### 行政复议',
+    '| 结果维持 | 结果纠正 | 其他结果 | 尚未审结 | 总计 |',
+    '| 13 | 1 | 4 | 10 | 28 |',
+    '',
+    '### 行政诉讼（未经复议直接起诉）',
+    '| 结果维持 | 结果纠正 | 其他结果 | 尚未审结 | 总计 |',
+    '| 3 | 0 | 2 | 4 | 9 |',
+    '',
+    '### 行政诉讼（复议后起诉）',
+    '| 结果维持 | 结果纠正 | 其他结果 | 尚未审结 | 总计 |',
+    '| 2 | 0 | 0 | 0 | 2 |',
+    '',
+    'FORMAT C - NARRATIVE TEXT (extract totals only):',
+    'Example: "行政复议28件、未经复议直接起诉9件、复议后起诉2件"',
+    'In this case, extract only the total values:',
+    '- review.total = 28',
+    '- litigationDirect.total = 9',
+    '- litigationPostReview.total = 2',
+    'Set other fields (maintain, correct, other, unfinished) to 0 or null if not specified.',
+    '',
+    'In BOTH cases, extract into reviewLitigationData:',
     JSON.stringify(
       {
         review: { maintain: 0, correct: 0, other: 0, unfinished: 0, total: 0 },
@@ -126,6 +222,12 @@ function buildSystemInstruction(): string {
       null,
       2
     ),
+    '',
+    'MAPPING for table_4:',
+    '- "行政复议" section -> review object',
+    '- "未经复议直接起诉" section -> litigationDirect object',
+    '- "复议后起诉" section -> litigationPostReview object',
+    '- 结果维持 -> maintain, 结果纠正 -> correct, 其他结果 -> other, 尚未审结 -> unfinished, 总计 -> total',
     '',
     'For "text" sections (Section 1, 5, 6): Extract the FULL text content VERBATIM. Do not summarize.',
     '',
@@ -162,12 +264,12 @@ async function loadUserText(absolutePath: string, request: LlmParseRequest): Pro
 
   // PDF Handling
   if (lower.endsWith('.pdf')) {
-    const parsed = await PdfParseService.parsePDF(absolutePath, String(request.reportId));
-    if (parsed.success && parsed.document?.extracted_text) {
+    const parsed = await PdfParseService.parsePDFToMarkdown(absolutePath, String(request.reportId));
+    if (parsed.success && parsed.markdown) {
       return {
-        text: parsed.document.extracted_text,
+        text: parsed.markdown,
         metadata: {
-          visual_border_missing: parsed.document.metadata.visual_border_missing,
+          visual_border_missing: parsed.metadata?.visual_border_missing,
           format: 'pdf'
         }
       };
@@ -177,7 +279,7 @@ async function loadUserText(absolutePath: string, request: LlmParseRequest): Pro
 
   // HTML Handling
   if (lower.endsWith('.html') || lower.endsWith('.htm')) {
-    const parsed = await HtmlParseService.parseHtml(absolutePath);
+    const parsed = await HtmlParseService.parseHtmlToMarkdown(absolutePath);
     if (parsed.success && parsed.extracted_text) {
       return {
         text: parsed.extracted_text,
@@ -194,7 +296,7 @@ async function loadUserText(absolutePath: string, request: LlmParseRequest): Pro
   if (lower.endsWith('.txt') || lower.endsWith('.md') || lower.endsWith('.json')) {
     try {
       const content = fs.readFileSync(absolutePath, 'utf-8');
-      return { text: content, metadata: { format: 'text' } };
+      return { text: content, metadata: { format: lower.endsWith('.md') ? 'markdown' : 'text' } };
     } catch (error) {
       return { text: `Text read failed. File metadata: ${JSON.stringify(request)}`, metadata: {} };
     }
@@ -219,7 +321,7 @@ export class GeminiLlmProvider implements LlmProvider {
     // Improved prompt to handle formatting issues
     const systemInstructionText = buildSystemInstruction() +
       '\nIMPORTANT: For "text" sections (Section 1, 5, 6), you MUST extract the FULL text content from the original document. Do NOT summarize. Do NOT use placeholders like "..." or "Wait for user content". If the text is present in the document, return it verbatim.\n' +
-      'IMPORTANT: For Tables (Section 2, 3, 4), if a cell is explicitly "Empty" or contains "/", please output "0" for consistency, but try to infer if it means "0". If the document context implies it is "missing data", output "0" but note that we prefer data availability.';
+      'IMPORTANT: Preserve special markers exactly. If a cell contains "/", "-", "—", or "空", output the same string. If a cell is blank, output null or "". Only output 0 when the cell explicitly shows "0".';
 
     // Load content using specialized parsers
     const loaded = await loadUserText(absolutePath, request);
@@ -302,10 +404,16 @@ export class GeminiLlmProvider implements LlmProvider {
         },
       };
 
+      // 清理 sections 中的 Markdown 符号（#、|---|等）
+      if (output.sections && Array.isArray(output.sections)) {
+        output.sections = cleanParsedResult(output.sections);
+      }
+
       return {
         provider: this.provider,
         model: this.model,
         output,
+        sourceText: userText,
       };
     } catch (error) {
       if (error instanceof LlmProviderError) {

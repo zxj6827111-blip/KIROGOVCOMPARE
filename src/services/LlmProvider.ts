@@ -9,6 +9,8 @@ export interface LlmParseResult {
   provider: string;
   model: string;
   output: any;
+  // Exact text sent to the LLM after preprocessing/truncation.
+  sourceText?: string;
 }
 
 export interface LlmProvider {

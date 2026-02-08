@@ -66,6 +66,7 @@ export class LlmJobRunner {
   private primaryProvider: LlmProvider | null = null;
   private fallbackProvider: LlmProvider | null = null;
   private parsedJsonColumnExists: boolean | null = null;
+  private rawTextColumnExists: boolean | null = null;
   private currentAbortController: AbortController | null = null;
   private currentJobId: number | null = null;
   private compareWorkersActive = 0; // 当前活跃的比对任务数
@@ -297,6 +298,15 @@ export class LlmJobRunner {
              prompt_version = 'v1'
          WHERE id = $4`,
         [outputJson, parseResult.provider, parseResult.model, job.version_id]);
+    }
+
+    if (typeof parseResult.sourceText === 'string' && await this.hasRawTextColumn()) {
+      await pool.query(
+        `UPDATE report_versions
+         SET raw_text = $1
+         WHERE id = $2`,
+        [parseResult.sourceText, job.version_id]
+      );
     }
 
     // Success: mark as DONE
@@ -759,6 +769,20 @@ export class LlmJobRunner {
     `);
     this.parsedJsonColumnExists = result.rows.length > 0;
     return this.parsedJsonColumnExists;
+  }
+
+  private async hasRawTextColumn(): Promise<boolean> {
+    if (this.rawTextColumnExists !== null) {
+      return this.rawTextColumnExists;
+    }
+
+    const result = await pool.query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_name = 'report_versions' AND column_name = 'raw_text'
+    `);
+    this.rawTextColumnExists = result.rows.length > 0;
+    return this.rawTextColumnExists;
   }
 
   private stringifyOutput(result: LlmParseResult): string {

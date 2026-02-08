@@ -20,7 +20,7 @@ function UploadReport() {
   const [unitName, setUnitName] = useState('');
   const [file, setFile] = useState(null);
   const [, setTextContent] = useState(''); // Only setter used
-  const [model, setModel] = useState('qwen2.5-72b');
+  const [model, setModel] = useState('deepseek-v3');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [isDragging, setIsDragging] = useState(false);
@@ -192,7 +192,7 @@ function UploadReport() {
   // Extract region name from filename
   const extractRegionFromFilename = (filename) => {
     // Remove extension and date suffix
-    let name = filename.replace(/\.(pdf|html|htm|txt)$/i, '');
+    let name = filename.replace(/\.(pdf|html|htm|txt|md|markdown)$/i, '');
     // Remove date patterns like _2025-12-30 or -2025-12-30
     name = name.replace(/[-_]\d{4}-\d{2}-\d{2}$/, '');
 
@@ -298,8 +298,8 @@ function UploadReport() {
             autoMatchRegion(extractedName);
           }
         }
-      } else if (file.type === 'text/plain' || filename.toLowerCase().endsWith('.txt')) {
-        // Read TXT file content directly
+      } else if (file.type === 'text/plain' || filename.toLowerCase().endsWith('.txt') || filename.toLowerCase().endsWith('.md') || filename.toLowerCase().endsWith('.markdown')) {
+        // Read TXT/Markdown file content directly
         const text = await file.text();
         setTextContent(text.slice(0, 10000));
 
@@ -312,7 +312,7 @@ function UploadReport() {
           }
         }
       } else {
-        setTextContent('不支持的文件类型，请上传 PDF、HTML 或 TXT 文件');
+        setTextContent('不支持的文件类型，请上传 PDF、HTML、TXT 或 Markdown 文件');
       }
     } catch (err) {
       console.error('Error processing file:', err);
@@ -504,18 +504,12 @@ function UploadReport() {
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
               >
-                <option value="qwen2.5-72b">通义千问 Qwen2.5-72B (推荐-ModelScope)</option>
+                <option value="deepseek-v3">DeepSeek V3.2 (ModelScope)</option>
                 <option value="zhipu/glm-4.7-flash">智谱 GLM-4.7-Flash (官方)</option>
                 <option value="glm-4.7-flash">智谱 GLM-4.7-Flash (ModelScope)</option>
-                <option value="glm-4.6">智谱 GLM-4.6 (ModelScope)</option>
-                <option value="mimo-v2">小米 MiMo-V2-Flash (ModelScope)</option>
-                <option value="qwen3-30b">通义千问 Qwen3-30B (ModelScope)</option>
-                <option value="deepseek-r1-32b">DeepSeek R1-32B (ModelScope)</option>
-                <option value="deepseek-v3">DeepSeek V3.2 (ModelScope)</option>
                 <option value="gemini/gemini-2.5-flash">Gemini 2.5 Flash</option>
                 <option value="gemini/gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
                 <option value="gemini/gemini-2.5-pro">Gemini 2.5 Pro</option>
-                <option value="gemini/gemini-3-flash">互政AI-flash</option>
               </select>
             </div>
 
@@ -531,7 +525,7 @@ function UploadReport() {
                 type="file"
                 ref={fileInputRef}
                 onChange={handleFileSelect}
-                accept=".pdf,.html,.txt"
+                accept=".pdf,.html,.txt,.md,.markdown"
                 className="hidden"
               />
               {file ? (
@@ -550,7 +544,7 @@ function UploadReport() {
                     <UploadCloud size={48} />
                   </div>
                   <p className="upload-title"><strong>点击上传</strong> 或 <strong>拖拽文件至此</strong></p>
-                  <p className="hint">支持 PDF、HTML 或 TXT 文件</p>
+                  <p className="hint">支持 PDF、HTML、TXT 或 Markdown 文件</p>
                 </div>
               )}
             </div>

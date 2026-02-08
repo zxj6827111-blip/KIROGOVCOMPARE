@@ -711,37 +711,13 @@ export class ConsistencyCheckService {
     /**
      * Generate Visual Audit items (Layer 1)
      * Supports both code-detected (border_missing) and AI-detected (table_border_missing) flags
+     * 
+     * NOTE: 2026-02-06 - 表格边框检测功能已禁用，因为误报率过高
+     * PDF检测的stroke比例算法和HTML的border属性检测都不够准确
      */
-    private generateVisualAuditItems(visualAudit: { border_missing?: boolean; table_border_missing?: boolean; notes?: string } | undefined): ConsistencyItem[] {
-        const items: ConsistencyItem[] = [];
-        if (!visualAudit) return items;
-
-        // Check both possible field names (code detection uses border_missing, AI uses table_border_missing)
-        const hasBorderIssue = visualAudit.border_missing === true || visualAudit.table_border_missing === true;
-
-        if (hasBorderIssue) {
-            items.push({
-                groupKey: 'visual',
-                checkKey: 'visual_border_missing',
-                fingerprint: this.generateFingerprint('visual', 'border_missing', 'lines_count'),
-                title: '视觉审计：表格边框缺失',
-                expr: 'table_has_borders == true',
-                leftValue: 0,
-                rightValue: 1,
-                delta: 1,
-                tolerance: 0,
-                autoStatus: 'FAIL',
-                evidenceJson: {
-                    paths: ['visual_audit.table_border_missing', 'visual_audit.border_missing'],
-                    values: {
-                        border_missing: true,
-                        ai_notes: visualAudit.notes || null,
-                        note: '原始文档的表格缺少可见的边框线'
-                    }
-                }
-            });
-        }
-        return items;
+    private generateVisualAuditItems(_visualAudit: { border_missing?: boolean; table_border_missing?: boolean; notes?: string } | undefined): ConsistencyItem[] {
+        // 功能已禁用 - 直接返回空数组
+        return [];
     }
 
     /**

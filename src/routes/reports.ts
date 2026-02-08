@@ -2,10 +2,13 @@ import express from 'express';
 import multer from 'multer';
 import fs from 'fs';
 import fsPromises from 'fs/promises';
+import path from 'path';
 import pool from '../config/database-llm';
 import { PROJECT_ROOT, UPLOADS_TMP_DIR } from '../config/constants';
 import { reportUploadService } from '../services/ReportUploadService';
 import { consistencyCheckService } from '../services/ConsistencyCheckService';
+import PdfParseService from '../services/PdfParseService';
+import HtmlParseService from '../services/HtmlParseService';
 import { authMiddleware, requirePermission, AuthRequest } from '../middleware/auth';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 
@@ -29,6 +32,7 @@ function parseDbJson(value: any): any {
 
 function hasParsedContent(parsed: any): boolean {
   if (!parsed) return false;
+  if (typeof parsed === 'string') return parsed.trim().length > 0;
   if (Array.isArray(parsed)) return parsed.length > 0;
   if (typeof parsed !== 'object') return false;
   if (Array.isArray(parsed.sections) && parsed.sections.length > 0) return true;
@@ -36,6 +40,64 @@ function hasParsedContent(parsed: any): boolean {
   if (parsed.report_type || parsed.basic_info || parsed.year) return true;
   // Fallback: any non-empty object counts as content
   return Object.keys(parsed).length > 0;
+}
+
+let rawTextColumnExistsCache: boolean | null = null;
+
+async function hasRawTextColumn(): Promise<boolean> {
+  if (rawTextColumnExistsCache !== null) {
+    return rawTextColumnExistsCache;
+  }
+  const result = await pool.query(`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_name = 'report_versions' AND column_name = 'raw_text'
+  `);
+  rawTextColumnExistsCache = result.rows.length > 0;
+  return rawTextColumnExistsCache;
+}
+
+async function rebuildSourceTextFromStorage(storagePath: string, reportId: number): Promise<{ text: string; sourceType: string }> {
+  let absolutePath = storagePath;
+  if (!path.isAbsolute(absolutePath)) {
+    absolutePath = path.join(PROJECT_ROOT, storagePath);
+    if (!fs.existsSync(absolutePath)) {
+      absolutePath = path.join(process.cwd(), storagePath);
+    }
+  }
+
+  if (!fs.existsSync(absolutePath)) {
+    throw new Error(`source_file_not_found:${absolutePath}`);
+  }
+
+  const lowerPath = absolutePath.toLowerCase();
+  if (lowerPath.endsWith('.pdf')) {
+    const parsed = await PdfParseService.parsePDFToMarkdown(absolutePath, String(reportId));
+    if (!parsed.success || !parsed.markdown) {
+      throw new Error(parsed.error || 'pdf_markdown_parse_failed');
+    }
+    return { text: parsed.markdown, sourceType: 'pdf_markdown' };
+  }
+
+  if (lowerPath.endsWith('.html') || lowerPath.endsWith('.htm')) {
+    const parsed = await HtmlParseService.parseHtmlToMarkdown(absolutePath);
+    if (!parsed.success || !parsed.extracted_text) {
+      throw new Error(parsed.error || 'html_markdown_parse_failed');
+    }
+    return { text: parsed.extracted_text, sourceType: 'html_markdown' };
+  }
+
+  const text = await fsPromises.readFile(absolutePath, 'utf8');
+  if (lowerPath.endsWith('.md') || lowerPath.endsWith('.markdown')) {
+    return { text, sourceType: 'markdown' };
+  }
+  if (lowerPath.endsWith('.txt')) {
+    return { text, sourceType: 'text' };
+  }
+  if (lowerPath.endsWith('.json')) {
+    return { text, sourceType: 'json' };
+  }
+  return { text, sourceType: 'text' };
 }
 
 const upload = multer({
@@ -74,11 +136,12 @@ const upload = multer({
     const isPdf = file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf');
     const isHtml = file.mimetype === 'text/html' || file.originalname.toLowerCase().endsWith('.html') || file.originalname.toLowerCase().endsWith('.htm');
     const isTxt = file.mimetype === 'text/plain' || file.originalname.toLowerCase().endsWith('.txt');
+    const isMd = file.mimetype === 'text/markdown' || file.mimetype === 'text/x-markdown' || file.originalname.toLowerCase().endsWith('.md') || file.originalname.toLowerCase().endsWith('.markdown');
 
-    if (isPdf || isHtml || isTxt) {
+    if (isPdf || isHtml || isTxt || isMd) {
       cb(null, true);
     } else {
-      cb(new Error('仅支持 PDF、HTML 或 TXT 文件'));
+      cb(new Error('仅支持 PDF、HTML、TXT 或 Markdown 文件'));
     }
   },
 });
@@ -121,9 +184,10 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
     const isPdf = file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf');
     const isHtml = file.mimetype === 'text/html' || file.originalname.toLowerCase().endsWith('.html') || file.originalname.toLowerCase().endsWith('.htm');
     const isTxt = file.mimetype === 'text/plain' || file.originalname.toLowerCase().endsWith('.txt');
+    const isMd = file.mimetype === 'text/markdown' || file.mimetype === 'text/x-markdown' || file.originalname.toLowerCase().endsWith('.md') || file.originalname.toLowerCase().endsWith('.markdown');
 
-    if (!isPdf && !isHtml && !isTxt) {
-      return res.status(400).json({ error: '仅支持 PDF、HTML 或 TXT 文件' });
+    if (!isPdf && !isHtml && !isTxt && !isMd) {
+      return res.status(400).json({ error: '仅支持 PDF、HTML、TXT 或 Markdown 文件' });
     }
 
     // Fix for garbled filenames
@@ -455,7 +519,7 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
           'manual_edit',
           active.schema_version || 'v1',
           jsonStr,
-          true,
+          false,
           oldVersionId,
           active.ingestion_batch_id ?? null
         ]
@@ -563,7 +627,11 @@ router.get('/reports', authMiddleware, async (req: AuthRequest, res) => {
         r.year,
         r.unit_name,
         rv.id AS active_version_id,
-        rv.parsed_json,
+        CASE
+          WHEN rv.parsed_json IS NULL THEN false
+          WHEN rv.parsed_json::text IN ('{}', 'null', '\"\"') THEN false
+          ELSE true
+        END AS has_content_db,
         (SELECT j.id FROM jobs j WHERE j.report_id = r.id ORDER BY j.id DESC LIMIT 1) AS job_id,
         (SELECT j.status FROM jobs j WHERE j.report_id = r.id ORDER BY j.id DESC LIMIT 1) AS job_status,
         (SELECT j.progress FROM jobs j WHERE j.report_id = r.id ORDER BY j.id DESC LIMIT 1) AS job_progress,
@@ -579,8 +647,14 @@ router.get('/reports', authMiddleware, async (req: AuthRequest, res) => {
 
     return res.json({
       data: result.rows.map((row) => {
-        const parsed = parseDbJson(row.parsed_json);
-        const hasContent = hasParsedContent(parsed);
+        // PostgreSQL may return boolean as: true/false, 't'/'f', 1/0, or 'true'/'false'
+        const hasContentDb = row.has_content_db;
+        let hasContent: boolean;
+        if (hasContentDb === true || hasContentDb === 't' || hasContentDb === 1 || hasContentDb === 'true') {
+          hasContent = true;
+        } else {
+          hasContent = false;
+        }
 
         return {
           report_id: row.report_id,
@@ -634,7 +708,12 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
       SELECT
         r.id as report_id,
         rv.id as version_id,
-        rv.parsed_json,
+
+        CASE
+          WHEN rv.parsed_json IS NULL THEN false
+          WHEN rv.parsed_json::text IN ('{}', 'null', '\"\"') THEN false
+          ELSE true
+        END AS has_content_db,
         rv.check_total,
         rv.check_visual,
         rv.check_structure,
@@ -651,8 +730,14 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
   // Check which versions have actual content
   const contentMap = new Map<number, boolean>();
   for (const v of versionRows) {
-    const parsed = parseDbJson(v.parsed_json);
-    contentMap.set(v.report_id, hasParsedContent(parsed));
+    // PostgreSQL may return boolean as: true/false, 't'/'f', 1/0, or 'true'/'false'
+    const hasContentDb = v.has_content_db;
+    const reportIdNum = Number(v.report_id); // Ensure consistent key type for Map
+    if (hasContentDb === true || hasContentDb === 't' || hasContentDb === 1 || hasContentDb === 'true') {
+      contentMap.set(reportIdNum, true);
+    } else {
+      contentMap.set(reportIdNum, false);
+    }
   }
 
   const result: Record<string, any> = {};
@@ -848,6 +933,104 @@ router.post('/reports/batch-checks/run', authMiddleware, async (req, res) => {
   } catch (error: any) {
     console.error('Error in batch-checks/run:', error);
     return res.status(500).json({ error: 'internal_server_error', message: error.message });
+  }
+});
+
+router.get('/reports/:id/source-text', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const reportId = Number(req.params.id);
+    if (!reportId || Number.isNaN(reportId) || !Number.isInteger(reportId) || reportId < 1) {
+      return res.status(400).json({ error: 'report_id 无效' });
+    }
+
+    const refresh = req.query.refresh === '1' || req.query.refresh === 'true';
+    const full = req.query.full === '1' || req.query.full === 'true';
+    const limitRaw = req.query.limit;
+    let requestedLimit: number | null = null;
+    if (typeof limitRaw === 'string' && limitRaw.trim() !== '') {
+      const parsedLimit = Number(limitRaw);
+      if (!Number.isFinite(parsedLimit) || parsedLimit < 1) {
+        return res.status(400).json({ error: 'limit 无效，必须是正整数' });
+      }
+      requestedLimit = Math.min(Math.floor(parsedLimit), 2_000_000);
+    }
+
+    const rawColumnExists = await hasRawTextColumn();
+    const sourceSql = rawColumnExists ? 'rv.raw_text' : 'NULL::text AS raw_text';
+    const detailRes = await pool.query(
+      `SELECT
+         r.id AS report_id,
+         r.region_id,
+         rv.id AS version_id,
+         rv.storage_path,
+         ${sourceSql}
+       FROM reports r
+       LEFT JOIN report_versions rv ON rv.id = r.active_version_id
+       WHERE r.id = $1
+       LIMIT 1`,
+      [reportId]
+    );
+
+    const row = detailRes.rows[0];
+    if (!row) {
+      return res.status(404).json({ error: 'report 不存在' });
+    }
+
+    const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
+    if (allowedRegionIds) {
+      if (allowedRegionIds.length === 0 || !allowedRegionIds.includes(row.region_id)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+    }
+
+    if (!row.version_id) {
+      return res.status(404).json({ error: 'active_version 不存在' });
+    }
+
+    let sourceText = typeof row.raw_text === 'string' ? row.raw_text : '';
+    let sourceType = sourceText ? 'db_raw_text' : 'none';
+
+    if (refresh || !sourceText) {
+      if (!row.storage_path) {
+        return res.status(404).json({ error: 'source_file_path 不存在' });
+      }
+
+      const rebuilt = await rebuildSourceTextFromStorage(String(row.storage_path), reportId);
+      sourceText = rebuilt.text;
+      sourceType = rebuilt.sourceType;
+
+      if (rawColumnExists) {
+        await pool.query(
+          `UPDATE report_versions
+           SET raw_text = $1
+           WHERE id = $2`,
+          [sourceText, row.version_id]
+        );
+      }
+    }
+
+    if (!sourceText) {
+      return res.status(404).json({ error: 'source_text 不存在' });
+    }
+
+    const totalLength = sourceText.length;
+    const effectiveLimit = full ? totalLength : (requestedLimit ?? 4000);
+    const content = full ? sourceText : sourceText.slice(0, effectiveLimit);
+    const returnedLength = content.length;
+    const truncated = returnedLength < totalLength;
+
+    return res.json({
+      report_id: reportId,
+      version_id: row.version_id,
+      source_type: sourceType,
+      total_length: totalLength,
+      returned_length: returnedLength,
+      truncated,
+      content,
+    });
+  } catch (error: any) {
+    console.error('Error reading source text:', error);
+    return res.status(500).json({ error: 'internal_server_error', message: error?.message || 'unknown_error' });
   }
 });
 

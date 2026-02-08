@@ -11,7 +11,166 @@ export interface HtmlParseResult {
     error?: string;
 }
 
+/**
+ * 识别表格类型（表二、表三、表四）
+ * 基于表格关键字判断
+ */
+function identifyTableType(tableText: string): { type: string; title: string } | null {
+    const text = tableText.toLowerCase();
+
+    // 表四：行政复议、行政诉讼
+    if (text.includes('行政复议') || text.includes('行政诉讼') || text.includes('复议') && text.includes('诉讼')) {
+        return { type: 'table_4', title: '## 表四：政府信息公开行政复议、行政诉讼情况' };
+    }
+
+    // 表三：申请情况（包含特征关键词）
+    if (text.includes('本年新收') || text.includes('上年结转') || text.includes('予以公开') ||
+        text.includes('部分公开') || text.includes('不予公开') || text.includes('自然人') && text.includes('法人')) {
+        return { type: 'table_3', title: '## 表三：收到和处理政府信息公开申请情况' };
+    }
+
+    // 表二：主动公开情况
+    if (text.includes('规章') || text.includes('规范性文件') || text.includes('行政许可') ||
+        text.includes('行政处罚') || text.includes('行政强制') || text.includes('第二十条')) {
+        return { type: 'table_2', title: '## 表二：主动公开政府信息情况' };
+    }
+
+    return null;
+}
+
+/**
+ * 将HTML表格转换为Markdown格式
+ * 处理colspan和rowspan，保持结构完整
+ */
+function convertTableToMarkdown($: any, table: cheerio.Element): string {
+    const rows: string[][] = [];
+    const $table = $(table);
+
+    // 创建一个二维矩阵来处理rowspan
+    const matrix: (string | null)[][] = [];
+    let maxCols = 0;
+
+    $table.find('tr').each((rowIdx: number, tr: cheerio.Element) => {
+        if (!matrix[rowIdx]) matrix[rowIdx] = [];
+
+        let colIdx = 0;
+        $(tr).find('td, th').each((_: number, cell: cheerio.Element) => {
+            const $cell = $(cell);
+            const text = $cell.text().trim().replace(/\s+/g, ' ');
+            const colspan = parseInt($cell.attr('colspan') || '1', 10);
+            const rowspan = parseInt($cell.attr('rowspan') || '1', 10);
+
+            // 找到下一个可用的列位置（跳过被rowspan占用的）
+            while (matrix[rowIdx][colIdx] !== undefined) {
+                colIdx++;
+            }
+
+            // 填充colspan
+            for (let c = 0; c < colspan; c++) {
+                // 填充rowspan
+                for (let r = 0; r < rowspan; r++) {
+                    if (!matrix[rowIdx + r]) matrix[rowIdx + r] = [];
+                    matrix[rowIdx + r][colIdx + c] = (r === 0 && c === 0) ? text : '';
+                }
+            }
+
+            colIdx += colspan;
+        });
+
+        maxCols = Math.max(maxCols, matrix[rowIdx].length);
+    });
+
+    // 统一列数
+    matrix.forEach(row => {
+        while (row.length < maxCols) {
+            row.push('');
+        }
+    });
+
+    // 检测是否是表四（多层复杂表头）
+    const flatText = matrix.map(r => r.join(' ')).join(' ');
+    const isTable4 = flatText.includes('行政复议') && flatText.includes('行政诉讼');
+
+    if (isTable4) {
+        // 表四特殊处理：拆分为多个子表格
+        return convertTable4ToMarkdown(matrix);
+    }
+
+    // 普通表格：转换为Markdown
+    const tableInfo = identifyTableType(flatText);
+    let result = '';
+
+    if (tableInfo) {
+        result += `\n${tableInfo.title}\n\n`;
+    }
+
+    if (matrix.length > 0) {
+        // 第一行作为表头
+        result += '| ' + matrix[0].map(c => c ?? '').join(' | ') + ' |\n';
+        result += '|' + matrix[0].map(() => '---').join('|') + '|\n';
+
+        // 数据行
+        for (let i = 1; i < matrix.length; i++) {
+            const row = matrix[i].map(c => c ?? '');
+            result += '| ' + row.join(' | ') + ' |\n';
+        }
+    }
+
+    return result;
+}
+
+/**
+ * 表四特殊处理：拆分为三个独立的子表格
+ */
+function convertTable4ToMarkdown(matrix: (string | null)[][]): string {
+    let result = '\n## 表四：政府信息公开行政复议、行政诉讼情况\n\n';
+
+    // 寻找数据行（通常是最后一行包含所有数字）
+    let dataRow: string[] = [];
+    for (let i = matrix.length - 1; i >= 0; i--) {
+        const row = matrix[i];
+        const numericCount = row.filter(c => /^\d+$/.test(c || '')).length;
+        if (numericCount >= 5) {
+            dataRow = row.map(c => c ?? '');
+            break;
+        }
+    }
+
+    if (dataRow.length >= 15) {
+        // 标准表四格式：行政复议(5列) + 未经复议直接起诉(5列) + 复议后起诉(5列)
+        const headers = ['结果维持', '结果纠正', '其他结果', '尚未审结', '总计'];
+
+        result += '### 行政复议\n';
+        result += '| ' + headers.join(' | ') + ' |\n';
+        result += '|' + headers.map(() => '---').join('|') + '|\n';
+        result += '| ' + dataRow.slice(0, 5).join(' | ') + ' |\n\n';
+
+        result += '### 行政诉讼（未经复议直接起诉）\n';
+        result += '| ' + headers.join(' | ') + ' |\n';
+        result += '|' + headers.map(() => '---').join('|') + '|\n';
+        result += '| ' + dataRow.slice(5, 10).join(' | ') + ' |\n\n';
+
+        result += '### 行政诉讼（复议后起诉）\n';
+        result += '| ' + headers.join(' | ') + ' |\n';
+        result += '|' + headers.map(() => '---').join('|') + '|\n';
+        result += '| ' + dataRow.slice(10, 15).join(' | ') + ' |\n';
+    } else {
+        // 数据不足，回退到普通格式
+        result += '| ' + matrix[0]?.map(c => c ?? '').join(' | ') + ' |\n';
+        result += '|' + (matrix[0] || []).map(() => '---').join('|') + '|\n';
+        for (let i = 1; i < matrix.length; i++) {
+            result += '| ' + matrix[i].map(c => c ?? '').join(' | ') + ' |\n';
+        }
+    }
+
+    return result;
+}
+
 export class HtmlParseService {
+    async parseHtmlToMarkdown(filePath: string): Promise<HtmlParseResult> {
+        return this.parseHtml(filePath);
+    }
+
     async parseHtml(filePath: string): Promise<HtmlParseResult> {
         try {
             const fileBuffer = await fs.readFile(filePath);
@@ -33,9 +192,18 @@ export class HtmlParseService {
                 }
             }
 
-            const decoder = new TextDecoder(encoding);
-            const content = decoder.decode(fileBuffer);
+            let content = '';
+            try {
+                const decoder = new TextDecoder(encoding);
+                content = decoder.decode(fileBuffer);
+            } catch {
+                const decoder = new TextDecoder('utf-8');
+                content = decoder.decode(fileBuffer);
+            }
             const $ = cheerio.load(content);
+
+            // Remove non-content tags that should never be sent to LLM.
+            $('script, style, noscript, template').remove();
 
             // 1. Visual Audit: Border Detection (Perform on original DOM)
             let visual_border_missing = false;
@@ -58,22 +226,17 @@ export class HtmlParseService {
                 }
             }
 
-            // 2. Extract pure text (preserving table structure)
-            // Replace tables with a structured string representation for LLM
+            // 2. Extract pure text with improved table structure
+            // Convert tables to Markdown format for better LLM parsing
             $('table').each((_, table) => {
-                let tableText = '\n[TABLE_START]\n';
-                $(table).find('tr').each((_, tr) => {
-                    let row: string[] = [];
-                    $(tr).find('td,th').each((_, td) => {
-                        row.push($(td).text().trim());
-                    });
-                    tableText += row.join('\t') + '\n';
-                });
-                tableText += '[TABLE_END]\n';
-                $(table).replaceWith(tableText);
+                const markdownTable = convertTableToMarkdown($, table);
+                $(table).replaceWith(markdownTable);
             });
 
-            const text = $.root().text();
+            // Clean up the text
+            let text = $.root().text();
+            // Remove excessive whitespace but keep structure
+            text = text.replace(/\n{3,}/g, '\n\n').trim();
 
             return {
                 success: true,
@@ -90,3 +253,4 @@ export class HtmlParseService {
 }
 
 export default new HtmlParseService();
+
