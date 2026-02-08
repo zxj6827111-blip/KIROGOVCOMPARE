@@ -1,4 +1,4 @@
-﻿import axios from 'axios';
+import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import { calculateFileHash } from '../utils/fileHash';
