@@ -593,18 +593,23 @@ export class ConsistencyCheckService {
                     name: '上年结转',
                 },
                 {
-                    // 正文中"收到政务公开申请"数量 = (七)总计 + 四、结转下年度
+                    // 正文中"收到政务公开申请"数量 = 本年新收
                     regex: /(?:共计?|合计)?收到.*?(?:政府信息公开|政务公开)?申请.*?(\d+)\s*件/,
                     field: 'totalApplications',
                     table: 'table3',
-                    path: 'tableData.total.results.totalProcessed + tableData.total.results.carriedForward',
-                    getValue: () => {
-                        const totalProcessed = this.parseNumber(tableData?.total?.results?.totalProcessed);
-                        const carriedForward = this.parseNumber(tableData?.total?.results?.carriedForward);
-                        if (totalProcessed === null && carriedForward === null) return null;
-                        return (totalProcessed || 0) + (carriedForward || 0);
-                    },
+                    path: 'tableData.total.newReceived',
+                    getValue: () => this.parseNumber(tableData?.total?.newReceived),
                     name: '收到申请总量',
+                },
+                {
+                    // 新增: "办理"或"答复"总量 = 办理结果总计
+                    // 排除"收到"字样，避免匹配到收到量
+                    regex: /(?:本年|本年度|共|合计)?(?:办理|答复|处理)(?:政府信息公开申请)?(?!.*收到).*?(\d+)\s*件/,
+                    field: 'totalProcessed',
+                    table: 'table3',
+                    path: 'tableData.total.results.totalProcessed',
+                    getValue: () => this.parseNumber(tableData?.total?.results?.totalProcessed),
+                    name: '办理结果总计',
                 },
                 {
                     regex: /结转下年度(?:继续办理)?.*?(\d+)\s*件/,
@@ -615,8 +620,9 @@ export class ConsistencyCheckService {
                     name: '结转下年度',
                 },
                 {
-                    // 增强: 增加"行政复议"的容错，限制中间字符避免跨越匹配
-                    regex: /行政复议[^，。、；]*?(\d+)\s*件/,
+                    // 增强: 增加"行政复议"的容错，确保匹配的是总数
+                    // 排除"尚未审结"等后缀
+                    regex: /行政复议[^，。、；]*?(\d+)\s*件(?!.*(?:尚未审结|结果维持))/,
                     field: 'reviewTotal',
                     table: 'table4',
                     path: 'reviewLitigationData.review.total',
@@ -624,9 +630,8 @@ export class ConsistencyCheckService {
                     name: '行政复议总计',
                 },
                 {
-                    // 新增: 行政诉讼总计 = 未经复议 + 复议后起诉
-                    // 限制中间只能有少量文字（类、案件等），避免跨越"行政复议...134件，行政诉讼...57件"
-                    regex: /行政诉讼[类案件]{0,10}?(\d+)\s*件/,
+                    // 增强: 行政诉讼总计 = 未经复议 + 复议后起诉
+                    regex: /行政诉讼[类案件]{0,10}?(\d+)\s*件(?!.*(?:尚未审结|结果维持))/,
                     field: 'litigationTotal',
                     table: 'table4',
                     path: 'reviewLitigationData.litigationDirect.total + reviewLitigationData.litigationPostReview.total',

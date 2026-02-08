@@ -1,3 +1,4 @@
+
 export interface LlmParseRequest {
   reportId: number;
   versionId: number;
@@ -15,6 +16,8 @@ export interface LlmParseResult {
 
 export interface LlmProvider {
   parse(request: LlmParseRequest, signal?: AbortSignal): Promise<LlmParseResult>;
+  // Optional generation method for non-file tasks
+  generate?(prompt: string, systemInstruction?: string, config?: any): Promise<any>;
 }
 
 export class LlmProviderError extends Error {

@@ -9,7 +9,7 @@ import path from 'path';
 import fs from 'fs';
 import { calculateFileHash } from '../utils/fileHash';
 import { LlmParseRequest, LlmParseResult, LlmProvider, LlmProviderError } from './LlmProvider';
-import { buildSystemInstruction, loadUserText, stripMarkdownJsonFences } from './LlmCommon';
+import { buildStrictParseSystemInstruction, loadUserText, stripMarkdownJsonFences } from './LlmCommon';
 
 export class ZhipuLlmProvider implements LlmProvider {
     private readonly provider = 'zhipu';
@@ -43,9 +43,7 @@ export class ZhipuLlmProvider implements LlmProvider {
         const fileStats = await fs.promises.stat(absolutePath);
         const fileHash = request.fileHash || (await calculateFileHash(absolutePath));
 
-        const systemInstructionText = buildSystemInstruction() +
-            '\nIMPORTANT: For "text" sections (Section 1, 5, 6), you MUST extract the FULL text content from the original document. Do NOT summarize. Do NOT use placeholders like "..." or "Wait for user content". If the text is present in the document, return it verbatim.\n' +
-            'IMPORTANT: Preserve special markers exactly. If a cell contains "/", "-", "—", or "空", output the same string. If a cell is blank, output null or "". Only output 0 when the cell explicitly shows "0".';
+        const systemInstructionText = buildStrictParseSystemInstruction();
 
         const loaded = await loadUserText(absolutePath, request);
         let userText = loaded.text;

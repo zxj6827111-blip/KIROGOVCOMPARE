@@ -343,7 +343,8 @@ export class GeminiLlmProvider implements LlmProvider {
       userText = userText.slice(0, maxChars);
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`;
+    const baseUrl = (process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com').replace(/\/+$/, '');
+    const url = `${baseUrl}/v1beta/models/${this.model}:generateContent`;
 
     try {
       const response = await axios.post<GeminiResponse>(
@@ -429,6 +430,55 @@ export class GeminiLlmProvider implements LlmProvider {
 
       const message = axiosError?.message || 'Gemini request failed';
       throw new LlmProviderError(message, 'gemini_request_error');
+    }
+  }
+
+  async generate(prompt: string, systemInstruction?: string, config?: any): Promise<any> {
+    const baseUrl = (process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com').replace(/\/+$/, '');
+    const url = `${baseUrl}/v1beta/models/${this.model}:generateContent`;
+    const thinkingBudget = Number(config?.thinkingBudget || 0);
+    const generationConfig: any = {
+      responseMimeType: config?.responseMimeType ?? 'application/json',
+      responseSchema: config?.responseSchema,
+      temperature: config?.temperature,
+      maxOutputTokens: config?.maxOutputTokens,
+    };
+    if (Number.isFinite(thinkingBudget) && thinkingBudget > 0) {
+      generationConfig.thinkingConfig = { thinkingBudget: Math.floor(thinkingBudget) };
+    }
+
+    try {
+      const response = await axios.post<GeminiResponse>(
+        url,
+        {
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: prompt }],
+            },
+          ],
+          systemInstruction: systemInstruction ? {
+            parts: [{ text: systemInstruction }],
+          } : undefined,
+          generationConfig,
+        },
+        {
+          params: { key: this.apiKey },
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 120000,
+        }
+      );
+
+      const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) {
+        throw new Error('Gemini response missing content');
+      }
+      return { text };
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response) {
+        throw new Error(`Gemini API Error: ${error.response.status} ${JSON.stringify(error.response.data)}`);
+      }
+      throw error;
     }
   }
 }

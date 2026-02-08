@@ -58,6 +58,16 @@ function resolveProviderAndModel(modelInput?: string): { provider: string; model
 
   const input = modelInput.toLowerCase().trim();
 
+  // 0. Explicit Nvidia prefix
+  if (input.startsWith('nvidia/')) {
+    return { provider: 'nvidia', model: input.replace('nvidia/', '') };
+  }
+
+  // 1. Explicit ModelScope prefix (Priority)
+  if (input.startsWith('modelscope/')) {
+    return { provider: 'modelscope', model: input.replace('modelscope/', '') };
+  }
+
   // 1. Explicit Gemini prefix
   if (input.startsWith('gemini/')) {
     return { provider: 'gemini', model: input.replace('gemini/', '') };
@@ -68,13 +78,19 @@ function resolveProviderAndModel(modelInput?: string): { provider: string; model
     return { provider: 'zhipu', model: input.replace('zhipu/', '') };
   }
 
-  // 3. Qwen / DeepSeek / MiMo -> ModelScope
+  // 3. Qwen / DeepSeek / MiMo / Kimi -> ModelScope
   if (
     input.includes('qwen') ||
     input.includes('deepseek') ||
-    input.includes('mimo')
+    input.includes('mimo') ||
+    input.includes('kimi') ||
+    input.includes('moonshot')
   ) {
-    return { provider: 'modelscope', model: modelInput }; // Keep original case for model ID if needed
+    // If it's explicitly DeepSeek but not nvidia prefix, it might be modelscope or fallback.
+    // Given user wants DeepSeek V3.2 via Nvidia, UploadReport sends 'nvidia/deepseek...', so it hits case 0.
+    // If just 'deepseek', keep as modelscope for legacy? Or switch to nvidia?
+    // Let's keep it modelscope for now as per original code logic, unless nvidia specific.
+    return { provider: 'modelscope', model: modelInput };
   }
 
   // 4. GLM models without zhipu/ prefix -> ModelScope (for backward compatibility)

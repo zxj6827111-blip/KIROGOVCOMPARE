@@ -77,6 +77,18 @@ export function buildSystemInstruction(): string {
         '',
         'CRITICAL RULE: Return ONLY valid JSON. No markdown formatting.',
         '',
+        '=== INPUT FORMAT RECOGNITION ===',
+        'The input may contain:',
+        '1. Markdown tables with | separators (e.g., | 项目 | 数值 |)',
+        '2. Section headers like "## 表二：..." or "### 行政复议"',
+        '3. Table type identifiers like "[TABLE_2]", "表三：", etc.',
+        '',
+        'For TABLE_4 (行政复议、行政诉讼情况), the input may be SPLIT into 3 separate sub-tables:',
+        '- ### 行政复议 (5 columns: 结果维持, 结果纠正, 其他结果, 尚未审结, 总计)',
+        '- ### 行政诉讼（未经复议直接起诉）(5 columns)',
+        '- ### 行政诉讼（复议后起诉）(5 columns)',
+        'You MUST recognize this split format and correctly map to reviewLitigationData.',
+        '',
         'SECTIONS TO EXTRACT:',
         '1. Overall Situation (一、总体情况) -> type: "text"',
         '2. Active Disclosure (二、主动公开政府信息情况) -> type: "table_2"',
@@ -102,19 +114,50 @@ export function buildSystemInstruction(): string {
         '=== CRITICAL DATA EXTRACTION RULES ===',
         'For ALL table cells (table_2, table_3, table_4):',
         '1. If a cell contains a NUMBER, extract it as a number (integer).',
-        '2. If a cell contains "/" or "-" or "—", extract it AS THE STRING "/" or "-" or "—". DO NOT convert to 0.',
+        '2. If a cell contains "/" or "-" or "—" or "空", extract it AS THE STRING "/" or "-" or "空". DO NOT convert to 0.',
         '3. If a cell is BLANK or EMPTY, extract it as null or empty string "". DO NOT convert to 0.',
         '4. Only use 0 when the cell explicitly shows "0".',
         '',
         'This is CRITICAL for data quality auditing. We need to distinguish between:',
         '- A cell that explicitly has value 0',
         '- A cell that is blank/empty (represents missing data)',
-        '- A cell that contains "/" or "-" (represents not applicable)',
+        '- A cell that contains "/" or "-" or "空" (represents not applicable)',
+        '',
+        '=== TABLE_3 STRUCTURE (申请情况表) ===',
+        'Look for keywords: 本年新收, 上年结转, 予以公开, 部分公开, 不予公开, 自然人, 法人/其他组织',
+        'Column headers typically: 项目 | 自然人 | 商业企业 | 科研机构 | 公益组织 | 法律服务机构 | 其他 | 总计',
         '',
         'CRITICAL for table_3 (Structure below):',
         JSON.stringify(table3, null, 2),
         '',
-        'Administrative Review/Litigation (table_4) extract into reviewLitigationData:',
+        '=== TABLE_4 STRUCTURE (复议诉讼表) ===',
+        'This table may appear in TWO formats:',
+        '',
+        'FORMAT A - Single large table with multi-row headers (complex):',
+        '| | 行政复议 | | | | | 行政诉讼 | ... |',
+        '',
+        'FORMAT B - SPLIT into 3 sub-tables (preferred, easier to parse):',
+        '### 行政复议',
+        '| 结果维持 | 结果纠正 | 其他结果 | 尚未审结 | 总计 |',
+        '| 13 | 1 | 4 | 10 | 28 |',
+        '',
+        '### 行政诉讼（未经复议直接起诉）',
+        '| 结果维持 | 结果纠正 | 其他结果 | 尚未审结 | 总计 |',
+        '| 3 | 0 | 2 | 4 | 9 |',
+        '',
+        '### 行政诉讼（复议后起诉）',
+        '| 结果维持 | 结果纠正 | 其他结果 | 尚未审结 | 总计 |',
+        '| 2 | 0 | 0 | 0 | 2 |',
+        '',
+        'FORMAT C - NARRATIVE TEXT (extract totals only):',
+        'Example: "行政复议28件、未经复议直接起诉9件、复议后起诉2件"',
+        'In this case, extract only the total values:',
+        '- review.total = 28',
+        '- litigationDirect.total = 9',
+        '- litigationPostReview.total = 2',
+        'Set other fields (maintain, correct, other, unfinished) to 0 or null if not specified.',
+        '',
+        'In BOTH cases, extract into reviewLitigationData:',
         JSON.stringify(
             {
                 review: { maintain: 0, correct: 0, other: 0, unfinished: 0, total: 0 },
@@ -124,6 +167,12 @@ export function buildSystemInstruction(): string {
             null,
             2
         ),
+        '',
+        'MAPPING for table_4:',
+        '- "行政复议" section -> review object',
+        '- "未经复议直接起诉" section -> litigationDirect object',
+        '- "复议后起诉" section -> litigationPostReview object',
+        '- 结果维持 -> maintain, 结果纠正 -> correct, 其他结果 -> other, 尚未审结 -> unfinished, 总计 -> total',
         '',
         'For "text" sections (Section 1, 5, 6): Extract the FULL text content VERBATIM. Do not summarize.',
         '',
@@ -145,6 +194,14 @@ export function buildSystemInstruction(): string {
     ].join('\n');
 
     return system;
+}
+
+export function buildStrictParseSystemInstruction(): string {
+    return (
+        buildSystemInstruction() +
+        '\nIMPORTANT: For "text" sections (Section 1, 5, 6), you MUST extract the FULL text content from the original document. Do NOT summarize. Do NOT use placeholders like "..." or "Wait for user content". If the text is present in the document, return it verbatim.\n' +
+        'IMPORTANT: Preserve special markers exactly. If a cell contains "/", "-", "—", or "空", output the same string. If a cell is blank, output null or "". Only output 0 when the cell explicitly shows "0".'
+    );
 }
 
 export async function loadUserText(absolutePath: string, request: LlmParseRequest): Promise<LoadedContent> {

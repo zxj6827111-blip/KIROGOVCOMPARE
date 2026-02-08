@@ -27,6 +27,7 @@ export class ModelScopeLlmProvider implements LlmProvider {
     private static readonly MODEL_MAP: Record<string, string> = {
         'glm-4.7-flash': 'ZhipuAI/GLM-4.7-Flash',
         'deepseek-v3': 'deepseek-ai/DeepSeek-V3.2',
+        'kimi-k2.5': 'moonshotai/Kimi-k2.5',
     };
 
     private resolveModelId(shortName: string): string {
