@@ -1,6 +1,5 @@
 param(
   [int]$Port = 8787,
-  [string]$DbPath = "",
   [string]$LogPath = "",
   [switch]$Force,
   [switch]$ShowWindow
@@ -10,9 +9,6 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
-if (-not $DbPath -or $DbPath.Trim().Length -eq 0) {
-  $DbPath = Join-Path $root 'data\llm_ingestion.db'
-}
 if (-not $LogPath -or $LogPath.Trim().Length -eq 0) {
   $logsDir = Join-Path $root 'logs'
   if (-not (Test-Path $logsDir)) { New-Item -ItemType Directory -Path $logsDir | Out-Null }
@@ -50,13 +46,13 @@ if ($listener -and -not $Force) {
 }
 
 $env:PORT = "$Port"
-# DATABASE_TYPE and SQLITE_DB_PATH will be loaded from .env by the Node app
+# Database configuration will be loaded from .env by the Node app.
 
 
 $pidFile = Join-Path $root ".llm-$Port.pid"
 
 Write-Host "Starting LLM server on port $Port..."
-Write-Host "DB: $DbPath"
+Write-Host "DB: PostgreSQL (from .env)"
 Write-Host "Log: $LogPath"
 Write-Host "Err: $errPath"
 

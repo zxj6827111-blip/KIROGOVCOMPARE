@@ -602,19 +602,11 @@ npm run build
 # 迁移脚本会在首次启动时自动执行
 ```
 
-### 数据迁移 (从 SQLite 到 PostgreSQL)
- 
- 本项目包含自动化迁移脚本，可直接将 SQLite 数据（包括孤儿数据处理）迁移至 Postgres：
- 
- ```bash
- # 1. 确保 SQLite 文件存在 (默认在 data/gov-reports-llm.db)
- # 如果是本地上传的，确保路径与 .env 中 SQLITE_DB_PATH 一致
- 
- # 2. 执行迁移 (带 --clean 参数会先清空 Postgres 表)
- node scripts/migrate_sqlite_to_pg.js --clean
- ```
- 
- > **注意**: 脚本已优化，会自动处理外键约束问题，即使存在少量数据不一致也能成功迁移。
+### 数据迁移说明（PG-only）
+
+当前仓库已切换为 PostgreSQL 单数据库模式，不再维护 SQLite 迁移脚本。
+
+如需迁移历史数据，请在离线环境通过 SQL 导入/ETL 工具写入 PostgreSQL，并在导入后执行应用层校验接口进行抽检。
 
 ---
 

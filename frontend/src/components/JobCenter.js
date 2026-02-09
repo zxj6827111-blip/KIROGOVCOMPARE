@@ -1,7 +1,27 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import './JobCenter.css';
 import { apiClient, API_BASE_URL } from '../apiClient';
 import { Trash2, RefreshCw, AlertTriangle, Ban, Eye, Download, RotateCw, Upload, FileDown } from 'lucide-react';
+
+const UPLOAD_POLL_ACTIVE_MS = 3000;
+const UPLOAD_POLL_IDLE_MS = 10000;
+const DOWNLOAD_POLL_ACTIVE_MS = 5000;
+const DOWNLOAD_POLL_IDLE_MS = 12000;
+const HIDDEN_POLL_MS = 30000;
+const BATCH_DELETE_CONCURRENCY = 6;
+
+async function runBatchWithConcurrency(items, worker, concurrency = BATCH_DELETE_CONCURRENCY) {
+    let successCount = 0;
+    for (let i = 0; i < items.length; i += concurrency) {
+        const chunk = items.slice(i, i + concurrency);
+        const settled = await Promise.allSettled(chunk.map(worker));
+        successCount += settled.filter((result) => result.status === 'fulfilled' && result.value === true).length;
+    }
+    return {
+        successCount,
+        failedCount: items.length - successCount,
+    };
+}
 
 function JobCenter() {
     // Pagination
@@ -36,6 +56,13 @@ function JobCenter() {
     const [downloadTotalPages, setDownloadTotalPages] = useState(1);
     const [downloadTotalJobs, setDownloadTotalJobs] = useState(0);
     const [downloadSelectedIds, setDownloadSelectedIds] = useState([]);
+    const [isPageVisible, setIsPageVisible] = useState(() => {
+        if (typeof document === 'undefined') return true;
+        return !document.hidden;
+    });
+
+    const uploadPollInFlightRef = useRef(false);
+    const downloadPollInFlightRef = useRef(false);
 
     // Confirm Dialog State
     const [confirmDialog, setConfirmDialog] = useState({
@@ -43,6 +70,13 @@ function JobCenter() {
         message: '',
         onConfirm: null,
     });
+
+    const hasActiveUploadJobs = jobs.some((job) =>
+        job.status === 'queued' || job.status === 'processing' || job.status === 'running'
+    );
+    const hasActiveDownloadJobs = downloadJobs.some((job) =>
+        job.status === 'queued' || job.status === 'processing' || job.status === 'running'
+    );
 
     const closeConfirm = () => {
         setConfirmDialog({ isOpen: false, message: '', onConfirm: null });
@@ -64,6 +98,10 @@ function JobCenter() {
     };
 
     const loadJobs = useCallback(async (isBackground = false) => {
+        if (isBackground && uploadPollInFlightRef.current) {
+            return;
+        }
+        uploadPollInFlightRef.current = true;
         if (!isBackground) setLoading(true);
         try {
             const params = {
@@ -85,12 +123,17 @@ function JobCenter() {
         } catch (error) {
             console.error('Failed to load jobs:', error);
         } finally {
+            uploadPollInFlightRef.current = false;
             if (!isBackground) setLoading(false);
         }
     }, [currentPage, filters]);
 
     // Load download (PDF export) jobs
     const loadDownloadJobs = useCallback(async (isBackground = false) => {
+        if (isBackground && downloadPollInFlightRef.current) {
+            return;
+        }
+        downloadPollInFlightRef.current = true;
         if (!isBackground) setDownloadLoading(true);
         try {
             const resp = await apiClient.get('/pdf-jobs', {
@@ -108,9 +151,18 @@ function JobCenter() {
         } catch (error) {
             console.error('Failed to load download jobs:', error);
         } finally {
+            downloadPollInFlightRef.current = false;
             if (!isBackground) setDownloadLoading(false);
         }
     }, [downloadCurrentPage]);
+
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            setIsPageVisible(!document.hidden);
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }, []);
 
     // Load regions for filter
     useEffect(() => {
@@ -128,16 +180,24 @@ function JobCenter() {
 
     // Load jobs when filters or page changes
     useEffect(() => {
-        loadJobs();
-    }, [loadJobs]);
+        if (activeTab === 'upload') {
+            loadJobs();
+        }
+    }, [activeTab, loadJobs]);
 
     // Auto-refresh polling (keep current page)
     useEffect(() => {
+        if (activeTab !== 'upload') return;
+        const intervalMs = !isPageVisible
+            ? HIDDEN_POLL_MS
+            : hasActiveUploadJobs
+                ? UPLOAD_POLL_ACTIVE_MS
+                : UPLOAD_POLL_IDLE_MS;
         const intervalId = setInterval(() => {
             loadJobs(true); // isBackground=true
-        }, 3000);
+        }, intervalMs);
         return () => clearInterval(intervalId);
-    }, [loadJobs]);
+    }, [activeTab, hasActiveUploadJobs, isPageVisible, loadJobs]);
 
     // Load download jobs when tab is 'download'
     useEffect(() => {
@@ -149,11 +209,16 @@ function JobCenter() {
     // Auto-refresh for download jobs
     useEffect(() => {
         if (activeTab !== 'download') return;
+        const intervalMs = !isPageVisible
+            ? HIDDEN_POLL_MS
+            : hasActiveDownloadJobs
+                ? DOWNLOAD_POLL_ACTIVE_MS
+                : DOWNLOAD_POLL_IDLE_MS;
         const intervalId = setInterval(() => {
             loadDownloadJobs(true);
-        }, 5000);
+        }, intervalMs);
         return () => clearInterval(intervalId);
-    }, [activeTab, loadDownloadJobs]);
+    }, [activeTab, hasActiveDownloadJobs, isPageVisible, loadDownloadJobs]);
 
     const handleFilterChange = (key, value) => {
         setFilters((prev) => ({ ...prev, [key]: value }));
@@ -374,18 +439,21 @@ function JobCenter() {
     const handleBatchDeleteDownload = () => {
         if (downloadSelectedIds.length === 0) return;
         showConfirm(`确定要删除选中的 ${downloadSelectedIds.length} 个下载任务吗？`, async () => {
-            let successCount = 0;
-            for (const jobId of downloadSelectedIds) {
-                try {
-                    await apiClient.delete(`/pdf-jobs/${jobId}`);
-                    successCount++;
-                } catch (err) {
-                    console.error('Failed to delete download job:', jobId, err);
+            const { successCount, failedCount } = await runBatchWithConcurrency(
+                downloadSelectedIds,
+                async (jobId) => {
+                    try {
+                        await apiClient.delete(`/pdf-jobs/${jobId}`);
+                        return true;
+                    } catch (err) {
+                        console.error('Failed to delete download job:', jobId, err);
+                        return false;
+                    }
                 }
-            }
+            );
             setDownloadSelectedIds([]);
             loadDownloadJobs();
-            alert(`已删除 ${successCount} 个任务`);
+            alert(`已删除 ${successCount} 个任务，失败 ${failedCount} 个`);
         });
     };
 

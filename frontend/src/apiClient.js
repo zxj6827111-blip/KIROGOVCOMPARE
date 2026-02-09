@@ -60,7 +60,14 @@ export const isAuthenticated = () => {
 // Helper to get current user
 export const getCurrentUser = () => {
   const userStr = localStorage.getItem('admin_user');
-  return userStr ? JSON.parse(userStr) : null;
+  if (!userStr) return null;
+  try {
+    return JSON.parse(userStr);
+  } catch {
+    // Corrupted storage should not crash app boot.
+    localStorage.removeItem('admin_user');
+    return null;
+  }
 };
 
 // Helper to logout

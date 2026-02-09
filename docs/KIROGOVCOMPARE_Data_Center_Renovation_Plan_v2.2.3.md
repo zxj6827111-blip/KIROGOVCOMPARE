@@ -1,4 +1,4 @@
-# KIROGOVCOMPARE Data Center Renovation Plan v2.2.3
+﻿# KIROGOVCOMPARE Data Center Renovation Plan v2.2.3
 
 **Version**: 2.2.3 (Full 合并版 — 可单文件交付)  
 **Date**: 2026-01-13  
@@ -39,7 +39,7 @@
 3. **SQLite 触发器**：唯一活动版本约束
 4. **metric_dictionary 双库 DDL 示例**：PG + SQLite 完整 DDL
 5. **CI 静态扫描规范**：SQLite Migration 禁用关键字检测
-6. **Schema 同构验收**：`schema_pg.json` vs `schema_sqlite.json` 对比规则
+6. **Schema 同构验收**：`schema_pg.json（当前基线）` 对比规则
 
 ---
 
@@ -229,7 +229,7 @@ CREATE INDEX idx_cells_table ON cells(version_id, table_id);
 | `TIMESTAMP` | `TEXT` | 使用 `datetime('now')` |
 | `NUMERIC` | `REAL` | 浮点数处理 |
 
-> **强制约束（端到端规则）**：`migrations/sqlite/*.sql` 中 **禁止出现** 以下 PG 专有类型或表达式：
+> **强制约束（端到端规则）**：`migrations/postgres/*.sql` 中 **禁止出现** 以下 PG 专有类型或表达式：
 > - `SERIAL`、`BIGSERIAL`
 > - `UUID`（直接作为类型）
 > - `JSONB`、`JSON`
@@ -238,7 +238,7 @@ CREATE INDEX idx_cells_table ON cells(version_id, table_id);
 
 ### 4.5 CI 静态扫描规范（SQLite Migration 类型检查）
 
-**扫描范围**：仅 `migrations/sqlite/*.sql`
+**扫描范围**：仅 `migrations/postgres/*.sql`
 
 **扫描规则**：
 1. 读取文件内容
@@ -802,12 +802,12 @@ Facts/Derived 指标值
 | 交付物 | 验收条件 |
 |--------|----------|
 | `migrations/pg/*.sql` | PG 可执行 |
-| `migrations/sqlite/*.sql` | SQLite 可执行，无 PG 专有类型 |
+| `migrations/postgres/*.sql` | PostgreSQL 可执行，符合当前约束 |
 | `src/services/MaterializeService.ts` | 单元测试覆盖率 ≥80% |
 | `metric_dictionary` seed 数据 | ≥10 条三表相关指标 |
 
 **双库 Migration 交付规范**：
-- 必须同时提供 `migrations/pg/*.sql` 与 `migrations/sqlite/*.sql`
+- 必须同时提供 `migrations/pg/*.sql` 与 `migrations/postgres/*.sql`
 - 或提供基于抽象层的双库兼容生成脚本
 - **严禁**：在 SQLite Migration 中出现 PG 专有类型
 
@@ -895,7 +895,7 @@ Facts/Derived 指标值
       "name": "unique_active_version",
       "description": "Each metric_key can have at most one row with deprecated_at IS NULL",
       "pg_implementation": "UNIQUE INDEX WHERE deprecated_at IS NULL",
-      "sqlite_implementation": "BEFORE INSERT/UPDATE TRIGGER",
+      "pg_implementation": "BEFORE INSERT/UPDATE TRIGGER",
       "validation": "Validated via behavioral test cases in section 11.3"
     }
   ]
@@ -920,7 +920,7 @@ Facts/Derived 指标值
 
 **静态验收（Schema 对比）**：
 1. 分别在 PG 和 SQLite 执行 Migration
-2. 导出 `schema_pg.json` 与 `schema_sqlite.json`
+2. 导出 `schema_pg.json` 与 `schema_pg.json`
 3. 对比两个 JSON：
    - 表名集合必须一致
    - 每张表的字段名集合必须一致
@@ -986,3 +986,4 @@ Facts/Derived 指标值
 ---
 
 *文档版本：v2.2.3 (Full) | 最后更新：2026-01-13 | 作者：Data Center Team*
+

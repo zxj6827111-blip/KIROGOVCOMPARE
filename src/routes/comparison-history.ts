@@ -182,36 +182,40 @@ router.get('/tree', authMiddleware, async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // 1. Fetch all regions
+    // 1. Fetch all regions and build lookup index for O(1) parent traversal
     const regionsRes = await pool.query(`
       SELECT id, name, parent_id, level, sort_order
       FROM regions
       ORDER BY level ASC, sort_order ASC, name ASC
     `);
     const allRegions = regionsRes.rows;
+    const allRegionMap = new Map<number, any>();
+    for (const region of allRegions) {
+      allRegionMap.set(Number(region.id), region);
+    }
 
     // Filter regions by allowed IDs if data scope is set
-    const regions = allowedRegionIds
-      ? allRegions.filter((r: any) => allowedRegionIds!.includes(r.id))
+    const scopedRegions = allowedRegionIds
+      ? allRegions.filter((r: any) => allowedRegionIds!.includes(Number(r.id)))
       : allRegions;
 
-    // Also include parent regions that are needed for hierarchy but not in scope
-    const regionIds = new Set(regions.map((r: any) => r.id));
-    const additionalParentIds = new Set<number>();
-    for (const region of regions) {
-      let parentId = region.parent_id;
-      while (parentId && !regionIds.has(parentId)) {
-        additionalParentIds.add(parentId);
-        const parent = allRegions.find((r: any) => r.id === parentId);
-        if (parent) {
-          parentId = parent.parent_id;
-        } else {
+    // Include required ancestors to keep hierarchy complete for scoped users
+    const combinedRegionMap = new Map<number, any>();
+    for (const region of scopedRegions) {
+      combinedRegionMap.set(Number(region.id), region);
+    }
+
+    for (const region of scopedRegions) {
+      let parentId = Number(region.parent_id);
+      while (parentId && !combinedRegionMap.has(parentId)) {
+        const parent = allRegionMap.get(parentId);
+        if (!parent) {
           break;
         }
+        combinedRegionMap.set(parentId, parent);
+        parentId = Number(parent.parent_id);
       }
     }
-    const parentRegions = allRegions.filter((r: any) => additionalParentIds.has(r.id));
-    const combinedRegions = [...regions, ...parentRegions];
 
     // 2. Build conditions for comparison aggregation
     const conditions: string[] = [];
@@ -248,7 +252,7 @@ router.get('/tree', authMiddleware, async (req: AuthRequest, res: Response) => {
 
     const statsMap = new Map<number, { total: number; issues: number }>();
     for (const row of statsRes.rows) {
-      statsMap.set(row.region_id, {
+      statsMap.set(Number(row.region_id), {
         total: parseInt(row.total_comparisons) || 0,
         issues: parseInt(row.total_issues) || 0
       });
@@ -264,39 +268,56 @@ router.get('/tree', authMiddleware, async (req: AuthRequest, res: Response) => {
       children: TreeNode[];
     }
 
-    const regionMap = new Map<number, any>();
-    for (const r of combinedRegions) {
-      regionMap.set(r.id, r);
+    // Build children adjacency map once to avoid repeated scans
+    const childrenByParent = new Map<number, any[]>();
+    for (const region of combinedRegionMap.values()) {
+      const parentId = Number(region.parent_id) || 0;
+      if (!childrenByParent.has(parentId)) {
+        childrenByParent.set(parentId, []);
+      }
+      childrenByParent.get(parentId)!.push(region);
     }
 
+    const sortRegions = (a: any, b: any): number => {
+      const orderA = Number(a?.sort_order) || 0;
+      const orderB = Number(b?.sort_order) || 0;
+      if (orderA !== orderB) return orderA - orderB;
+      return String(a?.name || '').localeCompare(String(b?.name || ''));
+    };
+
+    for (const regions of childrenByParent.values()) {
+      regions.sort(sortRegions);
+    }
+
+    const nodeMemo = new Map<number, TreeNode | null>();
+
     // Recursive function to build node and accumulate stats from children
-    const buildNode = (regionId: number, visited: Set<number> = new Set()): TreeNode | null => {
-      if (visited.has(regionId)) return null; // Prevent cycles
-      visited.add(regionId);
-
-      const region = regionMap.get(regionId);
-      if (!region) return null;
-
-      // Find children
-      const children: TreeNode[] = [];
-      for (const r of combinedRegions) {
-        if (r.parent_id === regionId) {
-          const childNode = buildNode(r.id, visited);
-          if (childNode) {
-            children.push(childNode);
-          }
-        }
+    const buildNode = (regionId: number, visiting: Set<number> = new Set()): TreeNode | null => {
+      if (nodeMemo.has(regionId)) {
+        return nodeMemo.get(regionId)!;
+      }
+      if (visiting.has(regionId)) {
+        nodeMemo.set(regionId, null);
+        return null; // Cycle protection
       }
 
-      // Sort children by sort_order then name
-      children.sort((a, b) => {
-        const regionA = regionMap.get(a.id);
-        const regionB = regionMap.get(b.id);
-        const orderA = regionA?.sort_order || 0;
-        const orderB = regionB?.sort_order || 0;
-        if (orderA !== orderB) return orderA - orderB;
-        return a.name.localeCompare(b.name);
-      });
+      const region = combinedRegionMap.get(regionId);
+      if (!region) {
+        nodeMemo.set(regionId, null);
+        return null;
+      }
+
+      const nextVisiting = new Set(visiting);
+      nextVisiting.add(regionId);
+
+      const childRegions = childrenByParent.get(regionId) || [];
+      const children: TreeNode[] = [];
+      for (const childRegion of childRegions) {
+        const childNode = buildNode(Number(childRegion.id), nextVisiting);
+        if (childNode) {
+          children.push(childNode);
+        }
+      }
 
       // Get direct stats for this region
       const directStats = statsMap.get(regionId) || { total: 0, issues: 0 };
@@ -311,15 +332,17 @@ router.get('/tree', authMiddleware, async (req: AuthRequest, res: Response) => {
 
       // If showIssuesOnly and no issues in subtree, skip
       if (showIssuesOnly && totalIssues === 0) {
+        nodeMemo.set(regionId, null);
         return null;
       }
 
       // Skip nodes with no comparisons in subtree (unless they have children with comparisons)
       if (totalComparisons === 0 && children.length === 0) {
+        nodeMemo.set(regionId, null);
         return null;
       }
 
-      return {
+      const node = {
         id: regionId,
         name: region.name,
         level: region.level || 1,
@@ -327,13 +350,17 @@ router.get('/tree', authMiddleware, async (req: AuthRequest, res: Response) => {
         totalIssues,
         children
       };
+      nodeMemo.set(regionId, node);
+      return node;
     };
 
     // Find root nodes (no parent or parent not in our set)
     const rootNodes: TreeNode[] = [];
+    const combinedRegions = Array.from(combinedRegionMap.values());
     for (const r of combinedRegions) {
-      if (!r.parent_id || r.parent_id === 0 || !regionMap.has(r.parent_id)) {
-        const node = buildNode(r.id);
+      const parentId = Number(r.parent_id);
+      if (!parentId || !combinedRegionMap.has(parentId)) {
+        const node = buildNode(Number(r.id));
         if (node) {
           rootNodes.push(node);
         }
@@ -342,8 +369,8 @@ router.get('/tree', authMiddleware, async (req: AuthRequest, res: Response) => {
 
     // Sort root nodes
     rootNodes.sort((a, b) => {
-      const regionA = regionMap.get(a.id);
-      const regionB = regionMap.get(b.id);
+      const regionA = combinedRegionMap.get(a.id);
+      const regionB = combinedRegionMap.get(b.id);
       const orderA = regionA?.sort_order || 0;
       const orderB = regionB?.sort_order || 0;
       if (orderA !== orderB) return orderA - orderB;

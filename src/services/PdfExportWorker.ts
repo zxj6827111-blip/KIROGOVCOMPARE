@@ -1,5 +1,6 @@
 import puppeteer from 'puppeteer';
 import http from 'http';
+import https from 'https';
 import path from 'path';
 import fs from 'fs';
 import pool from '../config/database-llm';
@@ -24,6 +25,8 @@ let isProcessing = false;
 
 // Worker 是否启动
 let isRunning = false;
+let pollIntervalRef: NodeJS.Timeout | null = null;
+let cleanupIntervalRef: NodeJS.Timeout | null = null;
 
 /**
  * 确保导出目录存在
@@ -40,15 +43,17 @@ function ensureExportsDir(): void {
 function isUrlAccessible(url: string): Promise<boolean> {
     return new Promise((resolve) => {
         const urlObj = new URL(url);
+        const isHttps = urlObj.protocol === 'https:';
+        const client = isHttps ? https : http;
         const options = {
             hostname: urlObj.hostname,
-            port: urlObj.port || 80,
-            path: '/',
+            port: urlObj.port || (isHttps ? 443 : 80),
+            path: `${urlObj.pathname || '/'}${urlObj.search || ''}`,
             method: 'HEAD',
             timeout: 3000
         };
 
-        const req = http.request(options, (res) => {
+        const req = client.request(options, (res) => {
             resolve(res.statusCode !== undefined && res.statusCode < 500);
         });
 
@@ -358,14 +363,14 @@ export function startPdfExportWorker(): void {
     ensureExportsDir();
 
     // 启动轮询
-    const pollInterval = setInterval(() => {
+    pollIntervalRef = setInterval(() => {
         if (isRunning) {
             pollAndProcess();
         }
     }, POLL_INTERVAL_MS);
 
     // 每小时清理一次过期文件
-    const cleanupInterval = setInterval(() => {
+    cleanupIntervalRef = setInterval(() => {
         if (isRunning) {
             void cleanupExpiredFiles();
         }
@@ -382,6 +387,14 @@ export function startPdfExportWorker(): void {
  */
 export function stopPdfExportWorker(): void {
     isRunning = false;
+    if (pollIntervalRef) {
+        clearInterval(pollIntervalRef);
+        pollIntervalRef = null;
+    }
+    if (cleanupIntervalRef) {
+        clearInterval(cleanupIntervalRef);
+        cleanupIntervalRef = null;
+    }
     console.log('[PdfExportWorker] Stopped');
 }
 
