@@ -95,17 +95,22 @@ function IssueList({ regionId, regionName, onBack, onSelectReport }) {
         return nodes.map(node => {
             // Clone node to handle children filtering
             const newNode = { ...node };
+
+            // Filter reports within the node based on filterMode
+            if (newNode.reports && filterMode === 'issues') {
+                newNode.reports = newNode.reports.filter(report => report.issue_count > 0);
+            }
+
             if (newNode.children) {
                 newNode.children = filterTree(newNode.children);
             }
             return newNode;
         }).filter(node => {
             if (filterMode === 'all') return true;
-            // Keep if own issues > 0 OR (subtree_issues > 0 AND children still exist after filter)
-            // Note: subtree_issues includes own_issues.
-            // If we filtered children and they are all gone, but own_issues is 0, we drop this node.
-            // Actually simpler: if subtree_issues > 0, we generally keep it.
-            return (node.subtree_issues > 0) || (node.own_issues > 0);
+            // Keep if has reports with issues OR has children with issues
+            const hasReportsWithIssues = node.reports && node.reports.length > 0;
+            const hasChildrenWithIssues = node.children && node.children.length > 0;
+            return hasReportsWithIssues || hasChildrenWithIssues;
         });
     }, [filterMode]);
 
