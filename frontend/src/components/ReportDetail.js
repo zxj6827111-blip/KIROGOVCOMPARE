@@ -829,15 +829,19 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     const parsedJson = saveData?.parsedJson ?? saveData;
     const newVersionId = saveData?.newVersionId;
 
-    setReport({
-      ...report,
-      active_version: {
-        ...report.active_version,
-        parsed_json: parsedJson,
-        version_id: newVersionId ?? report.active_version?.version_id,
-      },
+    setReport((prevReport) => {
+      if (!prevReport) return prevReport;
+      return {
+        ...prevReport,
+        active_version: {
+          ...prevReport.active_version,
+          parsed_json: parsedJson,
+          version_id: newVersionId ?? prevReport.active_version?.version_id,
+        },
+      };
     });
     setEditingData(null);
+    fetchHighlights();
     // No need to alert here - ParsedDataEditor already shows alert
   };
 
