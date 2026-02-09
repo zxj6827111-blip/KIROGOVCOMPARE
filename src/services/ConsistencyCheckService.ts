@@ -928,7 +928,177 @@ export class ConsistencyCheckService {
         return items;
     }
 
-    public runChecks(parsedJson: any): ConsistencyItem[] {
+    /**
+     * Generate Year Mismatch Items - 检查正文中年份与报告实际年份的一致性
+     * 例如：2023年报告却在正文中写"本单位2022年度..."，这是明显的年份错误
+     */
+    private generateYearMismatchItems(sections: any[], reportYear: number | null): ConsistencyItem[] {
+        const items: ConsistencyItem[] = [];
+
+        if (!reportYear || reportYear <= 0) {
+            return items;
+        }
+
+        // 获取所有文本内容进行检查
+        const textSections = sections
+            .map((s: any, index: number) => ({
+                content: s.type === 'text' && typeof s.content === 'string' ? s.content : null,
+                title: s.title || s.header || s.heading || `第${this.getChineseNumber(index + 1)}部分`,
+                sectionIndex: index,
+                type: s.type,
+            }))
+            .filter(s => s.content !== null);
+
+        if (textSections.length === 0) {
+            return items;
+        }
+
+        // 用于检测的年份：报告年份及其可能的错误年份
+        // 例如2023年报告，正文应该说的是2023年的工作，不应该是2022年
+        const expectedYear = reportYear;
+        const wrongYears = [reportYear - 1, reportYear + 1]; // 前一年和后一年都可能是错误
+
+        // 匹配在正文中表述年份的模式
+        // 例如：本年(度)、XXXX年度、XXXX年
+        // 特别关注像 "本单位2022年度通过门户网站..." 这样的表述
+        const yearPatterns: Array<{
+            regex: RegExp;
+            description: string;
+            extractYear: (match: RegExpMatchArray) => number | null;
+        }> = [
+                {
+                    // 匹配 "本单位/本机关/我局 XXXX年度" 等表述
+                    regex: /(?:本单位|本机关|我局|我办|本街道|本区|本委|本厅)(\d{4})年[度]?(?:通过|主动|收到|共|公开|受理|办理|处理)/g,
+                    description: '机构自称+年度表述',
+                    extractYear: (match) => parseInt(match[1], 10),
+                },
+                {
+                    // 匹配 "XXXX年度通过门户网站主动公开政府信息" 等表述
+                    regex: /(\d{4})年[度]?(?:通过|本年|全年)?(?:门户网站)?(?:主动公开|政府信息公开|依申请公开|公开)(?:政府信息|年报|工作)/g,
+                    description: '年度+政务公开表述',
+                    extractYear: (match) => parseInt(match[1], 10),
+                },
+                {
+                    // 匹配工作总结性质的年份表述
+                    regex: /(\d{4})年[度]?[:,，]?(?:本机关|本单位|我局)?(?:共|累计|合计)?(?:收到|受理|办理|处理|答复)/g,
+                    description: '年度+工作数据表述',
+                    extractYear: (match) => parseInt(match[1], 10),
+                },
+            ];
+
+        // 记录已发现的年份不一致问题
+        const foundMismatches: Array<{
+            wrongYear: number;
+            context: string;
+            sectionTitle: string;
+            sectionIndex: number;
+            description: string;
+            matchPosition: number; // 用于去重
+        }> = [];
+
+        // 用于去重的集合：章节索引 + 匹配位置
+        const seenPositions = new Set<string>();
+
+        for (const section of textSections) {
+            for (const pattern of yearPatterns) {
+                // 重置 regex 的 lastIndex
+                pattern.regex.lastIndex = 0;
+                let match;
+                while ((match = pattern.regex.exec(section.content)) !== null) {
+                    const mentionedYear = pattern.extractYear(match);
+                    if (mentionedYear && wrongYears.includes(mentionedYear)) {
+                        // 发现年份不一致
+                        const matchStart = match.index;
+
+                        // 基于章节+位置去重（避免不同正则匹配同一位置）
+                        // 使用10个字符的容差范围来判断是否是同一位置
+                        const positionKey = `${section.sectionIndex}:${Math.floor(matchStart / 20)}`;
+                        if (seenPositions.has(positionKey)) {
+                            continue; // 跳过已经记录的位置
+                        }
+                        seenPositions.add(positionKey);
+
+                        // 扩大上下文范围，确保能显示完整的句子
+                        const contextStart = Math.max(0, matchStart - 30);
+                        const contextEnd = Math.min(section.content.length, matchStart + match[0].length + 50);
+                        const context = section.content.substring(contextStart, contextEnd);
+
+                        foundMismatches.push({
+                            wrongYear: mentionedYear,
+                            context: `...${context}...`,
+                            sectionTitle: section.title,
+                            sectionIndex: section.sectionIndex,
+                            description: pattern.description,
+                            matchPosition: matchStart,
+                        });
+                    }
+                }
+            }
+        }
+
+        // 为每个发现的年份不一致问题生成检查项
+        if (foundMismatches.length > 0) {
+            // 如果有多个相同年份的问题，合并为一个检查项
+            const mismatchesByYear = new Map<number, typeof foundMismatches>();
+            for (const mismatch of foundMismatches) {
+                if (!mismatchesByYear.has(mismatch.wrongYear)) {
+                    mismatchesByYear.set(mismatch.wrongYear, []);
+                }
+                mismatchesByYear.get(mismatch.wrongYear)!.push(mismatch);
+            }
+
+            for (const [wrongYear, matches] of Array.from(mismatchesByYear)) {
+                // 构建可展示的上下文文本，格式化为多行显示
+                const contextTexts = matches.slice(0, 5).map((m, idx) =>
+                    `【${idx + 1}】${m.sectionTitle}：${m.context}`
+                );
+                const displayContext = contextTexts.join('\n');
+
+                // 构建详细的匹配信息用于展示
+                const matchDetails = matches.slice(0, 5).map(m => ({
+                    context: m.context,
+                    sectionTitle: m.sectionTitle,
+                    patternType: m.description,
+                    sectionIndex: m.sectionIndex,
+                }));
+
+                items.push({
+                    groupKey: 'quality',
+                    checkKey: `year_mismatch_${wrongYear}`,
+                    fingerprint: this.generateFingerprint('quality', `year_mismatch_${wrongYear}`, 'year_consistency'),
+                    title: `年份不一致：报告年份为${expectedYear}年，但正文中发现${wrongYear}年的表述`,
+                    expr: `text_year == report_year (${expectedYear})`,
+                    leftValue: wrongYear,
+                    rightValue: expectedYear,
+                    delta: Math.abs(wrongYear - expectedYear),
+                    tolerance: 0,
+                    autoStatus: 'FAIL',
+                    evidenceJson: {
+                        paths: matches.map(m => `sections[${m.sectionIndex}].content`),
+                        // 添加 leftPaths 和 rightPaths 以支持前端定位和展示
+                        leftPaths: [`正文中年份表述: ${wrongYear}年`],
+                        rightPaths: [`报告实际年份: ${expectedYear}年`],
+                        values: {
+                            reportYear: expectedYear,
+                            wrongYear: wrongYear,
+                            matchCount: matches.length,
+                            // 提供 context 和 matchedText 供前端展示
+                            context: displayContext,
+                            matchedText: displayContext,
+                            textValue: wrongYear,
+                            // 详细匹配信息
+                            matches: matchDetails,
+                            note: `报告应描述${expectedYear}年的工作，但发现${matches.length}处提及${wrongYear}年的表述，可能是年份错误`
+                        }
+                    }
+                });
+            }
+        }
+
+        return items;
+    }
+
+    public runChecks(parsedJson: any, reportYear?: number | null): ConsistencyItem[] {
         const items: ConsistencyItem[] = [];
 
         // Parse if string
@@ -976,6 +1146,11 @@ export class ConsistencyCheckService {
         items.push(...this.generateSection5GapItems(sections));
         items.push(...this.generateSection6LogicItems(sections));
 
+        // Year Mismatch Check - 检查正文年份与报告年份一致性
+        if (reportYear) {
+            items.push(...this.generateYearMismatchItems(sections, reportYear));
+        }
+
 
         // Table2 placeholder (no rules yet, but group must exist)
         // We add an info item if table2 section exists but has no checks
@@ -1005,6 +1180,21 @@ export class ConsistencyCheckService {
     public async runAndPersist(reportVersionId: number, parsedJson: any): Promise<{ runId: number; items: ConsistencyItem[] }> {
         // ensureDbMigrations(); // Removed: migrations should be handled at app startup
 
+        // Get report year from database for year consistency check
+        let reportYear: number | null = null;
+        try {
+            const yearResult = await pool.query(`
+                SELECT r.year
+                FROM report_versions rv
+                JOIN reports r ON rv.report_id = r.id
+                WHERE rv.id = $1
+                LIMIT 1
+            `, [reportVersionId]);
+            reportYear = yearResult.rows[0]?.year ? Number(yearResult.rows[0].year) : null;
+        } catch (err) {
+            console.warn('[ConsistencyCheck] Failed to get report year:', err);
+        }
+
         const runResult = await pool.query(`
       INSERT INTO report_consistency_runs (report_version_id, status, engine_version, created_at)
       VALUES ($1, 'running', $2, NOW())
@@ -1016,7 +1206,7 @@ export class ConsistencyCheckService {
             throw new Error('Failed to create consistency run');
         }
 
-        const items = this.runChecks(parsedJson);
+        const items = this.runChecks(parsedJson, reportYear);
 
         // Upsert each item, preserving human_status and human_comment
         for (const item of items) {
