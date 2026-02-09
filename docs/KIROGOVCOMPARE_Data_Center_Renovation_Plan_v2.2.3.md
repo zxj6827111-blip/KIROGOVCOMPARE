@@ -1,4 +1,4 @@
-﻿# KIROGOVCOMPARE Data Center Renovation Plan v2.2.3
+# KIROGOVCOMPARE Data Center Renovation Plan v2.2.3
 
 **Version**: 2.2.3 (Full 合并版 — 可单文件交付)  
 **Date**: 2026-01-13  
