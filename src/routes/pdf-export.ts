@@ -1,6 +1,7 @@
 import express, { Response, Router } from 'express';
 import puppeteer from 'puppeteer';
 import http from 'http';
+import https from 'https';
 import path from 'path';
 import pool from '../config/database-llm';
 import { authMiddleware, AuthRequest, generateExpiringToken } from '../middleware/auth';
@@ -8,6 +9,8 @@ import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 
 const router: Router = express.Router();
 const SERVICE_TOKEN_TTL_MS = 5 * 60 * 1000;
+const PDF_EXPORT_DEBUG = process.env.PDF_EXPORT_DEBUG === '1';
+const PDF_EXPORT_HYDRATE_WAIT_MS = Number(process.env.PDF_EXPORT_HYDRATE_WAIT_MS || 1500);
 
 /**
  * Check if a URL is accessible
@@ -15,15 +18,17 @@ const SERVICE_TOKEN_TTL_MS = 5 * 60 * 1000;
 async function isUrlAccessible(url: string): Promise<boolean> {
     return new Promise((resolve) => {
         const urlObj = new URL(url);
+        const isHttps = urlObj.protocol === 'https:';
+        const client = isHttps ? https : http;
         const options = {
             hostname: urlObj.hostname,
-            port: urlObj.port || 80,
-            path: urlObj.pathname,
+            port: urlObj.port || (isHttps ? 443 : 80),
+            path: `${urlObj.pathname || '/'}${urlObj.search || ''}`,
             method: 'HEAD',
             timeout: 2000
         };
 
-        const req = http.request(options, (res) => {
+        const req = client.request(options, (res) => {
             resolve(res.statusCode !== undefined && res.statusCode < 500);
         });
 
@@ -145,8 +150,10 @@ router.get('/:id/pdf', authMiddleware, async (req: AuthRequest, res: Response) =
 
         const page = await browser.newPage();
 
-        // Enable console logging from page
-        page.on('console', msg => console.log(`[PDF Page Console] ${msg.type()}: ${msg.text()}`));
+        // Enable verbose page logging only in debug mode to reduce noise and overhead.
+        if (PDF_EXPORT_DEBUG) {
+            page.on('console', msg => console.log(`[PDF Page Console] ${msg.type()}: ${msg.text()}`));
+        }
         page.on('pageerror', (error) => console.error(`[PDF Page Error]`, String(error)));
 
         // 设置视口大小 (横向布局，更宽以适应表格)
@@ -163,27 +170,29 @@ router.get('/:id/pdf', authMiddleware, async (req: AuthRequest, res: Response) =
             timeout: 60000
         });
 
-        // Add extra wait for React to hydrate
-        console.log(`[PDF Export] Waiting for React to render...`);
-        await new Promise(resolve => setTimeout(resolve, 5000));
-
-        // Take a screenshot for debugging
-        const screenshotPath = path.join(__dirname, '..', '..', 'logs', `pdf-debug-${comparisonId}-${Date.now()}.png`);
-        try {
-            await page.screenshot({ path: screenshotPath, fullPage: true });
-            console.log(`[PDF Export] Debug screenshot saved to: ${screenshotPath}`);
-        } catch (e) {
-            console.log(`[PDF Export] Could not save screenshot:`, e);
+        // Short, configurable hydration wait to avoid unnecessary fixed 5s latency.
+        if (PDF_EXPORT_HYDRATE_WAIT_MS > 0) {
+            await new Promise(resolve => setTimeout(resolve, PDF_EXPORT_HYDRATE_WAIT_MS));
         }
 
-        // Get page content for debugging
-        const pageContent = await page.content();
-        console.log(`[PDF Export] Page content length: ${pageContent.length}`);
-        if (pageContent.includes('comparison-content')) {
-            console.log(`[PDF Export] Found comparison-content in HTML`);
-        } else {
-            console.log(`[PDF Export] comparison-content NOT found in HTML`);
-            console.log(`[PDF Export] First 2000 chars: ${pageContent.substring(0, 2000)}`);
+        if (PDF_EXPORT_DEBUG) {
+            // Capture diagnostics only in debug mode.
+            const screenshotPath = path.join(__dirname, '..', '..', 'logs', `pdf-debug-${comparisonId}-${Date.now()}.png`);
+            try {
+                await page.screenshot({ path: screenshotPath, fullPage: true });
+                console.log(`[PDF Export] Debug screenshot saved to: ${screenshotPath}`);
+            } catch (e) {
+                console.log(`[PDF Export] Could not save screenshot:`, e);
+            }
+
+            const pageContent = await page.content();
+            console.log(`[PDF Export] Page content length: ${pageContent.length}`);
+            if (pageContent.includes('comparison-content')) {
+                console.log(`[PDF Export] Found comparison-content in HTML`);
+            } else {
+                console.log(`[PDF Export] comparison-content NOT found in HTML`);
+                console.log(`[PDF Export] First 2000 chars: ${pageContent.substring(0, 2000)}`);
+            }
         }
 
         // Try to wait for content, but with fallback

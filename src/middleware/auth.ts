@@ -1,4 +1,4 @@
-import pool, { dbType } from '../config/database-llm';
+import pool from '../config/database-llm';
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 
@@ -156,17 +156,11 @@ export async function authMiddleware(req: AuthRequest, res: Response, next: Next
 
   // Fetch latest user info/permissions from DB
   try {
-    let users: any[] = [];
-    if (dbType === 'postgres') {
-       const result = await pool.query('SELECT * FROM admin_users WHERE id = $1', [decoded.id]);
-       users = result.rows;
-    } else {
-       const { querySqlite, sqlValue } = require('../config/sqlite');
-       users = querySqlite(`SELECT * FROM admin_users WHERE id = ${sqlValue(decoded.id)}`);
-    }
+    const result = await pool.query('SELECT * FROM admin_users WHERE id = $1', [decoded.id]);
+    const users: any[] = result.rows;
     if (users && users.length > 0) {
       const dbUser = users[0];
-      // PostgreSQL jsonb returns objects directly, SQLite returns strings
+      // PostgreSQL jsonb returns objects directly.
       const parseJsonField = (val: any) => {
         if (!val) return {};
         if (typeof val === 'object') return val;
@@ -199,17 +193,11 @@ export async function optionalAuthMiddleware(req: AuthRequest, _res: Response, n
 
       // Fetch latest user info/permissions from DB
       try {
-        let users: any[] = [];
-        if (dbType === 'postgres') {
-            const result = await pool.query('SELECT * FROM admin_users WHERE id = $1', [decoded.id]);
-            users = result.rows;
-        } else {
-            const { querySqlite, sqlValue } = require('../config/sqlite');
-            users = querySqlite(`SELECT * FROM admin_users WHERE id = ${sqlValue(decoded.id)}`);
-        }
+        const result = await pool.query('SELECT * FROM admin_users WHERE id = $1', [decoded.id]);
+        const users: any[] = result.rows;
         if (users && users.length > 0) {
           const dbUser = users[0];
-          // PostgreSQL jsonb returns objects directly, SQLite returns strings
+          // PostgreSQL jsonb returns objects directly.
           const parseJsonField = (val: any) => {
             if (!val) return {};
             if (typeof val === 'object') return val;

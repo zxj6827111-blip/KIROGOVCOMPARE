@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS metric_dictionary (
   interpretation_template TEXT,
   effective_from TIMESTAMPTZ,
   deprecated_at TIMESTAMPTZ,
-  superseded_by VARCHAR(50), -- TEXT in sqlite, maybe ID or Key? Keep as VARCHAR
+  superseded_by VARCHAR(50), -- legacy replacement pointer (ID or key)
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(metric_key, version)

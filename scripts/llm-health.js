@@ -30,7 +30,7 @@ async function main() {
         // ignore
       }
     }
-    console.error(`Tip: if port 8787 is LISTENING but health hangs, the process may be wedged (often sqlite3 CLI lock/hang).`);
+    console.error(`Tip: if port 8787 is LISTENING but health hangs, check server logs for startup/runtime errors.`);
     process.exit(1);
   } finally {
     clearTimeout(t);

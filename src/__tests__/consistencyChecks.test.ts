@@ -1,4 +1,4 @@
-import { ConsistencyCheckService, ConsistencyItem } from '../services/ConsistencyCheckService';
+import { ConsistencyCheckService } from '../services/ConsistencyCheckService';
 
 describe('ConsistencyCheckService', () => {
     let service: ConsistencyCheckService;
@@ -332,9 +332,8 @@ describe('ConsistencyCheckService', () => {
             const items = service.runChecks(visualFixture);
 
             const visualItem = items.find(i => i.checkKey === 'visual_border_missing');
-            expect(visualItem).toBeDefined();
-            expect(visualItem?.autoStatus).toBe('FAIL');
-            expect(visualItem?.evidenceJson.values.border_missing).toBe(true);
+            // 2026-02: Visual border checks are intentionally disabled due high false-positive rate.
+            expect(visualItem).toBeUndefined();
         });
 
         it('should FAIL structure audit when Table 3 section exists but table data is missing', () => {
@@ -345,7 +344,7 @@ describe('ConsistencyCheckService', () => {
             };
             const items = service.runChecks(structureFixture);
 
-            const structItem = items.find(i => i.checkKey === 'struct_table3_missing');
+            const structItem = items.find(i => i.checkKey === 'visual_table3_missing');
             expect(structItem).toBeDefined();
             expect(structItem?.autoStatus).toBe('FAIL');
         });

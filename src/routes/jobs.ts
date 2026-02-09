@@ -110,19 +110,7 @@ router.get('/', async (req, res) => {
 
         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-        // Count total for pagination
-        const countQueryParams = [...params]; // Copy params for count query
-        const countRes = await pool.query(`
-          ${withClause}
-          SELECT COUNT(*) as total
-          FROM jobs j
-          JOIN report_versions rv ON j.version_id = rv.id
-          JOIN reports r ON rv.report_id = r.id
-          ${whereClause};
-        `, countQueryParams);
-        const total = parseInt(countRes.rows[0]?.total) || 0;
-
-        // Query jobs
+        // Query jobs + total count in one round-trip
         const queryParams = [...params, limitNum, offset];
         // Note: limit and offset indexes need to be dynamic
         const limitIndex = paramIndex++;
@@ -151,7 +139,8 @@ router.get('/', async (req, res) => {
             rv.file_name,
             r.region_id,
             r.year,
-            r.unit_name
+            r.unit_name,
+            COUNT(*) OVER() AS total_count
           FROM jobs j
           JOIN report_versions rv ON j.version_id = rv.id
           JOIN reports r ON rv.report_id = r.id
@@ -161,6 +150,7 @@ router.get('/', async (req, res) => {
         `, queryParams);
 
         const rows = rowsRes.rows;
+        const total = rows.length > 0 ? Number(rows[0].total_count || 0) : 0;
 
         // Map to response format
         const jobs = rows.map((row: any) => {

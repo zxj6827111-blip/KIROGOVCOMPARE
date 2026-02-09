@@ -59,6 +59,7 @@ function resolveAllowedKinds(mode: string): Set<string> {
 
 const ALLOWED_KINDS = resolveAllowedKinds(WORKER_MODE);
 const ALLOWED_KIND_LIST = Array.from(ALLOWED_KINDS);
+const NON_COMPARE_ALLOWED_KIND_LIST = ALLOWED_KIND_LIST.filter((kind) => kind !== 'compare');
 
 export class LlmJobRunner {
   private running = false;
@@ -463,24 +464,26 @@ export class LlmJobRunner {
 
   // 批量获取比对任务
   private async claimCompareJobs(limit: number): Promise<QueuedJob[]> {
-    const selectResult = await pool.query(`
-      SELECT id, report_id, comparison_id
-      FROM jobs 
-      WHERE status = 'queued' AND kind = 'compare'
-      ORDER BY created_at ASC
-      LIMIT $1
-      FOR UPDATE SKIP LOCKED`, [limit]);
-
-    if (selectResult.rows.length === 0) return [];
-
-    const jobIds = selectResult.rows.map((r: any) => r.id);
-    await pool.query(`
-      UPDATE jobs
-      SET status = 'running', 
+    const claimResult = await pool.query(`
+      WITH next_jobs AS (
+        SELECT id
+        FROM jobs
+        WHERE status = 'queued' AND kind = 'compare'
+        ORDER BY created_at ASC
+        LIMIT $1
+        FOR UPDATE SKIP LOCKED
+      )
+      UPDATE jobs j
+      SET status = 'running',
           started_at = NOW()
-      WHERE id = ANY($1::int[])`, [jobIds]);
+      FROM next_jobs n
+      WHERE j.id = n.id
+      RETURNING j.id, j.report_id, j.comparison_id
+    `, [limit]);
 
-    return selectResult.rows.map((row: any) => ({
+    if (claimResult.rows.length === 0) return [];
+
+    return claimResult.rows.map((row: any) => ({
       id: row.id,
       kind: 'compare',
       report_id: row.report_id,
@@ -492,30 +495,32 @@ export class LlmJobRunner {
   }
 
   private async claimNextJob(): Promise<QueuedJob | null> {
-    // PostgreSQL: Use two separate queries for atomic claim
-    const selectResult = await pool.query(`
-        SELECT id FROM jobs 
-        WHERE status = 'queued' AND kind != 'pdf_export'
-          AND kind = ANY($1::text[])
-        ORDER BY (CASE kind WHEN 'materialize' THEN 0 WHEN 'checks' THEN 1 WHEN 'parse' THEN 2 WHEN 'compare' THEN 3 ELSE 9 END) ASC, created_at ASC
-        LIMIT 1
-        FOR UPDATE SKIP LOCKED`, [ALLOWED_KIND_LIST]);
-
-    if (selectResult.rows.length === 0) {
+    // Compare jobs are handled by processCompareJobsConcurrently().
+    if (NON_COMPARE_ALLOWED_KIND_LIST.length === 0) {
       return null;
     }
 
-    const jobId = selectResult.rows[0].id;
     const updateResult = await pool.query(`
-        UPDATE jobs
-        SET status = 'running', 
-            started_at = NOW(),
-            step_code = $1,
-            step_name = $2,
-            progress = $3
-        WHERE id = $4
-        RETURNING id, report_id, version_id, kind, comparison_id, retry_count, max_retries`,
-      [STEPS.PARSING.code, STEPS.PARSING.name, STEPS.PARSING.progress, jobId]);
+      WITH next_job AS (
+        SELECT id
+        FROM jobs
+        WHERE status = 'queued' AND kind != 'pdf_export'
+          AND kind = ANY($4::text[])
+        ORDER BY (CASE kind WHEN 'materialize' THEN 0 WHEN 'checks' THEN 1 WHEN 'parse' THEN 2 WHEN 'compare' THEN 3 ELSE 9 END) ASC, created_at ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+      )
+      UPDATE jobs j
+      SET status = 'running',
+          started_at = NOW(),
+          step_code = $1,
+          step_name = $2,
+          progress = $3
+      FROM next_job n
+      WHERE j.id = n.id
+      RETURNING j.id, j.report_id, j.version_id, j.kind, j.comparison_id, j.retry_count, j.max_retries
+    `,
+      [STEPS.PARSING.code, STEPS.PARSING.name, STEPS.PARSING.progress, NON_COMPARE_ALLOWED_KIND_LIST]);
 
     const updatedJobs = updateResult.rows;
 

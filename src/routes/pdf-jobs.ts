@@ -149,15 +149,7 @@ router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
 
         const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
-        // 获取总数
-        const countRes = await pool.query(`
-          SELECT COUNT(*) as total FROM jobs j 
-          LEFT JOIN comparisons c ON j.comparison_id = c.id
-          ${whereClause};
-        `, params);
-        const total = Number(countRes.rows[0]?.total || 0);
-
-        // 获取任务列表
+        // 获取任务列表（同查询返回总数，减少一次数据库往返）
         params.push(limitNum); // $Limit
         const limitIndex = paramIndex++;
         params.push(offset); // $Offset
@@ -177,7 +169,8 @@ router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
             j.created_at,
             j.started_at,
             j.finished_at,
-            j.error_message
+            j.error_message,
+            COUNT(*) OVER() as total_count
           FROM jobs j
           LEFT JOIN comparisons c ON j.comparison_id = c.id
           ${whereClause}
@@ -186,9 +179,11 @@ router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
         `, params);
 
         const rows = jobsRes.rows;
+        const total = rows.length > 0 ? Number(rows[0].total_count || 0) : 0;
 
         // 检查文件是否存在
         const jobs = rows.map((row: any) => {
+            const { total_count, ...jobRow } = row;
             const displayStatus = row.status === 'running' ? 'processing' : row.status;
             let fileExists = false;
 
@@ -197,7 +192,7 @@ router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
             }
 
             return {
-                ...row,
+                ...jobRow,
                 status: displayStatus,
                 file_exists: fileExists
             };

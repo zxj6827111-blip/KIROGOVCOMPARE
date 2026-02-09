@@ -17,9 +17,12 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NODE_ENV: test
-      DATABASE_TYPE: sqlite
-      SQLITE_DB_PATH: /tmp/llm_ingestion.db
-      SQLITE_PATH: /tmp/llm_ingestion.db
+      DATABASE_TYPE: postgres
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: gov_report_diff
+      DB_USER: postgres
+      DB_PASSWORD: postgres
       BASE_URL: http://localhost:3000/api
       LLM_PROVIDER: stub
       GEMINI_API_KEY: ""
@@ -33,17 +36,8 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y sqlite3
-
       - name: Scan for hidden control characters
         run: python3 scripts/check_control_chars.py
-
-      - name: Scan sqlite migrations for forbidden keywords
-        run: node scripts/scan_sqlite_migrations.js
-
-      - name: Compare schema snapshots (pg vs sqlite)
-        run: node scripts/compare_schema_snapshots.js
 
       - name: Install backend dependencies
         run: npm ci
@@ -51,58 +45,6 @@ jobs:
       - name: Build backend
         run: npm run build
 
-      # - name: Start backend server (sqlite)
-      #   run: |
-      #     set -euo pipefail
-      #     export PATH="$PATH:$(pwd)/tools/sqlite"
-      #     DATABASE_TYPE=sqlite SQLITE_DB_PATH="${SQLITE_DB_PATH}" PORT=${PORT} node dist/index-llm.js > server.log 2>&1 &
-      #     echo $! > server.pid
-      #     for i in {1..30}; do
-      #       if curl -fsS "${BASE_URL}/health" >/dev/null; then
-      #         echo "server is up"
-      #         ready=1
-      #         break
-      #       fi
-      #       sleep 2
-      #     done
-      #     if [ "${ready:-0}" != "1" ]; then
-      #       echo "server failed to start"
-      #       cat server.log
-      #       exit 1
-      #     fi
+      - name: Run tests
+        run: npm test -- --runInBand
 
-      # - name: Run acceptance scripts
-      #   run: |
-      #     set -euo pipefail
-      #     export PATH="$PATH:$(pwd)/tools/sqlite"
-      #
-      #     echo "[run] LLM_HEALTH_TEST.sh"
-      #     BASE_URL="${BASE_URL}" SQLITE_DB_PATH="${SQLITE_DB_PATH}" bash LLM_HEALTH_TEST.sh
-      #
-      #     echo "[run] LLM_REPORTS_READ_TEST.sh"
-      #     BASE_URL="${BASE_URL}" SQLITE_DB_PATH="${SQLITE_DB_PATH}" bash LLM_REPORTS_READ_TEST.sh
-      #
-      #     echo "[run] LLM_PARSE_PROVIDER_TEST.sh"
-      #     BASE_URL="${BASE_URL}" SQLITE_DB_PATH="${SQLITE_DB_PATH}" bash LLM_PARSE_PROVIDER_TEST.sh
-      #
-      #     echo "[run] LLM_COMPARE_TEST.sh"
-      #     COMPARE_OUTPUT=$(BASE_URL="${BASE_URL}" SQLITE_DB_PATH="${SQLITE_DB_PATH}" bash LLM_COMPARE_TEST.sh | tee /tmp/LLM_COMPARE_TEST.log)
-      #     COMPARISON_ID=$(echo "${COMPARE_OUTPUT}" | awk -F= '/^COMPARISON_ID=/{print $2}' | tail -n 1)
-      #     if [ -z "${COMPARISON_ID}" ]; then
-      #       echo "COMPARISON_ID not captured" >&2
-      #       exit 1
-      #     fi
-      #
-      #     echo "[run] LLM_COMPARE_EXPORT_TEST.sh"
-      #     BASE_URL="${BASE_URL}" SQLITE_DB_PATH="${SQLITE_DB_PATH}" COMPARISON_ID="${COMPARISON_ID}" bash LLM_COMPARE_EXPORT_TEST.sh
-
-      # - name: Stop backend server
-      #   if: always()
-      #   run: |
-      #     if [ -f server.pid ]; then
-      #       kill "$(cat server.pid)" || true
-      #     fi
-      #     if [ -f server.log ]; then
-      #       echo "--- server.log ---"
-      #       cat server.log
-      #     fi

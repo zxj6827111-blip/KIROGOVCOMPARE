@@ -19,6 +19,21 @@ import {
   Loader
 } from 'lucide-react';
 
+const BATCH_REQUEST_CONCURRENCY = 6;
+
+async function runBatchWithConcurrency(items, worker, concurrency = BATCH_REQUEST_CONCURRENCY) {
+  let successCount = 0;
+  for (let i = 0; i < items.length; i += concurrency) {
+    const chunk = items.slice(i, i + concurrency);
+    const settled = await Promise.allSettled(chunk.map(worker));
+    successCount += settled.filter(result => result.status === 'fulfilled' && result.value === true).length;
+  }
+  return {
+    successCount,
+    failedCount: items.length - successCount,
+  };
+}
+
 function ComparisonHistory() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -253,24 +268,36 @@ function ComparisonHistory() {
     if (!window.confirm(`确定要批量导出 ${selectedIds.length} 个比对报告吗？`)) return;
 
     const allComps = getAllLoadedComparisons();
-    let successCount = 0;
-    for (const id of selectedIds) {
-      const c = allComps.find(comp => comp.id === id);
-      if (c) {
+    const compMap = new Map(allComps.map(comp => [comp.id, comp]));
+    const targets = selectedIds
+      .map(id => {
+        const comp = compMap.get(id);
+        if (!comp) return null;
+        return {
+          id,
+          title: `${comp.regionName || '未知地区'} ${comp.yearA}-${comp.yearB} 年报对比`
+        };
+      })
+      .filter(Boolean);
+
+    const { successCount, failedCount } = await runBatchWithConcurrency(
+      targets,
+      async (target) => {
         try {
           await apiClient.post('/pdf-jobs', {
-            comparison_id: id,
-            title: `${c.regionName || '未知地区'} ${c.yearA}-${c.yearB} 年报对比`
+            comparison_id: target.id,
+            title: target.title
           });
-          successCount++;
+          return true;
         } catch (err) {
-          console.error('Failed to create PDF job for', id, err);
+          console.error('Failed to create PDF job for', target.id, err);
+          return false;
         }
       }
-    }
+    );
 
     setSelectedIds([]);
-    alert(`已创建 ${successCount} 个导出任务，请前往任务中心查看进度`);
+    alert(`已创建 ${successCount} 个导出任务，失败 ${failedCount} 个，请前往任务中心查看进度`);
   };
 
   // Batch delete
@@ -282,19 +309,22 @@ function ComparisonHistory() {
 
     if (!window.confirm(`确定要删除选中的 ${selectedIds.length} 条比对记录吗？此操作不可恢复。`)) return;
 
-    let successCount = 0;
-    for (const id of selectedIds) {
-      try {
-        await apiClient.delete(`/comparisons/${id}`);
-        successCount++;
-      } catch (err) {
-        console.error('Failed to delete comparison', id, err);
+    const { successCount, failedCount } = await runBatchWithConcurrency(
+      selectedIds,
+      async (id) => {
+        try {
+          await apiClient.delete(`/comparisons/${id}`);
+          return true;
+        } catch (err) {
+          console.error('Failed to delete comparison', id, err);
+          return false;
+        }
       }
-    }
+    );
 
     setSelectedIds([]);
     fetchTree();
-    alert(`已删除 ${successCount} 条记录`);
+    alert(`已删除 ${successCount} 条记录，失败 ${failedCount} 条`);
   };
 
   // 一键比对：批量创建比对任务
