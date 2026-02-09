@@ -310,14 +310,16 @@ EXECUTE FUNCTION enforce_active_version_belongs();
 CREATE OR REPLACE FUNCTION sync_report_versions_active()
 RETURNS trigger AS $$
 BEGIN
-  IF NEW.active_version_id IS NULL THEN
+  -- Avoid transient unique-index conflicts on uq_report_versions_active by
+  -- clearing active flags first, then enabling the target version.
+  UPDATE report_versions
+  SET is_active = false
+  WHERE report_id = NEW.id;
+
+  IF NEW.active_version_id IS NOT NULL THEN
     UPDATE report_versions
-    SET is_active = false
-    WHERE report_id = NEW.id;
-  ELSE
-    UPDATE report_versions
-    SET is_active = (id = NEW.active_version_id)
-    WHERE report_id = NEW.id;
+    SET is_active = true
+    WHERE id = NEW.active_version_id;
   END IF;
   RETURN NEW;
 END;
