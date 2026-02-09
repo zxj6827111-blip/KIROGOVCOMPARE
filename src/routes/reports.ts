@@ -451,7 +451,8 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
 
     const active = activeVersionRes.rows[0];
     const oldVersionId = active.id;
-    const jsonStr = JSON.stringify(parsed_json);
+    // PostgreSQL text/jsonb cannot store NUL bytes; strip them defensively.
+    const jsonStr = JSON.stringify(parsed_json).replace(/\u0000/g, '');
 
     // 2. Calculate idempotent file_hash
     const editHash = crypto.createHash('sha256').update(jsonStr, 'utf8').digest('hex');
@@ -465,32 +466,33 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
        WHERE report_id = $1 AND file_hash = $2
     `, [reportId, newFileHash]);
 
-    let newVersionId: number;
-    let reused = false;
-
-    if (existingVersionRes.rows.length > 0) {
-      // Reuse existing version
-      newVersionId = existingVersionRes.rows[0].id;
-      reused = true;
-
+    const activateVersion = async (targetVersionId: number) => {
       await pool.query(`
          UPDATE reports
          SET active_version_id = $1, updated_at = NOW()
          WHERE id = $2
-      `, [newVersionId, reportId]);
+      `, [targetVersionId, reportId]);
 
       await pool.query(`
          UPDATE report_versions
          SET is_active = false, updated_at = NOW()
          WHERE report_id = $1 AND id != $2
-      `, [reportId, newVersionId]);
+      `, [reportId, targetVersionId]);
 
       await pool.query(`
          UPDATE report_versions
          SET is_active = true, updated_at = NOW()
          WHERE id = $1
-      `, [newVersionId]);
+      `, [targetVersionId]);
+    };
 
+    let newVersionId: number | null = null;
+    let reused = false;
+
+    if (existingVersionRes.rows.length > 0) {
+      // Reuse existing version
+      newVersionId = Number(existingVersionRes.rows[0].id);
+      reused = true;
       console.log(`[ParsedData] Reused existing version ${newVersionId} for report ${reportId}`);
     } else {
       // Create new version
@@ -499,7 +501,10 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
         ? baseFileName
         : `${baseFileName.substring(0, 100)} (手工修订)`;
 
-      const insertRes = await pool.query(
+      const insertVersion = async (
+        parentVersionId: number | null,
+        ingestionBatchId: number | null
+      ) => pool.query(
         `INSERT INTO report_versions 
            (report_id, file_name, file_hash, file_size, storage_path, text_path, raw_text,
             provider, model, prompt_version, schema_version, parsed_json, is_active, created_at, updated_at,
@@ -520,32 +525,73 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
           active.schema_version || 'v1',
           jsonStr,
           false,
-          oldVersionId,
-          active.ingestion_batch_id ?? null
+          parentVersionId,
+          ingestionBatchId
         ]
       );
-      newVersionId = insertRes.rows[0].id;
 
-      console.log(`[ParsedData] Created new version ${newVersionId} for report ${reportId} (old: ${oldVersionId})`);
+      let insertRes: any = null;
+      try {
+        insertRes = await insertVersion(
+          Number(oldVersionId),
+          active.ingestion_batch_id === null || active.ingestion_batch_id === undefined
+            ? null
+            : Number(active.ingestion_batch_id)
+        );
+      } catch (insertError: any) {
+        const isForeignKeyViolation = insertError?.code === '23503';
+        const constraint = String(insertError?.constraint || '');
+
+        if (isForeignKeyViolation) {
+          const parentFallback = constraint.includes('parent_version_id');
+          const batchFallback = constraint.includes('ingestion_batch_id');
+
+          console.warn(
+            `[ParsedData] FK violation on manual version insert (constraint=${constraint}). ` +
+            `Retrying with parent_version_id=${parentFallback ? 'NULL' : oldVersionId}, ` +
+            `ingestion_batch_id=${batchFallback ? 'NULL' : (active.ingestion_batch_id ?? null)}`
+          );
+
+          insertRes = await insertVersion(
+            parentFallback ? null : Number(oldVersionId),
+            batchFallback ? null : (
+              active.ingestion_batch_id === null || active.ingestion_batch_id === undefined
+                ? null
+                : Number(active.ingestion_batch_id)
+            )
+          );
+        } else if (insertError?.code === '23505') {
+          // Concurrent insert of same hash: fallback to reuse.
+          const concurrentExistingRes = await pool.query(
+            `SELECT id FROM report_versions WHERE report_id = $1 AND file_hash = $2 LIMIT 1`,
+            [reportId, newFileHash]
+          );
+          if (concurrentExistingRes.rows.length > 0) {
+            newVersionId = Number(concurrentExistingRes.rows[0].id);
+            reused = true;
+            console.warn(`[ParsedData] Detected concurrent insert, reusing version ${newVersionId}`);
+          } else {
+            throw insertError;
+          }
+        } else {
+          throw insertError;
+        }
+      }
+
+      if (!reused) {
+        if (!insertRes?.rows?.[0]?.id) {
+          throw new Error('manual_version_insert_failed');
+        }
+        newVersionId = Number(insertRes.rows[0].id);
+        console.log(`[ParsedData] Created new version ${newVersionId} for report ${reportId} (old: ${oldVersionId})`);
+      }
     }
 
-    await pool.query(`
-       UPDATE reports
-       SET active_version_id = $1, updated_at = NOW()
-       WHERE id = $2
-    `, [newVersionId, reportId]);
+    if (!newVersionId || Number.isNaN(Number(newVersionId))) {
+      throw new Error('manual_version_resolve_failed');
+    }
 
-    await pool.query(`
-       UPDATE report_versions
-       SET is_active = false, updated_at = NOW()
-       WHERE report_id = $1 AND id != $2
-    `, [reportId, newVersionId]);
-
-    await pool.query(`
-       UPDATE report_versions
-       SET is_active = true, updated_at = NOW()
-       WHERE id = $1
-    `, [newVersionId]);
+    await activateVersion(newVersionId);
 
     return res.json({
       success: true,
@@ -553,9 +599,13 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
       new_version_id: newVersionId,
       reused
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error updating parsed data:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    const isProduction = process.env.NODE_ENV === 'production';
+    return res.status(500).json({
+      error: isProduction ? 'Internal server error' : `Internal server error: ${error?.message || 'unknown'}`,
+      ...(isProduction ? {} : { code: error?.code, constraint: error?.constraint })
+    });
   }
 });
 

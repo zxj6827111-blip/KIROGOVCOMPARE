@@ -77,12 +77,38 @@ const ParsedDataEditor = ({ reportId, versionId, parsedJson, onSave, onCancel })
 
       const { new_version_id, old_version_id, reused } = response.data;
 
-      const message = reused
-        ? '保存成功（复用已有版本，无需重复创建）。建议重新运行一致性校验。'
-        : '保存成功，已生成新版本（旧版本已保留）。建议重新运行一致性校验。';
+      let checksRunSuccess = false;
+      let checksCount = null;
+      let checksRunError = null;
 
-      alert(message);
-      onSave({ parsedJson: editedData, newVersionId: new_version_id, oldVersionId: old_version_id, reused });
+      try {
+        const checksResponse = await apiClient.post(`/reports/${reportId}/checks/run`, {});
+        checksRunSuccess = true;
+        checksCount = checksResponse?.data?.count ?? null;
+      } catch (checkErr) {
+        checksRunError = checkErr.response?.data?.error || checkErr.message || '自动校验触发失败';
+        console.error('Auto checks run failed:', checkErr);
+      }
+
+      const saveMessage = reused
+        ? '保存成功（复用已有版本，无需重复创建）。'
+        : '保存成功，已生成新版本（旧版本已保留）。';
+      const checksMessage = checksRunSuccess
+        ? (typeof checksCount === 'number'
+          ? `已自动完成一致性校验（共 ${checksCount} 项）。`
+          : '已自动完成一致性校验。')
+        : `但自动校验未成功：${checksRunError}。可在“勾稽关系校验”页手动重试。`;
+
+      alert(`${saveMessage}${checksMessage}`);
+      onSave({
+        parsedJson: editedData,
+        newVersionId: new_version_id,
+        oldVersionId: old_version_id,
+        reused,
+        checksRunSuccess,
+        checksCount,
+        checksRunError
+      });
     } catch (err) {
       setError(err.response?.data?.error || err.message || '保存失败');
     } finally {
@@ -105,7 +131,7 @@ const ParsedDataEditor = ({ reportId, versionId, parsedJson, onSave, onCancel })
             onClick={handleSave}
             disabled={saving || !hasChanges}
           >
-            {saving ? '保存中...' : '保存修改'}
+            {saving ? '保存并校验中...' : '保存并自动校验'}
           </button>
         </div>
       </div>
@@ -502,7 +528,7 @@ const ParsedDataEditor = ({ reportId, versionId, parsedJson, onSave, onCancel })
 
       {hasChanges && (
         <div className="changes-warning">
-          ⚠️ 您有未保存的修改。保存后建议重新运行一致性校验。
+          ⚠️ 您有未保存的修改。保存后将自动运行一致性校验。
         </div>
       )}
     </div>
