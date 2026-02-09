@@ -21,6 +21,7 @@ import {
 
 function RegionsManager() {
   const [regions, setRegions] = useState([]);
+  const [isReordering, setIsReordering] = useState(false);
 
   // Selection Path: Array of full region objects representing the "active" path.
   const [selectionPath, setSelectionPath] = useState([]);
@@ -298,41 +299,55 @@ function RegionsManager() {
   // --- Move Up/Down ---
   const handleMoveUp = async (e, item, siblings) => {
     e.stopPropagation();
+    if (isReordering) return;
     const currentIndex = siblings.findIndex(s => s.id === item.id);
     if (currentIndex <= 0) return; // Already at top
 
-    const prevItem = siblings[currentIndex - 1];
-    // Swap sort_order
-    const orders = [
-      { id: item.id, sort_order: prevItem.sort_order || currentIndex - 1 },
-      { id: prevItem.id, sort_order: item.sort_order || currentIndex }
-    ];
+    // Rebuild full sibling order with contiguous sort_order values.
+    // This avoids jumps when existing sort_order has duplicates/null values.
+    const reordered = [...siblings];
+    const [movedItem] = reordered.splice(currentIndex, 1);
+    reordered.splice(currentIndex - 1, 0, movedItem);
+    const orders = reordered.map((r, index) => ({
+      id: r.id,
+      sort_order: index + 1
+    }));
 
     try {
+      setIsReordering(true);
       await apiClient.post('/regions/reorder', { orders });
-      fetchData();
+      await fetchData();
     } catch (err) {
       alert('排序失败: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setIsReordering(false);
     }
   };
 
   const handleMoveDown = async (e, item, siblings) => {
     e.stopPropagation();
+    if (isReordering) return;
     const currentIndex = siblings.findIndex(s => s.id === item.id);
     if (currentIndex >= siblings.length - 1) return; // Already at bottom
 
-    const nextItem = siblings[currentIndex + 1];
-    // Swap sort_order
-    const orders = [
-      { id: item.id, sort_order: nextItem.sort_order || currentIndex + 1 },
-      { id: nextItem.id, sort_order: item.sort_order || currentIndex }
-    ];
+    // Rebuild full sibling order with contiguous sort_order values.
+    // This avoids jumps when existing sort_order has duplicates/null values.
+    const reordered = [...siblings];
+    const [movedItem] = reordered.splice(currentIndex, 1);
+    reordered.splice(currentIndex + 1, 0, movedItem);
+    const orders = reordered.map((r, index) => ({
+      id: r.id,
+      sort_order: index + 1
+    }));
 
     try {
+      setIsReordering(true);
       await apiClient.post('/regions/reorder', { orders });
-      fetchData();
+      await fetchData();
     } catch (err) {
       alert('排序失败: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setIsReordering(false);
     }
   };
 
@@ -392,15 +407,17 @@ function RegionsManager() {
         <div className="flex items-center gap-1">
           {/* Sort buttons */}
           <button
-            className={`p-1 hover:bg-blue-100 rounded text-gray-400 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity ${isFirst ? 'invisible' : ''}`}
+            className={`p-1 hover:bg-blue-100 rounded text-gray-400 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed ${isFirst ? 'invisible' : ''}`}
             onClick={(e) => handleMoveUp(e, item, siblings)}
+            disabled={isReordering || isFirst}
             title="上移"
           >
             <ArrowUp size={12} />
           </button>
           <button
-            className={`p-1 hover:bg-blue-100 rounded text-gray-400 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity ${isLast ? 'invisible' : ''}`}
+            className={`p-1 hover:bg-blue-100 rounded text-gray-400 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-30 disabled:cursor-not-allowed ${isLast ? 'invisible' : ''}`}
             onClick={(e) => handleMoveDown(e, item, siblings)}
+            disabled={isReordering || isLast}
             title="下移"
           >
             <ArrowDown size={12} />

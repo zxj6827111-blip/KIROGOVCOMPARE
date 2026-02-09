@@ -5,6 +5,7 @@ import pdfExportService from '../services/PdfExportService';
 import { calculateReportMetrics } from '../utils/reportAnalysis';
 import { ComparisonReportData } from '../services/PdfExportService';
 import { calculateDiffs, renderDiffHtml } from '../utils/diffRenderer';
+import { compareRegionsByCityManagementOrder } from '../utils/regionSort';
 
 const router = express.Router();
 
@@ -278,15 +279,8 @@ router.get('/tree', authMiddleware, async (req: AuthRequest, res: Response) => {
       childrenByParent.get(parentId)!.push(region);
     }
 
-    const sortRegions = (a: any, b: any): number => {
-      const orderA = Number(a?.sort_order) || 0;
-      const orderB = Number(b?.sort_order) || 0;
-      if (orderA !== orderB) return orderA - orderB;
-      return String(a?.name || '').localeCompare(String(b?.name || ''));
-    };
-
     for (const regions of childrenByParent.values()) {
-      regions.sort(sortRegions);
+      regions.sort(compareRegionsByCityManagementOrder);
     }
 
     const nodeMemo = new Map<number, TreeNode | null>();
@@ -367,14 +361,11 @@ router.get('/tree', authMiddleware, async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // Sort root nodes
+    // Sort root nodes with the same order rule as City Management.
     rootNodes.sort((a, b) => {
-      const regionA = combinedRegionMap.get(a.id);
-      const regionB = combinedRegionMap.get(b.id);
-      const orderA = regionA?.sort_order || 0;
-      const orderB = regionB?.sort_order || 0;
-      if (orderA !== orderB) return orderA - orderB;
-      return a.name.localeCompare(b.name);
+      const regionA = combinedRegionMap.get(a.id) ?? { id: a.id, name: a.name, level: a.level, sort_order: 0 };
+      const regionB = combinedRegionMap.get(b.id) ?? { id: b.id, name: b.name, level: b.level, sort_order: 0 };
+      return compareRegionsByCityManagementOrder(regionA, regionB);
     });
 
     // Calculate grand totals

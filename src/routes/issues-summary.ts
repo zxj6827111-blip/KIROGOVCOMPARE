@@ -2,6 +2,7 @@ import express from 'express';
 import pool from '../config/database-llm';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
+import { compareRegionsByCityManagementOrder } from '../utils/regionSort';
 
 const router = express.Router();
 
@@ -198,12 +199,11 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
                     sum += calculateSubtreeStats(child);
                 }
 
-                // Now sort children
-                node.children.sort((a: any, b: any) => {
-                    if (b.subtree_issues !== a.subtree_issues) return b.subtree_issues - a.subtree_issues;
-                    if (a.sort_order !== b.sort_order) return (a.sort_order || 0) - (b.sort_order || 0);
-                    return a.region_name.localeCompare(b.region_name);
-                });
+                // Keep sibling order aligned with City Management settings.
+                node.children.sort((a: any, b: any) => compareRegionsByCityManagementOrder(
+                    { id: a.region_id, name: a.region_name, level: a.region_level, sort_order: a.sort_order },
+                    { id: b.region_id, name: b.region_name, level: b.region_level, sort_order: b.sort_order }
+                ));
             }
             node.subtree_issues = sum;
             return sum;
@@ -214,11 +214,11 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
             totalIssues += calculateSubtreeStats(root);
         });
 
-        // Sort roots
-        roots.sort((a: any, b: any) => {
-            if (b.subtree_issues !== a.subtree_issues) return b.subtree_issues - a.subtree_issues;
-            return (a.region_name || '').localeCompare(b.region_name || '');
-        });
+        // Sort roots with the same order rule as City Management.
+        roots.sort((a: any, b: any) => compareRegionsByCityManagementOrder(
+            { id: a.region_id, name: a.region_name, level: a.region_level, sort_order: a.sort_order },
+            { id: b.region_id, name: b.region_name, level: b.region_level, sort_order: b.sort_order }
+        ));
 
         return res.json({
             data: {
