@@ -5,6 +5,7 @@ import { calculateFileHash } from '../utils/fileHash';
 import { DATA_DIR, UPLOADS_DIR } from '../config/constants';
 import pool from '../config/database-llm';
 import { v5 as uuidv5, validate as validateUuid } from 'uuid';
+import { checkStoragePathExists } from './SourceFileGuardService';
 
 const NAMESPACE_uuid = '6ba7b810-9dad-11d1-80b4-00c04fd430c8'; // Standard namespace
 
@@ -131,12 +132,148 @@ async function resolveIngestionBatchId(batchUuid?: string, createdBy?: number | 
   return inserted.rows[0]?.id ?? null;
 }
 
+function normalizeUnitName(input?: string | null, fallback: string = ''): string {
+  const candidate = typeof input === 'string' ? input.trim() : '';
+  if (candidate) {
+    return candidate;
+  }
+  return String(fallback || '').trim();
+}
+
+function hasParsedContent(parsed: unknown): boolean {
+  if (parsed === null || parsed === undefined) return false;
+  if (typeof parsed === 'string') {
+    const trimmed = parsed.trim();
+    if (!trimmed || trimmed === '{}' || trimmed === 'null' || trimmed === '""') {
+      return false;
+    }
+    try {
+      return hasParsedContent(JSON.parse(trimmed));
+    } catch {
+      return true;
+    }
+  }
+  if (Array.isArray(parsed)) return parsed.length > 0;
+  if (typeof parsed !== 'object') return false;
+  const obj = parsed as Record<string, unknown>;
+  if (Array.isArray(obj.sections) && obj.sections.length > 0) return true;
+  if (obj.tables && typeof obj.tables === 'object' && Object.keys(obj.tables as object).length > 0) return true;
+  if (obj.report_type || obj.basic_info || obj.year) return true;
+  return Object.keys(obj).length > 0;
+}
+
+async function resolveOrCreateReport(regionId: number, year: number, unitName: string): Promise<{ id: number }> {
+  const existingResult = await pool.query(
+    `SELECT id, unit_name
+     FROM reports
+     WHERE region_id = $1 AND year = $2
+     ORDER BY (active_version_id IS NOT NULL) DESC, updated_at DESC, id DESC
+     LIMIT 1`,
+    [regionId, year]
+  );
+
+  const existing = existingResult.rows[0];
+  if (existing?.id) {
+    await pool.query(
+      `UPDATE reports
+       SET updated_at = NOW(),
+           unit_name = CASE
+             WHEN (unit_name IS NULL OR BTRIM(unit_name) = '') AND $2 <> '' THEN $2
+             ELSE unit_name
+           END
+       WHERE id = $1`,
+      [existing.id, unitName]
+    );
+    return { id: Number(existing.id) };
+  }
+
+  try {
+    const insertResult = await pool.query(
+      `INSERT INTO reports (region_id, year, unit_name)
+       VALUES ($1, $2, $3)
+       RETURNING id`,
+      [regionId, year, unitName]
+    );
+    return { id: Number(insertResult.rows[0].id) };
+  } catch (error: any) {
+    if (error?.code === '23505') {
+      const concurrentResult = await pool.query(
+        `SELECT id
+         FROM reports
+         WHERE region_id = $1 AND year = $2
+         ORDER BY (active_version_id IS NOT NULL) DESC, updated_at DESC, id DESC
+         LIMIT 1`,
+        [regionId, year]
+      );
+      const concurrent = concurrentResult.rows[0];
+      if (concurrent?.id) {
+        return { id: Number(concurrent.id) };
+      }
+    }
+    throw error;
+  }
+}
+
+async function ensureParseJob(
+  reportId: number,
+  versionId: number,
+  provider: string,
+  model: string,
+  ingestionBatchId: number | null,
+  storagePath: string | null
+): Promise<{ jobId: number; reused: boolean }> {
+  const sourceCheck = checkStoragePathExists(storagePath);
+  if (!sourceCheck.ok) {
+    const error = new Error(sourceCheck.errorMessage || 'source file missing');
+    (error as any).code = sourceCheck.errorCode || 'SOURCE_FILE_MISSING';
+    throw error;
+  }
+
+  const runningJobResult = await pool.query(
+    `SELECT id
+     FROM jobs
+     WHERE report_id = $1
+       AND version_id = $2
+       AND kind = 'parse'
+       AND status IN ('queued', 'running')
+     ORDER BY id DESC
+     LIMIT 1`,
+    [reportId, versionId]
+  );
+  const runningJob = runningJobResult.rows[0];
+  if (runningJob?.id) {
+    return { jobId: Number(runningJob.id), reused: true };
+  }
+
+  const newJobResult = await pool.query(
+    `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model, ingestion_batch_id)
+     VALUES ($1, $2, 'parse', 'queued', 0, $3, $4, $5)
+     RETURNING id`,
+    [reportId, versionId, provider, model, ingestionBatchId]
+  );
+  return { jobId: Number(newJobResult.rows[0].id), reused: false };
+}
+
+async function findLatestParseJobId(reportId: number, versionId: number): Promise<number | null> {
+  const parseJobResult = await pool.query(
+    `SELECT id
+     FROM jobs
+     WHERE report_id = $1
+       AND version_id = $2
+       AND kind = 'parse'
+     ORDER BY id DESC
+     LIMIT 1`,
+    [reportId, versionId]
+  );
+  return parseJobResult.rows[0]?.id ? Number(parseJobResult.rows[0].id) : null;
+}
+
 export class ReportUploadService {
   async processUpload(payload: ReportUploadPayload): Promise<ReportUploadResult> {
     ensureStorageDir();
 
     // Check region exists
-    const regionResult = await pool.query('SELECT id FROM regions WHERE id = $1 LIMIT 1', [payload.regionId]);
+    const regionResult = await pool.query('SELECT id, name FROM regions WHERE id = $1 LIMIT 1', [payload.regionId]);
     const region = regionResult.rows[0];
 
     if (!region) {
@@ -145,17 +282,10 @@ export class ReportUploadService {
 
     const { provider, model } = resolveProviderAndModel(payload.model);
     const fileHash = await calculateFileHash(payload.tempFilePath);
-    const unitName = payload.unitName ? String(payload.unitName).trim() : '';
+    const unitName = normalizeUnitName(payload.unitName, region.name);
     const ingestionBatchId = await resolveIngestionBatchId(payload.batchUuid, null);
 
-    // Insert or update report
-    const reportResult = await pool.query(
-      `INSERT INTO reports (region_id, year, unit_name) VALUES ($1, $2, $3)
-       ON CONFLICT(region_id, year, unit_name) DO UPDATE SET updated_at = NOW()
-       RETURNING id`,
-      [payload.regionId, payload.year, unitName]
-    );
-    const report = reportResult.rows[0];
+    const report = await resolveOrCreateReport(payload.regionId, payload.year, unitName);
 
     // Check existing version
     const versionResult = await pool.query(
@@ -184,16 +314,13 @@ export class ReportUploadService {
     let reusedVersion = false;
 
     if (!existingVersion) {
-      // Deactivate old versions (compatibility)
-      await pool.query('UPDATE report_versions SET is_active = false WHERE report_id = $1 AND is_active = true', [report.id]);
-
-      // Insert new version
+      // Insert a new candidate version. It remains pending review until explicitly published.
       const insertVersionResult = await pool.query(
         `INSERT INTO report_versions (
           report_id, file_name, file_hash, file_size, storage_path, text_path,
           provider, model, prompt_version, parsed_json, schema_version, is_active, raw_text,
-          version_type, parent_version_id, state, ingestion_batch_id
-        ) VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, 'v1', '{}', 'v1', true, NULL, 'original_parse', NULL, 'parsed', $8)
+          version_type, parent_version_id, state, review_status, ingestion_batch_id
+        ) VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, 'v1', '{}', 'v1', false, NULL, 'original_parse', NULL, 'pending_review', 'pending_review', $8)
         RETURNING id`,
         [report.id, payload.originalName, fileHash, payload.size, storageRelative, provider, model, ingestionBatchId]
       );
@@ -208,31 +335,10 @@ export class ReportUploadService {
       throw new Error('version_not_created');
     }
 
-    // NOTE: We no longer update active_version_id here.
-    // active_version_id will be updated AFTER materialize job succeeds,
-    // ensuring it only points to versions with actual fact table data.
-    // This prevents the dashboard from showing zero values for new uploads.
-    // See: LlmJobRunner.ts processMaterializeJob()
+    // Do not promote candidate versions to active here. Publishing is explicit.
 
-    // Mark this version as active for the report_versions table
-    await pool.query(
-      `UPDATE report_versions SET is_active = false WHERE report_id = $1 AND id != $2`,
-      [report.id, versionId]
-    );
-    await pool.query(
-      `UPDATE report_versions SET is_active = true WHERE id = $1`,
-      [versionId]
-    );
-
-    // Always create a new job record for each upload (history mode)
-    const newJobResult = await pool.query(
-      `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model, ingestion_batch_id)
-       VALUES ($1, $2, 'parse', 'queued', 0, $3, $4, $5) RETURNING id`,
-      [report.id, versionId, provider, model, ingestionBatchId]
-    );
-    const newJob = newJobResult.rows[0];
-    const jobId = newJob.id;
-    const reusedJob = false;
+    let jobId: number | null = null;
+    let reusedJob = false;
 
     const storageAbsoluteDir = path.join(DATA_DIR, 'uploads', `${payload.regionId}`, `${payload.year}`);
     ensureStorageDir(storageAbsoluteDir);
@@ -241,12 +347,26 @@ export class ReportUploadService {
       fs.copyFileSync(payload.tempFilePath, storageAbsolute);
     }
 
+    if (existingVersion && hasParsedContent(existingVersion.parsed_json)) {
+      const latestParseJobId = await findLatestParseJobId(report.id, versionId);
+      if (latestParseJobId) {
+        jobId = latestParseJobId;
+        reusedJob = true;
+      }
+    }
+
+    if (!jobId) {
+      const ensured = await ensureParseJob(report.id, versionId, provider, model, ingestionBatchId, storageRelative);
+      jobId = ensured.jobId;
+      reusedJob = ensured.reused;
+    }
+
     fs.unlink(payload.tempFilePath, () => undefined);
 
     return {
       reportId: report.id,
       versionId,
-      jobId,
+      jobId: Number(jobId),
       fileHash,
       storagePath: storageRelative,
       reusedVersion,
@@ -264,7 +384,7 @@ export class ReportUploadService {
     ensureStorageDir();
 
     // Check region exists
-    const regionResult = await pool.query('SELECT id FROM regions WHERE id = $1 LIMIT 1', [payload.regionId]);
+    const regionResult = await pool.query('SELECT id, name FROM regions WHERE id = $1 LIMIT 1', [payload.regionId]);
     const region = regionResult.rows[0];
 
     if (!region) {
@@ -278,18 +398,11 @@ export class ReportUploadService {
       throw new Error('raw_text_empty');
     }
 
-    const unitName = payload.unitName ? String(payload.unitName).trim() : '';
+    const unitName = normalizeUnitName(payload.unitName, region.name);
     const fileHash = crypto.createHash('sha256').update(rawText, 'utf8').digest('hex');
     const ingestionBatchId = await resolveIngestionBatchId(payload.batchUuid, null);
 
-    // Insert or update report
-    const reportResult = await pool.query(
-      `INSERT INTO reports (region_id, year, unit_name) VALUES ($1, $2, $3)
-       ON CONFLICT(region_id, year, unit_name) DO UPDATE SET updated_at = NOW()
-       RETURNING id`,
-      [payload.regionId, payload.year, unitName]
-    );
-    const report = reportResult.rows[0];
+    const report = await resolveOrCreateReport(payload.regionId, payload.year, unitName);
 
     // Check existing version
     const versionResult = await pool.query(
@@ -308,20 +421,17 @@ export class ReportUploadService {
     let reusedVersion = false;
 
     if (!existingVersion) {
-      // Deactivate old versions
-      await pool.query('UPDATE report_versions SET is_active = false WHERE report_id = $1 AND is_active = true', [report.id]);
-
       const parsedJson = {};
       const fileSize = Buffer.byteLength(rawText, 'utf8');
       const fileName = `raw-content-${payload.year}${extension}`;
 
-      // Insert new version
+      // Insert a new candidate version. It remains pending review until explicitly published.
       const insertVersionResult = await pool.query(
         `INSERT INTO report_versions (
           report_id, file_name, file_hash, file_size, storage_path, text_path,
           provider, model, prompt_version, parsed_json, schema_version, is_active, raw_text,
-          version_type, parent_version_id, state, ingestion_batch_id
-        ) VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, 'v1', $8, 'v1', true, $9, 'original_parse', NULL, 'parsed', $10)
+          version_type, parent_version_id, state, review_status, ingestion_batch_id
+        ) VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, 'v1', $8, 'v1', false, $9, 'original_parse', NULL, 'pending_review', 'pending_review', $10)
         RETURNING id`,
         [report.id, fileName, fileHash, fileSize, storageRelative, provider, model, JSON.stringify(parsedJson), rawText, ingestionBatchId]
       );
@@ -336,28 +446,10 @@ export class ReportUploadService {
       throw new Error('version_not_created');
     }
 
-    // NOTE: We no longer update active_version_id here.
-    // active_version_id will be updated AFTER materialize job succeeds.
-    // See: LlmJobRunner.ts processMaterializeJob()
+    // Do not promote candidate versions to active here. Publishing is explicit.
 
-    await pool.query(
-      `UPDATE report_versions SET is_active = false WHERE report_id = $1 AND id != $2`,
-      [report.id, versionId]
-    );
-    await pool.query(
-      `UPDATE report_versions SET is_active = true WHERE id = $1`,
-      [versionId]
-    );
-
-    // Always create a new job record for each upload (history mode)
-    const newJobResult = await pool.query(
-      `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model, ingestion_batch_id)
-       VALUES ($1, $2, 'parse', 'queued', 0, $3, $4, $5) RETURNING id`,
-      [report.id, versionId, provider, model, ingestionBatchId]
-    );
-    const newJob = newJobResult.rows[0];
-    const jobId = newJob.id;
-    const reusedJob = false;
+    let jobId: number | null = null;
+    let reusedJob = false;
 
     const storageAbsoluteDir = path.join(DATA_DIR, 'uploads', `${payload.regionId}`, `${payload.year}`);
     ensureStorageDir(storageAbsoluteDir);
@@ -366,10 +458,24 @@ export class ReportUploadService {
       fs.writeFileSync(storageAbsolute, rawText, { encoding: 'utf8' });
     }
 
+    if (existingVersion && hasParsedContent(existingVersion.parsed_json)) {
+      const latestParseJobId = await findLatestParseJobId(report.id, versionId);
+      if (latestParseJobId) {
+        jobId = latestParseJobId;
+        reusedJob = true;
+      }
+    }
+
+    if (!jobId) {
+      const ensured = await ensureParseJob(report.id, versionId, provider, model, ingestionBatchId, storageRelative);
+      jobId = ensured.jobId;
+      reusedJob = ensured.reused;
+    }
+
     return {
       reportId: report.id,
       versionId,
-      jobId,
+      jobId: Number(jobId),
       fileHash,
       storagePath: storageRelative,
       reusedVersion,

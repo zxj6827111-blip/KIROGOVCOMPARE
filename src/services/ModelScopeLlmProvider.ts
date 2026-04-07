@@ -72,6 +72,10 @@ export class ModelScopeLlmProvider implements LlmProvider {
             effectiveModel.toLowerCase().includes('qwq') ||
             this.model.toLowerCase().includes('r1') ||
             this.model.toLowerCase().includes('qwq');
+        const parseTemperatureRaw = Number(process.env.LLM_PARSE_TEMPERATURE ?? 0);
+        const parseTemperature = Number.isFinite(parseTemperatureRaw)
+            ? Math.max(0, Math.min(1, parseTemperatureRaw))
+            : 0;
 
         try {
             // NOTE: Using non-streaming request for simplicity in backend processing.
@@ -91,6 +95,8 @@ export class ModelScopeLlmProvider implements LlmProvider {
                         }
                     ],
                     stream: false,
+                    temperature: parseTemperature,
+                    top_p: 1,
                     // Only enable thinking for reasoning models to avoid timeouts
                     ...(isReasoningModel ? { enable_thinking: true } : {})
                 },
@@ -174,6 +180,8 @@ export class ModelScopeLlmProvider implements LlmProvider {
                                 { role: 'user', content: userText }
                             ],
                             stream: false,
+                            temperature: parseTemperature,
+                            top_p: 1,
                             // Use same conditional thinking as primary request
                             ...(isReasoningModel ? { enable_thinking: true } : {})
                         },

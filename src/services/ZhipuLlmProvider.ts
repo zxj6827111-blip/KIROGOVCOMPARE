@@ -62,6 +62,10 @@ export class ZhipuLlmProvider implements LlmProvider {
             console.log(`[Zhipu Official] Truncating input from ${userText.length} to ${maxChars}`);
             userText = userText.slice(0, maxChars);
         }
+        const parseTemperatureRaw = Number(process.env.LLM_PARSE_TEMPERATURE ?? 0);
+        const parseTemperature = Number.isFinite(parseTemperatureRaw)
+            ? Math.max(0, Math.min(1, parseTemperatureRaw))
+            : 0;
 
         try {
             const response = await this.client.chat.completions.create({
@@ -77,7 +81,8 @@ export class ZhipuLlmProvider implements LlmProvider {
                     }
                 ],
                 max_tokens: 16384,
-                temperature: 0.7,
+                temperature: parseTemperature,
+                top_p: 1,
             }, {
                 signal: signal,
                 timeout: 600000, // 10 minutes

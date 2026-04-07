@@ -23,8 +23,7 @@ CREATE TABLE IF NOT EXISTS reports (
   unit_name VARCHAR(255) NOT NULL DEFAULT '',
   active_version_id BIGINT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE(region_id, year, unit_name)
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_reports_region_year ON reports(region_id, year);
@@ -80,6 +79,9 @@ CREATE TABLE IF NOT EXISTS report_versions (
   change_reason TEXT,
   changed_fields_summary TEXT,
   state TEXT NOT NULL DEFAULT 'parsed',
+  review_status VARCHAR(30) NOT NULL DEFAULT 'published',
+  approved_at TIMESTAMPTZ,
+  approved_by BIGINT,
   created_by BIGINT,
   ingestion_batch_id BIGINT REFERENCES ingestion_batches(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -256,6 +258,9 @@ ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS version_type TEXT NOT NULL 
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS change_reason TEXT;
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS changed_fields_summary TEXT;
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS state TEXT NOT NULL DEFAULT 'parsed';
+ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS review_status VARCHAR(30) NOT NULL DEFAULT 'published';
+ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS approved_by BIGINT REFERENCES admin_users(id);
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS created_by BIGINT;
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS ingestion_batch_id BIGINT REFERENCES ingestion_batches(id);
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS check_total INTEGER;
@@ -698,34 +703,102 @@ export async function runLLMMigrations(): Promise<void> {
     await pool.query(postgresSchema);
     console.log('[Postgres Migrations] Schema ensured.');
 
+    // ------------------------------------------------------------------------
+    // Report uniqueness hardening: one report per (region_id, year)
+    // ------------------------------------------------------------------------
+    try {
+      await pool.query(`ALTER TABLE reports DROP CONSTRAINT IF EXISTS reports_region_id_year_unit_name_key;`);
+    } catch (dropError: any) {
+      console.error('[Migrations] Failed to drop legacy reports unique constraint:', dropError?.message || dropError);
+    }
+
+    try {
+      await pool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_reports_region_year
+        ON reports(region_id, year);
+      `);
+    } catch (uniqueIndexError: any) {
+      console.error(
+        '[Migrations] Failed to create uq_reports_region_year index. Resolve duplicate reports and rerun fix:merge-duplicates.',
+        uniqueIndexError?.message || uniqueIndexError
+      );
+    }
+
     // ============================================================================
     // DATA INTEGRITY REPAIR
     // ============================================================================
 
-    // 1. Fix missing active_version_id AND fix cases where active version is empty but valid one exists
-    // We check if current active_version is NULL or has very short content (likely empty JSON)
+    // 1. Fix missing/invalid active_version_id.
+    // Prefer versions that already have fact rows; then parsed_json-rich versions;
+    // finally fall back to latest version so active_version_id is not unnecessarily nulled out.
     const repairRes = await pool.query(`
       UPDATE reports r
       SET active_version_id = (
-        SELECT id FROM report_versions rv
+        SELECT rv.id
+        FROM report_versions rv
         WHERE rv.report_id = r.id
-        AND rv.parsed_json IS NOT NULL
-        AND length(rv.parsed_json::text) > 100 
-        ORDER BY rv.created_at DESC
+        ORDER BY
+          CASE
+            WHEN (
+              EXISTS (SELECT 1 FROM fact_active_disclosure fad WHERE fad.report_id = r.id AND fad.version_id = rv.id)
+              OR EXISTS (SELECT 1 FROM fact_application fa WHERE fa.report_id = r.id AND fa.version_id = rv.id)
+              OR EXISTS (SELECT 1 FROM fact_legal_proceeding flp WHERE flp.report_id = r.id AND flp.version_id = rv.id)
+            ) THEN 0
+            WHEN rv.parsed_json IS NOT NULL AND length(rv.parsed_json::text) > 100 THEN 1
+            WHEN rv.parsed_json IS NOT NULL AND rv.parsed_json::text NOT IN ('{}', 'null', '\"\"') THEN 2
+            ELSE 3
+          END ASC,
+          rv.created_at DESC,
+          rv.id DESC
         LIMIT 1
       )
       WHERE 
-        (r.active_version_id IS NULL)
-        OR 
         EXISTS (
+          SELECT 1
+          FROM report_versions rv2
+          WHERE rv2.report_id = r.id
+        )
+        AND (
+          r.active_version_id IS NULL
+          OR NOT EXISTS (
+            SELECT 1
+            FROM report_versions cur
+            WHERE cur.id = r.active_version_id
+              AND cur.report_id = r.id
+          )
+          OR
+          EXISTS (
           SELECT 1 FROM report_versions cur 
           WHERE cur.id = r.active_version_id 
-          AND (cur.parsed_json IS NULL OR length(cur.parsed_json::text) < 100)
-        );
+            AND cur.report_id = r.id
+            AND (cur.parsed_json IS NULL OR cur.parsed_json::text IN ('{}', 'null', '\"\"'))
+        )
+          OR EXISTS (
+            SELECT 1
+            FROM report_versions cur
+            WHERE cur.id = r.active_version_id
+              AND cur.report_id = r.id
+              AND NOT (
+                EXISTS (SELECT 1 FROM fact_active_disclosure fad WHERE fad.report_id = r.id AND fad.version_id = cur.id)
+                OR EXISTS (SELECT 1 FROM fact_application fa WHERE fa.report_id = r.id AND fa.version_id = cur.id)
+                OR EXISTS (SELECT 1 FROM fact_legal_proceeding flp WHERE flp.report_id = r.id AND flp.version_id = cur.id)
+              )
+              AND EXISTS (
+                SELECT 1
+                FROM report_versions rvx
+                WHERE rvx.report_id = r.id
+                  AND (
+                    EXISTS (SELECT 1 FROM fact_active_disclosure fadx WHERE fadx.report_id = r.id AND fadx.version_id = rvx.id)
+                    OR EXISTS (SELECT 1 FROM fact_application fax WHERE fax.report_id = r.id AND fax.version_id = rvx.id)
+                    OR EXISTS (SELECT 1 FROM fact_legal_proceeding flpx WHERE flpx.report_id = r.id AND flpx.version_id = rvx.id)
+                  )
+              )
+          )
+      );
     `);
 
     if ((repairRes.rowCount ?? 0) > 0) {
-      console.log(`[Migrations] Fixed data integrity for ${repairRes.rowCount} reports (linked to valid versions)`);
+      console.log(`[Migrations] Fixed data integrity for ${repairRes.rowCount} reports (active version aligned)`);
     }
 
     // 2. Sync is_active to match reports.active_version_id (best-effort)
@@ -743,6 +816,31 @@ export async function runLLMMigrations(): Promise<void> {
       WHERE rv.report_id IN (SELECT id FROM reports WHERE active_version_id IS NULL);
     `);
 
+    // 2.5. Normalize review workflow status so only the current published version
+    // is treated as formal production data; older versions remain historical.
+    await pool.query(`
+      UPDATE report_versions rv
+      SET review_status = CASE
+            WHEN EXISTS (
+              SELECT 1
+              FROM reports r
+              WHERE r.active_version_id = rv.id
+            ) OR rv.is_active = true THEN 'published'
+            ELSE 'history'
+          END,
+          approved_at = CASE
+            WHEN EXISTS (
+              SELECT 1
+              FROM reports r
+              WHERE r.active_version_id = rv.id
+            ) OR rv.is_active = true
+              THEN COALESCE(rv.approved_at, rv.updated_at, rv.created_at, NOW())
+            ELSE rv.approved_at
+          END
+      WHERE rv.review_status IS NULL
+         OR rv.review_status NOT IN ('pending_review', 'published', 'history');
+    `);
+
     // 3. Create unique active version index (after normalization)
     try {
       await pool.query(`
@@ -752,6 +850,15 @@ export async function runLLMMigrations(): Promise<void> {
       `);
     } catch (indexError: any) {
       console.error('[Migrations] Failed to create uq_report_versions_active index:', indexError?.message || indexError);
+    }
+
+    try {
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_report_versions_review_status
+        ON report_versions(report_id, review_status, created_at DESC);
+      `);
+    } catch (indexError: any) {
+      console.error('[Migrations] Failed to create idx_report_versions_review_status:', indexError?.message || indexError);
     }
 
   } catch (error: any) {

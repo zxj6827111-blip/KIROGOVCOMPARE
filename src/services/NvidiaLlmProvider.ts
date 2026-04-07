@@ -106,6 +106,10 @@ export class NvidiaLlmProvider implements LlmProvider {
     }
 
     const systemPrompt = buildStrictParseSystemInstruction();
+    const parseTemperatureRaw = Number(process.env.LLM_PARSE_TEMPERATURE ?? 0);
+    const parseTemperature = Number.isFinite(parseTemperatureRaw)
+      ? Math.max(0, Math.min(1, parseTemperatureRaw))
+      : 0;
 
     try {
       const response = await axios.post<OpenAIResponse>(
@@ -116,7 +120,8 @@ export class NvidiaLlmProvider implements LlmProvider {
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userText },
           ],
-          temperature: 0.2,
+          temperature: parseTemperature,
+          top_p: 1,
           max_tokens: 4096,
           stream: false,
         },

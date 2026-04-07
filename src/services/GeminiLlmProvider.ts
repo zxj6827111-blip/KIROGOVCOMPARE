@@ -259,6 +259,28 @@ interface LoadedContent {
   };
 }
 
+function parseGeminiJsonText(text: string): any {
+  try {
+    return JSON.parse(stripMarkdownJsonFences(text));
+  } catch {
+    return { raw_text: text };
+  }
+}
+
+function hasStructuredTables(parsed: any): boolean {
+  if (!parsed || typeof parsed !== 'object') return false;
+  const sections = Array.isArray(parsed.sections) ? parsed.sections : [];
+  const sectionHit = (type: string) => sections.some((item: any) => item?.type === type);
+  return (
+    sectionHit('table_2') ||
+    sectionHit('table_3') ||
+    sectionHit('table_4') ||
+    Boolean(parsed.activeDisclosureData) ||
+    Boolean(parsed.tableData) ||
+    Boolean(parsed.reviewLitigationData)
+  );
+}
+
 async function loadUserText(absolutePath: string, request: LlmParseRequest): Promise<LoadedContent> {
   const lower = absolutePath.toLowerCase();
 
@@ -345,31 +367,35 @@ export class GeminiLlmProvider implements LlmProvider {
 
     const baseUrl = (process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com').replace(/\/+$/, '');
     const url = `${baseUrl}/v1beta/models/${this.model}:generateContent`;
+    const parseTemperatureRaw = Number(process.env.LLM_PARSE_TEMPERATURE ?? 0);
+    const parseTemperature = Number.isFinite(parseTemperatureRaw)
+      ? Math.max(0, Math.min(1, parseTemperatureRaw))
+      : 0;
 
     try {
-      const response = await axios.post<GeminiResponse>(
-        url,
-        {
-          contents: [
-            {
-              role: 'user',
-              parts: [{ text: userText }],
-            },
-          ],
-          systemInstruction: {
-            parts: [{ text: systemInstructionText }],
+      const requestPayload = {
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: userText }],
           },
-          generationConfig: {
-            responseMimeType: 'application/json',
-          },
+        ],
+        systemInstruction: {
+          parts: [{ text: systemInstructionText }],
         },
-        {
-          params: { key: this.apiKey },
-          headers: { 'Content-Type': 'application/json' },
-          timeout: 300000,
-          signal: signal,
-        }
-      );
+        generationConfig: {
+          responseMimeType: 'application/json',
+          temperature: parseTemperature,
+          topP: 1,
+        },
+      };
+
+      const response = await axios.post<GeminiResponse>(url, requestPayload, {
+        params: { key: this.apiKey },
+        headers: { 'Content-Type': 'application/json' },
+        timeout: 300000,
+        signal: signal,
+      });
 
       const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
       if (!text) {
@@ -378,11 +404,60 @@ export class GeminiLlmProvider implements LlmProvider {
       }
       console.log('[Gemini] Raw Response (Preview):', text.slice(0, 500));
 
-      let parsed: any;
-      try {
-        parsed = JSON.parse(stripMarkdownJsonFences(text));
-      } catch (error) {
-        parsed = { raw_text: text };
+      let parsed: any = parseGeminiJsonText(text);
+
+      // Fallback for scanned/low-text PDFs: send original PDF bytes directly to Gemini.
+      const isPdf = absolutePath.toLowerCase().endsWith('.pdf');
+      const pdfInlineFallbackEnabled = String(process.env.GEMINI_PDF_INLINE_FALLBACK || '1') !== '0';
+      const minTextLenForPdf = Number(process.env.GEMINI_PDF_MIN_TEXT_LEN || 200);
+      const maxInlinePdfBytes = Number(process.env.GEMINI_INLINE_PDF_MAX_BYTES || 15 * 1024 * 1024);
+      const needPdfFallback =
+        isPdf &&
+        pdfInlineFallbackEnabled &&
+        userText.length < minTextLenForPdf &&
+        !hasStructuredTables(parsed) &&
+        fileStats.size <= maxInlinePdfBytes;
+
+      if (needPdfFallback) {
+        console.warn(`[Gemini] Low-text PDF detected. Retrying parse with inline PDF bytes for ${absolutePath}`);
+        const pdfBase64 = (await fs.promises.readFile(absolutePath)).toString('base64');
+        const inlinePrompt =
+          '请直接读取这份 PDF 原文并按系统 JSON Schema 抽取，不要省略表二/表三/表四；只返回 JSON。';
+
+        const inlinePayload = {
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { text: inlinePrompt },
+                { inlineData: { mimeType: 'application/pdf', data: pdfBase64 } },
+              ],
+            },
+          ],
+          systemInstruction: {
+            parts: [{ text: systemInstructionText }],
+          },
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: parseTemperature,
+            topP: 1,
+          },
+        };
+
+        const inlineResponse = await axios.post<GeminiResponse>(url, inlinePayload, {
+          params: { key: this.apiKey },
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 300000,
+          signal: signal,
+        });
+        const inlineText = inlineResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (inlineText) {
+          console.log('[Gemini] Inline PDF Response (Preview):', inlineText.slice(0, 500));
+          const inlineParsed = parseGeminiJsonText(inlineText);
+          if (hasStructuredTables(inlineParsed)) {
+            parsed = inlineParsed;
+          }
+        }
       }
 
       // Merge visual metadata into the result

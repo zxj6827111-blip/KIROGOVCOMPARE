@@ -4,6 +4,7 @@ import pool from '../config/database-llm';
 import { llmJobRunner } from '../services/LlmJobRunner';
 import { authMiddleware, AuthRequest, requirePermission } from '../middleware/auth';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
+import { checkVersionSourceFileExists } from '../services/SourceFileGuardService';
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -254,7 +255,7 @@ router.get('/task/:jobId', async (req, res) => {
             status: displayStatus,
             progress: job.progress || 0,
             step_code: job.step_code || 'QUEUED',
-            step_name: job.step_name || '绛夊緟澶勭悊',
+            step_name: job.step_name || '等待处理',
             attempt: job.attempt || 1,
             provider: job.provider,
             model: job.model,
@@ -497,6 +498,23 @@ router.post('/:version_id/retry', requirePermission('manage_jobs'), async (req, 
 
         if (failedJobs.length === 0) {
             return res.status(400).json({ error: 'No failed or cancelled jobs to retry' });
+        }
+
+        const hasParseRetry = failedJobs.some((j: any) => j.kind === 'parse');
+        if (hasParseRetry) {
+            const sourceCheck = await checkVersionSourceFileExists(versionId);
+            if (!sourceCheck) {
+                return res.status(404).json({ error: 'Version not found' });
+            }
+            if (!sourceCheck.ok) {
+                return res.status(422).json({
+                    error: 'SOURCE_FILE_MISSING',
+                    message: sourceCheck.errorMessage || 'source file missing',
+                    version_id: versionId,
+                    storage_path: sourceCheck.storagePath,
+                    resolved_path: sourceCheck.resolvedPath,
+                });
+            }
         }
 
         for (const job of failedJobs) {

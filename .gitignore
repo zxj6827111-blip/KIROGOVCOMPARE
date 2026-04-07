@@ -18,6 +18,8 @@ check_db*.js
 *.patch
 *.rej
 uploads/
+output/
+tmp/
 *.swp
 *.swo
 *~

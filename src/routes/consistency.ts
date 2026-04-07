@@ -4,6 +4,33 @@ import { consistencyCheckService } from '../services/ConsistencyCheckService';
 
 const router = express.Router();
 
+async function resolveReportVersionId(reportId: string, versionIdRaw?: unknown): Promise<number | null> {
+  const explicitVersionId = typeof versionIdRaw === 'string' || typeof versionIdRaw === 'number'
+    ? Number(versionIdRaw)
+    : NaN;
+
+  if (Number.isInteger(explicitVersionId) && explicitVersionId > 0) {
+    const versionRes = await pool.query(
+      `SELECT id
+       FROM report_versions
+       WHERE id = $1 AND report_id = $2
+       LIMIT 1`,
+      [explicitVersionId, Number(reportId)]
+    );
+    return versionRes.rows[0]?.id ? Number(versionRes.rows[0].id) : null;
+  }
+
+  const reportRes = await pool.query(`
+      SELECT rv.id as version_id
+      FROM reports r
+      JOIN report_versions rv ON rv.id = r.active_version_id
+      WHERE r.id = $1
+      LIMIT 1
+    `, [reportId]);
+
+  return reportRes.rows[0]?.version_id ? Number(reportRes.rows[0].version_id) : null;
+}
+
 async function refreshComparisonStatusForReport(reportId: number): Promise<void> {
   const comparisonsRes = await pool.query(`
     SELECT id, year_a, year_b, left_report_id, right_report_id
@@ -139,16 +166,8 @@ router.get('/reports/:id/checks', async (req, res) => {
   }
 
   try {
-    // 1. Get active version of the report
-    const reportRes = await pool.query(`
-      SELECT rv.id as version_id, rv.parsed_json
-      FROM reports r
-      JOIN report_versions rv ON rv.id = r.active_version_id
-      WHERE r.id = $1
-      LIMIT 1
-    `, [reportId]);
-
-    if (reportRes.rows.length === 0) {
+    const versionId = await resolveReportVersionId(reportId, req.query.version_id);
+    if (!versionId) {
       res.json({
         latest_run: null,
         groups: []
@@ -156,15 +175,13 @@ router.get('/reports/:id/checks', async (req, res) => {
       return;
     }
 
-    const { version_id } = reportRes.rows[0];
-
     // 2. Get latest run info
     const runRes = await pool.query(`
       SELECT * FROM report_consistency_runs 
       WHERE report_version_id = $1
       ORDER BY created_at DESC
       LIMIT 1
-    `, [version_id]);
+    `, [versionId]);
 
     const latestRun = runRes.rows[0] || null;
     let summary: any = { fail: 0, uncertain: 0, pass: 0, total: 0 };
@@ -182,7 +199,7 @@ router.get('/reports/:id/checks', async (req, res) => {
       FROM report_consistency_items 
       WHERE report_version_id = $1
       ORDER BY id ASC
-    `, [version_id]);
+    `, [versionId]);
     const itemsRows = itemsRes.rows;
 
     const items = itemsRows.map((item: any) => {
@@ -264,28 +281,28 @@ router.get('/reports/:id/checks', async (req, res) => {
 router.post('/reports/:id/checks/run', async (req, res) => {
   const reportId = req.params.id;
   try {
-    const reportRes = await pool.query(`
-        SELECT rv.id as version_id, rv.parsed_json
-        FROM reports r
-        JOIN report_versions rv ON rv.id = r.active_version_id
-        WHERE r.id = $1
-        LIMIT 1
-     `, [reportId]);
-
-    if (reportRes.rows.length === 0) {
-      res.status(404).json({ error: 'Report or active version not found' });
+    const versionId = await resolveReportVersionId(reportId, req.body?.version_id ?? req.query.version_id);
+    if (!versionId) {
+      res.status(404).json({ error: 'Report or target version not found' });
       return;
     }
 
-    const { version_id, parsed_json } = reportRes.rows[0];
+    const versionRes = await pool.query(
+      `SELECT parsed_json
+       FROM report_versions
+       WHERE id = $1
+       LIMIT 1`,
+      [versionId]
+    );
+    const parsed_json = versionRes.rows[0]?.parsed_json;
     let parsed = parsed_json;
     if (typeof parsed === 'string') {
       try { parsed = JSON.parse(parsed); } catch (e) { }
     }
 
-    const result = await consistencyCheckService.runAndPersist(version_id, parsed);
+    const result = await consistencyCheckService.runAndPersist(versionId, parsed);
 
-    res.json({ success: true, runId: result.runId, count: result.items.length });
+    res.json({ success: true, version_id: versionId, runId: result.runId, count: result.items.length });
 
   } catch (err: any) {
     console.error('Error running checks:', err);

@@ -1,5 +1,6 @@
 import React from 'react';
 import { TrendingUp } from 'lucide-react';
+import { analyzeTable3Diagnostics, getTable3SuspiciousCell } from '../utils/table3Diagnostics';
 
 // Table 2: Active Disclosure - Matched to PDF format
 const Table2View = ({ data, highlightCells = [] }) => {
@@ -145,6 +146,8 @@ const getHighlightMeta = (fullPath, highlightCells) => {
 // Table 3 View
 const Table3View = ({ data, compact = false, highlightCells = [] }) => {
   if (!data) return null;
+  const diagnostics = analyzeTable3Diagnostics(data);
+  const diagnosticMessages = [...diagnostics.suspiciousRows, ...(diagnostics.identityRows || [])];
 
   const getData = (key) => {
     if (key === 'naturalPerson') return data.naturalPerson;
@@ -183,12 +186,15 @@ const Table3View = ({ data, compact = false, highlightCells = [] }) => {
   const renderCell = (v, category = null, fieldPath = null) => {
     const fullPath = category && fieldPath ? `tableData.${category}.${fieldPath}` : null;
     const meta = fullPath ? getHighlightMeta(fullPath, highlightCells) : { className: '', sideLabel: '' };
+    const suspicious = fullPath ? getTable3SuspiciousCell(diagnostics, fullPath) : null;
 
     return (
       <td
-        className={`text-center ${meta.className}`}
+        className={`text-center table3-number-cell ${meta.className} ${suspicious ? 'cell-suspicious-fragment' : ''}`}
         data-cell-path={fullPath || undefined}
         data-hl-side={meta.sideLabel || undefined}
+        data-suspicious-label={suspicious?.marker || undefined}
+        title={suspicious?.title || undefined}
       >
         {v}
       </td>
@@ -197,6 +203,16 @@ const Table3View = ({ data, compact = false, highlightCells = [] }) => {
 
   return (
     <div className={`comparison-table-container ${compact ? 'shadow-none' : ''}`}>
+      {diagnosticMessages.length > 0 && (
+        <div className="table-diagnostic-banner">
+          <div className="table-diagnostic-title">疑似拆格告警</div>
+          {diagnosticMessages.map((item) => (
+            <div key={item.key} className="table-diagnostic-item">
+              {item.message}
+            </div>
+          ))}
+        </div>
+      )}
       <div className={compact ? 'overflow-x-auto' : 'overflow-x-auto min-w-[900px]'}>
         <table className="comparison-table table-fixed">
           {/* Columns Config */}

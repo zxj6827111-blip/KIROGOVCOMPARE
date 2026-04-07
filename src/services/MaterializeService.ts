@@ -40,18 +40,177 @@ interface FactLegalProceeding {
   count: number | null;
 }
 
-function parseJson(input: string | Record<string, any>): any {
-  if (input === null || input === undefined) {
-    return null;
-  }
-  if (typeof input === 'object') {
-    return input;
-  }
+function tryParseJsonText(value: unknown): { ok: boolean; value: any } {
+  if (typeof value !== 'string') return { ok: false, value: null };
+  const trimmed = value.trim();
+  if (!trimmed) return { ok: false, value: null };
+  const cleaned = trimmed
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/```$/i, '')
+    .trim();
   try {
-    return JSON.parse(input);
+    return { ok: true, value: JSON.parse(cleaned) };
   } catch {
+    return { ok: false, value: null };
+  }
+}
+
+function deepParseJson(input: unknown, maxDepth = 4): unknown {
+  let current: unknown = input;
+  for (let i = 0; i < maxDepth; i += 1) {
+    if (typeof current !== 'string') return current;
+    const parsed = tryParseJsonText(current);
+    if (!parsed.ok) return current;
+    current = parsed.value;
+  }
+  return current;
+}
+
+function pick(obj: Record<string, any> | null | undefined, keys: string[]): any {
+  if (!obj || typeof obj !== 'object') return undefined;
+  for (const key of keys) {
+    if (obj[key] !== undefined) return obj[key];
+  }
+  return undefined;
+}
+
+function extractBalancedJsonObject(source: string, startIndex: number): string | null {
+  if (startIndex < 0 || startIndex >= source.length || source[startIndex] !== '{') {
     return null;
   }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = startIndex; i < source.length; i += 1) {
+    const ch = source[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (ch === '{') {
+      depth += 1;
+      continue;
+    }
+
+    if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(startIndex, i + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+function findFirstJsonObjectByKeys(rawText: string, keyTokens: string[]): Record<string, any> | null {
+  for (const keyToken of keyTokens) {
+    let cursor = 0;
+    while (cursor < rawText.length) {
+      const keyIndex = rawText.indexOf(keyToken, cursor);
+      if (keyIndex < 0) break;
+
+      const colonIndex = rawText.indexOf(':', keyIndex + keyToken.length);
+      if (colonIndex < 0) break;
+
+      const objectStart = rawText.indexOf('{', colonIndex + 1);
+      if (objectStart < 0) break;
+
+      const objectText = extractBalancedJsonObject(rawText, objectStart);
+      if (objectText) {
+        const parsed = tryParseJsonText(objectText);
+        if (parsed.ok && parsed.value && typeof parsed.value === 'object' && !Array.isArray(parsed.value)) {
+          return parsed.value as Record<string, any>;
+        }
+      }
+
+      cursor = keyIndex + keyToken.length;
+    }
+  }
+
+  return null;
+}
+
+function extractTablePayloadsFromRawText(rawText: unknown): {
+  table2?: Record<string, any>;
+  table3?: Record<string, any>;
+  table4?: Record<string, any>;
+} {
+  if (typeof rawText !== 'string' || !rawText.trim()) {
+    return {};
+  }
+
+  const table2 = findFirstJsonObjectByKeys(rawText, ['"activeDisclosureData"', '"table_2"']);
+  const table3 = findFirstJsonObjectByKeys(rawText, ['"tableData"', '"table_3"']);
+  const table4 = findFirstJsonObjectByKeys(rawText, ['"reviewLitigationData"', '"table_4"']);
+
+  return { table2: table2 || undefined, table3: table3 || undefined, table4: table4 || undefined };
+}
+
+function normalizeParsedPayload(input: string | Record<string, any>): any {
+  const parsedValue = deepParseJson(input);
+  if (!parsedValue || typeof parsedValue !== 'object') return parsedValue;
+
+  const parsedObject = parsedValue as Record<string, any>;
+  const rawTextParsed = deepParseJson(parsedObject.raw_text);
+  const candidate =
+    rawTextParsed && typeof rawTextParsed === 'object'
+      ? { ...parsedObject, ...(rawTextParsed as Record<string, any>) }
+      : parsedObject;
+
+  if (Array.isArray(candidate.sections) && candidate.sections.length > 0) {
+    return candidate;
+  }
+
+  let table2Raw = pick(candidate, ['activeDisclosureData', 'table_2']);
+  let table3Raw = pick(candidate, ['tableData', 'table_3']);
+  let table4Raw = pick(candidate, ['reviewLitigationData', 'table_4']);
+
+  // Fallback for legacy payloads: raw_text may contain large quasi-JSON where whole parse fails,
+  // but table object fragments are still valid JSON blocks.
+  if ((!table2Raw || !table3Raw || !table4Raw) && typeof parsedObject.raw_text === 'string') {
+    const extracted = extractTablePayloadsFromRawText(parsedObject.raw_text);
+    if (!table2Raw && extracted.table2) table2Raw = extracted.table2;
+    if (!table3Raw && extracted.table3) table3Raw = extracted.table3;
+    if (!table4Raw && extracted.table4) table4Raw = extracted.table4;
+  }
+
+  const sections: any[] = [];
+  if (table2Raw && typeof table2Raw === 'object') {
+    sections.push({ type: 'table_2', activeDisclosureData: table2Raw });
+  }
+  if (table3Raw && typeof table3Raw === 'object') {
+    sections.push({ type: 'table_3', tableData: table3Raw });
+  }
+  if (table4Raw && typeof table4Raw === 'object') {
+    sections.push({ type: 'table_4', reviewLitigationData: table4Raw });
+  }
+
+  if (sections.length > 0) {
+    return { ...candidate, sections };
+  }
+
+  return candidate;
 }
 
 function normalizeValue(value: any): { raw: string | null; num: number | null; semantic: ValueSemantic; normalized: string | null } {
@@ -279,7 +438,7 @@ function buildLegalProceeding(parsed: any): { facts: FactLegalProceeding[]; cell
 }
 
 export async function materializeReportVersion(input: MaterializeInput): Promise<void> {
-  const parsed = parseJson(input.parsedJson);
+  const parsed = normalizeParsedPayload(input.parsedJson);
   if (!parsed) {
     throw new Error('parsed_json_invalid');
   }
@@ -345,3 +504,10 @@ export async function materializeReportVersion(input: MaterializeInput): Promise
     client.release();
   }
 }
+
+export const __materializeInternals = {
+  normalizeParsedPayload,
+  extractBalancedJsonObject,
+  findFirstJsonObjectByKeys,
+  extractTablePayloadsFromRawText,
+};
