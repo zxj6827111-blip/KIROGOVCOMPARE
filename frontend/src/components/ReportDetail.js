@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import './ReportDetail.css';
 import { apiClient } from '../apiClient';
 import { Table2View, Table3View, Table4View } from './TableViews';
@@ -545,14 +545,14 @@ const normalizeParsedPayload = (parsed) => {
   const sections = [];
   if (hasMeaningfulObjectData(table2)) {
     sections.push({
-      title: '浜屻€佷富鍔ㄥ叕寮€鏀垮簻淇℃伅鎯呭喌',
+      title: '二、主动公开政府信息情况',
       type: 'table_2',
       activeDisclosureData: table2,
     });
   }
   if (hasMeaningfulObjectData(table3)) {
     sections.push({
-      title: '涓夈€佹敹鍒板拰澶勭悊鏀垮簻淇℃伅鍏紑鐢宠鎯呭喌',
+      title: '三、收到和处理政府信息公开申请情况',
       type: 'table_3',
       tableData: table3,
     });
@@ -716,14 +716,14 @@ const buildParsedFromFacts = (factsPayload) => {
   const sections = [];
   if (hasMeaningfulObjectData(table2)) {
     sections.push({
-      title: '浜屻€佷富鍔ㄥ叕寮€鏀垮簻淇℃伅鎯呭喌',
+      title: '二、主动公开政府信息情况',
       type: 'table_2',
       activeDisclosureData: table2,
     });
   }
   if (hasMeaningfulObjectData(table3)) {
     sections.push({
-      title: '涓夈€佹敹鍒板拰澶勭悊鏀垮簻淇℃伅鍏紑鐢宠鎯呭喌',
+      title: '三、收到和处理政府信息公开申请情况',
       type: 'table_3',
       tableData: table3,
     });
@@ -800,15 +800,15 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const [factsLoadError, setFactsLoadError] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [showParsed, setShowParsed] = useState(true); // 榛樿灞曞紑
-  const [showMetadata, setShowMetadata] = useState(false); // 鍏冩暟鎹粯璁ら殣钘?
+  const [showParsed, setShowParsed] = useState(true); // 默认展开
+  const [showMetadata, setShowMetadata] = useState(false); // 元数据默认隐藏
   const [editingData, setEditingData] = useState(null); // 编辑模式
   const [activeTab, setActiveTab] = useState('content'); // 'content' | 'checks'
-  const [highlightCells, setHighlightCells] = useState([]); // 鍕剧ń闂鍗曞厓鏍艰矾寰?
-  const [highlightTexts, setHighlightTexts] = useState([]); // 鍕剧ń闂鏂囨湰
-  const [focusedCheck, setFocusedCheck] = useState(null); // 褰撳墠瀹氫綅鐨勫嬀绋介棶棰?
-  const [focusedCells, setFocusedCells] = useState([]); // 瀹氫綅妯″紡涓嬬殑鍗曞厓鏍艰矾寰?
-  const [qualityIssues, setQualityIssues] = useState({}); // 璐ㄩ噺瀹¤闂 { sec5: [...], sec6: [...] }
+  const [highlightCells, setHighlightCells] = useState([]); // 勾稽问题单元格路径
+  const [highlightTexts, setHighlightTexts] = useState([]); // 勾稽问题文本
+  const [focusedCheck, setFocusedCheck] = useState(null); // 当前定位的勾稽问题
+  const [focusedCells, setFocusedCells] = useState([]); // 定位模式下的单元格路径
+  const [qualityIssues, setQualityIssues] = useState({}); // 质量审计问题 { sec5: [...], sec6: [...] }
   const [showVersionHistory, setShowVersionHistory] = useState(false); // 版本历史折叠
   const [versionHistory, setVersionHistory] = useState(null); // 历史版本列表数据
   const [versionsLoading, setVersionsLoading] = useState(false);
@@ -895,7 +895,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     setFocusedCells([]);
   }, [reportId]);
 
-  // 鑾峰彇鍕剧ń鏍￠獙闂鏁版嵁鐢ㄤ簬楂樹寒
+  // 获取勾稽校验问题数据用于高亮
   const fetchHighlights = async (targetVersionId) => {
     if (!reportId || !targetVersionId) return;
     try {
@@ -907,7 +907,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
 
       console.log('[DEBUG ReportDetail] Fetched checks data:', data);
 
-      // 鎻愬彇鏈‘璁ょ殑闂璺緞
+      // 提取未确认的问题路径
       const cellPaths = [];
       const textInfos = [];
       const sec5Issues = [];
@@ -915,7 +915,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
 
       groups.forEach((group) => {
         (group.items || []).forEach((item) => {
-          // 鍙珮浜湭纭銆佹湭蹇界暐鐨勯棶棰?
+          // 只高亮未确认、未忽略的问题
           if (
             item.human_status !== 'confirmed' &&
             item.human_status !== 'dismissed' &&
@@ -1036,7 +1036,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     setTraceError('');
   }, [reportId, workingVersionId]);
 
-  // 鍔犺浇鎶ュ憡鏃跺悓鏃惰幏鍙栭珮浜暟鎹?
+  // 加载报告时同时获取高亮数据
   useEffect(() => {
     if (reportId && workingVersionId) {
       fetchHighlights(workingVersionId);
@@ -1116,7 +1116,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
       }
       await new Promise((r) => setTimeout(r, intervalMs));
     }
-    throw new Error('绛夊緟瑙ｆ瀽瓒呮椂锛岃绋嶅悗鍐嶈瘯');
+    throw new Error('等待解析超时，请稍后重试');
   };
 
   const handleReparse = async () => {
@@ -1130,7 +1130,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
         workingVersionId ? { version_id: workingVersionId } : {}
       );
       const jobId = resp.data?.job_id || resp.data?.jobId;
-      if (!jobId) throw new Error('鏈繑鍥?job_id');
+      if (!jobId) throw new Error('未返回有效 job_id');
 
       const job = await pollJob(jobId);
       if ((job.status || '').toLowerCase() === 'failed') {
@@ -1192,7 +1192,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     setEditingData(null);
   };
 
-  // 瀵规枃鏈腑鐨勯棶棰樻暟瀛楄繘琛岄珮浜?- SECURITY FIX: Use safe React elements instead of dangerouslySetInnerHTML
+  // 对文本中的问题数字进行高亮 - SECURITY FIX: Use safe React elements instead of dangerouslySetInnerHTML
   const highlightTextIssues = (text, highlights) => {
     if (!highlights || highlights.length === 0 || !text) return text;
 
@@ -1258,9 +1258,9 @@ function ReportDetail({ reportId: propReportId, onBack }) {
 
   const renderParsedContent = (parsed) => {
     const normalized = normalizeParsedPayload(parsed);
-    if (!normalized) return <p className="meta">鏆傛棤瑙ｆ瀽鍐呭</p>;
+    if (!normalized) return <p className="meta">暂无解析内容</p>;
 
-    // 濡傛灉鏄璞′笖鍖呭惈sections锛屽垯娓叉煋缁撴瀯鍖栧唴瀹?
+    // 如果是对象且包含 sections，则渲染结构化内容
     if (
       normalized &&
       typeof normalized === 'object' &&
@@ -1325,10 +1325,10 @@ function ReportDetail({ reportId: propReportId, onBack }) {
           <div />
           <div>
             <button className="btn-edit" onClick={handleEditClick} style={{ marginRight: '10px' }}>
-              鉁?编辑全部
+              编辑全部
             </button>
             <button className="secondary-btn" onClick={() => setShowParsed((prev) => !prev)}>
-              {showParsed ? '鎶樺彔鍐呭' : '灞曞紑鍐呭'}
+              {showParsed ? '折叠内容' : '展开内容'}
             </button>
           </div>
         </div>
@@ -1353,7 +1353,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
               <div key={idx} className="section-item">
                 <h4 className="section-title">
                   {section.title}
-                  {/* 鏄剧ず绗簲/鍏儴鍒嗙殑璐ㄩ噺闂鏍囪 */}
+                  {/* 显示第五/第六部分的质量问题标记 */}
                   {String(section?.title || '').includes('\u4e94') &&
                     qualityIssues.sec5 &&
                     qualityIssues.sec5.length > 0 && (
@@ -1714,7 +1714,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                               className="trace-candidate-chip"
                             >
                               {candidate.leftLabel}={formatTraceValue(candidate.leftValue)} +{' '}
-                              {candidate.rightLabel}={formatTraceValue(candidate.rightValue)} ->{' '}
+                              {candidate.rightLabel}={formatTraceValue(candidate.rightValue)} {'-> '}
                               {formatTraceValue(candidate.mergedValue)}
                             </span>
                           ))}
@@ -1807,33 +1807,33 @@ function ReportDetail({ reportId: propReportId, onBack }) {
           </div>
           <div className="actions">
             <button className="action-btn" onClick={refresh} disabled={loading}>
-              鈫?刷新
+              刷新
             </button>
             <button className="action-btn" onClick={handleReparse} disabled={loading}>
-              鉄?鑷姩瑙ｆ瀽
+              自动解析
             </button>
             <button className="action-btn danger" onClick={handleDelete} disabled={loading}>
-              鉁?删除报告
+              删除报告
             </button>
             <button className="action-btn" onClick={handleBack}>
-              鈫?杩斿洖涓婁竴灞?
+              返回上一层
             </button>
           </div>
         </div>
 
-        {loading && <p>鍔犺浇涓?..</p>}
+        {loading && <p>加载中...</p>}
         {error && <div className="alert error">{error}</div>}
 
         {!loading && !error && report && (
           <>
-            {/* 鍏冩暟鎹姌鍙犳寜閽?*/}
+            {/* 元数据折叠按钮 */}
             <div className="metadata-toggle">
               <button className="secondary-btn" onClick={() => setShowMetadata(!showMetadata)}>
                 {showMetadata ? '隐藏技术信息' : '显示技术信息（报告信息、任务、版本等）'}
               </button>
             </div>
 
-            {/* 鍙姌鍙犵殑鍏冩暟鎹儴鍒?*/}
+            {/* 可折叠的元数据部分 */}
             {showMetadata && (
               <>
                 <section className="section">
@@ -1862,7 +1862,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                 {renderVersionDetail('正式发布版本', activeVersion, '暂无正式发布版本')}
                 {renderVersionDetail('待复核版本', pendingVersion, '当前没有待复核版本')}
 
-                {/* 鎶樺彔寮忕増鏈巻鍙?*/}
+                {/* 折叠式版本历史 */}
                 <section className="section">
                   <div
                     className="version-history-header"
@@ -2033,7 +2033,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
 
             {activeTab === 'checks' && (
               <section className="section">
-                {/* <h3>涓€鑷存€ф牎楠?/h3> Use header inside component */}
+                {/* <h3>一致性校验</h3> Use header inside component */}
                 <ConsistencyCheckView
                   reportId={reportId}
                   versionId={workingVersionId}
@@ -2072,7 +2072,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
         )}
       </div>
 
-      {/* 缂栬緫鍣ㄨ鐩栧眰 - 鏀惧湪鏈€澶栧眰浠ョ‘淇濅换浣曟爣绛鹃〉涓嬮兘鑳芥樉绀?*/}
+      {/* 编辑器覆盖层 - 放在最外层以确保任何标签页下都能显示 */}
       {editingData && (
         <div className="editor-overlay">
           <div className="editor-modal">

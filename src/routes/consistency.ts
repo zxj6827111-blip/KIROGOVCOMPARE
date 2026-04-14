@@ -1,10 +1,46 @@
 import express from 'express';
 import pool from '../config/database-llm';
+import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { consistencyCheckService } from '../services/ConsistencyCheckService';
+import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 
 const router = express.Router();
 
-async function resolveReportVersionId(reportId: string, versionIdRaw?: unknown): Promise<number | null> {
+router.use(authMiddleware);
+
+function isPositiveInteger(value: number): boolean {
+  return Number.isInteger(value) && value > 0;
+}
+
+async function checkReportAccess(
+  reportId: number,
+  user?: AuthRequest['user']
+): Promise<{ ok: true; regionId: number } | { ok: false; status: number; error: string }> {
+  if (!isPositiveInteger(reportId)) {
+    return { ok: false, status: 400, error: 'Invalid report ID' };
+  }
+
+  const reportRes = await pool.query(
+    `SELECT region_id
+     FROM reports
+     WHERE id = $1
+     LIMIT 1`,
+    [reportId]
+  );
+  const report = reportRes.rows[0];
+  if (!report) {
+    return { ok: false, status: 404, error: 'Report not found' };
+  }
+
+  const allowedRegionIds = await getAllowedRegionIdsAsync(user);
+  if (allowedRegionIds && (allowedRegionIds.length === 0 || !allowedRegionIds.includes(Number(report.region_id)))) {
+    return { ok: false, status: 403, error: 'Forbidden' };
+  }
+
+  return { ok: true, regionId: Number(report.region_id) };
+}
+
+async function resolveReportVersionId(reportId: number, versionIdRaw?: unknown): Promise<number | null> {
   const explicitVersionId = typeof versionIdRaw === 'string' || typeof versionIdRaw === 'number'
     ? Number(versionIdRaw)
     : NaN;
@@ -15,7 +51,7 @@ async function resolveReportVersionId(reportId: string, versionIdRaw?: unknown):
        FROM report_versions
        WHERE id = $1 AND report_id = $2
        LIMIT 1`,
-      [explicitVersionId, Number(reportId)]
+      [explicitVersionId, reportId]
     );
     return versionRes.rows[0]?.id ? Number(versionRes.rows[0].id) : null;
   }
@@ -158,10 +194,11 @@ async function refreshCachedStatsForVersion(reportVersionId: number): Promise<vo
 /**
  * GET /reports/:id/checks - Get consistency checks for a report
  */
-router.get('/reports/:id/checks', async (req, res) => {
-  const reportId = req.params.id;
-  if (!reportId) {
-    res.status(400).json({ error: 'Missing report ID' });
+router.get('/reports/:id/checks', async (req: AuthRequest, res) => {
+  const reportId = Number(req.params.id);
+  const access = await checkReportAccess(reportId, req.user);
+  if (!access.ok) {
+    res.status(access.status).json({ error: access.error });
     return;
   }
 
@@ -278,9 +315,15 @@ router.get('/reports/:id/checks', async (req, res) => {
 /**
  * POST /reports/:id/checks/run - Run consistency checks
  */
-router.post('/reports/:id/checks/run', async (req, res) => {
-  const reportId = req.params.id;
+router.post('/reports/:id/checks/run', async (req: AuthRequest, res) => {
+  const reportId = Number(req.params.id);
   try {
+    const access = await checkReportAccess(reportId, req.user);
+    if (!access.ok) {
+      res.status(access.status).json({ error: access.error });
+      return;
+    }
+
     const versionId = await resolveReportVersionId(reportId, req.body?.version_id ?? req.query.version_id);
     if (!versionId) {
       res.status(404).json({ error: 'Report or target version not found' });
@@ -313,8 +356,9 @@ router.post('/reports/:id/checks/run', async (req, res) => {
 /**
  * PATCH /reports/:id/checks/items/:itemId - Update check item status
  */
-router.patch('/reports/:id/checks/items/:itemId', async (req, res) => {
-  const { itemId } = req.params;
+router.patch('/reports/:id/checks/items/:itemId', async (req: AuthRequest, res) => {
+  const reportId = Number(req.params.id);
+  const itemId = Number(req.params.itemId);
   const { human_status, human_comment } = req.body;
 
   if (!human_status) {
@@ -323,6 +367,33 @@ router.patch('/reports/:id/checks/items/:itemId', async (req, res) => {
   }
 
   try {
+    if (!isPositiveInteger(reportId) || !isPositiveInteger(itemId)) {
+      res.status(400).json({ error: 'Invalid report or item ID' });
+      return;
+    }
+
+    const itemRes = await pool.query(
+      `SELECT r.region_id, rci.report_version_id
+       FROM report_consistency_items rci
+       JOIN report_versions rv ON rv.id = rci.report_version_id
+       JOIN reports r ON r.id = rv.report_id
+       WHERE rci.id = $1
+         AND r.id = $2
+       LIMIT 1`,
+      [itemId, reportId]
+    );
+    const itemRow = itemRes.rows[0];
+    if (!itemRow) {
+      res.status(404).json({ error: 'Check item not found' });
+      return;
+    }
+
+    const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
+    if (allowedRegionIds && (allowedRegionIds.length === 0 || !allowedRegionIds.includes(Number(itemRow.region_id)))) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+
     await pool.query(`
          UPDATE report_consistency_items
          SET human_status = $1,
@@ -332,8 +403,7 @@ router.patch('/reports/:id/checks/items/:itemId', async (req, res) => {
        `, [human_status, human_comment || null, itemId]);
 
     try {
-      const itemRowsRes = await pool.query('SELECT report_version_id FROM report_consistency_items WHERE id = $1 LIMIT 1', [itemId]);
-      const reportVersionId = itemRowsRes.rows[0]?.report_version_id;
+      const reportVersionId = itemRow.report_version_id;
       if (reportVersionId) {
         await refreshCachedStatsForVersion(Number(reportVersionId));
         const reportRowsRes = await pool.query('SELECT report_id FROM report_versions WHERE id = $1 LIMIT 1', [reportVersionId]);

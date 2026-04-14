@@ -140,8 +140,8 @@ async function main(): Promise<void> {
   const limit = toInt(parseArg('limit'), 2000);
   const reportIds = parseIdList(parseArg('reports'));
   const maxAttempts = toInt(parseArg('max-attempts'), 2);
-  const providerName = parseArg('provider') || 'gemini';
-  const modelName = parseArg('model') || 'gemini-2.5-flash';
+  const providerName = parseArg('provider') || process.env.LLM_PARSE_PROVIDER || process.env.LLM_PROVIDER || 'stub';
+  const modelName = parseArg('model') || process.env.LLM_PARSE_MODEL || process.env.LLM_MODEL || '';
 
   const beforeMissing = await countMissingActiveFacts();
   const rows = await loadTargets(limit, reportIds);

@@ -132,9 +132,20 @@ function resolvePathArg(value: string | undefined, fallback: string): string {
 function parseProviderConfigs(value: string | undefined): ProviderConfig[] {
   const entries = parseList(value);
   if (entries.length === 0) {
+    const primaryProvider = String(process.env.LLM_PARSE_PROVIDER || process.env.LLM_PROVIDER || 'stub').trim().toLowerCase();
+    const primaryModel = String(process.env.LLM_PARSE_MODEL || process.env.LLM_MODEL || '').trim();
+    const fallbackProvider = String(
+      process.env.LLM_PARSE_FALLBACK_PROVIDER || process.env.LLM_FALLBACK_PROVIDER || primaryProvider
+    ).trim().toLowerCase();
+    const fallbackModel = String(
+      process.env.LLM_PARSE_FALLBACK_MODEL || process.env.LLM_FALLBACK_MODEL || primaryModel
+    ).trim();
+
     return [
-      { provider: 'gemini', model: 'gemini-2.5-flash' },
-      { provider: 'modelscope', model: 'glm-4.7-flash' },
+      { provider: primaryProvider, model: primaryModel || undefined },
+      ...(fallbackProvider && fallbackModel && (fallbackProvider !== primaryProvider || fallbackModel !== primaryModel)
+        ? [{ provider: fallbackProvider, model: fallbackModel }]
+        : []),
     ];
   }
 

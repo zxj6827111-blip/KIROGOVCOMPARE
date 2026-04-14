@@ -49,9 +49,9 @@ function ensureStorageDir(dir: string = storageDir): void {
 }
 
 function resolveProviderAndModel(modelInput?: string): { provider: string; model: string } {
-  // Default from env
-  const defaultProvider = process.env.LLM_PROVIDER || 'stub';
-  const defaultModel = process.env.LLM_MODEL || 'default';
+  // Parse defaults should be independent from report-generation defaults.
+  const defaultProvider = process.env.LLM_PARSE_PROVIDER || process.env.LLM_PROVIDER || 'stub';
+  const defaultModel = process.env.LLM_PARSE_MODEL || process.env.LLM_MODEL || 'default';
 
   if (!modelInput) {
     return { provider: defaultProvider, model: defaultModel };
@@ -62,6 +62,11 @@ function resolveProviderAndModel(modelInput?: string): { provider: string; model
   // 0. Explicit Nvidia prefix
   if (input.startsWith('nvidia/')) {
     return { provider: 'nvidia', model: input.replace('nvidia/', '') };
+  }
+
+  // 0. Explicit OpenAI prefix
+  if (input.startsWith('openai/')) {
+    return { provider: 'openai', model: input.replace('openai/', '') };
   }
 
   // 1. Explicit ModelScope prefix (Priority)
@@ -79,6 +84,11 @@ function resolveProviderAndModel(modelInput?: string): { provider: string; model
     return { provider: 'zhipu', model: input.replace('zhipu/', '') };
   }
 
+  // 2.1 GLM-5 / GLM5 -> prefer Zhipu official API
+  if (input.includes('glm-5') || input.includes('glm5')) {
+    return { provider: 'zhipu', model: modelInput };
+  }
+
   // 3. Qwen / DeepSeek / MiMo / Kimi -> ModelScope
   if (
     input.includes('qwen') ||
@@ -94,14 +104,32 @@ function resolveProviderAndModel(modelInput?: string): { provider: string; model
     return { provider: 'modelscope', model: modelInput };
   }
 
-  // 4. GLM models without zhipu/ prefix -> ModelScope (for backward compatibility)
+  // 4. Legacy GLM models without zhipu/ prefix:
+  // prefer parse default provider when it is already set to zhipu,
+  // otherwise keep historical ModelScope fallback behavior.
   if (input.includes('glm')) {
+    if (defaultProvider === 'zhipu') {
+      return { provider: 'zhipu', model: modelInput };
+    }
     return { provider: 'modelscope', model: modelInput };
   }
 
+  // 5. GPT family -> OpenAI
+  if (input.startsWith('gpt-') || input.includes('gpt-5')) {
+    return { provider: 'openai', model: modelInput };
+  }
+
   // 5. Fallback to default provider
-  if (process.env.LLM_PROVIDER === 'modelscope') {
+  if ((process.env.LLM_PARSE_PROVIDER || process.env.LLM_PROVIDER) === 'openai') {
+    return { provider: 'openai', model: modelInput };
+  }
+
+  if ((process.env.LLM_PARSE_PROVIDER || process.env.LLM_PROVIDER) === 'modelscope') {
     return { provider: 'modelscope', model: modelInput };
+  }
+
+  if ((process.env.LLM_PARSE_PROVIDER || process.env.LLM_PROVIDER) === 'zhipu') {
+    return { provider: 'zhipu', model: modelInput };
   }
 
   return { provider: defaultProvider, model: modelInput };

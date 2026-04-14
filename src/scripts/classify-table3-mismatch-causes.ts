@@ -677,8 +677,8 @@ async function main(): Promise<void> {
     ? (path.isAbsolute(reportSummaryArg) ? reportSummaryArg : path.resolve(process.cwd(), reportSummaryArg))
     : findLatestReportSummaryJson(tmpDir);
 
-  const providerName = (parseArg('provider') || 'gemini').trim().toLowerCase();
-  const modelName = (parseArg('model') || 'gemini-2.5-flash').trim();
+  const providerName = (parseArg('provider') || process.env.LLM_PARSE_PROVIDER || process.env.LLM_PROVIDER || 'stub').trim().toLowerCase();
+  const modelName = (parseArg('model') || process.env.LLM_PARSE_MODEL || process.env.LLM_MODEL || '').trim();
   const minSourceFields = toInt(parseArg('min-source-fields'), 3);
 
   await fsp.mkdir(outDir, { recursive: true });

@@ -20,19 +20,31 @@ interface OpenAiChatCompletionResponse {
 
 export class ModelScopeLlmProvider implements LlmProvider {
     private readonly provider = 'modelscope';
+    private readonly baseUrl: string;
 
-    constructor(private readonly apiKey: string, private readonly model: string) { }
-
-    // Mapping of frontend short codes to real ModelScope Model IDs
-    private static readonly MODEL_MAP: Record<string, string> = {
-        'glm-4.7-flash': 'ZhipuAI/GLM-4.7-Flash',
-        'deepseek-v3': 'deepseek-ai/DeepSeek-V3.2',
-        'kimi-k2.5': 'moonshotai/Kimi-k2.5',
-    };
+    constructor(private readonly apiKey: string, private readonly model: string) {
+        this.baseUrl = String(process.env.MODELSCOPE_BASE_URL || '').trim();
+        if (!this.baseUrl) {
+            throw new LlmProviderError('MODELSCOPE_BASE_URL is required for ModelScope provider', 'modelscope_missing_base_url');
+        }
+    }
 
     private resolveModelId(shortName: string): string {
-        // Return mapped name or original if not found (allows fallback to raw ID if user passes full ID)
-        return ModelScopeLlmProvider.MODEL_MAP[shortName] || shortName;
+        const rawAliases = String(process.env.MODELSCOPE_MODEL_ALIASES_JSON || '').trim();
+        if (!rawAliases) {
+            return shortName;
+        }
+
+        try {
+            const aliases = JSON.parse(rawAliases) as Record<string, string>;
+            if (aliases && typeof aliases === 'object') {
+                return aliases[shortName] || shortName;
+            }
+        } catch (error) {
+            console.warn('[ModelScope] Failed to parse MODELSCOPE_MODEL_ALIASES_JSON:', error);
+        }
+
+        return shortName;
     }
 
     async parse(request: LlmParseRequest, signal?: AbortSignal): Promise<LlmParseResult> {
@@ -65,7 +77,7 @@ export class ModelScopeLlmProvider implements LlmProvider {
             userText = userText.slice(0, maxChars);
         }
 
-        const url = 'https://api-inference.modelscope.cn/v1/chat/completions';
+        const url = this.baseUrl;
 
         // Only enable thinking for true reasoning models (R1, QwQ)
         const isReasoningModel = effectiveModel.toLowerCase().includes('r1') ||

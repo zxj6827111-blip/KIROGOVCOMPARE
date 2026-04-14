@@ -77,9 +77,14 @@ function extractMessageText(content: unknown): string {
 
 export class NvidiaLlmProvider implements LlmProvider {
   private readonly provider = 'nvidia';
-  private readonly baseUrl = 'https://integrate.api.nvidia.com/v1';
+  private readonly baseUrl: string;
 
-  constructor(private readonly apiKey: string, private readonly model: string) {}
+  constructor(private readonly apiKey: string, private readonly model: string) {
+    this.baseUrl = String(process.env.NVIDIA_BASE_URL || '').trim().replace(/\/+$/, '');
+    if (!this.baseUrl) {
+      throw new LlmProviderError('NVIDIA_BASE_URL is required for Nvidia provider', 'nvidia_missing_base_url');
+    }
+  }
 
   async parse(request: LlmParseRequest, signal?: AbortSignal): Promise<LlmParseResult> {
     const absolutePath = path.isAbsolute(request.storagePath)

@@ -166,7 +166,50 @@ function mapVersionRow(row: any) {
   };
 }
 
-async function publishVersionForReport(reportId: number, versionId: number, approvedBy?: number | null) {
+type PublishVersionResult =
+  | {
+    ok: true;
+    warnings?: string[];
+  }
+  | {
+    ok: false;
+    status: number;
+    error: string;
+    open_issue_count?: number;
+  };
+
+async function runPostPublishSideEffects(reportId: number, versionId: number): Promise<string[]> {
+  const warnings: string[] = [];
+  const [statsRefreshResult, autoComparisonResult] = await Promise.allSettled([
+    govInsightStatsService.refreshAnnualStats({
+      reason: 'manual',
+      reportId,
+      versionId,
+    }),
+    llmJobRunner.triggerAutoComparisonForPublishedVersion(versionId, reportId),
+  ]);
+
+  if (statsRefreshResult.status === 'rejected') {
+    warnings.push('stats_refresh_failed');
+    console.warn(`[Publish] Failed to refresh annual stats for report ${reportId}, version ${versionId}:`, statsRefreshResult.reason);
+  } else if (!statsRefreshResult.value) {
+    warnings.push('stats_refresh_failed');
+    console.warn(`[Publish] Annual stats refresh returned false for report ${reportId}, version ${versionId}.`);
+  }
+
+  if (autoComparisonResult.status === 'rejected') {
+    warnings.push('auto_comparison_failed');
+    console.warn(`[Publish] Failed to trigger auto comparison for report ${reportId}, version ${versionId}:`, autoComparisonResult.reason);
+  }
+
+  return warnings;
+}
+
+async function publishVersionForReport(
+  reportId: number,
+  versionId: number,
+  approvedBy?: number | null
+): Promise<PublishVersionResult> {
   const version = await loadReportVersion(reportId, versionId);
   if (!version) {
     return { ok: false, status: 404, error: 'version not found' };
@@ -247,14 +290,9 @@ async function publishVersionForReport(reportId: number, versionId: number, appr
     client.release();
   }
 
-  await govInsightStatsService.refreshAnnualStats({
-    reason: 'manual',
-    reportId,
-    versionId,
-  });
-  await llmJobRunner.triggerAutoComparisonForPublishedVersion(versionId, reportId);
+  const warnings = await runPostPublishSideEffects(reportId, versionId);
 
-  return { ok: true };
+  return warnings.length > 0 ? { ok: true, warnings } : { ok: true };
 }
 
 async function ensureMaterializeJob(
@@ -285,7 +323,7 @@ async function ensureMaterializeJob(
 
   const insertRes = await pool.query(
     `INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, max_retries, ingestion_batch_id)
-     VALUES ($1, $2, 'materialize', 'queued', 60, 'MATERIALIZE', '绛夊緟缁撴瀯鍖?, 1, $3)
+     VALUES ($1, $2, 'materialize', 'queued', 60, 'MATERIALIZE', '等待结构化', 1, $3)
      RETURNING id`,
     [reportId, versionId, ingestionBatchId]
   );
@@ -377,7 +415,7 @@ const upload = multer({
     if (isPdf || isHtml || isTxt || isMd) {
       cb(null, true);
     } else {
-      cb(new Error('浠呮敮鎸?PDF銆丠TML銆乀XT 鎴?Markdown 鏂囦欢'));
+      cb(new Error('仅支持 PDF、HTML、TXT 或 Markdown 文件'));
     }
   },
 });
@@ -399,7 +437,7 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
     }
 
     if (!regionId || Number.isNaN(regionId) || !Number.isInteger(regionId)) {
-      return res.status(400).json({ error: 'region_id 鏃犳晥' });
+      return res.status(400).json({ error: 'region_id 无效' });
     }
 
     const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
@@ -410,11 +448,11 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
     }
 
     if (!year || Number.isNaN(year) || !Number.isInteger(year)) {
-      return res.status(400).json({ error: 'year 鏃犳晥' });
+      return res.status(400).json({ error: 'year 无效' });
     }
 
     if (!file) {
-      return res.status(400).json({ error: 'file 涓嶈兘涓虹┖' });
+      return res.status(400).json({ error: 'file 不能为空' });
     }
 
     const isPdf = file.mimetype === 'application/pdf' || file.originalname.toLowerCase().endsWith('.pdf');
@@ -423,7 +461,7 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
     const isMd = file.mimetype === 'text/markdown' || file.mimetype === 'text/x-markdown' || file.originalname.toLowerCase().endsWith('.md') || file.originalname.toLowerCase().endsWith('.markdown');
 
     if (!isPdf && !isHtml && !isTxt && !isMd) {
-      return res.status(400).json({ error: '浠呮敮鎸?PDF銆丠TML銆乀XT 鎴?Markdown 鏂囦欢' });
+      return res.status(400).json({ error: '仅支持 PDF、HTML、TXT 或 Markdown 文件' });
     }
 
     // Fix for garbled filenames
@@ -468,7 +506,7 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
       return res.status(404).json({ error: 'region not found' });
     }
     if (error?.message === 'version_not_created') {
-      return res.status(500).json({ error: 'report version 鍒涘缓澶辫触' });
+      return res.status(500).json({ error: 'report version 创建失败' });
     }
 
     if (typeof error?.message === 'string' && error.message.includes('unique constraint')) {
@@ -499,7 +537,7 @@ router.post('/reports/:id/parse', authMiddleware, requirePermission('upload_repo
       ? ['1', 'true', 'yes', 'on'].includes(forceRaw.trim().toLowerCase())
       : false;
     if (!reportId || Number.isNaN(reportId) || !Number.isInteger(reportId) || reportId < 1) {
-      return res.status(400).json({ error: 'report_id 鏃犳晥' });
+      return res.status(400).json({ error: 'report_id 无效' });
     }
 
     // Data scope check
@@ -672,11 +710,11 @@ router.post('/reports/text', authMiddleware, requirePermission('upload_reports')
     const batchUuid = req.body?.batch_uuid ?? req.body?.batch_id;
 
     if (!regionId || Number.isNaN(regionId) || !Number.isInteger(regionId)) {
-      return res.status(400).json({ error: 'region_id 鏃犳晥' });
+      return res.status(400).json({ error: 'region_id 无效' });
     }
 
     if (!year || Number.isNaN(year) || !Number.isInteger(year)) {
-      return res.status(400).json({ error: 'year 鏃犳晥' });
+      return res.status(400).json({ error: 'year 无效' });
     }
 
     const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
@@ -688,7 +726,7 @@ router.post('/reports/text', authMiddleware, requirePermission('upload_reports')
 
     const rawText = typeof rawTextRaw === 'string' ? rawTextRaw : '';
     if (!rawText.trim()) {
-      return res.status(400).json({ error: 'raw_text 涓嶈兘涓虹┖' });
+      return res.status(400).json({ error: 'raw_text 不能为空' });
     }
 
     const unitName = typeof unitNameRaw === 'string' && unitNameRaw.trim() ? unitNameRaw.trim() : null;
@@ -717,10 +755,10 @@ router.post('/reports/text', authMiddleware, requirePermission('upload_reports')
       return res.status(404).json({ error: 'region not found' });
     }
     if (error?.message === 'raw_text_empty') {
-      return res.status(400).json({ error: 'raw_text 涓嶈兘涓虹┖' });
+      return res.status(400).json({ error: 'raw_text 不能为空' });
     }
     if (error?.message === 'version_not_created') {
-      return res.status(500).json({ error: 'report version 鍒涘缓澶辫触' });
+      return res.status(500).json({ error: 'report version 创建失败' });
     }
 
     console.error('Text upload error:', error);
@@ -800,9 +838,9 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
     } else {
       // Create new version
       const baseFileName = active.file_name || 'report';
-      const newFileName = baseFileName.includes('(鎵嬪伐淇)')
+      const newFileName = baseFileName.includes('(手工修订)')
         ? baseFileName
-        : `${baseFileName.substring(0, 100)} (鎵嬪伐淇)`;
+        : `${baseFileName.substring(0, 100)} (手工修订)`;
 
       const insertVersion = async (
         parentVersionId: number | null,
@@ -941,7 +979,7 @@ router.get('/reports', authMiddleware, async (req: AuthRequest, res) => {
     if (region_id !== undefined) {
       const regionIdNum = Number(region_id);
       if (!region_id || Number.isNaN(regionIdNum) || !Number.isInteger(regionIdNum) || regionIdNum < 1) {
-        return res.status(400).json({ error: 'region_id 鏃犳晥' });
+        return res.status(400).json({ error: 'region_id 无效' });
       }
       conditions.push(`r.region_id = $${paramIndex++}`);
       params.push(regionIdNum);
@@ -950,7 +988,7 @@ router.get('/reports', authMiddleware, async (req: AuthRequest, res) => {
     if (year !== undefined) {
       const yearNum = Number(year);
       if (!year || Number.isNaN(yearNum) || !Number.isInteger(yearNum)) {
-        return res.status(400).json({ error: 'year 鏃犳晥' });
+        return res.status(400).json({ error: 'year 无效' });
       }
       conditions.push(`r.year = $${paramIndex++}`);
       params.push(yearNum);
@@ -1086,24 +1124,42 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
     }
   }
 
-  // Get active version_ids for these reports + parsed_json + cached check stats
+  // Keep the list-card status aligned with ReportDetail:
+  // prefer the latest pending-review version, otherwise fall back to active_version_id.
   const versionRes = await pool.query(`
       SELECT
         r.id as report_id,
-        rv.id as version_id,
+        COALESCE(pending_rv.id, active_rv.id) as version_id,
+        COALESCE(pending_rv.review_status, active_rv.review_status) as review_status,
 
         CASE
-          WHEN rv.parsed_json IS NULL THEN false
-          WHEN rv.parsed_json::text IN ('{}', 'null', '\"\"') THEN false
+          WHEN COALESCE(pending_rv.parsed_json, active_rv.parsed_json) IS NULL THEN false
+          WHEN COALESCE(pending_rv.parsed_json, active_rv.parsed_json)::text IN ('{}', 'null', '\"\"') THEN false
           ELSE true
         END AS has_content_db,
-        rv.check_total,
-        rv.check_visual,
-        rv.check_structure,
-        rv.check_quality,
-        rv.checks_updated_at
+        COALESCE(pending_rv.check_total, active_rv.check_total) as check_total,
+        COALESCE(pending_rv.check_visual, active_rv.check_visual) as check_visual,
+        COALESCE(pending_rv.check_structure, active_rv.check_structure) as check_structure,
+        COALESCE(pending_rv.check_quality, active_rv.check_quality) as check_quality,
+        COALESCE(pending_rv.checks_updated_at, active_rv.checks_updated_at) as checks_updated_at
       FROM reports r
-      JOIN report_versions rv ON rv.id = r.active_version_id
+      LEFT JOIN report_versions active_rv ON active_rv.id = r.active_version_id
+      LEFT JOIN LATERAL (
+        SELECT
+          rv.id,
+          rv.review_status,
+          rv.parsed_json,
+          rv.check_total,
+          rv.check_visual,
+          rv.check_structure,
+          rv.check_quality,
+          rv.checks_updated_at
+        FROM report_versions rv
+        WHERE rv.report_id = r.id
+          AND rv.review_status = 'pending_review'
+        ORDER BY rv.created_at DESC, rv.id DESC
+        LIMIT 1
+      ) pending_rv ON true
       WHERE r.id = ANY($1::int[])
     `, [filteredIds]);
 
@@ -1128,12 +1184,15 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
   const missingVersionIds: number[] = [];
   for (const row of versionRows) {
     const reportId = Number(row.report_id);
-    const checked = !!row.checks_updated_at;
-    if (!checked) {
-      missingVersionIds.push(Number(row.version_id));
+    const versionId = Number(row.version_id);
+    const checked = Boolean(versionId) && !!row.checks_updated_at;
+    if (versionId && !checked) {
+      missingVersionIds.push(versionId);
     }
     result[String(reportId)] = {
       has_content: contentMap.get(reportId) ?? false,
+      version_id: Number.isFinite(versionId) && versionId > 0 ? versionId : null,
+      review_status: row.review_status || null,
       checked,
       total: checked ? Number(row.check_total || 0) : null,
       visual: checked ? Number(row.check_visual || 0) : null,
@@ -1416,7 +1475,12 @@ router.post('/reports/:id/versions/:versionId/publish', authMiddleware, requireP
       });
     }
 
-    return res.json({ success: true, report_id: reportId, version_id: versionId });
+    return res.json({
+      success: true,
+      report_id: reportId,
+      version_id: versionId,
+      warnings: publishResult.warnings,
+    });
   } catch (error) {
     console.error('Error publishing report version:', error);
     return res.status(500).json({ error: 'Internal server error' });
@@ -1452,7 +1516,12 @@ router.post('/reports/:id/versions/:versionId/activate', authMiddleware, require
       });
     }
 
-    return res.json({ success: true, report_id: reportId, version_id: versionId });
+    return res.json({
+      success: true,
+      report_id: reportId,
+      version_id: versionId,
+      warnings: publishResult.warnings,
+    });
   } catch (error) {
     console.error('Error activating report version:', error);
     return res.status(500).json({ error: 'Internal server error' });
@@ -1463,7 +1532,7 @@ router.get('/reports/:id/source-text', authMiddleware, async (req: AuthRequest, 
   try {
     const reportId = Number(req.params.id);
     if (!reportId || Number.isNaN(reportId) || !Number.isInteger(reportId) || reportId < 1) {
-      return res.status(400).json({ error: 'report_id 鏃犳晥' });
+      return res.status(400).json({ error: 'report_id 无效' });
     }
 
     const requestedVersionId = typeof req.query.version_id === 'string'
@@ -1572,7 +1641,7 @@ router.get('/reports/:id', authMiddleware, async (req, res) => {
   try {
     const reportId = Number(req.params.id);
     if (!reportId || Number.isNaN(reportId) || !Number.isInteger(reportId) || reportId < 1) {
-      return res.status(400).json({ error: 'report_id 鏃犳晥' });
+      return res.status(400).json({ error: 'report_id 无效' });
     }
 
     const reportRes = await pool.query(`
@@ -1655,7 +1724,7 @@ router.delete('/reports/:id', authMiddleware, requirePermission('delete_reports'
   try {
     const reportId = Number(req.params.id);
     if (!reportId || Number.isNaN(reportId) || !Number.isInteger(reportId) || reportId < 1) {
-      return res.status(400).json({ error: 'report_id 鏃犳晥' });
+      return res.status(400).json({ error: 'report_id 无效' });
     }
 
     const reportRes = await pool.query(`SELECT region_id FROM reports WHERE id = $1`, [reportId]);
@@ -1714,7 +1783,7 @@ router.delete('/reports/:id', authMiddleware, requirePermission('delete_reports'
       client.release();
     }
 
-    return res.json({ success: true, message: '鍒犻櫎鎴愬姛' });
+    return res.json({ success: true, message: '删除成功' });
   } catch (error) {
     console.error('Error deleting report:', error);
     return res.status(500).json({ error: 'Internal server error' });

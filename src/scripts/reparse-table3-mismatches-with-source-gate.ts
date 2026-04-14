@@ -1778,8 +1778,8 @@ async function main(): Promise<void> {
   const maxAttempts = toInt(parseArg('max-attempts'), 2);
   const minSourceFields = toInt(parseArg('min-source-fields'), 3);
   const minRowSourceFields = toNonNegativeInt(parseArg('min-row-source-fields'), 4);
-  const providerName = (parseArg('provider') || 'modelscope').trim().toLowerCase();
-  const modelName = (parseArg('model') || 'glm-4.7-flash').trim();
+  const providerName = (parseArg('provider') || process.env.LLM_PARSE_PROVIDER || process.env.LLM_PROVIDER || 'stub').trim().toLowerCase();
+  const modelName = (parseArg('model') || process.env.LLM_PARSE_MODEL || process.env.LLM_MODEL || '').trim();
   const gateModeRaw = (parseArg('gate-mode') || 'parse-only').trim().toLowerCase();
   const gateMode: GateMode =
     gateModeRaw === 'ai-source-json'

@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import './CityIndex.css';
 import { apiClient } from '../apiClient';
 import {
@@ -78,6 +78,11 @@ function CityIndex({ onSelectReport, onViewComparison }) {
     const years = new Set(reports.map(r => r.year));
     return Array.from(years).sort((a, b) => b - a); // 降序排列
   }, [reports]);
+
+  const latestReportLabel = useMemo(() => {
+    const latestYear = availableYears[0];
+    return latestYear ? `${latestYear}年度报告` : '暂无年报';
+  }, [availableYears]);
 
   // 当 path 变化时，更新 URL 参数
   useEffect(() => {
@@ -502,7 +507,7 @@ function CityIndex({ onSelectReport, onViewComparison }) {
             </div>
             <div className="summary-card" style={{ background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: 'var(--shadow-sm)', flex: 1, display: 'flex', flexDirection: 'column' }}>
               <span style={{ fontSize: '13px', color: 'var(--color-text-secondary)', fontWeight: 600, textTransform: 'uppercase' }}>最新更新</span>
-              <span style={{ fontSize: '16px', fontWeight: 600, color: 'var(--color-text-primary)', marginTop: 'auto' }}>2024年度报告</span>
+              <span style={{ fontSize: '16px', fontWeight: 600, color: 'var(--color-text-primary)', marginTop: 'auto' }}>{latestReportLabel}</span>
             </div>
           </div>
         )

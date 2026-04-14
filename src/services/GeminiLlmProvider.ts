@@ -21,6 +21,14 @@ function stripMarkdownJsonFences(text: string): string {
     .trim();
 }
 
+function resolveGeminiBaseUrl(): string {
+  const baseUrl = String(process.env.GEMINI_BASE_URL || '').trim().replace(/\/+$/, '');
+  if (!baseUrl) {
+    throw new LlmProviderError('GEMINI_BASE_URL is required for Gemini provider', 'gemini_missing_base_url');
+  }
+  return baseUrl;
+}
+
 /**
  * 清理 Markdown 标题符号（#, ##, ###等）和表格分隔符
  * 在 LLM 解析后调用，用于清理最终存入数据库的文本内容
@@ -365,7 +373,7 @@ export class GeminiLlmProvider implements LlmProvider {
       userText = userText.slice(0, maxChars);
     }
 
-    const baseUrl = (process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com').replace(/\/+$/, '');
+    const baseUrl = resolveGeminiBaseUrl();
     const url = `${baseUrl}/v1beta/models/${this.model}:generateContent`;
     const parseTemperatureRaw = Number(process.env.LLM_PARSE_TEMPERATURE ?? 0);
     const parseTemperature = Number.isFinite(parseTemperatureRaw)
@@ -509,7 +517,7 @@ export class GeminiLlmProvider implements LlmProvider {
   }
 
   async generate(prompt: string, systemInstruction?: string, config?: any): Promise<any> {
-    const baseUrl = (process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com').replace(/\/+$/, '');
+    const baseUrl = resolveGeminiBaseUrl();
     const url = `${baseUrl}/v1beta/models/${this.model}:generateContent`;
     const thinkingBudget = Number(config?.thinkingBudget || 0);
     const generationConfig: any = {
