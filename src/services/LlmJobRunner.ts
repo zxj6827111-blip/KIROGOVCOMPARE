@@ -5,9 +5,15 @@ import { consistencyCheckService } from './ConsistencyCheckService';
 import { materializeService } from './data-center/MaterializeService';
 import { ingestionBatchService } from './data-center/IngestionBatchService';
 import { govInsightStatsService } from './GovInsightStatsService';
+import { stabilizeParsedOutput } from './ParsedOutputStabilityService';
+import { parseConsensusService } from './ParseConsensusService';
 import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
 import { summarizeDiff } from '../utils/jsonDiff';
 import { calculateReportMetrics } from '../utils/reportAnalysis';
+import { PROJECT_ROOT } from '../config/constants';
+import { normalizeAnnualReportOutputFromSource } from './SegmentedAnnualReportParse';
 
 interface QueuedJob {
   id: number;
@@ -26,19 +32,79 @@ interface QueuedJob {
 const STEPS = {
   RECEIVED: { code: 'RECEIVED', name: '已接收并保存文件', progress: 10 },
   ENQUEUED: { code: 'ENQUEUED', name: '已入库并创建解析任务', progress: 20 },
-  PARSING: { code: 'PARSING', name: 'AI 解析中', progress: 50 },
-  MATERIALIZE: { code: 'MATERIALIZE', name: '结构化入库', progress: 70 },
-  POSTPROCESS: { code: 'POSTPROCESS', name: '结果校验与入库', progress: 80 },
+  PARSING: { code: 'PARSING', name: 'AI parsing', progress: 50 },
+  MATERIALIZE: { code: 'MATERIALIZE', name: 'Materializing', progress: 70 },
+  POSTPROCESS: { code: 'POSTPROCESS', name: 'Validating and saving', progress: 80 },
   DONE: { code: 'DONE', name: '完成', progress: 100 },
   QUEUED: { code: 'QUEUED', name: '等待处理', progress: 0 },
-  CANCELLED: { code: 'CANCELLED', name: '已取消', progress: 100 },
+  CANCELLED: { code: 'CANCELLED', name: 'Cancelled', progress: 100 },
 };
 
 const POLL_INTERVAL_MS = 5000; // 5秒轮询间隔，避免API速率限制
 const POST_JOB_COOLDOWN_MS = Number(process.env.LLM_POST_JOB_COOLDOWN_MS || 10000); // Cooldown after parse jobs (default 10s) to avoid API rate limits.
-const COMPARE_CONCURRENCY = 5; // 比对任务并发数
+const COMPARE_CONCURRENCY = 5; // compare task concurrency
 
 const WORKER_MODE = (process.env.LLM_WORKER_MODE || 'all').toLowerCase().trim();
+const PARSE_CONSENSUS_ENABLED = toBooleanEnv(process.env.LLM_PARSE_CONSENSUS_ENABLED, true);
+const PARSE_RULE_GATE_ENABLED = toBooleanEnv(process.env.LLM_PARSE_RULE_GATE_ENABLED, false);
+const PARSE_CONSENSUS_ALLOW_SAME_MODEL = toBooleanEnv(process.env.LLM_PARSE_CONSENSUS_ALLOW_SAME_MODEL, false);
+const PARSE_STABILIZE_MODE = (process.env.LLM_PARSE_STABILIZE_MODE || 'none').toLowerCase().trim();
+
+function getFailureStep(jobKind: string): { code: string; name: string; progress: number } {
+  switch (jobKind) {
+    case 'parse':
+      return { code: STEPS.PARSING.code, name: 'AI 解析失败', progress: STEPS.PARSING.progress };
+    case 'materialize':
+    case 'checks':
+      return { code: STEPS.POSTPROCESS.code, name: '结果校验与入库失败', progress: STEPS.POSTPROCESS.progress };
+    default:
+      return { code: STEPS.QUEUED.code, name: '处理失败', progress: 100 };
+  }
+}
+
+function toBooleanEnv(raw: string | undefined, fallback: boolean): boolean {
+  if (!raw) return fallback;
+  const normalized = raw.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
+  return fallback;
+}
+
+function resolveStabilizeOptions(modeRaw: string): { table3: boolean; table4: boolean } {
+  const mode = modeRaw.trim().toLowerCase();
+  if (mode === 'all' || mode === 'full') {
+    return { table3: true, table4: true };
+  }
+  if (mode === 'table4' || mode === 'table4-only') {
+    return { table3: false, table4: true };
+  }
+  return { table3: false, table4: false };
+}
+
+const PARSE_STABILIZE_OPTIONS = resolveStabilizeOptions(PARSE_STABILIZE_MODE);
+
+function resolveParsePrimaryConfig(): { provider: string; model: string } {
+  const provider = (process.env.LLM_PARSE_PROVIDER || process.env.LLM_PROVIDER || 'stub').trim().toLowerCase();
+  const model = (process.env.LLM_PARSE_MODEL || process.env.LLM_MODEL || 'default').trim();
+  return { provider, model };
+}
+
+function resolveParseFallbackConfig(): { provider: string; model: string } {
+  const primary = resolveParsePrimaryConfig();
+  const provider = (
+    process.env.LLM_PARSE_FALLBACK_PROVIDER ||
+    process.env.LLM_FALLBACK_PROVIDER ||
+    primary.provider
+  ).trim().toLowerCase();
+
+  const model = (
+    process.env.LLM_PARSE_FALLBACK_MODEL ||
+    process.env.LLM_FALLBACK_MODEL ||
+    primary.model
+  ).trim();
+
+  return { provider, model };
+}
 
 function resolveAllowedKinds(mode: string): Set<string> {
   if (!mode || mode === 'all') {
@@ -82,6 +148,9 @@ export class LlmJobRunner {
 
     this.running = true;
     console.log(`[JobRunner] Worker mode: ${WORKER_MODE} (kinds: ${ALLOWED_KIND_LIST.join(', ') || 'none'})`);
+    console.log(
+      `[JobRunner] Parse stabilize mode: ${PARSE_STABILIZE_MODE || 'none'} (table3=${PARSE_STABILIZE_OPTIONS.table3}, table4=${PARSE_STABILIZE_OPTIONS.table4}), parse_rule_gate=${PARSE_RULE_GATE_ENABLED}`
+    );
     this.scheduleNextTick();
   }
 
@@ -131,7 +200,7 @@ export class LlmJobRunner {
       UPDATE jobs
       SET status = 'cancelled',
           step_code = 'CANCELLED',
-          step_name = '已取消',
+          step_name = 'Cancelled',
           progress = 100,
           finished_at = NOW(),
           error_message = '用户手动取消'
@@ -142,6 +211,12 @@ export class LlmJobRunner {
 
   private async handleJobFailure(job: QueuedJob, error: any): Promise<void> {
     const { code, message } = this.normalizeError(error);
+    const failureStep = getFailureStep(job.kind);
+    const nonRetryableCodes = new Set([
+      'SOURCE_FILE_MISSING',
+      'MATERIALIZE_EMPTY_FACTS',
+      'PARSED_JSON_EMPTY',
+    ]);
 
     // Check for Cancellation
     if (axios.isCancel(error) || error.name === 'AbortError' || message.includes('User cancelled') || message.includes('canceled')) {
@@ -152,9 +227,25 @@ export class LlmJobRunner {
             error_message = '用户手动取消',
             progress = 100,
             step_code = 'CANCELLED',
-            step_name = '已取消',
+            step_name = 'Cancelled',
             finished_at = NOW()
         WHERE id = $1`, [job.id]);
+      return;
+    }
+
+    if (nonRetryableCodes.has(code)) {
+      await pool.query(`
+        UPDATE jobs
+        SET status = 'failed',
+            error_code = $1,
+            error_message = $2,
+            finished_at = NOW(),
+            progress = $3,
+            step_code = $4,
+            step_name = $5
+        WHERE id = $6`,
+        [code, message, failureStep.progress, failureStep.code, failureStep.name, job.id]);
+      console.error(`[Job ${job.id}] Non-retryable failure: ${code} ${message}`);
       return;
     }
 
@@ -167,7 +258,7 @@ export class LlmJobRunner {
       // Retry: increment retry_count, reset to queued
       console.log(`[Job ${job.id}] Retrying with attempt ${attempt + 1} (fallback model)...`);
 
-      const errorMsg = `第${attempt}轮失败: ${message}`;
+      const errorMsg = `Attempt ${attempt} failed: ${message}`;
       await pool.query(`
         UPDATE jobs 
         SET status = 'queued',
@@ -182,7 +273,13 @@ export class LlmJobRunner {
         [STEPS.QUEUED.progress, STEPS.QUEUED.code, STEPS.QUEUED.name, code, errorMsg, job.id]);
     } else {
       // Final failure: mark as failed
-      const finalMessage = `已更换模型重试仍失败。第1轮失败原因: ${code}; 第2轮失败原因: ${message}`;
+      const previousErrorRes = await pool.query(
+        `SELECT error_message FROM jobs WHERE id = $1 LIMIT 1`,
+        [job.id]
+      );
+      const previousErrorMessage = String(previousErrorRes.rows[0]?.error_message || '').trim();
+      const firstAttemptMessage = previousErrorMessage || `Attempt ${Math.max(1, attempt - 1)} failed: ${code}`;
+      const finalMessage = `Fallback retry also failed.\n${firstAttemptMessage}\nAttempt ${attempt} failed: ${message}`;
 
       await pool.query(`
         UPDATE jobs 
@@ -190,11 +287,11 @@ export class LlmJobRunner {
             error_code = $1,
             error_message = $2,
             finished_at = NOW(),
-            progress = 100,
-            step_code = $3,
-            step_name = '失败'
-        WHERE id = $4`,
-        [code, finalMessage, STEPS.DONE.code, job.id]);
+            progress = $3,
+            step_code = $4,
+            step_name = $5
+        WHERE id = $6`,
+        [code, finalMessage, failureStep.progress, failureStep.code, failureStep.name, job.id]);
 
       console.error(`[Job ${job.id}] Final failure after ${attempt} attempts`);
 
@@ -245,6 +342,12 @@ export class LlmJobRunner {
             : undefined;
       }
 
+      if (!pName && !mName) {
+        const parsePrimary = resolveParsePrimaryConfig();
+        pName = parsePrimary.provider;
+        mName = parsePrimary.model;
+      }
+
       if (pName || mName) {
         console.log(`[Job ${job.id}] Using config: Provider=${pName}, Model=${mName}`);
       }
@@ -252,9 +355,8 @@ export class LlmJobRunner {
       // Create a fresh provider instance for this job if customized, or default
       provider = createLlmProvider(pName, mName);
     } else if (attempt === 2) {
-      // Retry Strategy: Use fallback model from env, or default to DeepSeek V3.2
-      const fallbackProvider = process.env.LLM_FALLBACK_PROVIDER || 'modelscope';
-      const fallbackModel = process.env.LLM_FALLBACK_MODEL || 'deepseek-ai/DeepSeek-V3.2';
+      // Retry Strategy: parse fallback is independent from report-generation fallback
+      const { provider: fallbackProvider, model: fallbackModel } = resolveParseFallbackConfig();
       console.log(`[Job ${job.id}] Retry Attempt 2: Switching to fallback model '${fallbackModel}'`);
       provider = createLlmProvider(fallbackProvider, fallbackModel);
     } else {
@@ -264,12 +366,122 @@ export class LlmJobRunner {
 
     console.log(`[Job ${job.id}] Processing parse job (attempt ${attempt})...`);
 
+    const resolvedStoragePath = path.isAbsolute(job.storage_path)
+      ? job.storage_path
+      : path.resolve(PROJECT_ROOT, job.storage_path);
+    if (!fs.existsSync(resolvedStoragePath)) {
+      throw new LlmProviderError(`source file missing: ${resolvedStoragePath}`, 'SOURCE_FILE_MISSING');
+    }
+
     const parseResult = await provider.parse({
       reportId: job.report_id || 0,
       versionId: job.version_id,
-      storagePath: job.storage_path,
+      storagePath: resolvedStoragePath,
       fileHash: job.file_hash,
     }, signal);
+
+    const annualReportNormalized = normalizeAnnualReportOutputFromSource(
+      parseResult.output,
+      typeof parseResult.sourceText === 'string' ? parseResult.sourceText : ''
+    );
+    parseResult.output = annualReportNormalized.output;
+    if (annualReportNormalized.repairs.length > 0) {
+      console.log(
+        `[Job ${job.id}] Applied ${annualReportNormalized.repairs.length} annual report repairs: ${annualReportNormalized.repairs.join(', ')}`
+      );
+    }
+    if (annualReportNormalized.validationIssues.length > 0) {
+      throw new LlmProviderError(
+        `Annual report segmented validation failed: ${annualReportNormalized.validationIssues.join(', ')}`,
+        'ANNUAL_REPORT_SEGMENT_VALIDATION_FAILED'
+      );
+    }
+
+    const stabilized = stabilizeParsedOutput(parseResult.output, PARSE_STABILIZE_OPTIONS);
+    parseResult.output = stabilized.output;
+    if (stabilized.repairs.length > 0) {
+      console.log(
+        `[Job ${job.id}] Applied ${stabilized.repairs.length} deterministic parse repairs: ${stabilized.repairs.slice(0, 10).join(', ')}`
+      );
+    }
+
+    let verifierResult: LlmParseResult | null = null;
+    if (PARSE_CONSENSUS_ENABLED) {
+      const verifierConfig = this.resolveConsensusVerifierConfig(parseResult.provider, parseResult.model);
+      const sameModel =
+        verifierConfig.provider.toLowerCase() === parseResult.provider.toLowerCase() &&
+        verifierConfig.model === parseResult.model;
+
+      if (sameModel && !PARSE_CONSENSUS_ALLOW_SAME_MODEL) {
+        throw new LlmProviderError(
+          'Consensus verifier model equals primary model. Set LLM_PARSE_CONSENSUS_PROVIDER/LLM_PARSE_CONSENSUS_MODEL (or fallback model) to a different model.',
+          'PARSE_CONSENSUS_CONFIG_INVALID'
+        );
+      }
+
+      if (sameModel) {
+        console.warn(`[Job ${job.id}] Consensus verifier uses same provider/model as primary parse.`);
+      } else {
+        console.log(
+          `[Job ${job.id}] Running consensus verifier parse with Provider=${verifierConfig.provider}, Model=${verifierConfig.model}`
+        );
+      }
+
+      const verifierProvider = createLlmProvider(verifierConfig.provider, verifierConfig.model);
+      verifierResult = await verifierProvider.parse(
+        {
+          reportId: job.report_id || 0,
+          versionId: job.version_id,
+          storagePath: resolvedStoragePath,
+          fileHash: job.file_hash,
+        },
+        signal
+      );
+
+      const verifierAnnualReportNormalized = normalizeAnnualReportOutputFromSource(
+        verifierResult.output,
+        typeof verifierResult.sourceText === 'string' ? verifierResult.sourceText : ''
+      );
+      verifierResult.output = verifierAnnualReportNormalized.output;
+      if (verifierAnnualReportNormalized.repairs.length > 0) {
+        console.log(
+          `[Job ${job.id}] Verifier applied ${verifierAnnualReportNormalized.repairs.length} annual report repairs: ${verifierAnnualReportNormalized.repairs.join(', ')}`
+        );
+      }
+      if (verifierAnnualReportNormalized.validationIssues.length > 0) {
+        throw new LlmProviderError(
+          `Annual report segmented validation failed: ${verifierAnnualReportNormalized.validationIssues.join(', ')}`,
+          'ANNUAL_REPORT_SEGMENT_VALIDATION_FAILED'
+        );
+      }
+
+      const verifierStabilized = stabilizeParsedOutput(verifierResult.output, PARSE_STABILIZE_OPTIONS);
+      verifierResult.output = verifierStabilized.output;
+      if (verifierStabilized.repairs.length > 0) {
+        console.log(
+          `[Job ${job.id}] Verifier applied ${verifierStabilized.repairs.length} deterministic repairs: ${verifierStabilized.repairs.slice(0, 10).join(', ')}`
+        );
+      }
+    }
+
+    const consensusResult = verifierResult
+      ? parseConsensusService.compareCriticalSections(parseResult.output, verifierResult.output)
+      : null;
+
+    if (consensusResult) {
+      const mismatchSummary = consensusResult.sections
+        .filter((item) => !item.matched)
+        .map((item) => `${item.section}(a:${item.added},r:${item.removed},c:${item.changed})`)
+        .join('; ');
+      console.log(
+        `[Job ${job.id}] Parse consensus matched=${consensusResult.matched}, mismatchedSections=${consensusResult.mismatchedSections.length}${mismatchSummary ? ` => ${mismatchSummary}` : ''
+        }`
+      );
+    }
+
+    const ruleGateResult = PARSE_RULE_GATE_ENABLED
+      ? parseConsensusService.checkDeterministicRules(parseResult.output)
+      : null;
 
     // Update progress: POSTPROCESS
     await pool.query(`
@@ -283,12 +495,40 @@ export class LlmJobRunner {
       [STEPS.POSTPROCESS.code, STEPS.POSTPROCESS.name, STEPS.POSTPROCESS.progress, parseResult.provider, parseResult.model, job.id]);
 
     const outputJson = this.stringifyOutput(parseResult);
+    const verifierOutputJson = verifierResult ? this.stringifyOutput(verifierResult) : null;
 
     // Insert parse result
     await pool.query(
       `INSERT INTO report_version_parses (report_version_id, provider, model, output_json, created_at)
        VALUES ($1, $2, $3, $4, NOW())`,
       [job.version_id, parseResult.provider, parseResult.model, outputJson]);
+
+    if (verifierResult && verifierOutputJson) {
+      await pool.query(
+        `INSERT INTO report_version_parses (report_version_id, provider, model, output_json, created_at)
+         VALUES ($1, $2, $3, $4, NOW())`,
+        [job.version_id, verifierResult.provider, verifierResult.model, verifierOutputJson]
+      );
+    }
+
+    if (consensusResult && !consensusResult.matched) {
+      const mismatchDetails = consensusResult.sections
+        .filter((item) => !item.matched)
+        .map((item) => `${item.section}:${item.samplePaths.join('|') || 'hash_mismatch'}`)
+        .join('; ');
+      throw new LlmProviderError(
+        `Parse consensus mismatch on ${consensusResult.mismatchedSections.join(', ')}${mismatchDetails ? ` (${mismatchDetails})` : ''}`,
+        'PARSE_CONSENSUS_MISMATCH'
+      );
+    }
+
+    if (ruleGateResult && !ruleGateResult.passed) {
+      const issueText = ruleGateResult.issues.slice(0, 8).join('; ');
+      throw new LlmProviderError(
+        `Deterministic parse rule gate failed: ${issueText}`,
+        'PARSE_RULE_GATE_FAILED'
+      );
+    }
 
     if (await this.hasParsedJsonColumn()) {
       await pool.query(
@@ -317,6 +557,8 @@ export class LlmJobRunner {
           progress = $1,
           step_code = $2,
           step_name = $3,
+          error_code = NULL,
+          error_message = NULL,
           finished_at = NOW() 
       WHERE id = $4`,
       [STEPS.DONE.progress, STEPS.DONE.code, STEPS.DONE.name, job.id]);
@@ -412,7 +654,7 @@ export class LlmJobRunner {
       await this.processJob(job);
 
       // 任务完成后添加冷却时间，避免过快调用 API 触发速率限制
-      // 但 compare 任务是本地处理，不需要冷却
+      // 浣?compare 浠诲姟鏄湰鍦板鐞嗭紝涓嶉渶瑕佸喎鍗?
       if (POST_JOB_COOLDOWN_MS > 0 && job.kind === 'parse') {
         console.log(`[JobRunner] Cooling down for ${POST_JOB_COOLDOWN_MS}ms before next job...`);
         await new Promise(resolve => setTimeout(resolve, POST_JOB_COOLDOWN_MS));
@@ -423,22 +665,22 @@ export class LlmJobRunner {
     }
   }
 
-  // 并发处理比对任务
+  // 骞跺彂澶勭悊姣斿浠诲姟
   private async processCompareJobsConcurrently(): Promise<void> {
     if (!ALLOWED_KINDS.has('compare')) {
       return;
     }
-    // 计算可以启动的worker数量
+    // 璁＄畻鍙互鍚姩鐨剋orker数量
     const availableSlots = COMPARE_CONCURRENCY - this.compareWorkersActive;
     if (availableSlots <= 0) return;
 
-    // 获取多个比对任务
+    // 鑾峰彇澶氫釜姣斿浠诲姟
     const jobs = await this.claimCompareJobs(availableSlots);
     if (jobs.length === 0) return;
 
     console.log(`[JobRunner] Starting ${jobs.length} concurrent compare workers (active: ${this.compareWorkersActive}/${COMPARE_CONCURRENCY})`);
 
-    // 并发启动任务处理（不等待完成）
+    // 骞跺彂鍚姩浠诲姟澶勭悊锛堜笉绛夊緟瀹屾垚锛?
     for (const job of jobs) {
       this.compareWorkersActive++;
       this.runCompareWorker(job).finally(() => {
@@ -447,7 +689,7 @@ export class LlmJobRunner {
     }
   }
 
-  // 单个比对worker
+  // 鍗曚釜姣斿worker
   private async runCompareWorker(job: QueuedJob): Promise<void> {
     try {
       await this.processCompareJob(job);
@@ -462,7 +704,7 @@ export class LlmJobRunner {
     }
   }
 
-  // 批量获取比对任务
+  // 鎵归噺鑾峰彇姣斿浠诲姟
   private async claimCompareJobs(limit: number): Promise<QueuedJob[]> {
     const claimResult = await pool.query(`
       WITH next_jobs AS (
@@ -589,23 +831,41 @@ export class LlmJobRunner {
       throw new Error(`Materialization failed: ${materializeResult.error}`);
     }
 
-    // CRITICAL FIX: Update active_version_id AFTER materialize succeeds.
-    // Guard against out-of-order materialize completion (older versions finishing later).
-    // Only promote if this version is still marked as the report's current candidate.
-    const updateRes = await pool.query(
-      `UPDATE reports
-       SET active_version_id = $1, updated_at = NOW()
-       WHERE id = $2
-         AND EXISTS (
-           SELECT 1 FROM report_versions rv
-           WHERE rv.id = $1 AND rv.report_id = $2 AND rv.is_active = true
-         )`,
-      [job.version_id, job.report_id]
+    if ((materializeResult.factsCreated ?? 0) <= 0) {
+      throw new LlmProviderError(
+        `Materialization produced empty facts (version=${job.version_id})`,
+        'MATERIALIZE_EMPTY_FACTS'
+      );
+    }
+
+    const versionStatusRes = await pool.query(
+      `SELECT review_status FROM report_versions WHERE id = $1 LIMIT 1`,
+      [job.version_id]
     );
-    if (updateRes.rowCount === 0) {
-      console.log(`[Job ${job.id}] Skip updating active_version_id for report ${job.report_id} (version ${job.version_id} no longer active candidate)`);
+    const reportVersionRes = await pool.query(
+      `SELECT active_version_id FROM reports WHERE id = $1 LIMIT 1`,
+      [job.report_id]
+    );
+    const reviewStatus = String(versionStatusRes.rows[0]?.review_status || 'pending_review');
+    const isCurrentActiveVersion = Number(reportVersionRes.rows[0]?.active_version_id || 0) === job.version_id;
+    const shouldPromote = reviewStatus === 'published';
+    let promoted = false;
+
+    if (shouldPromote) {
+      const updateRes = await pool.query(
+        `UPDATE reports
+         SET active_version_id = $1, updated_at = NOW()
+         WHERE id = $2`,
+        [job.version_id, job.report_id]
+      );
+      promoted = (updateRes.rowCount ?? 0) > 0;
+      if (promoted) {
+        console.log(`[Job ${job.id}] Published version ${job.version_id} is now active for report ${job.report_id}`);
+      }
+    } else if (isCurrentActiveVersion) {
+      console.log(`[Job ${job.id}] Materialized active version ${job.version_id}; refreshing GovInsight stats immediately.`);
     } else {
-      console.log(`[Job ${job.id}] Updated active_version_id to ${job.version_id} for report ${job.report_id}`);
+      console.log(`[Job ${job.id}] Materialized candidate version ${job.version_id}; awaiting manual review before publish.`);
     }
 
     await pool.query(
@@ -614,15 +874,20 @@ export class LlmJobRunner {
              progress = $1,
              step_code = $2,
              step_name = $3,
+             error_code = NULL,
+             error_message = NULL,
              finished_at = NOW()
          WHERE id = $4`,
       [STEPS.DONE.progress, STEPS.DONE.code, STEPS.DONE.name, job.id]
     );
 
-    // Update batch stats or refresh GovInsight stats depending on upload mode
+    const shouldRefreshGovInsightStats = promoted || isCurrentActiveVersion;
+
     if (job.ingestion_batch_id) {
       await ingestionBatchService.updateBatchStats(Number(job.ingestion_batch_id));
-    } else {
+    }
+
+    if (shouldRefreshGovInsightStats) {
       await govInsightStatsService.refreshAnnualStats({
         reason: 'single_upload',
         reportId: job.report_id ?? undefined,
@@ -686,14 +951,18 @@ export class LlmJobRunner {
     if (job.version_id) {
       await this.generateNotificationIfNeeded(job.version_id);
 
-      // Auto-trigger comparison with neighbor years (previous/next)
-      // IMPORTANT: Run this BEFORE marking job as succeeded, so we can see logs/errors if it fails
-      try {
-        console.log(`[Job ${job.id}] Attempting to trigger auto-comparison...`);
-        await this.triggerAutoComparison(job.version_id, job.report_id);
-      } catch (err) {
-        // Log error but don't fail the check job itself, as checks technically passed
-        console.error(`[Job ${job.id}] Auto-comparison trigger failed:`, err);
+      const publishState = await this.getVersionPublishState(job.version_id, job.report_id);
+      if (publishState.isPublishedCurrent) {
+        // Auto-trigger comparison only after a version is formally published.
+        try {
+          console.log(`[Job ${job.id}] Attempting to trigger auto-comparison for published version...`);
+          await this.triggerAutoComparison(job.version_id, job.report_id);
+        } catch (err) {
+          // Log error but don't fail the check job itself, as checks technically passed
+          console.error(`[Job ${job.id}] Auto-comparison trigger failed:`, err);
+        }
+      } else {
+        console.log(`[Job ${job.id}] Skip auto-comparison because version ${job.version_id} is still pending review.`);
       }
     }
 
@@ -703,6 +972,8 @@ export class LlmJobRunner {
             progress = $1,
             step_code = $2,
             step_name = $3,
+            error_code = NULL,
+            error_message = NULL,
             finished_at = NOW() 
         WHERE id = $4`,
       [STEPS.DONE.progress, STEPS.DONE.code, STEPS.DONE.name, job.id]);
@@ -790,6 +1061,32 @@ export class LlmJobRunner {
     return this.rawTextColumnExists;
   }
 
+  private resolveConsensusVerifierConfig(primaryProvider: string, primaryModel: string): { provider: string; model: string } {
+    const provider = (
+      process.env.LLM_PARSE_CONSENSUS_PROVIDER ||
+      process.env.LLM_PARSE_FALLBACK_PROVIDER ||
+      process.env.LLM_FALLBACK_PROVIDER ||
+      primaryProvider
+    ).trim().toLowerCase();
+
+    const model = (
+      process.env.LLM_PARSE_CONSENSUS_MODEL ||
+      process.env.LLM_PARSE_FALLBACK_MODEL ||
+      process.env.LLM_FALLBACK_MODEL ||
+      primaryModel
+    ).trim();
+
+    if (!provider) {
+      throw new LlmProviderError('LLM parse consensus verifier provider is empty', 'PARSE_CONSENSUS_CONFIG_INVALID');
+    }
+
+    if (!model) {
+      throw new LlmProviderError('LLM parse consensus verifier model is empty', 'PARSE_CONSENSUS_CONFIG_INVALID');
+    }
+
+    return { provider, model };
+  }
+
   private stringifyOutput(result: LlmParseResult): string {
     if (typeof result.output === 'string') {
       return result.output;
@@ -799,7 +1096,8 @@ export class LlmJobRunner {
 
   private getProvider(attempt: number): LlmProvider {
     if (!this.primaryProvider) {
-      this.primaryProvider = createLlmProvider();
+      const parsePrimary = resolveParsePrimaryConfig();
+      this.primaryProvider = createLlmProvider(parsePrimary.provider, parsePrimary.model);
     }
     return this.primaryProvider;
   }
@@ -809,6 +1107,8 @@ export class LlmJobRunner {
     let code = 'UNKNOWN_ERROR';
     if (error instanceof LlmProviderError) {
       code = error.code || 'UNKNOWN_ERROR';
+    } else if (message.toLowerCase().includes('enoent') || message.toLowerCase().includes('no such file or directory')) {
+      code = 'SOURCE_FILE_MISSING';
     } else if (message.includes('timeout')) {
       code = 'TIMEOUT';
     } else if (message.includes('network')) {
@@ -869,7 +1169,7 @@ export class LlmJobRunner {
     const content = JSON.stringify({
       reportId: report.report_id,
       versionId: versionId,
-      message: `文件 ${report.file_name} 已成功解析并入库。`,
+      message: `File ${report.file_name} parsed and materialized successfully.`, 
       timestamp: new Date().toISOString()
     });
 
@@ -877,6 +1177,44 @@ export class LlmJobRunner {
         INSERT INTO notifications (type, title, content_json, related_version_id, created_at)
         VALUES ('upload_complete', $1, $2, $3, NOW())
     `, [title, content, versionId]);
+  }
+
+  public async triggerAutoComparisonForPublishedVersion(versionId: number, reportId: number | null): Promise<void> {
+    if (!reportId) {
+      return;
+    }
+    const publishState = await this.getVersionPublishState(versionId, reportId);
+    if (!publishState.isPublishedCurrent) {
+      console.log(`[AutoCompare] Skip manual trigger for version ${versionId}: not current published version.`);
+      return;
+    }
+    await this.triggerAutoComparison(versionId, reportId);
+  }
+
+  private async getVersionPublishState(
+    versionId: number,
+    reportId: number | null
+  ): Promise<{ reviewStatus: string; isPublishedCurrent: boolean }> {
+    if (!reportId) {
+      return { reviewStatus: 'pending_review', isPublishedCurrent: false };
+    }
+
+    const versionRes = await pool.query(
+      `SELECT review_status FROM report_versions WHERE id = $1 LIMIT 1`,
+      [versionId]
+    );
+    const reviewStatus = String(versionRes.rows[0]?.review_status || 'pending_review');
+
+    const reportRes = await pool.query(
+      `SELECT active_version_id FROM reports WHERE id = $1 LIMIT 1`,
+      [reportId]
+    );
+    const activeVersionId = Number(reportRes.rows[0]?.active_version_id || 0);
+
+    return {
+      reviewStatus,
+      isPublishedCurrent: reviewStatus === 'published' && activeVersionId === versionId,
+    };
   }
 
   /**
@@ -906,14 +1244,15 @@ export class LlmJobRunner {
 
       // 2. Find neighbor year's active report for same region
       const targetRes = await pool.query(`
-        SELECT id
+        SELECT id, active_version_id
         FROM reports
-        WHERE region_id = $1 AND year = $2 AND active_version_id IS NOT NULL
+        WHERE region_id = $1 AND year = $2
+        ORDER BY (active_version_id IS NOT NULL) DESC, updated_at DESC, id DESC
         LIMIT 1
       `, [currentReport.region_id, targetYear]);
 
       const targetReport = targetRes.rows[0];
-      if (!targetReport) {
+      if (!targetReport?.id || !targetReport.active_version_id) {
         console.log(`[AutoCompare] No active report found for region ${currentReport.region_id} in year ${targetYear}. Skipping comparison.`);
         continue;
       }
@@ -963,3 +1302,4 @@ export class LlmJobRunner {
 }
 
 export const llmJobRunner = new LlmJobRunner();
+

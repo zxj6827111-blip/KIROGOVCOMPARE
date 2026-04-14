@@ -4,6 +4,7 @@ import pool from '../config/database-llm';
 import { llmJobRunner } from '../services/LlmJobRunner';
 import { authMiddleware, AuthRequest, requirePermission } from '../middleware/auth';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
+import { checkVersionSourceFileExists } from '../services/SourceFileGuardService';
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -254,7 +255,7 @@ router.get('/task/:jobId', async (req, res) => {
             status: displayStatus,
             progress: job.progress || 0,
             step_code: job.step_code || 'QUEUED',
-            step_name: job.step_name || '绛夊緟澶勭悊',
+            step_name: job.step_name || '等待处理',
             attempt: job.attempt || 1,
             provider: job.provider,
             model: job.model,
@@ -331,7 +332,7 @@ router.get('/:version_id', async (req, res) => {
       ORDER BY created_at ASC;
     `, [versionId]);
 
-        const jobs = jobsRes.rows;
+        const jobs = jobsRes.rows.map(normalizeJobForDisplay);
 
         // Aggregate status
         const aggregatedStatus = determineVersionStatus(jobs);
@@ -347,28 +348,32 @@ router.get('/:version_id', async (req, res) => {
             const stepCode = currentCoreJob.step_code;
             const jobProgress = currentCoreJob.progress || 0;
 
-            switch (stepCode) {
-                case 'RECEIVED':
-                    overallProgress = 20;
-                    break;
-                case 'ENQUEUED':
-                case 'QUEUED':
-                    overallProgress = 40;
-                    break;
-                case 'PARSING':
-                    // AI parsing: 40% to 80% (40% range)
-                    overallProgress = 40 + Math.round((jobProgress / 100) * 40);
-                    break;
-                case 'POSTPROCESS':
-                    // Post processing: 80% to 100% (20% range)
-                    overallProgress = 80 + Math.round((jobProgress / 100) * 20);
-                    break;
-                case 'DONE':
-                    overallProgress = 100;
-                    break;
-                default:
-                    // Fallback: use job progress directly
-                    overallProgress = jobProgress;
+            if (currentCoreJob.status === 'failed') {
+                overallProgress = jobProgress;
+            } else {
+                switch (stepCode) {
+                    case 'RECEIVED':
+                        overallProgress = 20;
+                        break;
+                    case 'ENQUEUED':
+                    case 'QUEUED':
+                        overallProgress = 40;
+                        break;
+                    case 'PARSING':
+                        // AI parsing: 40% to 80% (40% range)
+                        overallProgress = 40 + Math.round((jobProgress / 100) * 40);
+                        break;
+                    case 'POSTPROCESS':
+                        // Post processing: 80% to 100% (20% range)
+                        overallProgress = 80 + Math.round((jobProgress / 100) * 20);
+                        break;
+                    case 'DONE':
+                        overallProgress = 100;
+                        break;
+                    default:
+                        // Fallback: use job progress directly
+                        overallProgress = jobProgress;
+                }
             }
         }
         // Ensure all core jobs completed means 100%
@@ -499,6 +504,23 @@ router.post('/:version_id/retry', requirePermission('manage_jobs'), async (req, 
             return res.status(400).json({ error: 'No failed or cancelled jobs to retry' });
         }
 
+        const hasParseRetry = failedJobs.some((j: any) => j.kind === 'parse');
+        if (hasParseRetry) {
+            const sourceCheck = await checkVersionSourceFileExists(versionId);
+            if (!sourceCheck) {
+                return res.status(404).json({ error: 'Version not found' });
+            }
+            if (!sourceCheck.ok) {
+                return res.status(422).json({
+                    error: 'SOURCE_FILE_MISSING',
+                    message: sourceCheck.errorMessage || 'source file missing',
+                    version_id: versionId,
+                    storage_path: sourceCheck.storagePath,
+                    resolved_path: sourceCheck.resolvedPath,
+                });
+            }
+        }
+
         for (const job of failedJobs) {
             // Get full details to clone
             const jobDetailsRes = await pool.query('SELECT * FROM jobs WHERE id = $1', [job.id]);
@@ -549,6 +571,64 @@ function determineVersionStatus(jobs: Array<{ status: string; kind: string }>): 
     if (lastJob.status === 'succeeded') return 'succeeded';
 
     return lastJob.status;
+}
+
+function normalizeJobForDisplay(job: any): any {
+    if (!job) return job;
+
+    if (job.status === 'cancelled') {
+        return {
+            ...job,
+            step_code: 'CANCELLED',
+            step_name: job.step_name || 'Cancelled',
+            progress: 100,
+        };
+    }
+
+    if (job.status !== 'failed') {
+        return job;
+    }
+
+    const needsLegacyFailureFix =
+        !job.step_code ||
+        job.step_code === 'DONE' ||
+        job.step_name === 'Failed';
+
+    if (!needsLegacyFailureFix) {
+        if (job.step_name === 'Failed') {
+            if (job.kind === 'parse') {
+                return { ...job, step_name: 'AI parsing failed' };
+            }
+            if (job.kind === 'materialize' || job.kind === 'checks') {
+                return { ...job, step_name: 'Postprocess failed' };
+            }
+        }
+        return job;
+    }
+
+    if (job.kind === 'parse') {
+        return {
+            ...job,
+            step_code: 'PARSING',
+            step_name: 'AI parsing failed',
+            progress: job.progress && job.progress < 100 ? job.progress : 50,
+        };
+    }
+
+    if (job.kind === 'materialize' || job.kind === 'checks') {
+        return {
+            ...job,
+            step_code: 'POSTPROCESS',
+            step_name: 'Postprocess failed',
+            progress: job.progress && job.progress < 100 ? job.progress : 80,
+        };
+    }
+
+    return {
+        ...job,
+        step_code: 'QUEUED',
+        step_name: job.step_name || 'Processing failed',
+    };
 }
 
 /**

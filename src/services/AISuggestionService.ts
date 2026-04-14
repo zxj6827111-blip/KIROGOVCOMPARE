@@ -11,7 +11,11 @@ export interface AISuggestionOptions {
 }
 
 export class AISuggestionService {
-  private openaiApiKey = process.env.OPENAI_API_KEY;
+  private openaiApiKey = process.env.AI_SUGGESTION_API_KEY || process.env.OPENAI_API_KEY;
+  private openaiBaseUrl = String(process.env.AI_SUGGESTION_BASE_URL || process.env.OPENAI_BASE_URL || '').trim().replace(/\/+$/, '');
+  private openaiModel = String(process.env.AI_SUGGESTION_MODEL || process.env.OPENAI_MODEL || process.env.LLM_MODEL || '').trim();
+  private openaiTemperature = Number(process.env.AI_SUGGESTION_TEMPERATURE || 0.7);
+  private openaiMaxTokens = Number(process.env.AI_SUGGESTION_MAX_TOKENS || 1000);
   private aiConfigVersion = parseInt(process.env.AI_CONFIG_VERSION || '1');
 
   /**
@@ -101,7 +105,7 @@ export class AISuggestionService {
     improvementSuggestions: string[];
   }> {
     // 如果没有配置OpenAI API，返回默认建议
-    if (!this.openaiApiKey) {
+    if (!this.openaiApiKey || !this.openaiBaseUrl || !this.openaiModel) {
       return this.generateDefaultSuggestion(diffSummary);
     }
 
@@ -111,9 +115,9 @@ export class AISuggestionService {
 
       // 调用OpenAI API
       const response = await axios.post(
-        'https://api.openai.com/v1/chat/completions',
+        `${this.openaiBaseUrl}/chat/completions`,
         {
-          model: 'gpt-3.5-turbo',
+          model: this.openaiModel,
           messages: [
             {
               role: 'system',
@@ -134,8 +138,8 @@ export class AISuggestionService {
               content: input,
             },
           ],
-          temperature: 0.7,
-          max_tokens: 1000,
+          temperature: Number.isFinite(this.openaiTemperature) ? this.openaiTemperature : 0.7,
+          max_tokens: Number.isFinite(this.openaiMaxTokens) ? this.openaiMaxTokens : 1000,
         },
         {
           headers: {

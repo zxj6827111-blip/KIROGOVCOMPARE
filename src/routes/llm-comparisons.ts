@@ -169,11 +169,19 @@ router.post('/comparisons', authMiddleware, async (req, res) => {
         [yearA, yearB] = [yearB, yearA];
       }
       const leftReportRes = await pool.query(
-        'SELECT id, region_id, year FROM reports WHERE region_id = $1 AND year = $2 LIMIT 1',
+        `SELECT id, region_id, year
+         FROM reports
+         WHERE region_id = $1 AND year = $2
+         ORDER BY (active_version_id IS NOT NULL) DESC, updated_at DESC, id DESC
+         LIMIT 1`,
         [regionId, yearA]
       );
       const rightReportRes = await pool.query(
-        'SELECT id, region_id, year FROM reports WHERE region_id = $1 AND year = $2 LIMIT 1',
+        `SELECT id, region_id, year
+         FROM reports
+         WHERE region_id = $1 AND year = $2
+         ORDER BY (active_version_id IS NOT NULL) DESC, updated_at DESC, id DESC
+         LIMIT 1`,
         [regionId, yearB]
       );
       const leftReport = leftReportRes.rows[0];

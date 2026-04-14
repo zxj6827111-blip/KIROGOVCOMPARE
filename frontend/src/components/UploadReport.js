@@ -8,6 +8,19 @@ import { FileText, FolderOpen, AlertTriangle, UploadCloud } from 'lucide-react';
 const extractField = (payload, key) =>
   payload?.[key] || payload?.[key.replace(/_./g, (m) => m[1].toUpperCase())];
 
+const normalizeUploadModelOptions = (rawOptions) => {
+  if (!Array.isArray(rawOptions)) return [];
+  return rawOptions
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const value = String(item.value || '').trim();
+      const label = String(item.label || item.name || item.value || '').trim();
+      if (!value || !label) return null;
+      return { value, label };
+    })
+    .filter(Boolean);
+};
+
 function UploadReport() {
   const [regions, setRegions] = useState([]);
   const [regionId, setRegionId] = useState('');
@@ -15,7 +28,9 @@ function UploadReport() {
   const [unitName, setUnitName] = useState('');
   const [file, setFile] = useState(null);
   const [, setTextContent] = useState(''); // Only setter used
-  const [model, setModel] = useState('gemini/gemini-2.5-flash');
+  const [model, setModel] = useState('');
+  const [modelOptions, setModelOptions] = useState([]);
+  const [modelConfigLoading, setModelConfigLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [isDragging, setIsDragging] = useState(false);
@@ -73,6 +88,35 @@ function UploadReport() {
       }
     };
     loadRegions();
+  }, []);
+
+  useEffect(() => {
+    const loadModelConfig = async () => {
+      try {
+        const resp = await apiClient.get('/ai/config');
+        const uploadParse = resp.data?.uploadParse || {};
+        const options = normalizeUploadModelOptions(uploadParse.options);
+        const defaultModel = String(uploadParse.defaultModel || '').trim();
+
+        setModelOptions(options);
+        setModel((current) => {
+          if (current && options.some((item) => item.value === current)) {
+            return current;
+          }
+          if (defaultModel && options.some((item) => item.value === defaultModel)) {
+            return defaultModel;
+          }
+          return options[0]?.value || current || '';
+        });
+      } catch (err) {
+        console.error('Failed to load upload model config:', err);
+        setModelOptions([]);
+      } finally {
+        setModelConfigLoading(false);
+      }
+    };
+
+    loadModelConfig();
   }, []);
 
   // Auto-match region based on unit name (Hierarchical Matching)
@@ -502,12 +546,22 @@ function UploadReport() {
             {/* AI 模型选择 - 结构与批量一致 */}
             <div className="form-section">
               <label>AI 模型</label>
-              <select value={model} onChange={(e) => setModel(e.target.value)}>
-                <option value="gemini/gemini-2.5-flash">GEMINI2.5FLASH</option>
-                <option value="nvidia/deepseek-ai/deepseek-v3.2">DeepSeek V3.2 (NVIDIA)</option>
-                <option value="nvidia/moonshotai/kimi-k2.5">Kimi k2.5 (NVIDIA)</option>
-                <option value="modelscope/Qwen/Qwen3-235B-A22B-Instruct-2507">Qwen3 235B (modelscope)</option>
-                <option value="modelscope/kimi-k2.5">Kimi k2.5 (modelscope)</option>
+              <select
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                disabled={loading || modelConfigLoading || modelOptions.length === 0}
+              >
+                {modelOptions.length > 0 ? (
+                  modelOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">
+                    {modelConfigLoading ? 'AI 模型配置加载中...' : '使用后端默认解析模型'}
+                  </option>
+                )}
               </select>
             </div>
 
@@ -614,7 +668,13 @@ function UploadReport() {
           </div>
         </div>
       ) : (
-        <BatchUpload isEmbedded={true} />
+        <BatchUpload
+          isEmbedded={true}
+          model={model}
+          onModelChange={setModel}
+          modelOptions={modelOptions}
+          modelConfigLoading={modelConfigLoading}
+        />
       )}
     </div>
   );

@@ -26,6 +26,38 @@ export const EntityContext = React.createContext<{
   openSelector: undefined
 });
 
+const ENTITY_STORAGE_KEY = 'govinsight:selected-entity-id';
+
+const findEntityById = (nodes: EntityProfile[], targetId: string): EntityProfile | null => {
+  for (const node of nodes) {
+    if (node.id === targetId) return node;
+    if (node.children?.length) {
+      const match = findEntityById(node.children, targetId);
+      if (match) return match;
+    }
+  }
+  return null;
+};
+
+const pickInitialEntity = (tree: EntityProfile[]): EntityProfile | null => {
+  if (!tree.length) return null;
+
+  const savedId = typeof window !== 'undefined' ? localStorage.getItem(ENTITY_STORAGE_KEY) : null;
+  if (savedId) {
+    const savedEntity = findEntityById(tree, savedId);
+    if (savedEntity) return savedEntity;
+  }
+
+  for (const root of tree) {
+    if (root.children?.length) {
+      const firstChildWithChildren = root.children.find((child) => child.children && child.children.length > 0);
+      return firstChildWithChildren || root.children[0];
+    }
+  }
+
+  return tree[0];
+};
+
 // Helper to separate Geographic units (Districts, Streets, Towns) from Functional Departments
 const partitionChildren = (children: EntityProfile[]) => {
   const geo: EntityProfile[] = [];
@@ -74,12 +106,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         const tree = buildRegionTree(orgs);
         setRegionTree(tree);
 
-        // Default to first item if available
-        if (tree.length > 0) {
-          setCurrentEntity(tree[0]);
-        } else {
-          setCurrentEntity(null);
-        }
+        setCurrentEntity(pickInitialEntity(tree));
       } catch (err) {
         console.error('Failed to load orgs', err);
         setRegionTree([]);
@@ -123,6 +150,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
         setIsLoading(false);
       });
     }
+  // Keep this effect keyed to entity id to avoid reload loops while lazy-loading
+  // partially populated tree nodes that legitimately have empty own data.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentEntity?.id]);
 
   // Close menu on click outside
@@ -138,6 +168,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const handleSelectEntity = (entity: EntityProfile) => {
     setCurrentEntity(entity);
+    localStorage.setItem(ENTITY_STORAGE_KEY, entity.id);
     setIsMenuOpen(false);
   };
 

@@ -23,8 +23,7 @@ CREATE TABLE IF NOT EXISTS reports (
   unit_name VARCHAR(255) NOT NULL DEFAULT '',
   active_version_id BIGINT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE(region_id, year, unit_name)
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_reports_region_year ON reports(region_id, year);
@@ -80,6 +79,9 @@ CREATE TABLE IF NOT EXISTS report_versions (
   change_reason TEXT,
   changed_fields_summary TEXT,
   state TEXT NOT NULL DEFAULT 'parsed',
+  review_status VARCHAR(30) NOT NULL DEFAULT 'published',
+  approved_at TIMESTAMPTZ,
+  approved_by BIGINT,
   created_by BIGINT,
   ingestion_batch_id BIGINT REFERENCES ingestion_batches(id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -256,6 +258,9 @@ ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS version_type TEXT NOT NULL 
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS change_reason TEXT;
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS changed_fields_summary TEXT;
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS state TEXT NOT NULL DEFAULT 'parsed';
+ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS review_status VARCHAR(30) NOT NULL DEFAULT 'published';
+ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS approved_by BIGINT REFERENCES admin_users(id);
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS created_by BIGINT;
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS ingestion_batch_id BIGINT REFERENCES ingestion_batches(id);
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS check_total INTEGER;
@@ -494,6 +499,38 @@ CREATE TABLE IF NOT EXISTS ai_decision_reports (
 
 CREATE INDEX IF NOT EXISTS idx_ai_reports_region_year ON ai_decision_reports(region_id, year);
 
+CREATE TABLE IF NOT EXISTS gov_insight_report_jobs (
+  id BIGSERIAL PRIMARY KEY,
+  region_id BIGINT NOT NULL,
+  org_id VARCHAR(100) NOT NULL,
+  org_name VARCHAR(255) NOT NULL,
+  year INTEGER NOT NULL,
+  status VARCHAR(30) NOT NULL DEFAULT 'queued',
+  progress INTEGER NOT NULL DEFAULT 0,
+  step_code VARCHAR(50) NOT NULL DEFAULT 'QUEUED',
+  step_name VARCHAR(255) NOT NULL DEFAULT '等待处理',
+  model VARCHAR(100) NOT NULL,
+  prompt_text TEXT NOT NULL,
+  system_instruction TEXT,
+  request_config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  error_code VARCHAR(50),
+  error_message TEXT,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  max_retries INTEGER NOT NULL DEFAULT 1,
+  created_by BIGINT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  started_at TIMESTAMPTZ,
+  finished_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_gov_insight_report_jobs_region_year
+  ON gov_insight_report_jobs(region_id, year, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_gov_insight_report_jobs_status
+  ON gov_insight_report_jobs(status, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_gov_insight_report_jobs_active
+  ON gov_insight_report_jobs(region_id, year)
+  WHERE status IN ('queued', 'running');
+
 INSERT INTO metric_dictionary (
   metric_key,
   version,
@@ -531,9 +568,24 @@ ON CONFLICT DO NOTHING;
 -- 政务公开智慧治理大屏数据聚合视图
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_class WHERE relname='gov_open_annual_stats' AND relkind='m') THEN
-    DROP VIEW IF EXISTS gov_open_annual_stats;
-    DROP MATERIALIZED VIEW IF EXISTS gov_open_annual_stats;
+  IF NOT EXISTS (SELECT 1 FROM pg_class WHERE relname='gov_open_annual_stats' AND relkind='m')
+     OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='gov_open_annual_stats' AND column_name='action_force')
+     OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='gov_open_annual_stats' AND column_name='fees_amount')
+     OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='gov_open_annual_stats' AND column_name='outcome_not_open_state_secret')
+     OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='gov_open_annual_stats' AND column_name='outcome_not_open_law_forbidden')
+     OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='gov_open_annual_stats' AND column_name='outcome_not_open_enforcement')
+     OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='gov_open_annual_stats' AND column_name='outcome_complaint')
+     OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='gov_open_annual_stats' AND column_name='outcome_publication')
+     OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='gov_open_annual_stats' AND column_name='outcome_massive')
+     OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='gov_open_annual_stats' AND column_name='outcome_confirm')
+     OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='gov_open_annual_stats' AND column_name='outcome_overdue_correction')
+     OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='gov_open_annual_stats' AND column_name='outcome_overdue_fee')
+     OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='gov_open_annual_stats' AND column_name='outcome_other_reasons') THEN
+    IF EXISTS (SELECT 1 FROM pg_class WHERE relname='gov_open_annual_stats' AND relkind='m') THEN
+      DROP MATERIALIZED VIEW gov_open_annual_stats;
+    ELSIF EXISTS (SELECT 1 FROM pg_class WHERE relname='gov_open_annual_stats' AND relkind='v') THEN
+      DROP VIEW gov_open_annual_stats;
+    END IF;
     CREATE MATERIALIZED VIEW gov_open_annual_stats AS
  WITH RECURSIVE base AS (
          SELECT r.id AS report_id,
@@ -589,7 +641,17 @@ BEGIN
                 CASE
                     WHEN (fad.category = 'punishment') THEN COALESCE(fad.processed_count, 0)
                     ELSE 0
-                END) AS action_punishment
+                END) AS action_punishment,
+            sum(
+                CASE
+                    WHEN (fad.category = 'coercion') THEN COALESCE(fad.processed_count, 0)
+                    ELSE 0
+                END) AS action_force,
+            sum(
+                CASE
+                    WHEN (fad.category = 'fees') THEN COALESCE(fad.amount, 0)
+                    ELSE 0
+                END) AS fees_amount
            FROM fact_active_disclosure fad
           GROUP BY fad.report_id, fad.version_id
         ), application_pivot AS (
@@ -604,15 +666,25 @@ BEGIN
             sum(CASE WHEN fa.response_type = 'unable_no_info' THEN fa.count ELSE 0 END) AS outcome_unable_no_info,
             sum(CASE WHEN fa.response_type = 'unable_need_creation' THEN fa.count ELSE 0 END) AS outcome_unable_need_creation,
             sum(CASE WHEN fa.response_type = 'unable_unclear' THEN fa.count ELSE 0 END) AS outcome_unable_unclear,
-            sum(CASE WHEN fa.response_type IN ('denied', 'not_open', 'denied_law_forbidden', 'denied_state_secret', 'not_open_danger', 'denied_safety_stability', 'not_open_process', 'denied_process_info', 'not_open_internal', 'denied_internal_affairs', 'not_open_third_party', 'denied_third_party_rights', 'denied_enforcement_case') THEN fa.count ELSE 0 END) AS outcome_not_open,
+            sum(CASE WHEN fa.response_type IN ('denied', 'not_open', 'denied_law_forbidden', 'denied_state_secret', 'not_open_danger', 'denied_safety_stability', 'not_open_process', 'denied_process_info', 'not_open_internal', 'denied_internal_affairs', 'not_open_third_party', 'denied_third_party_rights', 'denied_enforcement_case', 'not_open_admin_query', 'denied_admin_query') THEN fa.count ELSE 0 END) AS outcome_not_open,
+            sum(CASE WHEN fa.response_type = 'denied_state_secret' THEN fa.count ELSE 0 END) AS outcome_not_open_state_secret,
+            sum(CASE WHEN fa.response_type = 'denied_law_forbidden' THEN fa.count ELSE 0 END) AS outcome_not_open_law_forbidden,
             sum(CASE WHEN fa.response_type IN ('not_open_danger', 'denied_safety_stability') THEN fa.count ELSE 0 END) AS outcome_not_open_danger,
             sum(CASE WHEN fa.response_type IN ('not_open_process', 'denied_process_info') THEN fa.count ELSE 0 END) AS outcome_not_open_process,
             sum(CASE WHEN fa.response_type IN ('not_open_internal', 'denied_internal_affairs') THEN fa.count ELSE 0 END) AS outcome_not_open_internal,
             sum(CASE WHEN fa.response_type IN ('not_open_third_party', 'denied_third_party_rights') THEN fa.count ELSE 0 END) AS outcome_not_open_third_party,
+            sum(CASE WHEN fa.response_type = 'denied_enforcement_case' THEN fa.count ELSE 0 END) AS outcome_not_open_enforcement,
             sum(CASE WHEN fa.response_type IN ('not_open_admin_query', 'denied_admin_query') THEN fa.count ELSE 0 END) AS outcome_not_open_admin_query,
-            sum(CASE WHEN fa.response_type IN ('ignored', 'other', 'not_processed_complaint', 'not_processed_confirm_info', 'ignore_repeat', 'not_processed_repeat', 'not_open_admin_query', 'denied_admin_query', 'other_other_reasons', 'other_overdue_correction', 'other_overdue_fee') THEN fa.count ELSE 0 END) AS outcome_ignore,
+            sum(CASE WHEN fa.response_type IN ('ignored', 'not_processed_complaint', 'not_processed_confirm_info', 'ignore_repeat', 'not_processed_repeat', 'not_processed_publication', 'not_processed_massive_requests') THEN fa.count ELSE 0 END) AS outcome_ignore,
+            sum(CASE WHEN fa.response_type = 'not_processed_complaint' THEN fa.count ELSE 0 END) AS outcome_complaint,
             sum(CASE WHEN fa.response_type IN ('ignore_repeat', 'not_processed_repeat') THEN fa.count ELSE 0 END) AS outcome_ignore_repeat,
-            sum(CASE WHEN fa.response_type = 'outcome_other' THEN fa.count ELSE 0 END) AS outcome_other,
+            sum(CASE WHEN fa.response_type = 'not_processed_publication' THEN fa.count ELSE 0 END) AS outcome_publication,
+            sum(CASE WHEN fa.response_type = 'not_processed_massive_requests' THEN fa.count ELSE 0 END) AS outcome_massive,
+            sum(CASE WHEN fa.response_type = 'not_processed_confirm_info' THEN fa.count ELSE 0 END) AS outcome_confirm,
+            sum(CASE WHEN fa.response_type IN ('other', 'outcome_other', 'other_other_reasons', 'other_overdue_correction', 'other_overdue_fee') THEN fa.count ELSE 0 END) AS outcome_other,
+            sum(CASE WHEN fa.response_type = 'other_overdue_correction' THEN fa.count ELSE 0 END) AS outcome_overdue_correction,
+            sum(CASE WHEN fa.response_type = 'other_overdue_fee' THEN fa.count ELSE 0 END) AS outcome_overdue_fee,
+            sum(CASE WHEN fa.response_type IN ('outcome_other', 'other_other_reasons') THEN fa.count ELSE 0 END) AS outcome_other_reasons,
             sum(CASE WHEN fa.response_type = 'carried_forward' THEN fa.count ELSE 0 END) AS app_carried_forward
            FROM fact_application fa
           WHERE fa.applicant_type <> 'total'
@@ -651,6 +723,8 @@ BEGIN
     COALESCE(ad.doc_abolished, (0)) AS doc_abolished,
     COALESCE(ad.action_licensing, (0)) AS action_licensing,
     COALESCE(ad.action_punishment, (0)) AS action_punishment,
+    COALESCE(ad.action_force, (0)) AS action_force,
+    COALESCE(ad.fees_amount, (0)) AS fees_amount,
     COALESCE(ap.app_new, (0)) AS app_new,
     COALESCE(ap.app_carried_over, (0)) AS app_carried_over,
     COALESCE(ap.source_natural, (0)) AS source_natural,
@@ -661,14 +735,24 @@ BEGIN
     COALESCE(ap.outcome_unable_need_creation, (0)) AS outcome_unable_need_creation,
     COALESCE(ap.outcome_unable_unclear, (0)) AS outcome_unable_unclear,
     COALESCE(ap.outcome_not_open, (0)) AS outcome_not_open,
+    COALESCE(ap.outcome_not_open_state_secret, (0)) AS outcome_not_open_state_secret,
+    COALESCE(ap.outcome_not_open_law_forbidden, (0)) AS outcome_not_open_law_forbidden,
     COALESCE(ap.outcome_not_open_danger, (0)) AS outcome_not_open_danger,
     COALESCE(ap.outcome_not_open_process, (0)) AS outcome_not_open_process,
     COALESCE(ap.outcome_not_open_internal, (0)) AS outcome_not_open_internal,
     COALESCE(ap.outcome_not_open_third_party, (0)) AS outcome_not_open_third_party,
+    COALESCE(ap.outcome_not_open_enforcement, (0)) AS outcome_not_open_enforcement,
     COALESCE(ap.outcome_not_open_admin_query, (0)) AS outcome_not_open_admin_query,
     COALESCE(ap.outcome_ignore, (0)) AS outcome_ignore,
+    COALESCE(ap.outcome_complaint, (0)) AS outcome_complaint,
     COALESCE(ap.outcome_ignore_repeat, (0)) AS outcome_ignore_repeat,
+    COALESCE(ap.outcome_publication, (0)) AS outcome_publication,
+    COALESCE(ap.outcome_massive, (0)) AS outcome_massive,
+    COALESCE(ap.outcome_confirm, (0)) AS outcome_confirm,
     COALESCE(ap.outcome_other, (0)) AS outcome_other,
+    COALESCE(ap.outcome_overdue_correction, (0)) AS outcome_overdue_correction,
+    COALESCE(ap.outcome_overdue_fee, (0)) AS outcome_overdue_fee,
+    COALESCE(ap.outcome_other_reasons, (0)) AS outcome_other_reasons,
     COALESCE(ap.app_carried_forward, (0)) AS app_carried_forward,
     COALESCE(lp.rev_total, (0)) AS rev_total,
     COALESCE(lp.rev_corrected, (0)) AS rev_corrected,
@@ -698,34 +782,102 @@ export async function runLLMMigrations(): Promise<void> {
     await pool.query(postgresSchema);
     console.log('[Postgres Migrations] Schema ensured.');
 
+    // ------------------------------------------------------------------------
+    // Report uniqueness hardening: one report per (region_id, year)
+    // ------------------------------------------------------------------------
+    try {
+      await pool.query(`ALTER TABLE reports DROP CONSTRAINT IF EXISTS reports_region_id_year_unit_name_key;`);
+    } catch (dropError: any) {
+      console.error('[Migrations] Failed to drop legacy reports unique constraint:', dropError?.message || dropError);
+    }
+
+    try {
+      await pool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_reports_region_year
+        ON reports(region_id, year);
+      `);
+    } catch (uniqueIndexError: any) {
+      console.error(
+        '[Migrations] Failed to create uq_reports_region_year index. Resolve duplicate reports and rerun fix:merge-duplicates.',
+        uniqueIndexError?.message || uniqueIndexError
+      );
+    }
+
     // ============================================================================
     // DATA INTEGRITY REPAIR
     // ============================================================================
 
-    // 1. Fix missing active_version_id AND fix cases where active version is empty but valid one exists
-    // We check if current active_version is NULL or has very short content (likely empty JSON)
+    // 1. Fix missing/invalid active_version_id.
+    // Prefer versions that already have fact rows; then parsed_json-rich versions;
+    // finally fall back to latest version so active_version_id is not unnecessarily nulled out.
     const repairRes = await pool.query(`
       UPDATE reports r
       SET active_version_id = (
-        SELECT id FROM report_versions rv
+        SELECT rv.id
+        FROM report_versions rv
         WHERE rv.report_id = r.id
-        AND rv.parsed_json IS NOT NULL
-        AND length(rv.parsed_json::text) > 100 
-        ORDER BY rv.created_at DESC
+        ORDER BY
+          CASE
+            WHEN (
+              EXISTS (SELECT 1 FROM fact_active_disclosure fad WHERE fad.report_id = r.id AND fad.version_id = rv.id)
+              OR EXISTS (SELECT 1 FROM fact_application fa WHERE fa.report_id = r.id AND fa.version_id = rv.id)
+              OR EXISTS (SELECT 1 FROM fact_legal_proceeding flp WHERE flp.report_id = r.id AND flp.version_id = rv.id)
+            ) THEN 0
+            WHEN rv.parsed_json IS NOT NULL AND length(rv.parsed_json::text) > 100 THEN 1
+            WHEN rv.parsed_json IS NOT NULL AND rv.parsed_json::text NOT IN ('{}', 'null', '\"\"') THEN 2
+            ELSE 3
+          END ASC,
+          rv.created_at DESC,
+          rv.id DESC
         LIMIT 1
       )
       WHERE 
-        (r.active_version_id IS NULL)
-        OR 
         EXISTS (
+          SELECT 1
+          FROM report_versions rv2
+          WHERE rv2.report_id = r.id
+        )
+        AND (
+          r.active_version_id IS NULL
+          OR NOT EXISTS (
+            SELECT 1
+            FROM report_versions cur
+            WHERE cur.id = r.active_version_id
+              AND cur.report_id = r.id
+          )
+          OR
+          EXISTS (
           SELECT 1 FROM report_versions cur 
           WHERE cur.id = r.active_version_id 
-          AND (cur.parsed_json IS NULL OR length(cur.parsed_json::text) < 100)
-        );
+            AND cur.report_id = r.id
+            AND (cur.parsed_json IS NULL OR cur.parsed_json::text IN ('{}', 'null', '\"\"'))
+        )
+          OR EXISTS (
+            SELECT 1
+            FROM report_versions cur
+            WHERE cur.id = r.active_version_id
+              AND cur.report_id = r.id
+              AND NOT (
+                EXISTS (SELECT 1 FROM fact_active_disclosure fad WHERE fad.report_id = r.id AND fad.version_id = cur.id)
+                OR EXISTS (SELECT 1 FROM fact_application fa WHERE fa.report_id = r.id AND fa.version_id = cur.id)
+                OR EXISTS (SELECT 1 FROM fact_legal_proceeding flp WHERE flp.report_id = r.id AND flp.version_id = cur.id)
+              )
+              AND EXISTS (
+                SELECT 1
+                FROM report_versions rvx
+                WHERE rvx.report_id = r.id
+                  AND (
+                    EXISTS (SELECT 1 FROM fact_active_disclosure fadx WHERE fadx.report_id = r.id AND fadx.version_id = rvx.id)
+                    OR EXISTS (SELECT 1 FROM fact_application fax WHERE fax.report_id = r.id AND fax.version_id = rvx.id)
+                    OR EXISTS (SELECT 1 FROM fact_legal_proceeding flpx WHERE flpx.report_id = r.id AND flpx.version_id = rvx.id)
+                  )
+              )
+          )
+      );
     `);
 
     if ((repairRes.rowCount ?? 0) > 0) {
-      console.log(`[Migrations] Fixed data integrity for ${repairRes.rowCount} reports (linked to valid versions)`);
+      console.log(`[Migrations] Fixed data integrity for ${repairRes.rowCount} reports (active version aligned)`);
     }
 
     // 2. Sync is_active to match reports.active_version_id (best-effort)
@@ -743,6 +895,31 @@ export async function runLLMMigrations(): Promise<void> {
       WHERE rv.report_id IN (SELECT id FROM reports WHERE active_version_id IS NULL);
     `);
 
+    // 2.5. Normalize review workflow status so only the current published version
+    // is treated as formal production data; older versions remain historical.
+    await pool.query(`
+      UPDATE report_versions rv
+      SET review_status = CASE
+            WHEN EXISTS (
+              SELECT 1
+              FROM reports r
+              WHERE r.active_version_id = rv.id
+            ) OR rv.is_active = true THEN 'published'
+            ELSE 'history'
+          END,
+          approved_at = CASE
+            WHEN EXISTS (
+              SELECT 1
+              FROM reports r
+              WHERE r.active_version_id = rv.id
+            ) OR rv.is_active = true
+              THEN COALESCE(rv.approved_at, rv.updated_at, rv.created_at, NOW())
+            ELSE rv.approved_at
+          END
+      WHERE rv.review_status IS NULL
+         OR rv.review_status NOT IN ('pending_review', 'published', 'history');
+    `);
+
     // 3. Create unique active version index (after normalization)
     try {
       await pool.query(`
@@ -752,6 +929,15 @@ export async function runLLMMigrations(): Promise<void> {
       `);
     } catch (indexError: any) {
       console.error('[Migrations] Failed to create uq_report_versions_active index:', indexError?.message || indexError);
+    }
+
+    try {
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_report_versions_review_status
+        ON report_versions(report_id, review_status, created_at DESC);
+      `);
+    } catch (indexError: any) {
+      console.error('[Migrations] Failed to create idx_report_versions_review_status:', indexError?.message || indexError);
     }
 
   } catch (error: any) {

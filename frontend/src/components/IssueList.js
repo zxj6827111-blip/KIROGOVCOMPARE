@@ -9,8 +9,7 @@ import {
     CheckCircle,
     ArrowLeft,
     RefreshCw,
-    Eye,
-    Download
+    Eye
 } from 'lucide-react';
 
 function IssueList({ regionId, regionName, onBack, onSelectReport }) {
@@ -75,7 +74,7 @@ function IssueList({ regionId, regionName, onBack, onSelectReport }) {
     };
 
     // Helper to extract reports from tree nodes for batch operations
-    const getReportsFromNodes = (nodes) => {
+    const getReportsFromNodes = useCallback((nodes) => {
         let reports = [];
         if (!nodes) return reports;
         nodes.forEach(node => {
@@ -87,7 +86,7 @@ function IssueList({ regionId, regionName, onBack, onSelectReport }) {
             }
         });
         return reports;
-    };
+    }, []);
 
     // Recursive filtering
     const filterTree = useCallback((nodes) => {
@@ -125,7 +124,7 @@ function IssueList({ regionId, regionName, onBack, onSelectReport }) {
         // Current requirement: "对当前筛选...一键校验". So yes, filtered tree.
         const allReports = getReportsFromNodes(filteredTree);
         return allReports.map(r => r.report_id);
-    }, [filteredTree]);
+    }, [filteredTree, getReportsFromNodes]);
 
     // Calculate display stats based on filtered tree?
     // Or just use the global stats?
@@ -138,15 +137,6 @@ function IssueList({ regionId, regionName, onBack, onSelectReport }) {
         nodes.forEach(node => {
             if (node.own_issues > 0) count++; // Count regions that HAVE issues themselves
             if (node.children) count += countNodesWithIssues(node.children);
-        });
-        return count;
-    };
-
-    const countTotalNodes = (nodes) => {
-        let count = 0;
-        nodes.forEach(node => {
-            count++;
-            if (node.children) count += countTotalNodes(node.children);
         });
         return count;
     };

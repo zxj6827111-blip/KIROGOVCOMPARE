@@ -2,6 +2,82 @@
 import { EntityProfile, AnnualData, AnnualDataRecord, OrgItem, EntityType } from './types';
 import { fetchAnnualData } from './api';
 
+const LEGACY_FEES_BY_YEAR: Record<number, number> = {
+  2024: 96171.6,
+  2023: 71940.7,
+  2022: 65120.3,
+  2021: 62450.5,
+  2020: 58920.1
+};
+
+const LEGACY_2024_OUTCOME_DETAIL = {
+  notOpen: {
+    stateSecret: 2,
+    lawForbidden: 31,
+    danger: 5,
+    thirdParty: 6,
+    internal: 8,
+    process: 12,
+    enforcement: 9,
+    adminQuery: 105
+  },
+  unable: {
+    noInfo: 769,
+    needCreation: 11,
+    unclear: 2
+  },
+  untreated: {
+    complaint: 62,
+    repeat: 25,
+    publication: 0,
+    massive: 0,
+    confirm: 1
+  },
+  other: {
+    overdueCorrection: 71,
+    overdueFee: 6,
+    other: 110
+  }
+};
+
+const isValidAnnualYear = (year: unknown): year is number =>
+  Number.isInteger(year) && Number(year) >= 2000 && Number(year) <= 2100;
+
+const hasAnyDetailedOutcomeValue = (record: AnnualDataRecord): boolean =>
+  [
+    record.outcome_not_open_state_secret,
+    record.outcome_not_open_law_forbidden,
+    record.outcome_not_open_danger,
+    record.outcome_not_open_third_party,
+    record.outcome_not_open_internal,
+    record.outcome_not_open_process,
+    record.outcome_not_open_enforcement,
+    record.outcome_not_open_admin_query,
+    record.outcome_unable_no_info,
+    record.outcome_unable_need_creation,
+    record.outcome_unable_unclear,
+    record.outcome_complaint,
+    record.outcome_ignore_repeat,
+    record.outcome_publication,
+    record.outcome_massive,
+    record.outcome_confirm,
+    record.outcome_overdue_correction,
+    record.outcome_overdue_fee,
+    record.outcome_other_reasons
+  ].some((value) => typeof value === 'number' && value > 0);
+
+const normalizeRecordsByYear = (records: AnnualDataRecord[]): AnnualDataRecord[] => {
+  const deduped = new Map<number, AnnualDataRecord>();
+  records
+    .filter((record) => isValidAnnualYear(record.year))
+    .forEach((record) => {
+      if (!deduped.has(record.year)) {
+        deduped.set(record.year, record);
+      }
+    });
+  return Array.from(deduped.values());
+};
+
 // Legacy compat for views
 export const districts: EntityProfile[] = [];
 export const departments: EntityProfile[] = [];
@@ -12,6 +88,8 @@ export const mockSuzhou: any = { data: [] };
 
 // Transform API record to Frontend AnnualData
 export const transformYearData = (record: AnnualDataRecord): AnnualData => {
+  const useLegacy2024OutcomeDetail = record.year === 2024 && !hasAnyDetailedOutcomeValue(record);
+
   return {
     year: record.year,
     regulations: {
@@ -27,15 +105,10 @@ export const transformYearData = (record: AnnualDataRecord): AnnualData => {
     adminActions: {
       licensing: record.action_licensing || 0,
       punishment: record.action_punishment || 0,
-      force: 0 // Not in View
+      force: record.action_force || 0
     },
     fees: {
-      // Manual correction for Huaian 2024 and historical data as per requirement
-      amount: record.year === 2024 ? 96171.6 :
-        record.year === 2023 ? 71940.7 :
-          record.year === 2022 ? 65120.3 :
-            record.year === 2021 ? 62450.5 :
-              record.year === 2020 ? 58920.1 : 0
+      amount: record.fees_amount ?? LEGACY_FEES_BY_YEAR[record.year] ?? 0
     },
     applications: {
       newReceived: record.app_new || 0,
@@ -65,31 +138,31 @@ export const transformYearData = (record: AnnualDataRecord): AnnualData => {
       },
       outcomesDetail: {
         notOpen: {
-          stateSecret: record.year === 2024 ? 2 : (record.outcome_not_open_state_secret || 0),
-          lawForbidden: record.year === 2024 ? 31 : (record.outcome_not_open_law_forbidden || 0),
-          danger: record.year === 2024 ? 5 : (record.outcome_not_open_danger || 0),
-          thirdParty: record.year === 2024 ? 6 : (record.outcome_not_open_third_party || 0),
-          internal: record.year === 2024 ? 8 : (record.outcome_not_open_internal || 0),
-          process: record.year === 2024 ? 12 : (record.outcome_not_open_process || 0),
-          enforcement: record.year === 2024 ? 9 : (record.outcome_not_open_enforcement || 0),
-          adminQuery: record.year === 2024 ? 105 : (record.outcome_not_open_admin_query || 0)
+          stateSecret: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.notOpen.stateSecret : (record.outcome_not_open_state_secret ?? 0),
+          lawForbidden: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.notOpen.lawForbidden : (record.outcome_not_open_law_forbidden ?? 0),
+          danger: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.notOpen.danger : (record.outcome_not_open_danger ?? 0),
+          thirdParty: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.notOpen.thirdParty : (record.outcome_not_open_third_party ?? 0),
+          internal: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.notOpen.internal : (record.outcome_not_open_internal ?? 0),
+          process: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.notOpen.process : (record.outcome_not_open_process ?? 0),
+          enforcement: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.notOpen.enforcement : (record.outcome_not_open_enforcement ?? 0),
+          adminQuery: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.notOpen.adminQuery : (record.outcome_not_open_admin_query ?? 0)
         },
         unable: {
-          noInfo: record.year === 2024 ? 769 : (record.outcome_unable_no_info || 0),
-          needCreation: record.year === 2024 ? 11 : (record.outcome_unable_need_creation || 0),
-          unclear: record.year === 2024 ? 2 : (record.outcome_unable_unclear || 0)
+          noInfo: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.unable.noInfo : (record.outcome_unable_no_info ?? 0),
+          needCreation: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.unable.needCreation : (record.outcome_unable_need_creation ?? 0),
+          unclear: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.unable.unclear : (record.outcome_unable_unclear ?? 0)
         },
         untreated: {
-          complaint: record.year === 2024 ? 62 : (record.outcome_complaint || 0),
-          repeat: record.year === 2024 ? 25 : (record.outcome_ignore_repeat || 0),
-          publication: record.year === 2024 ? 0 : (record.outcome_publication || 0),
-          massive: record.year === 2024 ? 0 : (record.outcome_massive || 0),
-          confirm: record.year === 2024 ? 1 : (record.outcome_confirm || 0)
+          complaint: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.untreated.complaint : (record.outcome_complaint ?? 0),
+          repeat: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.untreated.repeat : (record.outcome_ignore_repeat ?? 0),
+          publication: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.untreated.publication : (record.outcome_publication ?? 0),
+          massive: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.untreated.massive : (record.outcome_massive ?? 0),
+          confirm: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.untreated.confirm : (record.outcome_confirm ?? 0)
         },
         other: {
-          overdueCorrection: record.year === 2024 ? 71 : (record.outcome_overdue_correction || 0),
-          overdueFee: record.year === 2024 ? 6 : (record.outcome_overdue_fee || 0),
-          other: record.year === 2024 ? 110 : (record.outcome_other_reasons || 0)
+          overdueCorrection: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.other.overdueCorrection : (record.outcome_overdue_correction ?? 0),
+          overdueFee: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.other.overdueFee : (record.outcome_overdue_fee ?? 0),
+          other: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.other.other : (record.outcome_other_reasons ?? 0)
         }
       },
 
@@ -179,14 +252,21 @@ export const loadEntityData = async (entity: EntityProfile): Promise<EntityProfi
     }
 
     // Separate records using normalized IDs for robustness
-    const entityRecords = records.filter(r => r.org_id?.trim().toLowerCase() === targetId);
+    const validYearRecords = records.filter((record) => isValidAnnualYear(record.year));
+    if (validYearRecords.length !== records.length) {
+      console.log('[loadEntityData] Dropped invalid-year records:', records.length - validYearRecords.length);
+    }
+
+    const entityRecords = normalizeRecordsByYear(
+      validYearRecords.filter(r => r.org_id?.trim().toLowerCase() === targetId)
+    );
 
     // Child records: parent_id matches targetId
     // 修复: 不再依赖isDistrictName,而是使用org_type或parent_id关系
     // Child records filtering and mapping
     const validChildIds = new Set(entity.children?.map(c => c.id.trim().toLowerCase()));
 
-    const relevantRecords = records.filter(r => {
+    const relevantRecords = validYearRecords.filter(r => {
       const oid = r.org_id?.trim().toLowerCase();
       const pid = r.parent_id?.trim().toLowerCase();
 
@@ -239,19 +319,22 @@ export const loadEntityData = async (entity: EntityProfile): Promise<EntityProfi
       return score(b) - score(a); // High score first
     };
 
+    const normalizedEntityRecords = normalizeRecordsByYear([...entityRecords].sort(prioritizeGovernment));
+
     // Sort records within each district group
     childRecordsMap.forEach((recs, key) => {
       recs.sort(prioritizeGovernment);
     });
 
     // Transform entity data
-    const annualData = entityRecords.map(transformYearData).sort((a, b) => a.year - b.year);
+    const annualData = normalizedEntityRecords.map(transformYearData).sort((a, b) => a.year - b.year);
 
     // Build children
     const childrenFromAPI: EntityProfile[] = [];
     childRecordsMap.forEach((recs, orgId) => {
-      const firstRec = recs[0];
-      const childData = recs.map(transformYearData).sort((a, b) => a.year - b.year);
+      const normalizedChildRecords = normalizeRecordsByYear(recs);
+      const firstRec = normalizedChildRecords[0] || recs[0];
+      const childData = normalizedChildRecords.map(transformYearData).sort((a, b) => a.year - b.year);
 
       const existingChild = entity.children?.find(c => c.id.trim().toLowerCase() === orgId);
 

@@ -71,11 +71,11 @@ CREATE TABLE IF NOT EXISTS reports (
   unit_name VARCHAR(255) NOT NULL DEFAULT '',
   active_version_id BIGINT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE(region_id, year, unit_name)
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_reports_region_year ON reports(region_id, year);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_reports_region_year ON reports(region_id, year);
 
 CREATE TABLE IF NOT EXISTS ingestion_batches (
   id BIGSERIAL PRIMARY KEY,

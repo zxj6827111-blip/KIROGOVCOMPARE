@@ -33,7 +33,19 @@ export const RiskAnalysis: React.FC = () => {
     conversionRate: (((d.disputes?.reconsideration?.total || 0) + (d.disputes?.litigation?.total || 0)) / (d.applications.newReceived || 1) * 100).toFixed(1)
   }));
 
-  const current = chartData.length > 0 ? chartData[chartData.length - 1] : { totalApp: 0, disputes: 0, corrections: 0, percent: 0 };
+  const current = chartData.length > 0 ? chartData[chartData.length - 1] : { year: new Date().getFullYear(), totalApp: 0, disputes: 0, corrections: 0, percent: 0 };
+  const previous = chartData.length > 1 ? chartData[chartData.length - 2] : null;
+  const periodLabel = previous ? `${previous.year}-${current.year}` : `${current.year}`;
+  const currentConversionRate = Number(current?.disputes && current?.totalApp ? (current.disputes / current.totalApp * 100).toFixed(1) : 0);
+  const previousConversionRate = previous ? Number((previous.disputes / previous.totalApp * 100).toFixed(1)) : null;
+  const conversionTrendLabel =
+    previousConversionRate === null
+      ? '变化不明显'
+      : currentConversionRate > previousConversionRate
+        ? '上升趋势'
+        : currentConversionRate < previousConversionRate
+          ? '下降趋势'
+          : '基本持平';
 
   // Funnel Data (Snapshot of current year)
   const funnelData = [
@@ -48,7 +60,7 @@ export const RiskAnalysis: React.FC = () => {
       <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
         <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
           <GitMerge className="w-5 h-5 mr-2 text-slate-500" />
-          社会矛盾转化漏斗 (2024)
+          社会矛盾转化漏斗 ({current.year})
         </h3>
         <div className="flex flex-col md:flex-row justify-center items-center space-y-4 md:space-y-0 md:space-x-8">
           {funnelData.map((item, idx) => (
@@ -141,7 +153,7 @@ export const RiskAnalysis: React.FC = () => {
         <div>
           <h4 className="font-bold text-rose-800 text-sm">风险预警提示</h4>
           <p className="text-sm text-rose-700 mt-1">
-            数据显示，2023-2024年间，尽管自然人申请数量趋于平稳，但<strong>“争议转化率”</strong>却呈现上升趋势。
+            数据显示，{periodLabel}年间，尽管自然人申请数量趋于平稳，但<strong>“争议转化率”</strong>整体呈现{conversionTrendLabel}。
             这表明单件申请引发的行政成本在增加，可能存在依申请公开回复模板老化、缺乏针对性解释工作等问题，
             极易引发“程序空转”类诉讼。建议加强与申请人的沟通机制。
           </p>

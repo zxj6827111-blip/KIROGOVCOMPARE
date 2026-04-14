@@ -4,6 +4,7 @@
  */
 
 import type { AnnualDataRecord, OrgItem, ApiResponse } from './types';
+import type { AnnualReportSummary } from './utils/aiReport';
 
 const API_BASE = process.env.REACT_APP_API_URL || '';
 
@@ -88,7 +89,7 @@ export async function saveAIReport(
   orgName: string,
   year: number,
   content: any,
-  model: string = 'gemini'
+  model?: string
 ): Promise<void> {
   const url = `${API_BASE}/api/gov-insight/ai-report/save`;
   const response = await fetch(url, {
@@ -127,6 +128,32 @@ export async function fetchAIReport(
   }
 
   const result: ApiResponse<any> = await response.json();
+  if (result.code !== 200 || !result.data) {
+    return null;
+  }
+
+  return result.data;
+}
+
+/**
+ * 获取年度报告原文摘要
+ */
+export async function fetchAnnualReportSummary(
+  orgId: string,
+  year: number
+): Promise<AnnualReportSummary | null> {
+  const params = new URLSearchParams();
+  params.set('org_id', orgId);
+  params.set('year', String(year));
+
+  const url = `${API_BASE}/api/gov-insight/annual-report-summary?${params.toString()}`;
+  const response = await fetch(url, { credentials: 'include' });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch annual report summary: ${response.status}`);
+  }
+
+  const result: ApiResponse<AnnualReportSummary | null> = await response.json();
   if (result.code !== 200 || !result.data) {
     return null;
   }

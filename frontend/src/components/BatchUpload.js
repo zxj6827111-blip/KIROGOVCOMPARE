@@ -95,13 +95,19 @@ const extractRegionFromFilename = (filename) => {
   return '';
 };
 
-function BatchUpload({ onClose, isEmbedded = false }) {
+function BatchUpload({
+  onClose,
+  isEmbedded = false,
+  model = '',
+  onModelChange = () => {},
+  modelOptions = [],
+  modelConfigLoading = false,
+}) {
   const [regions, setRegions] = useState([]);
   const [files, setFiles] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [isDragging, setIsDragging] = useState(false);
-  const [model, setModel] = useState('gemini/gemini-2.5-flash');
   const [editingId, setEditingId] = useState(null);
   const [, setBatchId] = useState(null); // Only setter used for batch tracking
   const fileInputRef = useRef(null);
@@ -563,10 +569,22 @@ function BatchUpload({ onClose, isEmbedded = false }) {
         {/* AI模型选择 */}
         <div className="form-section">
           <label>AI 模型</label>
-          <select value={model} onChange={(e) => setModel(e.target.value)} disabled={isProcessing}>
-            <option value="gemini/gemini-2.5-flash">GEMINI2.5FLASH</option>
-            <option value="nvidia/deepseek-ai/deepseek-v3.2">DeepSeek V3.2 (NVIDIA)</option>
-            <option value="nvidia/moonshotai/kimi-k2.5">Kimi k2.5 (NVIDIA)</option>
+          <select
+            value={model}
+            onChange={(e) => onModelChange(e.target.value)}
+            disabled={isProcessing || modelConfigLoading || modelOptions.length === 0}
+          >
+            {modelOptions.length > 0 ? (
+              modelOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))
+            ) : (
+              <option value="">
+                {modelConfigLoading ? 'AI 模型配置加载中...' : '使用后端默认解析模型'}
+              </option>
+            )}
           </select>
         </div>
 

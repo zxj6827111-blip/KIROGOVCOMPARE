@@ -132,6 +132,8 @@ export interface AnnualDataRecord {
   // 行政许可/处罚
   action_licensing: number;
   action_punishment: number;
+  action_force: number;
+  fees_amount?: number | null;
   // 依申请公开
   app_new: number;
   app_carried_over: number;

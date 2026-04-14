@@ -301,6 +301,38 @@ describe('ConsistencyCheckService', () => {
             expect(litigationItem?.rightValue).toBe(7); // 6 + 1
             expect(litigationItem?.autoStatus).toBe('PASS');
         });
+
+        it('should prefer the reply count when received and replied counts appear in the same sentence', () => {
+            const fixtureWithReceivedAndReplyCounts = {
+                sections: [
+                    {
+                        type: 'table_3',
+                        tableData: {
+                            total: {
+                                newReceived: 3259,
+                                carriedOver: 77,
+                                results: {
+                                    totalProcessed: 3278,
+                                    carriedForward: 58,
+                                },
+                            },
+                        },
+                    },
+                    {
+                        type: 'text',
+                        content: '2025年，全市共受理政府信息公开申请3259件，答复3278件（含上年度结转申请77件，另有58件顺延到下年度答复）。',
+                    },
+                ],
+            };
+
+            const items = service.runChecks(fixtureWithReceivedAndReplyCounts);
+            const processedItem = items.find(i => i.checkKey === 'text_vs_table3_totalProcessed');
+
+            expect(processedItem).toBeDefined();
+            expect(processedItem?.leftValue).toBe(3278);
+            expect(processedItem?.rightValue).toBe(3278);
+            expect(processedItem?.autoStatus).toBe('PASS');
+        });
     });
 
     // ... (existing fingerprint stability test) ...

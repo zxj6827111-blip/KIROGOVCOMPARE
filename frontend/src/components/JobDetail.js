@@ -170,14 +170,6 @@ function JobDetail({ versionId, onBack }) {
                             <label>尝试次数</label>
                             <span>第 {job.attempt || 1} 轮</span>
                         </div>
-                        <div className="info-item">
-                            <label>当前模型</label>
-                            <span>{job.model || '-'}</span>
-                        </div>
-                        <div className="info-item">
-                            <label>Provider</label>
-                            <span>{job.provider || '-'}</span>
-                        </div>
                     </div>
                 </div>
 
@@ -189,10 +181,11 @@ function JobDetail({ versionId, onBack }) {
                             const isActive = currentStepOrder >= step.order;
                             const isCurrent = currentStepOrder === step.order;
                             const isCompleted = currentStepOrder > step.order;
+                            const isFailedCurrent = job.status === 'failed' && isCurrent;
 
                             return (
                                 <div key={step.code} className="progress-step">
-                                    <div className={`step-indicator ${isActive ? 'active' : ''} ${isCompleted ? 'completed' : ''} ${isCurrent ? 'current' : ''}`}>
+                                    <div className={`step-indicator ${isActive ? 'active' : ''} ${isCompleted ? 'completed' : ''} ${isCurrent ? 'current' : ''} ${isFailedCurrent ? 'failed-current' : ''}`}>
                                         {isCompleted ? '✓' : step.order}
                                     </div>
                                     <div className="step-label">{step.name}</div>
@@ -205,7 +198,7 @@ function JobDetail({ versionId, onBack }) {
                     </div>
                     <div className="progress-percent">
                         <div className="progress-bar-bg">
-                            <div className="progress-bar-fill" style={{ width: `${job.progress}%` }}></div>
+                            <div className={`progress-bar-fill ${job.status === 'failed' ? 'failed' : ''}`} style={{ width: `${job.progress}%` }}></div>
                         </div>
                         <span className="progress-text">{job.progress}%</span>
                     </div>

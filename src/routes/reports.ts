@@ -7,10 +7,14 @@ import pool from '../config/database-llm';
 import { PROJECT_ROOT, UPLOADS_TMP_DIR } from '../config/constants';
 import { reportUploadService } from '../services/ReportUploadService';
 import { consistencyCheckService } from '../services/ConsistencyCheckService';
+import { materializeService } from '../services/data-center/MaterializeService';
+import { govInsightStatsService } from '../services/GovInsightStatsService';
+import { llmJobRunner } from '../services/LlmJobRunner';
 import PdfParseService from '../services/PdfParseService';
 import HtmlParseService from '../services/HtmlParseService';
 import { authMiddleware, requirePermission, AuthRequest } from '../middleware/auth';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
+import { checkStoragePathExists } from '../services/SourceFileGuardService';
 
 const router = express.Router();
 
@@ -55,6 +59,276 @@ async function hasRawTextColumn(): Promise<boolean> {
   `);
   rawTextColumnExistsCache = result.rows.length > 0;
   return rawTextColumnExistsCache;
+}
+
+async function hasAnyFactsForVersion(reportId: number, versionId: number): Promise<boolean> {
+  const result = await pool.query(
+    `SELECT
+       EXISTS(
+         SELECT 1 FROM fact_active_disclosure
+         WHERE report_id = $1 AND version_id = $2
+       ) OR EXISTS(
+         SELECT 1 FROM fact_application
+         WHERE report_id = $1 AND version_id = $2
+       ) OR EXISTS(
+         SELECT 1 FROM fact_legal_proceeding
+         WHERE report_id = $1 AND version_id = $2
+       ) AS has_facts`,
+    [reportId, versionId]
+  );
+  return Boolean(result.rows[0]?.has_facts);
+}
+
+async function resolvePreferredVersionId(reportId: number): Promise<number | null> {
+  const result = await pool.query(
+    `SELECT id
+     FROM report_versions
+     WHERE report_id = $1
+       AND review_status = 'pending_review'
+     ORDER BY created_at DESC, id DESC
+     LIMIT 1`,
+    [reportId]
+  );
+  if (result.rows[0]?.id) {
+    return Number(result.rows[0].id);
+  }
+
+  const activeRes = await pool.query(
+    `SELECT active_version_id
+     FROM reports
+     WHERE id = $1
+     LIMIT 1`,
+    [reportId]
+  );
+  return activeRes.rows[0]?.active_version_id ? Number(activeRes.rows[0].active_version_id) : null;
+}
+
+async function loadReportVersion(reportId: number, versionId: number) {
+  const result = await pool.query(
+    `SELECT *
+     FROM report_versions
+     WHERE report_id = $1
+       AND id = $2
+     LIMIT 1`,
+    [reportId, versionId]
+  );
+  return result.rows[0] || null;
+}
+
+async function countOpenReviewIssues(versionId: number): Promise<number> {
+  const result = await pool.query(
+    `SELECT COUNT(*) AS count
+     FROM report_consistency_items
+     WHERE report_version_id = $1
+       AND auto_status IN ('FAIL', 'UNCERTAIN')
+       AND COALESCE(human_status, 'pending') != 'dismissed'`,
+    [versionId]
+  );
+  return Number(result.rows[0]?.count || 0);
+}
+
+async function hasConsistencyRun(versionId: number): Promise<boolean> {
+  const result = await pool.query(
+    `SELECT 1
+     FROM report_consistency_runs
+     WHERE report_version_id = $1
+     LIMIT 1`,
+    [versionId]
+  );
+  return result.rows.length > 0;
+}
+
+function mapVersionRow(row: any) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    version_id: Number(row.id),
+    file_name: row.file_name,
+    file_hash: row.file_hash,
+    storage_path: row.storage_path,
+    text_path: row.text_path,
+    parsed_json: parseDbJson(row.parsed_json),
+    provider: row.provider,
+    model: row.model,
+    prompt_version: row.prompt_version,
+    schema_version: row.schema_version,
+    state: row.state,
+    review_status: row.review_status || 'published',
+    approved_at: row.approved_at || null,
+    approved_by: row.approved_by || null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    is_active: Boolean(row.is_active),
+    version_type: row.version_type || null,
+    parent_version_id: row.parent_version_id || null,
+  };
+}
+
+type PublishVersionResult =
+  | {
+    ok: true;
+    warnings?: string[];
+  }
+  | {
+    ok: false;
+    status: number;
+    error: string;
+    open_issue_count?: number;
+  };
+
+async function runPostPublishSideEffects(reportId: number, versionId: number): Promise<string[]> {
+  const warnings: string[] = [];
+  const [statsRefreshResult, autoComparisonResult] = await Promise.allSettled([
+    govInsightStatsService.refreshAnnualStats({
+      reason: 'manual',
+      reportId,
+      versionId,
+    }),
+    llmJobRunner.triggerAutoComparisonForPublishedVersion(versionId, reportId),
+  ]);
+
+  if (statsRefreshResult.status === 'rejected') {
+    warnings.push('stats_refresh_failed');
+    console.warn(`[Publish] Failed to refresh annual stats for report ${reportId}, version ${versionId}:`, statsRefreshResult.reason);
+  } else if (!statsRefreshResult.value) {
+    warnings.push('stats_refresh_failed');
+    console.warn(`[Publish] Annual stats refresh returned false for report ${reportId}, version ${versionId}.`);
+  }
+
+  if (autoComparisonResult.status === 'rejected') {
+    warnings.push('auto_comparison_failed');
+    console.warn(`[Publish] Failed to trigger auto comparison for report ${reportId}, version ${versionId}:`, autoComparisonResult.reason);
+  }
+
+  return warnings;
+}
+
+async function publishVersionForReport(
+  reportId: number,
+  versionId: number,
+  approvedBy?: number | null
+): Promise<PublishVersionResult> {
+  const version = await loadReportVersion(reportId, versionId);
+  if (!version) {
+    return { ok: false, status: 404, error: 'version not found' };
+  }
+
+  const checksRun = await hasConsistencyRun(versionId);
+  if (!checksRun) {
+    return { ok: false, status: 409, error: 'checks_not_run' };
+  }
+
+  const openIssueCount = await countOpenReviewIssues(versionId);
+  if (openIssueCount > 0) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'open_review_issues',
+      open_issue_count: openIssueCount,
+    };
+  }
+
+  let hasFacts = await hasAnyFactsForVersion(reportId, versionId);
+  if (!hasFacts) {
+    const materializeResult = await materializeService.materializeVersion(versionId);
+    hasFacts = materializeResult.success && (materializeResult.factsCreated ?? 0) > 0;
+  }
+  if (!hasFacts) {
+    return { ok: false, status: 409, error: 'materialized_facts_missing' };
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    await client.query(
+      `UPDATE report_versions
+       SET is_active = false,
+           updated_at = NOW()
+       WHERE report_id = $1`,
+      [reportId]
+    );
+
+    await client.query(
+      `UPDATE report_versions
+       SET review_status = 'history',
+           updated_at = NOW()
+       WHERE report_id = $1
+         AND id != $2
+         AND review_status IN ('published', 'pending_review')`,
+      [reportId, versionId]
+    );
+
+    await client.query(
+      `UPDATE report_versions
+       SET is_active = true,
+           review_status = 'published',
+           state = 'published',
+           approved_at = NOW(),
+           approved_by = $3,
+           updated_at = NOW()
+       WHERE report_id = $1
+         AND id = $2`,
+      [reportId, versionId, approvedBy ?? null]
+    );
+
+    await client.query(
+      `UPDATE reports
+       SET active_version_id = $1,
+           updated_at = NOW()
+       WHERE id = $2`,
+      [versionId, reportId]
+    );
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  const warnings = await runPostPublishSideEffects(reportId, versionId);
+
+  return warnings.length > 0 ? { ok: true, warnings } : { ok: true };
+}
+
+async function ensureMaterializeJob(
+  reportId: number,
+  versionId: number,
+  ingestionBatchId: number | null
+): Promise<{ jobId: number; status: 'queued' | 'running'; reused: boolean }> {
+  const existingJobRes = await pool.query(
+    `SELECT id, status
+     FROM jobs
+     WHERE report_id = $1
+       AND version_id = $2
+       AND kind = 'materialize'
+       AND status IN ('queued', 'running')
+     ORDER BY id DESC
+     LIMIT 1`,
+    [reportId, versionId]
+  );
+
+  const existing = existingJobRes.rows[0];
+  if (existing?.id) {
+    return {
+      jobId: Number(existing.id),
+      status: (existing.status === 'running' ? 'running' : 'queued'),
+      reused: true,
+    };
+  }
+
+  const insertRes = await pool.query(
+    `INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, max_retries, ingestion_batch_id)
+     VALUES ($1, $2, 'materialize', 'queued', 60, 'MATERIALIZE', '等待结构化', 1, $3)
+     RETURNING id`,
+    [reportId, versionId, ingestionBatchId]
+  );
+
+  return { jobId: Number(insertRes.rows[0].id), status: 'queued', reused: false };
 }
 
 async function rebuildSourceTextFromStorage(storagePath: string, reportId: number): Promise<{ text: string; sourceType: string }> {
@@ -229,18 +503,18 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
     });
   } catch (error: any) {
     if (error?.message === 'region_not_found') {
-      return res.status(404).json({ error: 'region 不存在' });
+      return res.status(404).json({ error: 'region not found' });
     }
     if (error?.message === 'version_not_created') {
       return res.status(500).json({ error: 'report version 创建失败' });
     }
 
     if (typeof error?.message === 'string' && error.message.includes('unique constraint')) {
-      return res.status(409).json({ error: '记录已存在' });
+      return res.status(409).json({ error: 'record already exists' });
     }
 
     if (error instanceof multer.MulterError) {
-      return res.status(400).json({ error: `上传错误: ${error.message}` });
+      return res.status(400).json({ error: `涓婁紶閿欒: ${error.message}` });
     }
 
     console.error('Upload error:', error);
@@ -256,6 +530,12 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
 router.post('/reports/:id/parse', authMiddleware, requirePermission('upload_reports'), async (req: AuthRequest, res) => {
   try {
     const reportId = Number(req.params.id);
+    const forceRaw = req.query.force;
+    const versionIdRaw = req.body?.version_id ?? req.query.version_id;
+    const requestedVersionId = versionIdRaw !== undefined ? Number(versionIdRaw) : null;
+    const forceParse = typeof forceRaw === 'string'
+      ? ['1', 'true', 'yes', 'on'].includes(forceRaw.trim().toLowerCase())
+      : false;
     if (!reportId || Number.isNaN(reportId) || !Number.isInteger(reportId) || reportId < 1) {
       return res.status(400).json({ error: 'report_id 无效' });
     }
@@ -277,7 +557,7 @@ router.post('/reports/:id/parse', authMiddleware, requirePermission('upload_repo
     );
     const report = reportRes.rows[0];
     if (!report) {
-      return res.status(404).json({ error: 'report 不存在' });
+      return res.status(404).json({ error: 'report not found' });
     }
 
     if (allowedRegionIds && !allowedRegionIds.includes(report.region_id)) {
@@ -285,29 +565,42 @@ router.post('/reports/:id/parse', authMiddleware, requirePermission('upload_repo
     }
 
     let versionId = report.active_version_id as number | null;
-    if (!versionId) {
-      const latestRes = await pool.query(
-        `SELECT id FROM report_versions
-         WHERE report_id = $1
-         ORDER BY created_at DESC
-         LIMIT 1`,
-        [reportId]
-      );
-      versionId = latestRes.rows?.[0]?.id ?? null;
+    if (requestedVersionId && Number.isInteger(requestedVersionId) && requestedVersionId > 0) {
+      const explicitVersion = await loadReportVersion(reportId, requestedVersionId);
+      if (!explicitVersion) {
+        return res.status(404).json({ error: 'target version not found' });
+      }
+      versionId = requestedVersionId;
+    } else {
+      versionId = await resolvePreferredVersionId(reportId);
+      if (!versionId) {
+        const latestRes = await pool.query(
+          `SELECT id FROM report_versions
+           WHERE report_id = $1
+           ORDER BY created_at DESC
+           LIMIT 1`,
+          [reportId]
+        );
+        versionId = latestRes.rows?.[0]?.id ?? null;
+      }
     }
 
     if (!versionId) {
-      return res.status(404).json({ error: 'report_version 不存在' });
+      return res.status(404).json({ error: 'report_version not found' });
     }
 
     const versionRes = await pool.query(
-      `SELECT provider, model, ingestion_batch_id
+      `SELECT provider, model, ingestion_batch_id, parsed_json, storage_path
        FROM report_versions
        WHERE id = $1
        LIMIT 1`,
       [versionId]
     );
-    const versionRow = versionRes.rows?.[0] || {};
+    const versionRow = versionRes.rows?.[0];
+    if (!versionRow) {
+      return res.status(404).json({ error: 'report_version not found' });
+    }
+    const sourceCheck = checkStoragePathExists(versionRow.storage_path ?? null);
 
     // If a parse job is already queued/running, return it
     const existingJobRes = await pool.query(
@@ -322,7 +615,75 @@ router.post('/reports/:id/parse', authMiddleware, requirePermission('upload_repo
     );
     const existingJob = existingJobRes.rows?.[0];
     if (existingJob?.id) {
+      if (existingJob.status === 'queued' && !sourceCheck.ok) {
+        await pool.query(
+          `UPDATE jobs
+           SET status = 'failed',
+               error_code = 'SOURCE_FILE_MISSING',
+               error_message = $2,
+               progress = 100,
+               step_code = 'DONE',
+               step_name = 'Failed',
+               finished_at = NOW()
+           WHERE id = $1
+             AND status = 'queued'`,
+          [existingJob.id, sourceCheck.errorMessage || 'source file missing']
+        );
+        return res.status(422).json({
+          error: 'SOURCE_FILE_MISSING',
+          message: sourceCheck.errorMessage || 'source file missing',
+          storage_path: sourceCheck.storagePath,
+          resolved_path: sourceCheck.resolvedPath,
+          fixed_stale_job_id: existingJob.id,
+        });
+      }
       return res.json({ job_id: existingJob.id, status: existingJob.status, reused: true });
+    }
+
+    if (!forceParse && hasParsedContent(versionRow.parsed_json)) {
+      const hasFacts = await hasAnyFactsForVersion(reportId, versionId);
+      if (!hasFacts) {
+        const materializeJob = await ensureMaterializeJob(
+          reportId,
+          versionId,
+          versionRow.ingestion_batch_id ?? null
+        );
+        return res.json({
+          job_id: materializeJob.jobId,
+          status: materializeJob.status,
+          reused: materializeJob.reused,
+          reason: 'parsed_missing_facts_materialize',
+        });
+      }
+
+      const latestParseJobRes = await pool.query(
+        `SELECT id, status
+         FROM jobs
+         WHERE report_id = $1
+           AND version_id = $2
+           AND kind = 'parse'
+         ORDER BY id DESC
+         LIMIT 1`,
+        [reportId, versionId]
+      );
+      const latestParseJob = latestParseJobRes.rows?.[0];
+      if (latestParseJob?.id) {
+        return res.json({
+          job_id: latestParseJob.id,
+          status: latestParseJob.status,
+          reused: true,
+          reason: 'already_parsed',
+        });
+      }
+    }
+
+    if (!sourceCheck.ok) {
+      return res.status(422).json({
+        error: 'SOURCE_FILE_MISSING',
+        message: sourceCheck.errorMessage || 'source file missing',
+        storage_path: sourceCheck.storagePath,
+        resolved_path: sourceCheck.resolvedPath,
+      });
     }
 
     const jobRes = await pool.query(
@@ -391,7 +752,7 @@ router.post('/reports/text', authMiddleware, requirePermission('upload_reports')
     });
   } catch (error: any) {
     if (error?.message === 'region_not_found') {
-      return res.status(404).json({ error: 'region 不存在' });
+      return res.status(404).json({ error: 'region not found' });
     }
     if (error?.message === 'raw_text_empty') {
       return res.status(400).json({ error: 'raw_text 不能为空' });
@@ -411,6 +772,7 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
   try {
     const reportId = Number(req.params.id);
     const { parsed_json } = req.body;
+    const requestedVersionId = req.body?.version_id ? Number(req.body.version_id) : null;
 
     if (!reportId || isNaN(reportId)) {
       return res.status(400).json({ error: 'Invalid report ID' });
@@ -436,21 +798,20 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
       }
     }
 
-    // 1. Find the current active version
-    const activeVersionRes = await pool.query(`
-       SELECT rv.*
-       FROM reports r
-       JOIN report_versions rv ON rv.id = r.active_version_id
-       WHERE r.id = $1
-       LIMIT 1
-    `, [reportId]);
-
-    if (activeVersionRes.rows.length === 0) {
-      return res.status(404).json({ error: 'No active version found for this report' });
+    const baseVersionId =
+      requestedVersionId && Number.isInteger(requestedVersionId) && requestedVersionId > 0
+        ? requestedVersionId
+        : await resolvePreferredVersionId(reportId);
+    if (!baseVersionId) {
+      return res.status(404).json({ error: 'No editable version found for this report' });
     }
 
-    const active = activeVersionRes.rows[0];
-    const oldVersionId = active.id;
+    const active = await loadReportVersion(reportId, baseVersionId);
+    if (!active) {
+      return res.status(404).json({ error: 'Base version not found for this report' });
+    }
+
+    const oldVersionId = Number(active.id);
     // PostgreSQL text/jsonb cannot store NUL bytes; strip them defensively.
     const jsonStr = JSON.stringify(parsed_json).replace(/\u0000/g, '');
 
@@ -465,26 +826,6 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
        SELECT id FROM report_versions 
        WHERE report_id = $1 AND file_hash = $2
     `, [reportId, newFileHash]);
-
-    const activateVersion = async (targetVersionId: number) => {
-      await pool.query(`
-         UPDATE reports
-         SET active_version_id = $1, updated_at = NOW()
-         WHERE id = $2
-      `, [targetVersionId, reportId]);
-
-      await pool.query(`
-         UPDATE report_versions
-         SET is_active = false, updated_at = NOW()
-         WHERE report_id = $1 AND id != $2
-      `, [reportId, targetVersionId]);
-
-      await pool.query(`
-         UPDATE report_versions
-         SET is_active = true, updated_at = NOW()
-         WHERE id = $1
-      `, [targetVersionId]);
-    };
 
     let newVersionId: number | null = null;
     let reused = false;
@@ -508,8 +849,8 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
         `INSERT INTO report_versions 
            (report_id, file_name, file_hash, file_size, storage_path, text_path, raw_text,
             provider, model, prompt_version, schema_version, parsed_json, is_active, created_at, updated_at,
-            version_type, parent_version_id, state, ingestion_batch_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW(), 'manual_correct', $14, 'manual_corrected', $15)
+            version_type, parent_version_id, state, review_status, ingestion_batch_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW(), 'manual_correct', $14, 'pending_review', 'pending_review', $15)
            RETURNING id`,
         [
           reportId,
@@ -591,13 +932,28 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
       throw new Error('manual_version_resolve_failed');
     }
 
-    await activateVersion(newVersionId);
+    let resolvedReviewStatus = 'pending_review';
+    if (reused) {
+      const reusedVersion = await loadReportVersion(reportId, Number(newVersionId));
+      resolvedReviewStatus = reusedVersion?.review_status || 'pending_review';
+    }
+
+    const materializeResult = await materializeService.materializeVersion(newVersionId);
+    if (!materializeResult.success) {
+      throw new Error(`manual_materialize_failed:${materializeResult.error || 'unknown'}`);
+    }
+    if ((materializeResult.factsCreated ?? 0) <= 0) {
+      throw new Error('manual_materialize_empty_facts');
+    }
 
     return res.json({
       success: true,
       old_version_id: oldVersionId,
       new_version_id: newVersionId,
-      reused
+      reused,
+      review_status: resolvedReviewStatus,
+      facts_created: materializeResult.factsCreated,
+      cells_created: materializeResult.cellsCreated,
     });
   } catch (error: any) {
     console.error('Error updating parsed data:', error);
@@ -611,11 +967,14 @@ router.patch('/reports/:id/parsed-data', authMiddleware, requirePermission('uplo
 
 router.get('/reports', authMiddleware, async (req: AuthRequest, res) => {
   try {
-    const { region_id, year, unit_name } = req.query;
+    const { region_id, year, unit_name, dedupe } = req.query;
 
     const conditions: string[] = [];
     const params: any[] = [];
     let paramIndex = 1;
+    const dedupeByRegionYear = dedupe === undefined
+      ? true
+      : !['0', 'false', 'no', 'off'].includes(String(dedupe).trim().toLowerCase());
 
     if (region_id !== undefined) {
       const regionIdNum = Number(region_id);
@@ -669,8 +1028,20 @@ router.get('/reports', authMiddleware, async (req: AuthRequest, res) => {
     }
 
     const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const dedupeParamRef = `$${paramIndex++}`;
+    params.push(dedupeByRegionYear);
 
     const query = `
+      WITH ranked_reports AS (
+        SELECT
+          r.*,
+          ROW_NUMBER() OVER (
+            PARTITION BY r.region_id, r.year
+            ORDER BY (r.active_version_id IS NOT NULL) DESC, r.updated_at DESC, r.id DESC
+          ) AS rn
+        FROM reports r
+        ${whereClause}
+      )
       SELECT
         r.id AS report_id,
         r.region_id,
@@ -687,9 +1058,9 @@ router.get('/reports', authMiddleware, async (req: AuthRequest, res) => {
         (SELECT j.progress FROM jobs j WHERE j.report_id = r.id ORDER BY j.id DESC LIMIT 1) AS job_progress,
         (SELECT j.error_code FROM jobs j WHERE j.report_id = r.id ORDER BY j.id DESC LIMIT 1) AS job_error_code,
         (SELECT j.error_message FROM jobs j WHERE j.report_id = r.id ORDER BY j.id DESC LIMIT 1) AS job_error_message
-      FROM reports r
+      FROM ranked_reports r
       LEFT JOIN report_versions rv ON rv.id = r.active_version_id
-      ${whereClause}
+      WHERE (${dedupeParamRef}::boolean = false OR r.rn = 1)
       ORDER BY r.id DESC;
     `;
 
@@ -753,24 +1124,42 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
     }
   }
 
-  // Get active version_ids for these reports + parsed_json + cached check stats
+  // Keep the list-card status aligned with ReportDetail:
+  // prefer the latest pending-review version, otherwise fall back to active_version_id.
   const versionRes = await pool.query(`
       SELECT
         r.id as report_id,
-        rv.id as version_id,
+        COALESCE(pending_rv.id, active_rv.id) as version_id,
+        COALESCE(pending_rv.review_status, active_rv.review_status) as review_status,
 
         CASE
-          WHEN rv.parsed_json IS NULL THEN false
-          WHEN rv.parsed_json::text IN ('{}', 'null', '\"\"') THEN false
+          WHEN COALESCE(pending_rv.parsed_json, active_rv.parsed_json) IS NULL THEN false
+          WHEN COALESCE(pending_rv.parsed_json, active_rv.parsed_json)::text IN ('{}', 'null', '\"\"') THEN false
           ELSE true
         END AS has_content_db,
-        rv.check_total,
-        rv.check_visual,
-        rv.check_structure,
-        rv.check_quality,
-        rv.checks_updated_at
+        COALESCE(pending_rv.check_total, active_rv.check_total) as check_total,
+        COALESCE(pending_rv.check_visual, active_rv.check_visual) as check_visual,
+        COALESCE(pending_rv.check_structure, active_rv.check_structure) as check_structure,
+        COALESCE(pending_rv.check_quality, active_rv.check_quality) as check_quality,
+        COALESCE(pending_rv.checks_updated_at, active_rv.checks_updated_at) as checks_updated_at
       FROM reports r
-      JOIN report_versions rv ON rv.id = r.active_version_id
+      LEFT JOIN report_versions active_rv ON active_rv.id = r.active_version_id
+      LEFT JOIN LATERAL (
+        SELECT
+          rv.id,
+          rv.review_status,
+          rv.parsed_json,
+          rv.check_total,
+          rv.check_visual,
+          rv.check_structure,
+          rv.check_quality,
+          rv.checks_updated_at
+        FROM report_versions rv
+        WHERE rv.report_id = r.id
+          AND rv.review_status = 'pending_review'
+        ORDER BY rv.created_at DESC, rv.id DESC
+        LIMIT 1
+      ) pending_rv ON true
       WHERE r.id = ANY($1::int[])
     `, [filteredIds]);
 
@@ -795,12 +1184,15 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
   const missingVersionIds: number[] = [];
   for (const row of versionRows) {
     const reportId = Number(row.report_id);
-    const checked = !!row.checks_updated_at;
-    if (!checked) {
-      missingVersionIds.push(Number(row.version_id));
+    const versionId = Number(row.version_id);
+    const checked = Boolean(versionId) && !!row.checks_updated_at;
+    if (versionId && !checked) {
+      missingVersionIds.push(versionId);
     }
     result[String(reportId)] = {
       has_content: contentMap.get(reportId) ?? false,
+      version_id: Number.isFinite(versionId) && versionId > 0 ? versionId : null,
+      review_status: row.review_status || null,
       checked,
       total: checked ? Number(row.check_total || 0) : null,
       visual: checked ? Number(row.check_visual || 0) : null,
@@ -986,6 +1378,156 @@ router.post('/reports/batch-checks/run', authMiddleware, async (req, res) => {
   }
 });
 
+router.get('/reports/:id/versions', authMiddleware, async (req: AuthRequest, res) => {
+  try {
+    const reportId = Number(req.params.id);
+    if (!reportId || Number.isNaN(reportId) || !Number.isInteger(reportId) || reportId < 1) {
+      return res.status(400).json({ error: 'report_id invalid' });
+    }
+
+    const reportRes = await pool.query(`SELECT region_id FROM reports WHERE id = $1 LIMIT 1`, [reportId]);
+    const report = reportRes.rows[0];
+    if (!report) {
+      return res.status(404).json({ error: 'report not found' });
+    }
+
+    const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
+    if (allowedRegionIds) {
+      if (allowedRegionIds.length === 0 || !allowedRegionIds.includes(report.region_id)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+    }
+
+    const versionsRes = await pool.query(
+      `WITH issue_counts AS (
+         SELECT
+           report_version_id,
+           COUNT(*) FILTER (
+             WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+               AND COALESCE(human_status, 'pending') != 'dismissed'
+           ) AS open_issue_count
+         FROM report_consistency_items
+         WHERE report_version_id IN (
+           SELECT id FROM report_versions WHERE report_id = $1
+         )
+         GROUP BY report_version_id
+       )
+       SELECT
+         rv.*,
+         COALESCE(ic.open_issue_count, 0) AS open_issue_count
+       FROM report_versions rv
+       LEFT JOIN issue_counts ic ON ic.report_version_id = rv.id
+       WHERE rv.report_id = $1
+       ORDER BY rv.created_at DESC, rv.id DESC`,
+      [reportId]
+    );
+
+    return res.json({
+      data: versionsRes.rows.map((row: any) => ({
+        id: Number(row.id),
+        file_name: row.file_name,
+        provider: row.provider,
+        model: row.model,
+        prompt_version: row.prompt_version,
+        schema_version: row.schema_version,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        is_active: Boolean(row.is_active),
+        review_status: row.review_status || 'published',
+        state: row.state || null,
+        approved_at: row.approved_at || null,
+        approved_by: row.approved_by || null,
+        open_issue_count: Number(row.open_issue_count || 0),
+      })),
+    });
+  } catch (error) {
+    console.error('Error listing report versions:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/reports/:id/versions/:versionId/publish', authMiddleware, requirePermission('upload_reports'), async (req: AuthRequest, res) => {
+  try {
+    const reportId = Number(req.params.id);
+    const versionId = Number(req.params.versionId);
+    if (!reportId || !versionId || Number.isNaN(reportId) || Number.isNaN(versionId)) {
+      return res.status(400).json({ error: 'invalid_report_or_version' });
+    }
+
+    const reportRes = await pool.query(`SELECT region_id FROM reports WHERE id = $1 LIMIT 1`, [reportId]);
+    const report = reportRes.rows[0];
+    if (!report) {
+      return res.status(404).json({ error: 'report not found' });
+    }
+
+    const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
+    if (allowedRegionIds) {
+      if (allowedRegionIds.length === 0 || !allowedRegionIds.includes(report.region_id)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+    }
+
+    const publishResult = await publishVersionForReport(reportId, versionId, req.user?.id ?? null);
+    if (!publishResult.ok) {
+      return res.status(publishResult.status ?? 500).json({
+        error: publishResult.error,
+        open_issue_count: (publishResult as any).open_issue_count ?? undefined,
+      });
+    }
+
+    return res.json({
+      success: true,
+      report_id: reportId,
+      version_id: versionId,
+      warnings: publishResult.warnings,
+    });
+  } catch (error) {
+    console.error('Error publishing report version:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/reports/:id/versions/:versionId/activate', authMiddleware, requirePermission('upload_reports'), async (req: AuthRequest, res) => {
+  try {
+    const reportId = Number(req.params.id);
+    const versionId = Number(req.params.versionId);
+    if (!reportId || !versionId || Number.isNaN(reportId) || Number.isNaN(versionId)) {
+      return res.status(400).json({ error: 'invalid_report_or_version' });
+    }
+
+    const reportRes = await pool.query(`SELECT region_id FROM reports WHERE id = $1 LIMIT 1`, [reportId]);
+    const report = reportRes.rows[0];
+    if (!report) {
+      return res.status(404).json({ error: 'report not found' });
+    }
+
+    const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
+    if (allowedRegionIds) {
+      if (allowedRegionIds.length === 0 || !allowedRegionIds.includes(report.region_id)) {
+        return res.status(403).json({ error: 'forbidden' });
+      }
+    }
+
+    const publishResult = await publishVersionForReport(reportId, versionId, req.user?.id ?? null);
+    if (!publishResult.ok) {
+      return res.status(publishResult.status ?? 500).json({
+        error: publishResult.error,
+        open_issue_count: (publishResult as any).open_issue_count ?? undefined,
+      });
+    }
+
+    return res.json({
+      success: true,
+      report_id: reportId,
+      version_id: versionId,
+      warnings: publishResult.warnings,
+    });
+  } catch (error) {
+    console.error('Error activating report version:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.get('/reports/:id/source-text', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const reportId = Number(req.params.id);
@@ -993,6 +1535,9 @@ router.get('/reports/:id/source-text', authMiddleware, async (req: AuthRequest, 
       return res.status(400).json({ error: 'report_id 无效' });
     }
 
+    const requestedVersionId = typeof req.query.version_id === 'string'
+      ? Number(req.query.version_id)
+      : null;
     const refresh = req.query.refresh === '1' || req.query.refresh === 'true';
     const full = req.query.full === '1' || req.query.full === 'true';
     const limitRaw = req.query.limit;
@@ -1000,13 +1545,20 @@ router.get('/reports/:id/source-text', authMiddleware, async (req: AuthRequest, 
     if (typeof limitRaw === 'string' && limitRaw.trim() !== '') {
       const parsedLimit = Number(limitRaw);
       if (!Number.isFinite(parsedLimit) || parsedLimit < 1) {
-        return res.status(400).json({ error: 'limit 无效，必须是正整数' });
+        return res.status(400).json({ error: 'limit invalid, must be a positive integer' });
       }
       requestedLimit = Math.min(Math.floor(parsedLimit), 2_000_000);
     }
 
     const rawColumnExists = await hasRawTextColumn();
     const sourceSql = rawColumnExists ? 'rv.raw_text' : 'NULL::text AS raw_text';
+    const versionId =
+      requestedVersionId && Number.isInteger(requestedVersionId) && requestedVersionId > 0
+        ? requestedVersionId
+        : await resolvePreferredVersionId(reportId);
+    if (!versionId) {
+      return res.status(404).json({ error: 'report_version not found' });
+    }
     const detailRes = await pool.query(
       `SELECT
          r.id AS report_id,
@@ -1015,15 +1567,16 @@ router.get('/reports/:id/source-text', authMiddleware, async (req: AuthRequest, 
          rv.storage_path,
          ${sourceSql}
        FROM reports r
-       LEFT JOIN report_versions rv ON rv.id = r.active_version_id
+       JOIN report_versions rv ON rv.report_id = r.id
        WHERE r.id = $1
+         AND rv.id = $2
        LIMIT 1`,
-      [reportId]
+      [reportId, versionId]
     );
 
     const row = detailRes.rows[0];
     if (!row) {
-      return res.status(404).json({ error: 'report 不存在' });
+      return res.status(404).json({ error: 'report not found' });
     }
 
     const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
@@ -1034,7 +1587,7 @@ router.get('/reports/:id/source-text', authMiddleware, async (req: AuthRequest, 
     }
 
     if (!row.version_id) {
-      return res.status(404).json({ error: 'active_version 不存在' });
+      return res.status(404).json({ error: 'version not found' });
     }
 
     let sourceText = typeof row.raw_text === 'string' ? row.raw_text : '';
@@ -1042,7 +1595,7 @@ router.get('/reports/:id/source-text', authMiddleware, async (req: AuthRequest, 
 
     if (refresh || !sourceText) {
       if (!row.storage_path) {
-        return res.status(404).json({ error: 'source_file_path 不存在' });
+        return res.status(404).json({ error: 'source_file_path missing' });
       }
 
       const rebuilt = await rebuildSourceTextFromStorage(String(row.storage_path), reportId);
@@ -1060,7 +1613,7 @@ router.get('/reports/:id/source-text', authMiddleware, async (req: AuthRequest, 
     }
 
     if (!sourceText) {
-      return res.status(404).json({ error: 'source_text 不存在' });
+      return res.status(404).json({ error: 'source_text missing' });
     }
 
     const totalLength = sourceText.length;
@@ -1097,27 +1650,16 @@ router.get('/reports/:id', authMiddleware, async (req, res) => {
         r.region_id,
         reg.name AS region_name,
         r.year,
-        r.unit_name,
-        rv.id AS version_id,
-        rv.file_hash,
-        rv.storage_path,
-        rv.parsed_json,
-        rv.provider,
-        rv.model,
-        rv.prompt_version,
-        rv.schema_version,
-        rv.text_path,
-        rv.created_at
+        r.unit_name
       FROM reports r
       LEFT JOIN regions reg ON reg.id = r.region_id
-      LEFT JOIN report_versions rv ON rv.id = r.active_version_id
       WHERE r.id = $1
       LIMIT 1;
     `, [reportId]);
     const report = reportRes.rows[0];
 
     if (!report) {
-      return res.status(404).json({ error: 'report 不存在' });
+      return res.status(404).json({ error: 'report not found' });
     }
 
     const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
@@ -1136,10 +1678,24 @@ router.get('/reports/:id', authMiddleware, async (req, res) => {
     `, [reportId]);
     const job = jobRes.rows[0];
 
-    let parsedJson: any = null;
-    if (report?.parsed_json) {
-      parsedJson = parseDbJson(report.parsed_json);
-    }
+    const activeVersionRes = await pool.query(
+      `SELECT *
+       FROM report_versions
+       WHERE id = (
+         SELECT active_version_id FROM reports WHERE id = $1 LIMIT 1
+       )
+       LIMIT 1`,
+      [reportId]
+    );
+    const pendingVersionRes = await pool.query(
+      `SELECT *
+       FROM report_versions
+       WHERE report_id = $1
+         AND review_status = 'pending_review'
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`,
+      [reportId]
+    );
 
     return res.json({
       report_id: report.report_id,
@@ -1147,18 +1703,8 @@ router.get('/reports/:id', authMiddleware, async (req, res) => {
       region_name: report.region_name,
       year: report.year,
       unit_name: report.unit_name,
-      active_version: report.version_id ? {
-        version_id: report.version_id,
-        file_hash: report.file_hash,
-        storage_path: report.storage_path,
-        text_path: report.text_path,
-        parsed_json: parsedJson,
-        provider: report.provider,
-        model: report.model,
-        prompt_version: report.prompt_version,
-        schema_version: report.schema_version,
-        created_at: report.created_at,
-      } : null,
+      active_version: mapVersionRow(activeVersionRes.rows[0]),
+      pending_review_version: mapVersionRow(pendingVersionRes.rows[0]),
       latest_job: job
         ? {
           job_id: job.id,
@@ -1183,7 +1729,7 @@ router.delete('/reports/:id', authMiddleware, requirePermission('delete_reports'
 
     const reportRes = await pool.query(`SELECT region_id FROM reports WHERE id = $1`, [reportId]);
     if (reportRes.rows.length === 0) {
-      return res.status(404).json({ error: 'report 不存在' });
+      return res.status(404).json({ error: 'report not found' });
     }
     const reportRegionId = reportRes.rows[0].region_id;
 

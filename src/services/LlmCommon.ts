@@ -204,6 +204,73 @@ export function buildStrictParseSystemInstruction(): string {
     );
 }
 
+export function buildParseResponseSchema(): Record<string, unknown> {
+    return {
+        type: 'object',
+        required: ['sections'],
+        additionalProperties: true,
+        properties: {
+            sections: {
+                type: 'array',
+                items: {
+                    type: 'object',
+                    required: ['title', 'type'],
+                    additionalProperties: true,
+                    properties: {
+                        title: { type: 'string' },
+                        type: {
+                            type: 'string',
+                            enum: ['text', 'table_2', 'table_3', 'table_4'],
+                        },
+                        content: {
+                            anyOf: [{ type: 'string' }, { type: 'null' }],
+                        },
+                        activeDisclosureData: {
+                            anyOf: [
+                                { type: 'object', additionalProperties: true },
+                                { type: 'null' },
+                            ],
+                        },
+                        tableData: {
+                            anyOf: [
+                                { type: 'object', additionalProperties: true },
+                                { type: 'null' },
+                            ],
+                        },
+                        reviewLitigationData: {
+                            anyOf: [
+                                { type: 'object', additionalProperties: true },
+                                { type: 'null' },
+                            ],
+                        },
+                    },
+                },
+            },
+            visual_audit: {
+                anyOf: [
+                    { type: 'object', additionalProperties: true },
+                    { type: 'null' },
+                ],
+            },
+            raw_text: {
+                anyOf: [{ type: 'string' }, { type: 'null' }],
+            },
+            report_type: {
+                anyOf: [{ type: 'string' }, { type: 'null' }],
+            },
+            basic_info: {
+                anyOf: [
+                    { type: 'object', additionalProperties: true },
+                    { type: 'null' },
+                ],
+            },
+            year: {
+                anyOf: [{ type: 'number' }, { type: 'string' }, { type: 'null' }],
+            },
+        },
+    };
+}
+
 export async function loadUserText(absolutePath: string, request: LlmParseRequest): Promise<LoadedContent> {
     const lower = absolutePath.toLowerCase();
 

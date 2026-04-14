@@ -15,7 +15,9 @@ export const DashboardHome: React.FC = () => {
 
   // 1. 智能获取最新年份（不再写死2024）
   // 如果数据库里只有2022年数据，就显示2022
-  const availableYears = entity?.data ? Array.from(new Set(entity.data.map(d => d.year))).sort((a, b) => b - a) : [];
+  const availableYears = entity?.data
+    ? Array.from(new Set(entity.data.map(d => d.year).filter((year) => Number.isFinite(year)))).sort((a, b) => b - a)
+    : [];
 
   // State for Year Selection
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
@@ -30,8 +32,8 @@ export const DashboardHome: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [availableYearsKey, selectedYear]);
 
-  // Fallback to first available or 2024
-  const currentYear = selectedYear || availableYears[0] || 2024;
+  // Fallback to first available or current calendar year
+  const currentYear = selectedYear || availableYears[0] || new Date().getFullYear();
 
   // State for Quadrant Selection
   const [selectedNode, setSelectedNode] = useState<any>(null);
@@ -208,7 +210,7 @@ export const DashboardHome: React.FC = () => {
         />
         <KPICard
           title="行政事业性收费"
-          value={(currentData.fees.amount / 100).toFixed(1)}
+          value={(currentData.fees.amount / 10000).toFixed(1)}
           unit="亿元"
           trend={null} // Mock data doesn't fully support trend calc unless I improved types.ts more, but relying on mocked data.ts logic 
           color="amber"

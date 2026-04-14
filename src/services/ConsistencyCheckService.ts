@@ -602,9 +602,10 @@ export class ConsistencyCheckService {
                     name: '收到申请总量',
                 },
                 {
-                    // 新增: "办理"或"答复"总量 = 办理结果总计
-                    // 排除"收到"字样，避免匹配到收到量
-                    regex: /(?:本年|本年度|共|合计)?(?:办理|答复|处理)(?:政府信息公开申请)?(?!.*收到).*?(\d+)\s*件/,
+                    // Tighten the gap before the number so narrative phrases like
+                    // "办理政府信息公开申请。...受理3259件，答复3278件" do not
+                    // incorrectly capture the earlier received-count.
+                    regex: /(?:答复|办结|办理结果(?:总计)?|处理结果(?:总计)?|处理|办理)(?:政府信息公开申请)?(?:总计|共计|共|数量)?[^0-9\r\n]{0,20}(\d+)\s*件/,
                     field: 'totalProcessed',
                     table: 'table3',
                     path: 'tableData.total.results.totalProcessed',

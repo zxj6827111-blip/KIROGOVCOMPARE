@@ -2,6 +2,7 @@ import express from 'express';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { LlmProviderError } from '../services/LlmProvider';
 import { createLlmProvider } from '../services/LlmProviderFactory';
+import { resolveFirstNonEmpty, resolveParseUploadModelOptions } from '../utils/aiEnv';
 
 const router = express.Router();
 
@@ -29,12 +30,26 @@ function normalizeModelSelection(modelInput: string): { providerName: string; mo
   const model = String(modelInput || '').trim();
   const lower = model.toLowerCase();
 
+  if (lower.startsWith('openai/')) {
+    return { providerName: 'openai', modelName: model.slice('openai/'.length) };
+  }
+
+  if (lower.startsWith('gpt-')) {
+    return { providerName: 'openai', modelName: model };
+  }
+
   if (lower === 'deepseek-v3' || lower === 'deepseek-v3.2') {
-    return { providerName: 'nvidia', modelName: 'deepseek-ai/deepseek-v3.2' };
+    return {
+      providerName: 'nvidia',
+      modelName: resolveFirstNonEmpty(process.env.NVIDIA_MODEL, model),
+    };
   }
 
   if (lower === 'kimi2.5' || lower === 'kimi-k2.5') {
-    return { providerName: 'nvidia', modelName: 'moonshotai/kimi-k2.5' };
+    return {
+      providerName: 'nvidia',
+      modelName: resolveFirstNonEmpty(process.env.KIMI_MODEL, model),
+    };
   }
 
   if (lower.startsWith('nvidia/')) {
@@ -53,14 +68,6 @@ function normalizeModelSelection(modelInput: string): { providerName: string; mo
     return { providerName: 'gemini', modelName: model.slice('gemini/'.length) };
   }
 
-  if (lower === 'gemini-3-flash-preview') {
-    return { providerName: 'gemini', modelName: 'gemini-2.5-flash' };
-  }
-
-  if (lower === 'gemini-3-pro-preview') {
-    return { providerName: 'gemini', modelName: 'gemini-2.5-pro' };
-  }
-
   if (lower.includes('gemini')) {
     return { providerName: 'gemini', modelName: model };
   }
@@ -74,8 +81,8 @@ function normalizeModelSelection(modelInput: string): { providerName: string; mo
   }
 
   return {
-    providerName: (process.env.LLM_PROVIDER || 'gemini').toLowerCase(),
-    modelName: model,
+    providerName: resolveFirstNonEmpty(process.env.LLM_PROVIDER, process.env.GOV_INSIGHT_REPORT_PROVIDER, 'stub').toLowerCase(),
+    modelName: model || resolveFirstNonEmpty(process.env.LLM_MODEL, process.env.GOV_INSIGHT_REPORT_MODEL),
   };
 }
 
@@ -93,6 +100,11 @@ function withThinkingInstruction(systemInstruction: string | undefined, config?:
 
   return [systemInstruction, thinkingInstruction].filter(Boolean).join('\n\n');
 }
+
+router.get('/config', authMiddleware, async (_req: AuthRequest, res) => {
+  const uploadParse = resolveParseUploadModelOptions();
+  return res.json({ uploadParse });
+});
 
 router.post('/generate-report', authMiddleware, async (req: AuthRequest, res) => {
   try {

@@ -1,8 +1,10 @@
 import express from 'express';
 import pool from '../config/database-llm';
-import { authMiddleware } from '../middleware/auth';
+import { authMiddleware, AuthRequest } from '../middleware/auth';
 import ReportFactoryService from '../services/report-factory/ReportFactoryService';
 import DerivedMetricsService from '../services/DerivedMetricsService';
+import { getAllowedRegionIdsAsync } from '../utils/dataScope';
+import { checkStoragePathExists } from '../services/SourceFileGuardService';
 
 const router = express.Router();
 
@@ -250,14 +252,23 @@ router.post('/v2/batches/:batchUuid/retry', async (req, res) => {
       return res.status(404).json({ error: 'Batch not found' });
     }
 
-    const failedJobsRes = await pool.query(`
-      SELECT id, report_id, version_id, kind, provider, model
-      FROM jobs
-      WHERE ingestion_batch_id = $1
-        AND status IN ('failed', 'cancelled')
-        AND kind != 'pdf_export'
-      ORDER BY created_at DESC
-    `, [batch.id]);
+    const failedJobsRes = await pool.query(
+      `SELECT
+         j.id,
+         j.report_id,
+         j.version_id,
+         j.kind,
+         j.provider,
+         j.model,
+         rv.storage_path
+       FROM jobs j
+       LEFT JOIN report_versions rv ON rv.id = j.version_id
+       WHERE j.ingestion_batch_id = $1
+         AND j.status IN ('failed', 'cancelled')
+         AND j.kind != 'pdf_export'
+       ORDER BY j.created_at DESC`,
+      [batch.id]
+    );
     const failedJobs = failedJobsRes.rows;
 
     if (failedJobs.length === 0) {
@@ -265,8 +276,26 @@ router.post('/v2/batches/:batchUuid/retry', async (req, res) => {
     }
 
     let retried = 0;
+    let skippedMissingSource = 0;
+    const skippedSamples: Array<{ job_id: number; report_id: number | null; version_id: number | null; reason: string }> = [];
     // We could optimize this, but loop is fine for typically small number of retries
     for (const job of failedJobs) {
+      if (job.kind === 'parse') {
+        const sourceCheck = checkStoragePathExists(job.storage_path ?? null);
+        if (!sourceCheck.ok) {
+          skippedMissingSource += 1;
+          if (skippedSamples.length < 30) {
+            skippedSamples.push({
+              job_id: Number(job.id),
+              report_id: job.report_id ?? null,
+              version_id: job.version_id ?? null,
+              reason: sourceCheck.errorMessage || 'source file missing',
+            });
+          }
+          continue;
+        }
+      }
+
       await pool.query(`
         INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model, ingestion_batch_id)
         VALUES ($1, $2, $3, 'queued', 0, $4, $5, $6)
@@ -274,10 +303,178 @@ router.post('/v2/batches/:batchUuid/retry', async (req, res) => {
       retried += 1;
     }
 
-    return res.json({ retried });
+    return res.json({
+      retried,
+      skipped_missing_source: skippedMissingSource,
+      skipped_missing_source_samples: skippedSamples,
+    });
   } catch (error) {
     console.error('[DataCenter] Failed to retry batch:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/v2/alerts/missing-sources', async (req: AuthRequest, res) => {
+  try {
+    const limitParam = typeof req.query.limit === 'string' ? Number(req.query.limit) : 200;
+    const scanLimitParam = typeof req.query.scan_limit === 'string' ? Number(req.query.scan_limit) : 5000;
+    const includeParseJobs = typeof req.query.include_parse_jobs === 'string'
+      ? req.query.include_parse_jobs !== '0' && req.query.include_parse_jobs.toLowerCase() !== 'false'
+      : true;
+
+    const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(Math.floor(limitParam), 2000) : 200;
+    const scanLimit = Number.isFinite(scanLimitParam) && scanLimitParam > 0 ? Math.min(Math.floor(scanLimitParam), 20000) : 5000;
+
+    const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
+    if (allowedRegionIds && allowedRegionIds.length === 0) {
+      return res.json({
+        summary: {
+          active_versions_scanned: 0,
+          active_versions_missing_source: 0,
+          parse_jobs_scanned: 0,
+          parse_jobs_missing_source: 0,
+        },
+        active_version_alerts: [],
+        parse_job_alerts: [],
+      });
+    }
+
+    const activeParams: any[] = [scanLimit];
+    let activeScopeSql = '';
+    if (allowedRegionIds) {
+      activeParams.push(allowedRegionIds);
+      activeScopeSql = ` AND r.region_id = ANY($${activeParams.length}::int[])`;
+    }
+
+    const activeRowsRes = await pool.query(
+      `SELECT
+         r.id AS report_id,
+         r.region_id,
+         reg.name AS region_name,
+         r.year,
+         r.unit_name,
+         r.active_version_id AS version_id,
+         rv.file_name,
+         rv.storage_path,
+         (rv.parsed_json IS NULL OR rv.parsed_json::text IN ('{}', 'null', '\"\"')) AS parsed_json_empty,
+         (
+           EXISTS (
+             SELECT 1 FROM fact_active_disclosure fad
+             WHERE fad.report_id = r.id AND fad.version_id = r.active_version_id
+           ) OR EXISTS (
+             SELECT 1 FROM fact_application fa
+             WHERE fa.report_id = r.id AND fa.version_id = r.active_version_id
+           ) OR EXISTS (
+             SELECT 1 FROM fact_legal_proceeding flp
+             WHERE flp.report_id = r.id AND flp.version_id = r.active_version_id
+           )
+         ) AS has_any_facts
+       FROM reports r
+       JOIN report_versions rv ON rv.id = r.active_version_id
+       LEFT JOIN regions reg ON reg.id = r.region_id
+       WHERE r.active_version_id IS NOT NULL
+         ${activeScopeSql}
+       ORDER BY r.id DESC
+       LIMIT $1`,
+      activeParams
+    );
+
+    const activeMissingAll = activeRowsRes.rows
+      .map((row: any) => {
+        const sourceCheck = checkStoragePathExists(row.storage_path ?? null);
+        return {
+          report_id: Number(row.report_id),
+          region_id: Number(row.region_id),
+          region_name: row.region_name || null,
+          year: Number(row.year),
+          unit_name: row.unit_name || null,
+          version_id: Number(row.version_id),
+          file_name: row.file_name || null,
+          parsed_json_empty: Boolean(row.parsed_json_empty),
+          has_any_facts: Boolean(row.has_any_facts),
+          severity: row.has_any_facts ? 'medium' : 'high',
+          storage_path: sourceCheck.storagePath,
+          resolved_path: sourceCheck.resolvedPath,
+          reason: sourceCheck.errorMessage || null,
+          missing_source: !sourceCheck.ok,
+        };
+      })
+      .filter((row: any) => row.missing_source);
+    const activeAlerts = activeMissingAll.slice(0, limit);
+
+    let parseJobAlerts: Array<Record<string, any>> = [];
+    let parseJobsScanned = 0;
+    let parseJobsMissingSourceCount = 0;
+    if (includeParseJobs) {
+      const parseJobParams: any[] = [scanLimit];
+      let parseJobScopeSql = '';
+      if (allowedRegionIds) {
+        parseJobParams.push(allowedRegionIds);
+        parseJobScopeSql = ` AND r.region_id = ANY($${parseJobParams.length}::int[])`;
+      }
+
+      const parseJobsRes = await pool.query(
+        `SELECT
+           j.id AS job_id,
+           j.status,
+           j.report_id,
+           j.version_id,
+           j.created_at,
+           rv.storage_path,
+           r.region_id,
+           reg.name AS region_name,
+           r.year,
+           r.unit_name
+         FROM jobs j
+         JOIN report_versions rv ON rv.id = j.version_id
+         JOIN reports r ON r.id = j.report_id
+         LEFT JOIN regions reg ON reg.id = r.region_id
+         WHERE j.kind = 'parse'
+           AND j.status IN ('queued', 'running')
+           ${parseJobScopeSql}
+         ORDER BY j.created_at ASC, j.id ASC
+         LIMIT $1`,
+        parseJobParams
+      );
+      parseJobsScanned = parseJobsRes.rows.length;
+
+      const parseJobMissingAll = parseJobsRes.rows
+        .map((row: any) => {
+          const sourceCheck = checkStoragePathExists(row.storage_path ?? null);
+          return {
+            job_id: Number(row.job_id),
+            status: row.status,
+            report_id: Number(row.report_id),
+            version_id: Number(row.version_id),
+            region_id: Number(row.region_id),
+            region_name: row.region_name || null,
+            year: Number(row.year),
+            unit_name: row.unit_name || null,
+            created_at: row.created_at,
+            storage_path: sourceCheck.storagePath,
+            resolved_path: sourceCheck.resolvedPath,
+            reason: sourceCheck.errorMessage || null,
+            missing_source: !sourceCheck.ok,
+          };
+        })
+        .filter((row: any) => row.missing_source);
+      parseJobsMissingSourceCount = parseJobMissingAll.length;
+      parseJobAlerts = parseJobMissingAll.slice(0, limit);
+    }
+
+    return res.json({
+      summary: {
+        active_versions_scanned: activeRowsRes.rows.length,
+        active_versions_missing_source: activeMissingAll.length,
+        parse_jobs_scanned: parseJobsScanned,
+        parse_jobs_missing_source: parseJobsMissingSourceCount,
+      },
+      active_version_alerts: activeAlerts,
+      parse_job_alerts: parseJobAlerts,
+    });
+  } catch (error) {
+    console.error('[DataCenter] Failed to load missing-source alerts:', error);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 
@@ -293,14 +490,34 @@ router.get('/v2/reports/:reportId/facts/:tableName', async (req, res) => {
       return res.status(400).json({ error: 'Invalid tableName' });
     }
 
+    const requestedVersionId = typeof req.query.version_id === 'string'
+      ? Number(req.query.version_id)
+      : null;
     const reportRes = await pool.query(
       `SELECT active_version_id FROM reports WHERE id = $1 LIMIT 1`,
       [reportId]
     );
     const report = reportRes.rows[0];
+    const targetVersionId =
+      requestedVersionId && Number.isInteger(requestedVersionId) && requestedVersionId > 0
+        ? requestedVersionId
+        : report?.active_version_id;
 
-    if (!report?.active_version_id) {
-      return res.status(404).json({ error: 'Active version not found' });
+    if (!targetVersionId) {
+      return res.status(404).json({ error: 'Target version not found' });
+    }
+
+    if (requestedVersionId) {
+      const versionRes = await pool.query(
+        `SELECT id
+         FROM report_versions
+         WHERE id = $1 AND report_id = $2
+         LIMIT 1`,
+        [requestedVersionId, reportId]
+      );
+      if (versionRes.rows.length === 0) {
+        return res.status(404).json({ error: 'Target version not found' });
+      }
     }
 
     // tableName is safe because of getTableName whitelist check
@@ -310,14 +527,14 @@ router.get('/v2/reports/:reportId/facts/:tableName', async (req, res) => {
       WHERE report_id = $1
         AND version_id = $2
       ORDER BY id ASC
-    `, [reportId, report.active_version_id]);
+    `, [reportId, targetVersionId]);
 
     return res.json({
       data: factsRes.rows.map((row: any) => ({
         ...row,
-        evidence: buildEvidenceForFact(req.params.tableName, row, report.active_version_id),
+        evidence: buildEvidenceForFact(req.params.tableName, row, targetVersionId),
       })),
-      version_id: report.active_version_id,
+      version_id: targetVersionId,
       table: req.params.tableName,
     });
   } catch (error) {
@@ -333,6 +550,9 @@ router.get('/v2/reports/:reportId/cells', async (req, res) => {
       return res.status(400).json({ error: 'Invalid reportId' });
     }
 
+    const requestedVersionId = typeof req.query.version_id === 'string'
+      ? Number(req.query.version_id)
+      : null;
     const tableId = typeof req.query.table_id === 'string' ? req.query.table_id : null;
     const rowKey = typeof req.query.row_key === 'string' ? req.query.row_key : null;
     const colKey = typeof req.query.col_key === 'string' ? req.query.col_key : null;
@@ -345,12 +565,30 @@ router.get('/v2/reports/:reportId/cells', async (req, res) => {
     );
     const report = reportRes.rows[0];
 
-    if (!report?.active_version_id) {
+    const targetVersionId =
+      requestedVersionId && Number.isInteger(requestedVersionId) && requestedVersionId > 0
+        ? requestedVersionId
+        : report?.active_version_id;
+
+    if (!targetVersionId) {
       return res.status(404).json({ error: 'Active version not found' });
     }
 
+    if (requestedVersionId) {
+      const versionRes = await pool.query(
+        `SELECT id
+         FROM report_versions
+         WHERE id = $1 AND report_id = $2
+         LIMIT 1`,
+        [requestedVersionId, reportId]
+      );
+      if (versionRes.rows.length === 0) {
+        return res.status(404).json({ error: 'Target version not found' });
+      }
+    }
+
     const conditions: string[] = [`version_id = $1`];
-    const params: any[] = [report.active_version_id];
+    const params: any[] = [targetVersionId];
     let paramIndex = 2; // $1 is used
 
     if (tableId) {
@@ -378,7 +616,7 @@ router.get('/v2/reports/:reportId/cells', async (req, res) => {
 
     return res.json({
       data: cellsRes.rows,
-      version_id: report.active_version_id,
+      version_id: targetVersionId,
     });
   } catch (error) {
     console.error('[DataCenter] Failed to fetch cells:', error);

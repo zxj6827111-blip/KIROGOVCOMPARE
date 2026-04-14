@@ -148,6 +148,13 @@
     box-shadow: 0 0 0 4px rgba(253, 214, 99, 0.2);
 }
 
+.step-indicator.failed-current {
+    background: var(--danger);
+    color: #fff;
+    border-color: var(--danger);
+    box-shadow: 0 0 0 4px rgba(242, 139, 130, 0.2);
+}
+
 .step-label {
     margin-top: 12px;
     font-size: 13px;
@@ -191,6 +198,10 @@
     height: 100%;
     background: linear-gradient(90deg, #81c995, #34a853);
     transition: width 0.5s ease;
+}
+
+.progress-bar-fill.failed {
+    background: linear-gradient(90deg, #f28b82, #d93025);
 }
 
 .progress-text {

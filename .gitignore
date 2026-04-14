@@ -12,12 +12,15 @@ data/
 *.db
 logs/
 .llm-*.pid
+.frontend-*.pid
 .tmp_*
 llm-*.log*
 check_db*.js
 *.patch
 *.rej
 uploads/
+output/
+tmp/
 *.swp
 *.swo
 *~
@@ -30,3 +33,5 @@ fixtures/manifest.csv
 temp-*.json
 test-report*.json
 frontend/temp-*.json
+.playwright-cli/
+tmp-upload-report.md

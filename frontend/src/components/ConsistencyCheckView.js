@@ -169,7 +169,7 @@ const getLocationInfo = (item) => {
   };
 };
 
-const ConsistencyCheckView = ({ reportId, onEdit, filterGroups, onLocate }) => {
+const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups, onLocate }) => {
   // ... (state and fetch methods same as before)
   const [checksData, setChecksData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -200,7 +200,9 @@ const ConsistencyCheckView = ({ reportId, onEdit, filterGroups, onLocate }) => {
     setLoading(true);
     setError('');
     try {
-      const response = await apiClient.get(`/reports/${reportId}/checks`);
+      const response = await apiClient.get(`/reports/${reportId}/checks`, {
+        params: versionId ? { version_id: versionId } : undefined,
+      });
       const data = response.data?.data || response.data;
       setChecksData(data);
 
@@ -226,13 +228,15 @@ const ConsistencyCheckView = ({ reportId, onEdit, filterGroups, onLocate }) => {
       fetchChecks();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reportId]);
+  }, [reportId, versionId]);
 
   const handleRunChecks = async () => {
     setLoading(true);
     setError('');
     try {
-      await apiClient.post(`/reports/${reportId}/checks/run`, {});
+      await apiClient.post(`/reports/${reportId}/checks/run`, {
+        ...(versionId ? { version_id: versionId } : {}),
+      });
       setTimeout(() => {
         fetchChecks();
       }, 3000);

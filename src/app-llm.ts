@@ -16,6 +16,7 @@ import issuesSummaryRouter from './routes/issues-summary';
 import reportMaintenanceRouter from './routes/report-maintenance';
 import dataCenterRouter from './routes/data-center';
 import govInsightRouter from './routes/gov-insight';
+import govInsightPdfRouter from './routes/gov-insight-pdf';
 import { createRateLimiter, createRedisStore } from './middleware/rateLimit';
 import { redactSensitive } from './utils/logRedactor';
 
@@ -65,6 +66,7 @@ export function createLlmApp(): express.Express {
 
   app.use('/api', llmHealthRouter);
   app.use('/api/gov-insight', govInsightRouter); // Public dashboard API (no auth)
+  app.use('/api/gov-insight', govInsightPdfRouter);
 
   app.get('/', (_req, res) => {
     res.json({

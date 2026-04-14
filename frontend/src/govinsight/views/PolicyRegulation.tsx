@@ -127,7 +127,7 @@ export const PolicyRegulation: React.FC = () => {
             <div>
               <div className="text-xs font-bold text-slate-400 uppercase mb-1">行政事业收费</div>
               <div className="text-4xl font-black text-slate-900 tracking-tighter">
-                {(current.fees / 100).toFixed(1)} <span className="text-sm font-bold text-slate-400">亿元</span>
+                {(current.fees / 10000).toFixed(1)} <span className="text-sm font-bold text-slate-400">亿元</span>
               </div>
             </div>
             <Wallet className="w-8 h-8 text-amber-500 opacity-20" />

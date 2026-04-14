@@ -10,6 +10,7 @@ import RegionsManager from './components/RegionsManager';
 import ComparisonHistory from './components/ComparisonHistory';
 import ComparisonDetailView from './components/ComparisonDetailView';
 import ComparisonPrintView from './components/print/ComparisonPrintView';
+import GovInsightReportPrintView from './components/print/GovInsightReportPrintView';
 import UserManagement from './components/UserManagement';
 
 import JobCenter from './components/JobCenter';
@@ -84,6 +85,12 @@ function App() {
   if (pathname.startsWith('/print/comparison/')) {
     const comparisonId = pathname.split('/').pop();
     return <ComparisonPrintView comparisonId={comparisonId} />;
+  }
+  if (pathname.startsWith('/print/govinsight-report/')) {
+    const parts = pathname.split('/');
+    const orgId = decodeURIComponent(parts[parts.length - 2] || '');
+    const year = Number(parts[parts.length - 1]);
+    return <GovInsightReportPrintView orgId={orgId} year={year} />;
   }
 
   // Show login if not authenticated

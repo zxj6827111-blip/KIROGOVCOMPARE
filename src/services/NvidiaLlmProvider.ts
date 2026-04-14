@@ -77,9 +77,14 @@ function extractMessageText(content: unknown): string {
 
 export class NvidiaLlmProvider implements LlmProvider {
   private readonly provider = 'nvidia';
-  private readonly baseUrl = 'https://integrate.api.nvidia.com/v1';
+  private readonly baseUrl: string;
 
-  constructor(private readonly apiKey: string, private readonly model: string) {}
+  constructor(private readonly apiKey: string, private readonly model: string) {
+    this.baseUrl = String(process.env.NVIDIA_BASE_URL || '').trim().replace(/\/+$/, '');
+    if (!this.baseUrl) {
+      throw new LlmProviderError('NVIDIA_BASE_URL is required for Nvidia provider', 'nvidia_missing_base_url');
+    }
+  }
 
   async parse(request: LlmParseRequest, signal?: AbortSignal): Promise<LlmParseResult> {
     const absolutePath = path.isAbsolute(request.storagePath)
@@ -106,6 +111,10 @@ export class NvidiaLlmProvider implements LlmProvider {
     }
 
     const systemPrompt = buildStrictParseSystemInstruction();
+    const parseTemperatureRaw = Number(process.env.LLM_PARSE_TEMPERATURE ?? 0);
+    const parseTemperature = Number.isFinite(parseTemperatureRaw)
+      ? Math.max(0, Math.min(1, parseTemperatureRaw))
+      : 0;
 
     try {
       const response = await axios.post<OpenAIResponse>(
@@ -116,7 +125,8 @@ export class NvidiaLlmProvider implements LlmProvider {
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userText },
           ],
-          temperature: 0.2,
+          temperature: parseTemperature,
+          top_p: 1,
           max_tokens: 4096,
           stream: false,
         },

@@ -14,17 +14,24 @@ import { buildStrictParseSystemInstruction, loadUserText, stripMarkdownJsonFence
 export class ZhipuLlmProvider implements LlmProvider {
     private readonly provider = 'zhipu';
     private readonly client: OpenAI;
+    private readonly baseURL: string;
 
     constructor(private readonly apiKey: string, private readonly model: string) {
+        this.baseURL = String(process.env.ZHIPU_BASE_URL || '').trim();
+        if (!this.baseURL) {
+            throw new LlmProviderError('ZHIPU_BASE_URL is required for Zhipu provider', 'zhipu_missing_base_url');
+        }
         // 智谱官方 API 使用 OpenAI 兼容格式
         this.client = new OpenAI({
             apiKey: this.apiKey,
-            baseURL: 'https://open.bigmodel.cn/api/paas/v4',
+            baseURL: this.baseURL,
         });
     }
 
     // 模型别名映射
     private static readonly MODEL_MAP: Record<string, string> = {
+        'glm-5-official': 'glm-5',
+        'glm5-official': 'glm-5',
         'glm-4.7-flash-official': 'glm-4.7-flash',
         'glm-4.5-air-official': 'glm-4.5-air',
         'glm-4-plus-official': 'glm-4-plus',
@@ -32,7 +39,21 @@ export class ZhipuLlmProvider implements LlmProvider {
     };
 
     private resolveModelId(shortName: string): string {
-        return ZhipuLlmProvider.MODEL_MAP[shortName] || shortName;
+        const rawAliases = String(process.env.ZHIPU_MODEL_ALIASES_JSON || '').trim();
+        if (!rawAliases) {
+            return shortName;
+        }
+
+        try {
+            const aliases = JSON.parse(rawAliases) as Record<string, string>;
+            if (aliases && typeof aliases === 'object') {
+                return aliases[shortName] || shortName;
+            }
+        } catch (error) {
+            console.warn('[Zhipu Official] Failed to parse ZHIPU_MODEL_ALIASES_JSON:', error);
+        }
+
+        return shortName;
     }
 
     async parse(request: LlmParseRequest, signal?: AbortSignal): Promise<LlmParseResult> {
@@ -62,6 +83,10 @@ export class ZhipuLlmProvider implements LlmProvider {
             console.log(`[Zhipu Official] Truncating input from ${userText.length} to ${maxChars}`);
             userText = userText.slice(0, maxChars);
         }
+        const parseTemperatureRaw = Number(process.env.LLM_PARSE_TEMPERATURE ?? 0);
+        const parseTemperature = Number.isFinite(parseTemperatureRaw)
+            ? Math.max(0, Math.min(1, parseTemperatureRaw))
+            : 0;
 
         try {
             const response = await this.client.chat.completions.create({
@@ -77,8 +102,11 @@ export class ZhipuLlmProvider implements LlmProvider {
                     }
                 ],
                 max_tokens: 16384,
-                temperature: 0.7,
-            }, {
+                temperature: parseTemperature,
+                top_p: 1,
+                response_format: { type: 'json_object' },
+                thinking: { type: 'disabled' },
+            } as any, {
                 signal: signal,
                 timeout: 600000, // 10 minutes
             });

@@ -72,7 +72,10 @@ const ParsedDataEditor = ({ reportId, versionId, parsedJson, onSave, onCancel })
     try {
       const response = await apiClient.patch(
         `/reports/${reportId}/parsed-data`,
-        { parsed_json: editedData }
+        {
+          parsed_json: editedData,
+          ...(versionId ? { version_id: versionId } : {}),
+        }
       );
 
       const { new_version_id, old_version_id, reused } = response.data;
@@ -82,7 +85,9 @@ const ParsedDataEditor = ({ reportId, versionId, parsedJson, onSave, onCancel })
       let checksRunError = null;
 
       try {
-        const checksResponse = await apiClient.post(`/reports/${reportId}/checks/run`, {});
+        const checksResponse = await apiClient.post(`/reports/${reportId}/checks/run`, {
+          ...(new_version_id ? { version_id: new_version_id } : {}),
+        });
         checksRunSuccess = true;
         checksCount = checksResponse?.data?.count ?? null;
       } catch (checkErr) {

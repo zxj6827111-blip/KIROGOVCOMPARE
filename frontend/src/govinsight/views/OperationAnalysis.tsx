@@ -159,7 +159,7 @@ export const OperationAnalysis: React.FC = () => {
           <div className="mt-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
             <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">业务分析结论：</h4>
             <p className="text-xs text-slate-600 leading-relaxed">
-              2024年度，<strong>“本机关不掌握”</strong> ({latestData.applications.outcomesDetail?.unable.noInfo || 0}件) 是导致无法提供的首要原因，占比显著。
+              {latestData.year}年度，<strong>“本机关不掌握”</strong> ({latestData.applications.outcomesDetail?.unable.noInfo || 0}件) 是导致无法提供的首要原因，占比显著。
               在不予公开类中，<strong>“行政查询事项”</strong> ({latestData.applications.outcomesDetail?.notOpen.adminQuery || 0}件) 较为突出，反映出社会公众对政务公开与“档案查阅”界限仍存在认知偏差，
               法制部门应加强对该类答复的模板优化，做好引导解释工作。
             </p>
