@@ -266,6 +266,10 @@ interface StoredNarrativeEnvelope {
   narrative: Record<string, unknown>;
 }
 
+type CompatibleEnhancedAIReportResponse = Omit<EnhancedAIReportResponse, 'version'> & {
+  version: 'v3' | 'v4';
+};
+
 const FORMAL_REPORT_FORMAT = 'govInsightFormalReportV2';
 const RISK_PRIORITY_ORDER: Record<RiskPriorityLevel, number> = {
   首要关注事项: 1,
@@ -291,7 +295,7 @@ const safeDivide = (num: number, den: number): number => {
 const round1 = (value: number): number => Math.round(value * 10) / 10;
 
 const sumNumbers = (...values: Array<number | undefined | null>): number =>
-  values.reduce((total, value) => total + (Number.isFinite(Number(value)) ? Number(value) : 0), 0);
+  values.reduce<number>((total, value) => total + (Number.isFinite(Number(value)) ? Number(value) : 0), 0);
 
 const normalizeText = (value: unknown): string =>
   String(value || '')
@@ -1904,8 +1908,8 @@ const isFormalNarrativePayload = (value: unknown): value is FormalNarrativePaylo
   );
 };
 
-const isNormalizedFormalReport = (value: unknown): value is EnhancedAIReportResponse => {
-  const obj = value as EnhancedAIReportResponse & { version?: string };
+const isNormalizedFormalReport = (value: unknown): value is CompatibleEnhancedAIReportResponse => {
+  const obj = value as Partial<CompatibleEnhancedAIReportResponse>;
   return (
     !!obj &&
     typeof obj === 'object' &&
@@ -1995,7 +1999,7 @@ export const normalizeReportData = (
   const fallback = buildRuleBasedEnhancedReport(entity, year, annualReportSummary);
 
   if (isNormalizedFormalReport(raw)) {
-    if (!context || !fallback) return raw.version === 'v4' ? raw : { ...raw, version: 'v4' as const };
+    if (!context || !fallback) return { ...raw, version: 'v4' as const };
     return {
       version: 'v4',
       metadata: sanitizeMetadata(raw.metadata, fallback.metadata, context),
