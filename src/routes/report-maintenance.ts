@@ -5,6 +5,99 @@ import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 
 const router = express.Router();
 
+type MaintenanceStatus = 'missing' | 'empty' | 'text_empty';
+
+interface MaintenanceReportRow {
+    report_id: number;
+    region_id: number;
+    year: number;
+    effective_version_id: number | null;
+    parsed_json: any;
+    raw_text: string | null;
+}
+
+const MAINTENANCE_TEXT_THRESHOLD = 100;
+const MAINTENANCE_STRUCTURED_KEYS = new Set(['sections', 'subsections', 'children', 'items', 'content', 'paragraphs']);
+const MAINTENANCE_TEXT_KEYS = new Set(['content', 'text']);
+const MAINTENANCE_METADATA_KEYS = new Set([
+    'type',
+    'title',
+    'file_hash',
+    'file_size',
+    'report_id',
+    'version_id',
+    'generated_at',
+    'storage_path',
+    'visual_audit',
+    'tableData',
+    'activeDisclosureData',
+    'reviewLitigationData',
+]);
+
+const hasEffectiveContent = (parsed: any): boolean => {
+    if (!parsed || typeof parsed !== 'object') return false;
+    if (Array.isArray(parsed.sections) && parsed.sections.length > 0) return true;
+    if (parsed.tables && typeof parsed.tables === 'object' && Object.keys(parsed.tables).length > 0) return true;
+    if (Array.isArray(parsed.content) && parsed.content.length > 0) return true;
+    return false;
+};
+
+const getParsedNarrativeTextLength = (node: unknown, parentKey = ''): number => {
+    if (node == null) return 0;
+
+    if (typeof node === 'string') {
+        return MAINTENANCE_TEXT_KEYS.has(parentKey) ? node.trim().length : 0;
+    }
+
+    if (Array.isArray(node)) {
+        return node.reduce((sum, item) => sum + getParsedNarrativeTextLength(item, parentKey), 0);
+    }
+
+    if (typeof node !== 'object') {
+        return 0;
+    }
+
+    return Object.entries(node as Record<string, unknown>).reduce((sum, [key, value]) => {
+        if (MAINTENANCE_METADATA_KEYS.has(key)) {
+            return sum;
+        }
+
+        if (
+            MAINTENANCE_STRUCTURED_KEYS.has(key)
+            || MAINTENANCE_TEXT_KEYS.has(key)
+            || parentKey === 'sections'
+            || parentKey === 'subsections'
+            || parentKey === 'paragraphs'
+            || parentKey === 'content'
+        ) {
+            return sum + getParsedNarrativeTextLength(value, key);
+        }
+
+        return sum;
+    }, 0);
+};
+
+const getReportMaintenanceStatus = (report?: MaintenanceReportRow | null): MaintenanceStatus | null => {
+    if (!report) {
+        return 'missing';
+    }
+
+    const isJsonEmpty = !report.effective_version_id || !hasEffectiveContent(report.parsed_json);
+    if (isJsonEmpty) {
+        return 'empty';
+    }
+
+    const rawTextLength = typeof report.raw_text === 'string' ? report.raw_text.trim().length : 0;
+    const parsedTextLength = getParsedNarrativeTextLength(report.parsed_json);
+    const isTextEmpty = rawTextLength < MAINTENANCE_TEXT_THRESHOLD && parsedTextLength < MAINTENANCE_TEXT_THRESHOLD;
+
+    if (isTextEmpty) {
+        return 'text_empty';
+    }
+
+    return null;
+};
+
 /**
  * GET /report-maintenance - 获取年报维护列表（未上传或内容为空的城市）
  * Query params:
@@ -101,27 +194,29 @@ router.get('/', authMiddleware, async (req: AuthRequest, res) => {
                 r.id AS report_id,
                 r.region_id,
                 r.year,
-                r.active_version_id,
-                rv.parsed_json,
-                rv.raw_text
+                COALESCE(pending_rv.id, active_rv.id) AS effective_version_id,
+                COALESCE(pending_rv.parsed_json, active_rv.parsed_json) AS parsed_json,
+                COALESCE(pending_rv.raw_text, active_rv.raw_text) AS raw_text
             FROM reports r
-            LEFT JOIN report_versions rv ON rv.id = r.active_version_id
+            LEFT JOIN report_versions active_rv ON active_rv.id = r.active_version_id
+            LEFT JOIN LATERAL (
+                SELECT
+                    rv.id,
+                    rv.parsed_json,
+                    rv.raw_text
+                FROM report_versions rv
+                WHERE rv.report_id = r.id
+                  AND rv.review_status = 'pending_review'
+                ORDER BY rv.created_at DESC, rv.id DESC
+                LIMIT 1
+            ) pending_rv ON true
             WHERE r.region_id = ANY($1::int[]) AND r.year = $2
         `;
         const reportsResult = await pool.query(reportsQuery, [regionIds, year]);
-        const reportsByRegion = new Map<number, any>();
+        const reportsByRegion = new Map<number, MaintenanceReportRow>();
         for (const row of reportsResult.rows) {
-            reportsByRegion.set(row.region_id, row);
+            reportsByRegion.set(Number(row.region_id), row as MaintenanceReportRow);
         }
-
-        // 判断报告是否为空
-        const isEmptyReport = (report: any): boolean => {
-            if (!report.active_version_id) return true;
-            if (!report.parsed_json) return true;
-            if (typeof report.parsed_json === 'object' && Object.keys(report.parsed_json).length === 0) return true;
-            if (!report.raw_text || report.raw_text.trim().length < 100) return true;
-            return false;
-        };
 
         // 构建结果列表
         const results: any[] = [];
@@ -131,53 +226,14 @@ router.get('/', authMiddleware, async (req: AuthRequest, res) => {
 
         for (const region of regionsResult) {
             const report = reportsByRegion.get(region.id);
-            let status: 'missing' | 'empty' | 'text_empty' | null = null;
+            const status = getReportMaintenanceStatus(report);
 
-            if (!report) {
-                status = 'missing';
+            if (status === 'missing') {
                 missingCount++;
-            } else {
-                // Helper to check if JSON has meaningful content (sections or tables)
-                const hasEffectiveContent = (parsed: any): boolean => {
-                    if (!parsed || typeof parsed !== 'object') return false;
-                    const hasSections = Array.isArray(parsed.sections) && parsed.sections.length > 0;
-                    const hasTables = parsed.tables && typeof parsed.tables === 'object' && Object.keys(parsed.tables).length > 0;
-                    return hasSections || hasTables;
-                };
-
-                // Check if JSON data is effectively empty
-                // We now require actual sections or tables to be present. 
-                // Just having 'metadata', 'error' keys etc is considered empty.
-                const isJsonEmpty = !report.active_version_id ||
-                    !report.parsed_json ||
-                    !hasEffectiveContent(report.parsed_json);
-
-                // Check if Text content is effectively empty
-                // Note: We only consider text empty if JSON is NOT empty (otherwise it falls into the main 'empty' category)
-                // Helper to check if text content exists in parsed sections
-                const hasParsedTextContent = (parsed: any): boolean => {
-                    if (!parsed || !parsed.sections || !Array.isArray(parsed.sections)) return false;
-                    let totalLen = 0;
-                    for (const s of parsed.sections) {
-                        // Defensive check for null/malformed section objects
-                        if (!s) continue;
-                        if (s.content && typeof s.content === 'string') {
-                            totalLen += s.content.length;
-                        }
-                        if (totalLen > 100) return true;
-                    }
-                    return totalLen > 100;
-                };
-
-                const isTextEmpty = (!report.raw_text || report.raw_text.trim().length < 100) && (!hasParsedTextContent(report.parsed_json));
-
-                if (isJsonEmpty) {
-                    status = 'empty';
-                    emptyCount++;
-                } else if (isTextEmpty) {
-                    status = 'text_empty';
-                    textEmptyCount++;
-                }
+            } else if (status === 'empty') {
+                emptyCount++;
+            } else if (status === 'text_empty') {
+                textEmptyCount++;
             }
 
             if (status) {
@@ -301,71 +357,43 @@ router.get('/export', authMiddleware, async (req: AuthRequest, res) => {
                 r.id AS report_id,
                 r.region_id,
                 r.year,
-                r.active_version_id,
-                rv.parsed_json,
-                rv.raw_text
+                COALESCE(pending_rv.id, active_rv.id) AS effective_version_id,
+                COALESCE(pending_rv.parsed_json, active_rv.parsed_json) AS parsed_json,
+                COALESCE(pending_rv.raw_text, active_rv.raw_text) AS raw_text
             FROM reports r
-            LEFT JOIN report_versions rv ON rv.id = r.active_version_id
+            LEFT JOIN report_versions active_rv ON active_rv.id = r.active_version_id
+            LEFT JOIN LATERAL (
+                SELECT
+                    rv.id,
+                    rv.parsed_json,
+                    rv.raw_text
+                FROM report_versions rv
+                WHERE rv.report_id = r.id
+                  AND rv.review_status = 'pending_review'
+                ORDER BY rv.created_at DESC, rv.id DESC
+                LIMIT 1
+            ) pending_rv ON true
             WHERE r.region_id = ANY($1::int[]) AND r.year = $2
         `;
         const reportsResult = await pool.query(reportsQuery, [regionIds, year]);
-        const reportsByRegion = new Map<number, any>();
+        const reportsByRegion = new Map<number, MaintenanceReportRow>();
         for (const row of reportsResult.rows) {
-            reportsByRegion.set(row.region_id, row);
+            reportsByRegion.set(Number(row.region_id), row as MaintenanceReportRow);
         }
-
-        const isEmptyReport = (report: any): boolean => {
-            if (!report.active_version_id) return true;
-            if (!report.parsed_json) return true;
-            if (typeof report.parsed_json === 'object' && Object.keys(report.parsed_json).length === 0) return true;
-            if (!report.raw_text || report.raw_text.trim().length < 100) return true;
-            return false;
-        };
 
         // 构建结果
         const results: any[] = [];
         for (const region of regionsResult) {
             const report = reportsByRegion.get(region.id);
+            const maintenanceStatus = getReportMaintenanceStatus(report);
             let status: string | null = null;
 
-            if (!report) {
+            if (maintenanceStatus === 'missing') {
                 status = '未上传';
-            } else {
-                // Helper to check if JSON has meaningful content
-                const hasEffectiveContent = (parsed: any): boolean => {
-                    if (!parsed || typeof parsed !== 'object') return false;
-                    const hasSections = Array.isArray(parsed.sections) && parsed.sections.length > 0;
-                    const hasTables = parsed.tables && typeof parsed.tables === 'object' && Object.keys(parsed.tables).length > 0;
-                    return hasSections || hasTables;
-                };
-
-                const isJsonEmpty = !report.active_version_id ||
-                    !report.parsed_json ||
-                    !hasEffectiveContent(report.parsed_json);
-
-
-                // Helper to check if text content exists in parsed sections
-                const hasParsedTextContent = (parsed: any): boolean => {
-                    if (!parsed || !parsed.sections || !Array.isArray(parsed.sections)) return false;
-                    let totalLen = 0;
-                    for (const s of parsed.sections) {
-                        // Defensive check for null/malformed section objects
-                        if (!s) continue;
-                        if (s.content && typeof s.content === 'string') {
-                            totalLen += s.content.length;
-                        }
-                        if (totalLen > 100) return true;
-                    }
-                    return totalLen > 100;
-                };
-
-                const isTextEmpty = (!report.raw_text || report.raw_text.trim().length < 100) && (!hasParsedTextContent(report.parsed_json));
-
-                if (isJsonEmpty) {
-                    status = '内容为空';
-                } else if (isTextEmpty) {
-                    status = '文字为空';
-                }
+            } else if (maintenanceStatus === 'empty') {
+                status = '内容为空';
+            } else if (maintenanceStatus === 'text_empty') {
+                status = '文字为空';
             }
 
             if (status) {

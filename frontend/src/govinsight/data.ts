@@ -1,70 +1,24 @@
 
-import { EntityProfile, AnnualData, AnnualDataRecord, OrgItem, EntityType } from './types';
+import {
+  EntityProfile,
+  AnnualData,
+  AnnualDataRecord,
+  OrgItem,
+  EntityType,
+  CanonicalEntityType,
+} from './types';
 import { fetchAnnualData } from './api';
+import { isDistrictLikeGovInsightEntity } from './utils/entityClassification';
 
-const LEGACY_FEES_BY_YEAR: Record<number, number> = {
-  2024: 96171.6,
-  2023: 71940.7,
-  2022: 65120.3,
-  2021: 62450.5,
-  2020: 58920.1
-};
+type ChildRecordRelation = 'self' | 'descendant';
 
-const LEGACY_2024_OUTCOME_DETAIL = {
-  notOpen: {
-    stateSecret: 2,
-    lawForbidden: 31,
-    danger: 5,
-    thirdParty: 6,
-    internal: 8,
-    process: 12,
-    enforcement: 9,
-    adminQuery: 105
-  },
-  unable: {
-    noInfo: 769,
-    needCreation: 11,
-    unclear: 2
-  },
-  untreated: {
-    complaint: 62,
-    repeat: 25,
-    publication: 0,
-    massive: 0,
-    confirm: 1
-  },
-  other: {
-    overdueCorrection: 71,
-    overdueFee: 6,
-    other: 110
-  }
-};
+interface ChildRecordMatch {
+  record: AnnualDataRecord;
+  relation: ChildRecordRelation;
+}
 
 const isValidAnnualYear = (year: unknown): year is number =>
   Number.isInteger(year) && Number(year) >= 2000 && Number(year) <= 2100;
-
-const hasAnyDetailedOutcomeValue = (record: AnnualDataRecord): boolean =>
-  [
-    record.outcome_not_open_state_secret,
-    record.outcome_not_open_law_forbidden,
-    record.outcome_not_open_danger,
-    record.outcome_not_open_third_party,
-    record.outcome_not_open_internal,
-    record.outcome_not_open_process,
-    record.outcome_not_open_enforcement,
-    record.outcome_not_open_admin_query,
-    record.outcome_unable_no_info,
-    record.outcome_unable_need_creation,
-    record.outcome_unable_unclear,
-    record.outcome_complaint,
-    record.outcome_ignore_repeat,
-    record.outcome_publication,
-    record.outcome_massive,
-    record.outcome_confirm,
-    record.outcome_overdue_correction,
-    record.outcome_overdue_fee,
-    record.outcome_other_reasons
-  ].some((value) => typeof value === 'number' && value > 0);
 
 const normalizeRecordsByYear = (records: AnnualDataRecord[]): AnnualDataRecord[] => {
   const deduped = new Map<number, AnnualDataRecord>();
@@ -78,6 +32,66 @@ const normalizeRecordsByYear = (records: AnnualDataRecord[]): AnnualDataRecord[]
   return Array.from(deduped.values());
 };
 
+const toNullableNumber = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const extractRegionIdFromToken = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const match = value.match(/(\d+)/);
+    if (match) {
+      const parsed = Number(match[1]);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+  }
+  return null;
+};
+
+const toLegacyEntityType = (
+  canonicalUnitType?: CanonicalEntityType | null,
+  fallbackType?: string | null
+): EntityType => {
+  switch (canonicalUnitType) {
+    case 'province':
+      return 'province';
+    case 'city':
+      return 'city';
+    case 'department':
+      return 'department';
+    case 'district':
+    case 'town_street':
+    case 'functional_zone':
+      return 'district';
+    default:
+      if (fallbackType === 'province' || fallbackType === 'city' || fallbackType === 'department') {
+        return fallbackType;
+      }
+      return 'district';
+  }
+};
+
+const ENTITY_TYPE_ORDER: Record<EntityType, number> = {
+  province: 0,
+  city: 1,
+  district: 2,
+  department: 3,
+};
+
+const sortEntityTree = (nodes: EntityProfile[]): EntityProfile[] =>
+  [...nodes]
+    .sort((a, b) => {
+      const typeDiff = (ENTITY_TYPE_ORDER[a.type] ?? 99) - (ENTITY_TYPE_ORDER[b.type] ?? 99);
+      if (typeDiff !== 0) return typeDiff;
+      return a.name.localeCompare(b.name, 'zh-CN');
+    })
+    .map((node) => ({
+      ...node,
+      children: node.children ? sortEntityTree(node.children) : [],
+    }));
+
 // Legacy compat for views
 export const districts: EntityProfile[] = [];
 export const departments: EntityProfile[] = [];
@@ -88,8 +102,6 @@ export const mockSuzhou: any = { data: [] };
 
 // Transform API record to Frontend AnnualData
 export const transformYearData = (record: AnnualDataRecord): AnnualData => {
-  const useLegacy2024OutcomeDetail = record.year === 2024 && !hasAnyDetailedOutcomeValue(record);
-
   return {
     year: record.year,
     regulations: {
@@ -108,7 +120,7 @@ export const transformYearData = (record: AnnualDataRecord): AnnualData => {
       force: record.action_force || 0
     },
     fees: {
-      amount: record.fees_amount ?? LEGACY_FEES_BY_YEAR[record.year] ?? 0
+      amount: record.fees_amount ?? 0
     },
     applications: {
       newReceived: record.app_new || 0,
@@ -138,31 +150,31 @@ export const transformYearData = (record: AnnualDataRecord): AnnualData => {
       },
       outcomesDetail: {
         notOpen: {
-          stateSecret: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.notOpen.stateSecret : (record.outcome_not_open_state_secret ?? 0),
-          lawForbidden: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.notOpen.lawForbidden : (record.outcome_not_open_law_forbidden ?? 0),
-          danger: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.notOpen.danger : (record.outcome_not_open_danger ?? 0),
-          thirdParty: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.notOpen.thirdParty : (record.outcome_not_open_third_party ?? 0),
-          internal: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.notOpen.internal : (record.outcome_not_open_internal ?? 0),
-          process: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.notOpen.process : (record.outcome_not_open_process ?? 0),
-          enforcement: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.notOpen.enforcement : (record.outcome_not_open_enforcement ?? 0),
-          adminQuery: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.notOpen.adminQuery : (record.outcome_not_open_admin_query ?? 0)
+          stateSecret: record.outcome_not_open_state_secret ?? 0,
+          lawForbidden: record.outcome_not_open_law_forbidden ?? 0,
+          danger: record.outcome_not_open_danger ?? 0,
+          thirdParty: record.outcome_not_open_third_party ?? 0,
+          internal: record.outcome_not_open_internal ?? 0,
+          process: record.outcome_not_open_process ?? 0,
+          enforcement: record.outcome_not_open_enforcement ?? 0,
+          adminQuery: record.outcome_not_open_admin_query ?? 0
         },
         unable: {
-          noInfo: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.unable.noInfo : (record.outcome_unable_no_info ?? 0),
-          needCreation: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.unable.needCreation : (record.outcome_unable_need_creation ?? 0),
-          unclear: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.unable.unclear : (record.outcome_unable_unclear ?? 0)
+          noInfo: record.outcome_unable_no_info ?? 0,
+          needCreation: record.outcome_unable_need_creation ?? 0,
+          unclear: record.outcome_unable_unclear ?? 0
         },
         untreated: {
-          complaint: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.untreated.complaint : (record.outcome_complaint ?? 0),
-          repeat: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.untreated.repeat : (record.outcome_ignore_repeat ?? 0),
-          publication: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.untreated.publication : (record.outcome_publication ?? 0),
-          massive: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.untreated.massive : (record.outcome_massive ?? 0),
-          confirm: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.untreated.confirm : (record.outcome_confirm ?? 0)
+          complaint: record.outcome_complaint ?? 0,
+          repeat: record.outcome_ignore_repeat ?? 0,
+          publication: record.outcome_publication ?? 0,
+          massive: record.outcome_massive ?? 0,
+          confirm: record.outcome_confirm ?? 0
         },
         other: {
-          overdueCorrection: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.other.overdueCorrection : (record.outcome_overdue_correction ?? 0),
-          overdueFee: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.other.overdueFee : (record.outcome_overdue_fee ?? 0),
-          other: useLegacy2024OutcomeDetail ? LEGACY_2024_OUTCOME_DETAIL.other.other : (record.outcome_other_reasons ?? 0)
+          overdueCorrection: record.outcome_overdue_correction ?? 0,
+          overdueFee: record.outcome_overdue_fee ?? 0,
+          other: record.outcome_other_reasons ?? 0
         }
       },
 
@@ -197,7 +209,13 @@ export const buildRegionTree = (items: OrgItem[]): EntityProfile[] => {
     map.set(item.id, {
       id: item.id,
       name: item.name,
-      type: item.type as EntityType,
+      type: toLegacyEntityType(item.canonical_unit_type, item.type),
+      regionId: toNullableNumber(item.region_id) ?? extractRegionIdFromToken(item.id) ?? undefined,
+      canonicalUnitType: item.canonical_unit_type || undefined,
+      canonicalParentRegionId: toNullableNumber(item.canonical_parent_region_id),
+      cityRegionId: toNullableNumber(item.city_region_id),
+      materializeStatus: item.materialize_status || null,
+      isOfficial: Boolean(item.is_official),
       data: [], // Data loaded on demand
       children: [],
       parentPath: [] // To be filled
@@ -218,93 +236,97 @@ export const buildRegionTree = (items: OrgItem[]): EntityProfile[] => {
     }
   });
 
-  return roots;
-};
-
-// Helper function to check if an entity name is a real "district" (区/县) vs a "department" (局/委员会)
-const isDistrictName = (name: string): boolean => {
-  // 扩展后缀列表,支持更多变体
-  const districtSuffixes = [
-    '区', '县', '市',  // 基本行政区划
-    '开发区', '园区', '文旅区', '高新区', '经开区', '工业园区',  // 开发区类
-    '新区', '示范区', '保税区', '自贸区',  // 特殊功能区
-    '镇', '乡', '街道', '办事处'  // 基层行政区划
-  ];
-  return districtSuffixes.some(suffix => name.endsWith(suffix));
+  return sortEntityTree(roots);
 };
 
 // Async data loader (Lazy load data for an entity)
 export const loadEntityData = async (entity: EntityProfile): Promise<EntityProfile> => {
   try {
     const targetId = entity.id.trim().toLowerCase();
-    console.log('[loadEntityData] %cSTART', 'background: #222; color: #bada55', {
-      id: entity.id,
-      name: entity.name,
-      normalizedId: targetId
-    });
+    const targetRegionId = entity.regionId ?? extractRegionIdFromToken(entity.id);
 
     // Fetch data for the entity AND its children in one call
     const records = await fetchAnnualData(undefined, entity.id, true);
-    console.log('[loadEntityData] Received', records.length, 'total records from API');
-
-    if (records.length > 0) {
-      console.log('[loadEntityData] First record raw:', records[0]);
-    }
 
     // Separate records using normalized IDs for robustness
     const validYearRecords = records.filter((record) => isValidAnnualYear(record.year));
-    if (validYearRecords.length !== records.length) {
-      console.log('[loadEntityData] Dropped invalid-year records:', records.length - validYearRecords.length);
-    }
 
     const entityRecords = normalizeRecordsByYear(
-      validYearRecords.filter(r => r.org_id?.trim().toLowerCase() === targetId)
+      validYearRecords.filter((r) => {
+        const recordRegionId = toNullableNumber(r.region_id) ?? extractRegionIdFromToken(r.org_id);
+        return r.org_id?.trim().toLowerCase() === targetId || (targetRegionId !== null && recordRegionId === targetRegionId);
+      })
     );
 
     // Child records: parent_id matches targetId
     // 修复: 不再依赖isDistrictName,而是使用org_type或parent_id关系
     // Child records filtering and mapping
     const validChildIds = new Set(entity.children?.map(c => c.id.trim().toLowerCase()));
+    const validChildRegionIds = new Set(
+      (entity.children || [])
+        .map((child) => child.regionId ?? extractRegionIdFromToken(child.id))
+        .filter((value): value is number => value !== null)
+    );
 
     const relevantRecords = validYearRecords.filter(r => {
       const oid = r.org_id?.trim().toLowerCase();
       const pid = r.parent_id?.trim().toLowerCase();
+      const recordRegionId = toNullableNumber(r.region_id) ?? extractRegionIdFromToken(r.org_id);
+      const parentRegionId =
+        toNullableNumber(r.canonical_parent_region_id) ??
+        extractRegionIdFromToken(r.parent_id);
 
       // Case 1: Record is a known child (Direct Match)
       if (oid && validChildIds.has(oid)) return true;
+      if (recordRegionId !== null && validChildRegionIds.has(recordRegionId)) return true;
 
       // Case 2: Record is a child of a known child (Grandchild Match)
       if (pid && validChildIds.has(pid)) return true;
+      if (parentRegionId !== null && validChildRegionIds.has(parentRegionId)) return true;
 
       return false;
     });
 
-    console.log('[loadEntityData] Match Results:', {
-      ownRecords: entityRecords.length,
-      relevantRecords: relevantRecords.length,
-      method: 'Extended Parent/Child Search'
-    });
-
-    // Group children records by the District ID (effective ID)
-    const childRecordsMap = new Map<string, AnnualDataRecord[]>();
+    // Group child records by effective child id, but keep track of whether
+    // the row belongs to the child itself or only to one of its descendants.
+    const childRecordsMap = new Map<string, ChildRecordMatch[]>();
 
     relevantRecords.forEach(r => {
       const oid = r.org_id?.trim().toLowerCase() || '';
       const pid = r.parent_id?.trim().toLowerCase() || '';
+      const recordRegionId = toNullableNumber(r.region_id) ?? extractRegionIdFromToken(r.org_id);
+      const parentRegionId =
+        toNullableNumber(r.canonical_parent_region_id) ??
+        extractRegionIdFromToken(r.parent_id);
 
       let effectiveId = '';
+      let relation: ChildRecordRelation = 'descendant';
 
       if (validChildIds.has(oid)) {
         effectiveId = oid;
+        relation = 'self';
+      } else if (recordRegionId !== null && validChildRegionIds.has(recordRegionId)) {
+        const matchedChild = entity.children?.find((child) => {
+          const childRegionId = child.regionId ?? extractRegionIdFromToken(child.id);
+          return childRegionId === recordRegionId;
+        });
+        effectiveId = matchedChild?.id.trim().toLowerCase() || '';
+        relation = 'self';
       } else if (validChildIds.has(pid)) {
         effectiveId = pid;
+      } else if (parentRegionId !== null && validChildRegionIds.has(parentRegionId)) {
+        const matchedChild = entity.children?.find((child) => {
+          const childRegionId = child.regionId ?? extractRegionIdFromToken(child.id);
+          return childRegionId === parentRegionId;
+        });
+        effectiveId = matchedChild?.id.trim().toLowerCase() || '';
       }
 
       if (effectiveId) {
         if (!childRecordsMap.has(effectiveId)) {
           childRecordsMap.set(effectiveId, []);
         }
-        childRecordsMap.get(effectiveId)!.push(r);
+        childRecordsMap.get(effectiveId)!.push({ record: r, relation });
       }
     });
 
@@ -321,27 +343,40 @@ export const loadEntityData = async (entity: EntityProfile): Promise<EntityProfi
 
     const normalizedEntityRecords = normalizeRecordsByYear([...entityRecords].sort(prioritizeGovernment));
 
-    // Sort records within each district group
-    childRecordsMap.forEach((recs, key) => {
-      recs.sort(prioritizeGovernment);
-    });
-
     // Transform entity data
     const annualData = normalizedEntityRecords.map(transformYearData).sort((a, b) => a.year - b.year);
 
     // Build children
     const childrenFromAPI: EntityProfile[] = [];
-    childRecordsMap.forEach((recs, orgId) => {
-      const normalizedChildRecords = normalizeRecordsByYear(recs);
-      const firstRec = normalizedChildRecords[0] || recs[0];
+    childRecordsMap.forEach((matches, orgId) => {
+      const preferredRecords = matches
+        .filter((match) => match.relation === 'self')
+        .map((match) => match.record);
+      const hasOwnRecords = preferredRecords.length > 0;
+      const recordsForChild = (preferredRecords.length > 0 ? preferredRecords : matches.map((match) => match.record))
+        .sort(prioritizeGovernment);
+
+      const normalizedChildRecords = normalizeRecordsByYear(recordsForChild);
+      const firstRec = normalizedChildRecords[0] || recordsForChild[0];
+      if (!firstRec) return;
       const childData = normalizedChildRecords.map(transformYearData).sort((a, b) => a.year - b.year);
 
       const existingChild = entity.children?.find(c => c.id.trim().toLowerCase() === orgId);
 
       childrenFromAPI.push({
         id: existingChild?.id || orgId,
-        name: firstRec.org_name,
-        type: (firstRec.org_type || 'district') as EntityType,
+        name: hasOwnRecords ? firstRec.org_name : (existingChild?.name || firstRec.org_name),
+        type: hasOwnRecords
+          ? toLegacyEntityType(firstRec.canonical_unit_type, firstRec.org_type)
+          : (existingChild?.type || toLegacyEntityType(firstRec.canonical_unit_type, firstRec.org_type)),
+        regionId: existingChild?.regionId ?? toNullableNumber(firstRec.region_id) ?? extractRegionIdFromToken(firstRec.org_id) ?? undefined,
+        canonicalUnitType: existingChild?.canonicalUnitType || firstRec.canonical_unit_type || undefined,
+        canonicalParentRegionId:
+          existingChild?.canonicalParentRegionId ??
+          toNullableNumber(firstRec.canonical_parent_region_id),
+        cityRegionId: existingChild?.cityRegionId ?? toNullableNumber(firstRec.city_region_id),
+        materializeStatus: firstRec.materialize_status || existingChild?.materializeStatus || null,
+        isOfficial: firstRec.is_official ?? existingChild?.isOfficial ?? false,
         data: childData,
         children: existingChild?.children || [],
         parentPath: [...(entity.parentPath || []), entity.name]
@@ -352,18 +387,13 @@ export const loadEntityData = async (entity: EntityProfile): Promise<EntityProfi
     const mergedChildren = [...childrenFromAPI];
     entity.children?.forEach(existingChild => {
       const normalizedChildId = existingChild.id.trim().toLowerCase();
-      if (!childRecordsMap.has(normalizedChildId) && isDistrictName(existingChild.name)) {
+      const isGeographicChild = isDistrictLikeGovInsightEntity(existingChild);
+      if (!childRecordsMap.has(normalizedChildId) && isGeographicChild) {
         mergedChildren.push({
           ...existingChild,
           data: existingChild.data || []
         });
       }
-    });
-
-    console.log('[loadEntityData] %cFINISH', 'background: #222; color: #bada55', {
-      totalChildren: mergedChildren.length,
-      withData: mergedChildren.filter(c => c.data.length > 0).length,
-      names: mergedChildren.map(c => c.name)
     });
 
     return {

@@ -3,11 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { EntityContext } from '../components/Layout';
 import { KPICard } from '../components/KPICard';
 import { MetricTip } from '../components/MetricTip';
-import { districts } from '../data';
 import {
   ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ScatterChart, Scatter, ZAxis, Cell, ReferenceLine, Label
 } from 'recharts';
 import { Layers, HelpCircle, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { isDistrictLikeGovInsightEntity } from '../utils/entityClassification';
+import type { EntityProfile } from '../types';
+
+const isDistrictLikeChild = (child: EntityProfile) => isDistrictLikeGovInsightEntity(child);
 
 export const DashboardHome: React.FC = () => {
   const { entity, setEntity } = useContext(EntityContext);
@@ -40,10 +43,6 @@ export const DashboardHome: React.FC = () => {
 
   // State for Heat Map Filter (District vs Department)
   const [heatMapFilter, setHeatMapFilter] = useState<'district' | 'department'>('district');
-
-  const isDistrict = (name: string) => {
-    return name.endsWith('区') || name.endsWith('县') || name.endsWith('市') || name.endsWith('开发区') || name.endsWith('园区') || name.endsWith('新区') || name.endsWith('新城');
-  };
 
   // Guard clause: If no data at all
   if (!entity || !entity.data || entity.data.length === 0) {
@@ -120,7 +119,6 @@ export const DashboardHome: React.FC = () => {
     .map(child => {
       const d = child.data.find(x => x.year === currentYear);
       if (!d) {
-        console.log('[DashboardHome] Child', child.name, 'has no data for year', currentYear, '- available years:', child.data.map(x => x.year));
         return null;
       }
       return {
@@ -132,15 +130,11 @@ export const DashboardHome: React.FC = () => {
     })
     .filter(Boolean) as any[] : [];
 
-  console.log('[DashboardHome] Entity children count:', entity.children?.length || 0);
-  console.log('[DashboardHome] Children with data:', entity.children?.filter(c => c.data && c.data.length > 0).length || 0);
-  console.log('[DashboardHome] quadrantData count:', quadrantData.length);
-
   const avgPressure = quadrantData.length > 0 ? quadrantData.reduce((acc, curr) => acc + curr.x, 0) / quadrantData.length : 0;
   const avgRisk = quadrantData.length > 0 ? quadrantData.reduce((acc, curr) => acc + curr.y, 0) / quadrantData.length : 0;
 
   const handleDrillDown = (name: string) => {
-    const target = districts.find(d => d.name === name);
+    const target = entity.children?.find((child) => child.name === name) || null;
     if (target) {
       setEntity(target);
       navigate('/portrait');
@@ -168,8 +162,8 @@ export const DashboardHome: React.FC = () => {
 
   const sortedDistricts = entity.children ? [...entity.children]
     .filter(child => {
-      if (heatMapFilter === 'district') return isDistrict(child.name);
-      if (heatMapFilter === 'department') return !isDistrict(child.name);
+        if (heatMapFilter === 'district') return isDistrictLikeChild(child);
+        if (heatMapFilter === 'department') return !isDistrictLikeChild(child);
       return true;
     })
     .sort((a, b) => {

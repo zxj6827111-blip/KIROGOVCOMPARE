@@ -492,6 +492,14 @@ CREATE TABLE IF NOT EXISTS ai_decision_reports (
   year INTEGER NOT NULL,
   content_json JSONB NOT NULL,
   model_used VARCHAR(100),
+  protocol_version VARCHAR(64) NOT NULL DEFAULT 'gov_insight_ai_report_v1',
+  payload_version VARCHAR(64),
+  prompt_version VARCHAR(64),
+  output_schema_version VARCHAR(64),
+  materialize_status VARCHAR(64),
+  source_job_id BIGINT,
+  source_report_version_id BIGINT REFERENCES report_versions(id),
+  report_payload_json JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(region_id, year)
@@ -513,6 +521,11 @@ CREATE TABLE IF NOT EXISTS gov_insight_report_jobs (
   prompt_text TEXT NOT NULL,
   system_instruction TEXT,
   request_config JSONB NOT NULL DEFAULT '{}'::jsonb,
+  report_payload_json JSONB,
+  report_payload_version VARCHAR(64),
+  prompt_version VARCHAR(64),
+  output_schema_version VARCHAR(64),
+  source_report_version_id BIGINT REFERENCES report_versions(id),
   error_code VARCHAR(50),
   error_message TEXT,
   retry_count INTEGER NOT NULL DEFAULT 0,
@@ -530,6 +543,144 @@ CREATE INDEX IF NOT EXISTS idx_gov_insight_report_jobs_status
 CREATE UNIQUE INDEX IF NOT EXISTS uq_gov_insight_report_jobs_active
   ON gov_insight_report_jobs(region_id, year)
   WHERE status IN ('queued', 'running');
+
+ALTER TABLE ai_decision_reports ADD COLUMN IF NOT EXISTS protocol_version VARCHAR(64) NOT NULL DEFAULT 'gov_insight_ai_report_v1';
+ALTER TABLE ai_decision_reports ADD COLUMN IF NOT EXISTS payload_version VARCHAR(64);
+ALTER TABLE ai_decision_reports ADD COLUMN IF NOT EXISTS prompt_version VARCHAR(64);
+ALTER TABLE ai_decision_reports ADD COLUMN IF NOT EXISTS output_schema_version VARCHAR(64);
+ALTER TABLE ai_decision_reports ADD COLUMN IF NOT EXISTS materialize_status VARCHAR(64);
+ALTER TABLE ai_decision_reports ADD COLUMN IF NOT EXISTS source_job_id BIGINT;
+ALTER TABLE ai_decision_reports ADD COLUMN IF NOT EXISTS source_report_version_id BIGINT REFERENCES report_versions(id);
+ALTER TABLE ai_decision_reports ADD COLUMN IF NOT EXISTS report_payload_json JSONB;
+
+ALTER TABLE gov_insight_report_jobs ADD COLUMN IF NOT EXISTS report_payload_json JSONB;
+ALTER TABLE gov_insight_report_jobs ADD COLUMN IF NOT EXISTS report_payload_version VARCHAR(64);
+ALTER TABLE gov_insight_report_jobs ADD COLUMN IF NOT EXISTS prompt_version VARCHAR(64);
+ALTER TABLE gov_insight_report_jobs ADD COLUMN IF NOT EXISTS output_schema_version VARCHAR(64);
+ALTER TABLE gov_insight_report_jobs ADD COLUMN IF NOT EXISTS source_report_version_id BIGINT REFERENCES report_versions(id);
+
+CREATE TABLE IF NOT EXISTS canonical_units (
+  region_id BIGINT PRIMARY KEY REFERENCES regions(id) ON DELETE CASCADE,
+  canonical_name VARCHAR(255) NOT NULL,
+  unit_type VARCHAR(32) NOT NULL CHECK (unit_type IN ('province', 'city', 'district', 'department', 'town_street', 'functional_zone', 'unknown')),
+  parent_region_id BIGINT REFERENCES regions(id),
+  city_region_id BIGINT REFERENCES regions(id),
+  mapping_source VARCHAR(64) NOT NULL DEFAULT 'rule_auto_v1',
+  confidence NUMERIC(5,4) NOT NULL DEFAULT 0.5,
+  mapping_version VARCHAR(64) NOT NULL DEFAULT 'canonical_units_v1',
+  effective_from_year INTEGER,
+  effective_to_year INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_canonical_units_parent ON canonical_units(parent_region_id);
+CREATE INDEX IF NOT EXISTS idx_canonical_units_city ON canonical_units(city_region_id);
+CREATE INDEX IF NOT EXISTS idx_canonical_units_type ON canonical_units(unit_type);
+
+CREATE TABLE IF NOT EXISTS canonical_unit_mapping_overrides (
+  region_id BIGINT PRIMARY KEY REFERENCES regions(id) ON DELETE CASCADE,
+  canonical_name VARCHAR(255),
+  unit_type VARCHAR(32) CHECK (unit_type IN ('province', 'city', 'district', 'department', 'town_street', 'functional_zone', 'unknown')),
+  parent_region_id BIGINT REFERENCES regions(id),
+  city_region_id BIGINT REFERENCES regions(id),
+  confidence NUMERIC(5,4),
+  note TEXT,
+  created_by BIGINT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO canonical_unit_mapping_overrides (
+  region_id,
+  canonical_name,
+  unit_type,
+  parent_region_id,
+  city_region_id,
+  confidence,
+  note,
+  updated_at
+) VALUES
+  (1437, '浦东新区', 'district', 1426, 1426, 1.0, 'phase1 frozen boundary seed', NOW()),
+  (781, '湖滨新区', 'functional_zone', 720, 720, 1.0, 'phase1 frozen boundary seed', NOW()),
+  (782, '洋河新区', 'functional_zone', 720, 720, 1.0, 'phase1 frozen boundary seed', NOW()),
+  (2182, '南通市经济技术开发区管委会', 'functional_zone', 2135, 2135, 1.0, 'phase1 frozen boundary seed', NOW()),
+  (2268, '高新区（如城街道、城南街道）', 'functional_zone', 2176, 2135, 1.0, 'phase1 frozen boundary seed', NOW()),
+  (1084, '泗阳棉花原种场', 'department', 779, 720, 1.0, 'phase1 frozen boundary seed: 原种场按县级部门口径纳入', NOW()),
+  (1085, '泗阳农场', 'department', 779, 720, 1.0, 'phase1 frozen boundary seed: 农场按县级部门口径纳入', NOW()),
+  (2348, '启东市国家统计局启东调查', 'department', 2178, 2135, 1.0, 'phase1 frozen boundary seed: 调查机构按县级部门口径纳入', NOW())
+ON CONFLICT (region_id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS gov_open_annual_stats_v2 (
+  id BIGSERIAL PRIMARY KEY,
+  region_id BIGINT NOT NULL REFERENCES regions(id) ON DELETE CASCADE,
+  parent_region_id BIGINT REFERENCES regions(id),
+  city_region_id BIGINT REFERENCES regions(id),
+  unit_type VARCHAR(32) NOT NULL CHECK (unit_type IN ('province', 'city', 'district', 'department', 'town_street', 'functional_zone', 'unknown')),
+  org_id VARCHAR(100) NOT NULL,
+  org_name VARCHAR(255) NOT NULL,
+  year INTEGER NOT NULL,
+  materialize_status VARCHAR(64) NOT NULL CHECK (materialize_status IN ('official', 'preview', 'blocked_missing_facts', 'blocked_mapping_pending', 'blocked_unknown_unit_type')),
+  is_official BOOLEAN NOT NULL DEFAULT FALSE,
+  source_report_id BIGINT REFERENCES reports(id) ON DELETE SET NULL,
+  source_report_version_id BIGINT REFERENCES report_versions(id) ON DELETE SET NULL,
+  stats_snapshot_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  metric_version VARCHAR(64) NOT NULL DEFAULT 'metrics_snapshot_v1',
+  mapping_version VARCHAR(64) NOT NULL DEFAULT 'canonical_units_v1',
+  reg_published INTEGER NOT NULL DEFAULT 0,
+  reg_active INTEGER NOT NULL DEFAULT 0,
+  reg_abolished INTEGER NOT NULL DEFAULT 0,
+  doc_published INTEGER NOT NULL DEFAULT 0,
+  doc_active INTEGER NOT NULL DEFAULT 0,
+  doc_abolished INTEGER NOT NULL DEFAULT 0,
+  action_licensing INTEGER NOT NULL DEFAULT 0,
+  action_punishment INTEGER NOT NULL DEFAULT 0,
+  action_force INTEGER NOT NULL DEFAULT 0,
+  fees_amount NUMERIC(18, 2) NOT NULL DEFAULT 0,
+  app_new INTEGER NOT NULL DEFAULT 0,
+  app_carried_over INTEGER NOT NULL DEFAULT 0,
+  source_natural INTEGER NOT NULL DEFAULT 0,
+  outcome_public INTEGER NOT NULL DEFAULT 0,
+  outcome_partial INTEGER NOT NULL DEFAULT 0,
+  outcome_unable INTEGER NOT NULL DEFAULT 0,
+  outcome_unable_no_info INTEGER NOT NULL DEFAULT 0,
+  outcome_unable_need_creation INTEGER NOT NULL DEFAULT 0,
+  outcome_unable_unclear INTEGER NOT NULL DEFAULT 0,
+  outcome_not_open INTEGER NOT NULL DEFAULT 0,
+  outcome_not_open_state_secret INTEGER NOT NULL DEFAULT 0,
+  outcome_not_open_law_forbidden INTEGER NOT NULL DEFAULT 0,
+  outcome_not_open_danger INTEGER NOT NULL DEFAULT 0,
+  outcome_not_open_process INTEGER NOT NULL DEFAULT 0,
+  outcome_not_open_internal INTEGER NOT NULL DEFAULT 0,
+  outcome_not_open_third_party INTEGER NOT NULL DEFAULT 0,
+  outcome_not_open_enforcement INTEGER NOT NULL DEFAULT 0,
+  outcome_not_open_admin_query INTEGER NOT NULL DEFAULT 0,
+  outcome_ignore INTEGER NOT NULL DEFAULT 0,
+  outcome_complaint INTEGER NOT NULL DEFAULT 0,
+  outcome_ignore_repeat INTEGER NOT NULL DEFAULT 0,
+  outcome_publication INTEGER NOT NULL DEFAULT 0,
+  outcome_massive INTEGER NOT NULL DEFAULT 0,
+  outcome_confirm INTEGER NOT NULL DEFAULT 0,
+  outcome_other INTEGER NOT NULL DEFAULT 0,
+  outcome_overdue_correction INTEGER NOT NULL DEFAULT 0,
+  outcome_overdue_fee INTEGER NOT NULL DEFAULT 0,
+  outcome_other_reasons INTEGER NOT NULL DEFAULT 0,
+  app_carried_forward INTEGER NOT NULL DEFAULT 0,
+  rev_total INTEGER NOT NULL DEFAULT 0,
+  rev_corrected INTEGER NOT NULL DEFAULT 0,
+  lit_total INTEGER NOT NULL DEFAULT 0,
+  lit_corrected INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(region_id, year, materialize_status)
+);
+
+CREATE INDEX IF NOT EXISTS idx_gov_open_annual_stats_v2_region_year
+  ON gov_open_annual_stats_v2(region_id, year, materialize_status);
+CREATE INDEX IF NOT EXISTS idx_gov_open_annual_stats_v2_city_year
+  ON gov_open_annual_stats_v2(city_region_id, year, unit_type);
+CREATE INDEX IF NOT EXISTS idx_gov_open_annual_stats_v2_year_status
+  ON gov_open_annual_stats_v2(year, materialize_status);
 
 INSERT INTO metric_dictionary (
   metric_key,

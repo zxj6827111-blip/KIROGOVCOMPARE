@@ -23,6 +23,22 @@ if (!fs.existsSync(tempDir)) {
   fs.mkdirSync(tempDir, { recursive: true });
 }
 
+const DEFAULT_REPORT_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
+const configuredReportUploadMaxBytes = Number(process.env.REPORT_UPLOAD_MAX_BYTES);
+const REPORT_UPLOAD_MAX_BYTES =
+  Number.isFinite(configuredReportUploadMaxBytes) && configuredReportUploadMaxBytes > 0
+    ? configuredReportUploadMaxBytes
+    : DEFAULT_REPORT_UPLOAD_MAX_BYTES;
+
+function sanitizeUploadFileName(originalName: string): string {
+  const baseName = path.basename(originalName || 'report');
+  const cleaned = baseName
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || 'report';
+}
+
 // Helper to safely parse JSON from DB (Postgres driver usually returns object for JSON columns, but handle strings too)
 function parseDbJson(value: any): any {
   if (value === null || value === undefined) return null;
@@ -380,7 +396,7 @@ const upload = multer({
     filename: (_req, file, cb) => {
       // Truncate filename if too long to avoid ENAMETOOLONG error
       const MAX_NAME_BYTES = 100;
-      let safeName = file.originalname;
+      let safeName = sanitizeUploadFileName(file.originalname);
 
       const byteLength = Buffer.byteLength(safeName, 'utf8');
       if (byteLength > MAX_NAME_BYTES) {
@@ -418,10 +434,30 @@ const upload = multer({
       cb(new Error('仅支持 PDF、HTML、TXT 或 Markdown 文件'));
     }
   },
+  limits: {
+    fileSize: REPORT_UPLOAD_MAX_BYTES,
+    files: 1,
+  },
 });
 
+const handleReportUpload: express.RequestHandler = (req, res, next) => {
+  upload.single('file')(req, res, (error) => {
+    if (error instanceof multer.MulterError) {
+      const status = error.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+      return res.status(status).json({
+        error: error.code === 'LIMIT_FILE_SIZE' ? 'file_too_large' : 'invalid_upload',
+        maxBytes: REPORT_UPLOAD_MAX_BYTES,
+      });
+    }
+    if (error) {
+      return res.status(400).json({ error: error.message || 'invalid_upload' });
+    }
+    next();
+  });
+};
+
 // Protect upload route
-router.post('/reports', authMiddleware, requirePermission('upload_reports'), upload.single('file'), async (req: AuthRequest, res) => {
+router.post('/reports', authMiddleware, requirePermission('upload_reports'), handleReportUpload, async (req: AuthRequest, res) => {
   const tmpFilePath = req.file?.path;
   try {
     const regionId = Number(req.body.region_id);
@@ -514,7 +550,7 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
     }
 
     if (error instanceof multer.MulterError) {
-      return res.status(400).json({ error: `涓婁紶閿欒: ${error.message}` });
+      return res.status(400).json({ error: `上传错误: ${error.message}` });
     }
 
     console.error('Upload error:', error);

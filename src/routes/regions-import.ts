@@ -2,11 +2,47 @@ import express, { Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import * as XLSX from 'xlsx';
+import { readSheet } from 'read-excel-file/node';
+import writeXlsxFile, { SheetData } from 'write-excel-file/node';
+import { parse as parseCsv } from 'csv-parse/sync';
 import pool from '../config/database-llm';
 import { authMiddleware, AuthRequest, requirePermission } from '../middleware/auth';
 
 const router = express.Router();
+const REGION_IMPORT_MAX_ROWS = Number(process.env.REGION_IMPORT_MAX_ROWS || 10000);
+const DEFAULT_REGION_IMPORT_MAX_BYTES = 5 * 1024 * 1024;
+const configuredRegionImportMaxBytes = Number(process.env.REGION_IMPORT_MAX_BYTES);
+const REGION_IMPORT_MAX_BYTES =
+  Number.isFinite(configuredRegionImportMaxBytes) && configuredRegionImportMaxBytes > 0
+    ? configuredRegionImportMaxBytes
+    : DEFAULT_REGION_IMPORT_MAX_BYTES;
+
+function sanitizeImportFileName(originalName: string): string {
+  const baseName = path.basename(originalName || 'regions');
+  const cleaned = baseName
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || 'regions';
+}
+
+function normalizeRows(rows: unknown[][]): string[][] {
+  return rows.slice(0, REGION_IMPORT_MAX_ROWS).map((row) =>
+    row.map((value) => {
+      if (value === null || value === undefined) return '';
+      if (value instanceof Date) return value.toISOString();
+      return String(value);
+    })
+  );
+}
+
+async function workbookToBuffer(data: string[][], sheetName: string): Promise<Buffer> {
+  const workbook = await writeXlsxFile(data as SheetData, {
+    sheet: sheetName,
+    columns: [{ width: 15 }, { width: 15 }, { width: 15 }, { width: 15 }],
+  });
+  return workbook.toBuffer();
+}
 
 // Temp directory for uploads
 const tempDir = path.join(process.cwd(), 'data', 'temp');
@@ -18,30 +54,45 @@ const upload = multer({
   storage: multer.diskStorage({
     destination: tempDir,
     filename: (_req, file, cb) => {
-      cb(null, `import_${Date.now()}_${file.originalname}`);
+      cb(null, `import_${Date.now()}_${sanitizeImportFileName(file.originalname)}`);
     },
   }),
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    if (['.xlsx', '.xls', '.csv'].includes(ext)) {
+    if (['.xlsx', '.csv'].includes(ext)) {
       cb(null, true);
     } else {
-      cb(new Error('仅支持 .xlsx, .xls, .csv 格式'));
+      cb(new Error('仅支持 .xlsx 或 .csv 文件'));
     }
   },
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB
+    fileSize: REGION_IMPORT_MAX_BYTES,
+    files: 1,
   },
 });
+
+const handleRegionImportUpload: express.RequestHandler = (req, res, next) => {
+  upload.single('file')(req, res, (error) => {
+    if (error instanceof multer.MulterError) {
+      const status = error.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+      return res.status(status).json({
+        error: error.code === 'LIMIT_FILE_SIZE' ? 'file_too_large' : 'invalid_upload',
+        maxBytes: REGION_IMPORT_MAX_BYTES,
+      });
+    }
+    if (error) {
+      return res.status(400).json({ error: error.message || 'invalid_upload' });
+    }
+    next();
+  });
+};
 
 /**
  * GET /api/regions/template
  * Download Excel template for region import
  */
-router.get('/template', (_req: Request, res: Response) => {
+router.get('/template', async (_req: Request, res: Response) => {
   try {
-    // Create template workbook
-    const wb = XLSX.utils.book_new();
 
     // Sample data
     const data = [
@@ -54,21 +105,7 @@ router.get('/template', (_req: Request, res: Response) => {
       ['浙江省', '杭州市', '西湖区', ''],
       ['浙江省', '杭州市', '上城区', ''],
     ];
-
-    const ws = XLSX.utils.aoa_to_sheet(data);
-
-    // Set column widths
-    ws['!cols'] = [
-      { wch: 15 }, // 省份
-      { wch: 15 }, // 城市
-      { wch: 15 }, // 区县
-      { wch: 15 }, // 街道
-    ];
-
-    XLSX.utils.book_append_sheet(wb, ws, '城市导入模板');
-
-    // Generate buffer
-    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const buffer = await workbookToBuffer(data, '区域导入模板');
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="region_import_template.xlsx"');
@@ -83,7 +120,7 @@ router.get('/template', (_req: Request, res: Response) => {
  * POST /api/regions/import
  * Import regions from Excel/CSV file
  */
-router.post('/import', authMiddleware, requirePermission('manage_cities'), upload.single('file'), async (req: AuthRequest, res: Response) => {
+router.post('/import', authMiddleware, requirePermission('manage_cities'), handleRegionImportUpload, async (req: AuthRequest, res: Response) => {
   const filePath = req.file?.path;
 
   try {
@@ -91,10 +128,9 @@ router.post('/import', authMiddleware, requirePermission('manage_cities'), uploa
       return res.status(400).json({ error: '请上传文件' });
     }
 
-    let wb: XLSX.WorkBook;
-
     const ext = path.extname(filePath!).toLowerCase();
-    if (ext === '.csv' || ext === '.txt') {
+    let rows: string[][];
+    if (ext === '.csv') {
       // Manual encoding detection for text-based files
       const buffer = fs.readFileSync(filePath!);
       let content = '';
@@ -112,17 +148,16 @@ router.post('/import', authMiddleware, requirePermission('manage_cities'), uploa
         content = utf8Str;
       }
 
-      wb = XLSX.read(content, { type: 'string' });
+      rows = normalizeRows(parseCsv(content, {
+        bom: true,
+        relaxColumnCount: true,
+        skipEmptyLines: false,
+      }));
     } else {
       // Excel files (binary)
-      wb = XLSX.readFile(filePath!);
+      const buffer = fs.readFileSync(filePath!);
+      rows = normalizeRows(await readSheet(buffer));
     }
-
-    const sheetName = wb.SheetNames[0];
-    const ws = wb.Sheets[sheetName];
-
-    // Convert to JSON
-    const rows: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
 
     if (rows.length < 2) {
       return res.status(400).json({ error: '文件为空或格式错误' });
@@ -335,7 +370,7 @@ router.post('/import', authMiddleware, requirePermission('manage_cities'), uploa
     }
 
     // Verify counts (approximate)
-    let createdCount = pendingL1.size + pendingL2.size + pendingL3.size + pendingL4.size;
+    const createdCount = pendingL1.size + pendingL2.size + pendingL3.size + pendingL4.size;
 
     // Clean up temp file
     if (filePath) {
@@ -447,14 +482,7 @@ router.get('/export', authMiddleware, requirePermission('manage_cities'), async 
         }
       }
     }
-
-    // Create workbook
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(data);
-    ws['!cols'] = [{ wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }];
-    XLSX.utils.book_append_sheet(wb, ws, '城市列表');
-
-    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const buffer = await workbookToBuffer(data, '区域数据');
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="regions_export_${Date.now()}.xlsx"`);

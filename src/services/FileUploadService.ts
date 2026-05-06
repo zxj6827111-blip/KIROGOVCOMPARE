@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
+import { uuidv4 } from '../utils/uuid';
 import StorageService from './StorageService';
 import { validatePDFFile } from '../utils/fileValidator';
 import { calculateFileHash } from '../utils/fileHash';

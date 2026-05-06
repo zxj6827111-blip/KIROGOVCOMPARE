@@ -24,6 +24,9 @@ dotenv.config();
 
 export function createLlmApp(): express.Express {
   const app = express();
+  const isProduction = process.env.NODE_ENV === 'production';
+  const trustProxy = process.env.TRUST_PROXY === '1' || process.env.TRUST_PROXY === 'true';
+  app.set('trust proxy', trustProxy ? 1 : false);
   const defaultCorsOrigins = ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:3002', 'http://localhost:3003'];
   const configuredCorsOrigins = (process.env.CORS_ALLOWED_ORIGINS || process.env.ALLOWED_ORIGINS || '')
     .split(',')
@@ -31,6 +34,9 @@ export function createLlmApp(): express.Express {
     .filter(Boolean);
   const allowedOrigins = configuredCorsOrigins.length > 0 ? configuredCorsOrigins : defaultCorsOrigins;
   const allowAnyOrigin = allowedOrigins.includes('*');
+  if (isProduction && allowAnyOrigin) {
+    throw new Error('CORS_ALLOWED_ORIGINS must not contain "*" in production');
+  }
   const rateLimitWindowMs = Number(process.env.RATE_LIMIT_WINDOW_MS || 60_000);
   const rateLimitMax = Number(process.env.RATE_LIMIT_MAX || 300);
   const rateLimitStore = (process.env.RATE_LIMIT_STORE || 'memory').toLowerCase();
@@ -50,15 +56,23 @@ export function createLlmApp(): express.Express {
 
   app.use((req, res, next) => {
     const origin = req.headers.origin;
-    if (origin && (allowAnyOrigin || allowedOrigins.includes(origin))) {
+    const originAllowed = Boolean(origin && (allowAnyOrigin || allowedOrigins.includes(origin)));
+    if (origin) {
+      res.setHeader('Vary', 'Origin');
+    }
+    if (originAllowed && origin) {
       res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
 
     if (req.method === 'OPTIONS') {
-      res.sendStatus(200);
+      if (origin && !originAllowed) {
+        res.sendStatus(403);
+        return;
+      }
+      res.sendStatus(204);
       return;
     }
     next();

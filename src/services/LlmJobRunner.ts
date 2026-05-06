@@ -14,6 +14,7 @@ import { summarizeDiff } from '../utils/jsonDiff';
 import { calculateReportMetrics } from '../utils/reportAnalysis';
 import { PROJECT_ROOT } from '../config/constants';
 import { normalizeAnnualReportOutputFromSource } from './SegmentedAnnualReportParse';
+import { resolveParseFallbackConfig, resolveParsePrimaryConfig } from '../utils/llmProviderConfig';
 
 interface QueuedJob {
   id: number;
@@ -82,29 +83,6 @@ function resolveStabilizeOptions(modeRaw: string): { table3: boolean; table4: bo
 }
 
 const PARSE_STABILIZE_OPTIONS = resolveStabilizeOptions(PARSE_STABILIZE_MODE);
-
-function resolveParsePrimaryConfig(): { provider: string; model: string } {
-  const provider = (process.env.LLM_PARSE_PROVIDER || process.env.LLM_PROVIDER || 'stub').trim().toLowerCase();
-  const model = (process.env.LLM_PARSE_MODEL || process.env.LLM_MODEL || 'default').trim();
-  return { provider, model };
-}
-
-function resolveParseFallbackConfig(): { provider: string; model: string } {
-  const primary = resolveParsePrimaryConfig();
-  const provider = (
-    process.env.LLM_PARSE_FALLBACK_PROVIDER ||
-    process.env.LLM_FALLBACK_PROVIDER ||
-    primary.provider
-  ).trim().toLowerCase();
-
-  const model = (
-    process.env.LLM_PARSE_FALLBACK_MODEL ||
-    process.env.LLM_FALLBACK_MODEL ||
-    primary.model
-  ).trim();
-
-  return { provider, model };
-}
 
 function resolveAllowedKinds(mode: string): Set<string> {
   if (!mode || mode === 'all') {
@@ -317,18 +295,16 @@ export class LlmJobRunner {
     if (attempt === 1) {
       // CRITICAL FIX: Prioritize provider/model from the JOBS table (user's actual selection)
       // Only fallback to report_versions if jobs.provider/model are NULL
-      let jobConfig: { provider?: string; model?: string } | undefined;
       const result = await pool.query('SELECT provider, model FROM jobs WHERE id = $1 LIMIT 1', [job.id]);
-      jobConfig = result.rows[0];
+      const jobConfig: { provider?: string; model?: string } | undefined = result.rows[0];
 
       let pName = jobConfig?.provider;
       let mName = jobConfig?.model;
 
       // If job doesn't have provider/model, fallback to version config
       if (!pName && !mName) {
-        let versionConfig: { provider?: string; model?: string } | undefined;
         const result = await pool.query('SELECT provider, model FROM report_versions WHERE id = $1 LIMIT 1', [job.version_id]);
-        versionConfig = result.rows[0];
+        const versionConfig: { provider?: string; model?: string } | undefined = result.rows[0];
 
         // If provider is 'upload' (legacy/default) or 'pending', ignore it and use env default.
         pName =
@@ -356,8 +332,16 @@ export class LlmJobRunner {
       provider = createLlmProvider(pName, mName);
     } else if (attempt === 2) {
       // Retry Strategy: parse fallback is independent from report-generation fallback
-      const { provider: fallbackProvider, model: fallbackModel } = resolveParseFallbackConfig();
-      console.log(`[Job ${job.id}] Retry Attempt 2: Switching to fallback model '${fallbackModel}'`);
+      const fallbackConfig = resolveParseFallbackConfig();
+      for (const skipped of fallbackConfig.skipped) {
+        console.warn(
+          `[Job ${job.id}] Skipping ${skipped.source} fallback provider '${skipped.provider}' (model='${skipped.model}'): ${skipped.reason}`
+        );
+      }
+      console.log(
+        `[Job ${job.id}] Retry Attempt 2: Switching to ${fallbackConfig.source} fallback '${fallbackConfig.provider}' / '${fallbackConfig.model}'`
+      );
+      const { provider: fallbackProvider, model: fallbackModel } = fallbackConfig;
       provider = createLlmProvider(fallbackProvider, fallbackModel);
     } else {
       // Fallback for subsequent retries (if any)
@@ -565,11 +549,10 @@ export class LlmJobRunner {
 
     // Enqueue materialize job if not already queued/running
     if (job.version_id && job.report_id) {
-      let existingMaterializeJob: { id?: number } | undefined;
       const result = await pool.query(
         `SELECT id FROM jobs WHERE report_id = $1 AND version_id = $2 AND kind = 'materialize' AND status IN ('queued', 'running') LIMIT 1`,
         [job.report_id, job.version_id]);
-      existingMaterializeJob = result.rows[0];
+      const existingMaterializeJob: { id?: number } | undefined = result.rows[0];
 
       if (!existingMaterializeJob?.id) {
         let ingestionBatchId: number | null = null;
@@ -654,7 +637,7 @@ export class LlmJobRunner {
       await this.processJob(job);
 
       // 任务完成后添加冷却时间，避免过快调用 API 触发速率限制
-      // 浣?compare 浠诲姟鏄湰鍦板鐞嗭紝涓嶉渶瑕佸喎鍗?
+      // compare 任务是本地处理，不需要冷却。
       if (POST_JOB_COOLDOWN_MS > 0 && job.kind === 'parse') {
         console.log(`[JobRunner] Cooling down for ${POST_JOB_COOLDOWN_MS}ms before next job...`);
         await new Promise(resolve => setTimeout(resolve, POST_JOB_COOLDOWN_MS));
@@ -665,22 +648,22 @@ export class LlmJobRunner {
     }
   }
 
-  // 骞跺彂澶勭悊姣斿浠诲姟
+  // 并发处理比对任务
   private async processCompareJobsConcurrently(): Promise<void> {
     if (!ALLOWED_KINDS.has('compare')) {
       return;
     }
-    // 璁＄畻鍙互鍚姩鐨剋orker数量
+    // 计算可以启动的 worker 数量
     const availableSlots = COMPARE_CONCURRENCY - this.compareWorkersActive;
     if (availableSlots <= 0) return;
 
-    // 鑾峰彇澶氫釜姣斿浠诲姟
+    // 获取多个比对任务
     const jobs = await this.claimCompareJobs(availableSlots);
     if (jobs.length === 0) return;
 
     console.log(`[JobRunner] Starting ${jobs.length} concurrent compare workers (active: ${this.compareWorkersActive}/${COMPARE_CONCURRENCY})`);
 
-    // 骞跺彂鍚姩浠诲姟澶勭悊锛堜笉绛夊緟瀹屾垚锛?
+    // 并发启动任务处理（不等待完成）
     for (const job of jobs) {
       this.compareWorkersActive++;
       this.runCompareWorker(job).finally(() => {
@@ -689,7 +672,7 @@ export class LlmJobRunner {
     }
   }
 
-  // 鍗曚釜姣斿worker
+  // 单个比对 worker
   private async runCompareWorker(job: QueuedJob): Promise<void> {
     try {
       await this.processCompareJob(job);
@@ -704,7 +687,7 @@ export class LlmJobRunner {
     }
   }
 
-  // 鎵归噺鑾峰彇姣斿浠诲姟
+  // 批量获取比对任务
   private async claimCompareJobs(limit: number): Promise<QueuedJob[]> {
     const claimResult = await pool.query(`
       WITH next_jobs AS (
@@ -809,13 +792,11 @@ export class LlmJobRunner {
       throw new Error('Materialize job missing version_id or report_id');
     }
 
-    let version: { id?: number; parsed_json?: string } | undefined;
-
     const result = await pool.query(
       `SELECT id, parsed_json FROM report_versions WHERE id = $1 LIMIT 1`,
       [job.version_id]
     );
-    version = result.rows[0];
+    const version: { id?: number; parsed_json?: string } | undefined = result.rows[0];
 
     if (!version?.id) {
       throw new Error('Version not found');
@@ -895,12 +876,11 @@ export class LlmJobRunner {
       });
     }
 
-    let existingChecksJob: { id?: number } | undefined;
     const checksResult = await pool.query(
       `SELECT id FROM jobs WHERE report_id = $1 AND version_id = $2 AND kind = 'checks' AND status IN ('queued', 'running') LIMIT 1`,
       [job.report_id, job.version_id]
     );
-    existingChecksJob = checksResult.rows[0];
+    const existingChecksJob: { id?: number } | undefined = checksResult.rows[0];
 
     if (!existingChecksJob?.id) {
       let ingestionBatchId: number | null = null;
@@ -924,11 +904,10 @@ export class LlmJobRunner {
     }
 
     // Get parsed_json from report_versions
-    let version: { id?: number; parsed_json?: string } | undefined;
     const result = await pool.query(
       `SELECT id, parsed_json FROM report_versions WHERE id = $1 LIMIT 1`,
       [job.version_id]);
-    version = result.rows[0];
+    const version: { id?: number; parsed_json?: string } | undefined = result.rows[0];
 
     if (!version?.id) {
       throw new Error('Version not found');
@@ -984,11 +963,10 @@ export class LlmJobRunner {
       throw new Error('Compare job missing comparison_id');
     }
 
-    let comparison: any;
     const result = await pool.query(
       `SELECT id, left_report_id, right_report_id FROM comparisons WHERE id = $1 LIMIT 1`,
       [job.comparison_id]);
-    comparison = result.rows[0];
+    const comparison: any = result.rows[0];
 
     if (!comparison) {
       throw new Error('comparison_not_found');

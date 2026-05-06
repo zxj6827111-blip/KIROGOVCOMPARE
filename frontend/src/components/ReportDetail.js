@@ -921,7 +921,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
             item.human_status !== 'dismissed' &&
             (item.auto_status === 'FAIL' || item.auto_status === 'UNCERTAIN')
           ) {
-            // 鎻愬彇璐ㄩ噺瀹¤闂锛圫ection 5/6锛?
+            // 提取质量审计问题（Section 5/6）
             const groupKey = group.groupKey || group.group_key;
             if (groupKey === 'quality') {
               if (item.check_key === 'narrative_sec5_gap') {
@@ -959,7 +959,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
             // Text Info extraction
             allPaths.forEach((p) => {
               if (p.includes('text') || p.includes('content')) {
-                // 鎻愬彇鏂囨湰闂淇℃伅
+                // 提取文本问题信息
                 const textValue = item.evidence?.values?.textValue;
                 if (textValue) {
                   textInfos.push({ value: textValue, context: item.evidence?.values?.context });
@@ -1146,7 +1146,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
 
   const handleDelete = async () => {
     if (!reportId) return;
-    if (!window.confirm(`纭鍒犻櫎鎶ュ憡 #${reportId} 吗？`)) return;
+    if (!window.confirm(`确认删除报告 #${reportId} 吗？`)) return;
     setError('');
     setLoading(true);
     try {
@@ -1270,7 +1270,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
       return renderStructuredContent(normalized);
     }
 
-    // 鍚﹀垯鏄剧ず鍘熷JSON
+    // 否则显示原始 JSON
     const text = typeof normalized === 'string' ? normalized : JSON.stringify(normalized, null, 2);
     const preview = text.length > 600 ? `${text.slice(0, 600)}...` : text;
 
@@ -1287,7 +1287,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const renderStructuredContent = (parsed) => {
     if (!parsed || !parsed.sections) return null;
 
-    // 对sections杩涜鎺掑簭锛屽皢鏍囬鏀惧湪鏈€鍓嶉潰
+    // 对 sections 进行排序，将标题放在最前面
     const sections = [...parsed.sections];
     sections.sort((a, b) => {
       const titleA = String(a?.title || '');
@@ -1376,7 +1376,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                     )}
                 </h4>
                 <div className="section-content">
-                  {/* 鏄剧ず璐ㄩ噺闂璇︽儏 */}
+                  {/* 显示质量问题详情 */}
                   {String(section?.title || '').includes('\u4e94') &&
                     qualityIssues.sec5 &&
                     qualityIssues.sec5.length > 0 && (
@@ -1427,7 +1427,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                   )}
                   {!['text', 'table_2', 'table_3', 'table_4'].includes(section.type) && (
                     <div className="unknown-type">
-                      <p className="meta">鏈煡绫诲瀷: {section.type}</p>
+                      <p className="meta">未知类型：{section.type}</p>
                       <pre>{JSON.stringify(section, null, 2)}</pre>
                     </div>
                   )}
@@ -2007,7 +2007,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
               </div>
             </div>
 
-            {/* Tab 鍐呭 */}
+            {/* Tab 内容 */}
             {activeTab === 'content' && (
               <section className="section">
                 <div className="report-title-banner">
