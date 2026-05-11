@@ -16,8 +16,6 @@ import {
   validateGovInsightStoredEnvelope,
 } from './GovInsightReportProtocol';
 
-type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
-
 interface GovInsightReportJobRow {
   id: number;
   region_id: number;
