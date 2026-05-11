@@ -1,5 +1,6 @@
 import pool from '../../config/database-llm';
 import { materializeReportVersion } from '../MaterializeService';
+import { parseRunService } from '../ParseRunService';
 
 export interface MaterializeResult {
     factsCreated: number;
@@ -47,6 +48,14 @@ export class MaterializeService {
     }
 
     private async loadVersion(versionId: number): Promise<VersionRow | null> {
+        const current = await parseRunService.getCurrentParsedResult(versionId);
+        if (current) {
+            return {
+                report_id: current.reportId,
+                parsed_json: current.parsedJson as string | Record<string, any> | null,
+            };
+        }
+
         const result = await pool.query(
             `SELECT rv.parsed_json, r.id as report_id
              FROM report_versions rv

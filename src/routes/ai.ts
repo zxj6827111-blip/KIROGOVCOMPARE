@@ -34,6 +34,14 @@ function normalizeModelSelection(modelInput: string): { providerName: string; mo
     return { providerName: 'openai', modelName: model.slice('openai/'.length) };
   }
 
+  if (lower.startsWith('mimo/')) {
+    return { providerName: 'mimo', modelName: model.slice('mimo/'.length) };
+  }
+
+  if (lower.includes('mimo')) {
+    return { providerName: 'mimo', modelName: model };
+  }
+
   if (lower.startsWith('gpt-')) {
     return { providerName: 'openai', modelName: model };
   }

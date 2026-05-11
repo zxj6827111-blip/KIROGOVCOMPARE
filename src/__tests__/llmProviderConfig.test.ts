@@ -71,4 +71,44 @@ describe('resolveParseFallbackConfig', () => {
       }),
     ]);
   });
+
+  it('uses MiMo as parse fallback when its endpoint and key are configured', () => {
+    const result = resolveParseFallbackConfig({
+      LLM_PARSE_PROVIDER: 'openai',
+      LLM_PARSE_MODEL: 'gpt-5.5',
+      LLM_PARSE_FALLBACK_PROVIDER: 'mimo',
+      LLM_PARSE_FALLBACK_MODEL: 'mimo-v2.5-pro',
+      OPENAI_API_KEY: 'openai-key',
+      MIMO_API_KEY: 'mimo-key',
+      MIMO_BASE_URL: 'https://token-plan-cn.xiaomimimo.com/v1',
+    });
+
+    expect(result.provider).toBe('mimo');
+    expect(result.model).toBe('mimo-v2.5-pro');
+    expect(result.source).toBe('parse_fallback');
+    expect(result.skipped).toHaveLength(0);
+  });
+
+  it('skips MiMo fallback until MIMO_API_KEY is configured', () => {
+    const result = resolveParseFallbackConfig({
+      LLM_PARSE_PROVIDER: 'openai',
+      LLM_PARSE_MODEL: 'gpt-5.5',
+      LLM_PARSE_FALLBACK_PROVIDER: 'mimo',
+      LLM_PARSE_FALLBACK_MODEL: 'mimo-v2.5-pro',
+      OPENAI_API_KEY: 'openai-key',
+      MIMO_API_KEY: '',
+      MIMO_BASE_URL: 'https://token-plan-cn.xiaomimimo.com/v1',
+    });
+
+    expect(result.provider).toBe('openai');
+    expect(result.model).toBe('gpt-5.5');
+    expect(result.source).toBe('primary');
+    expect(result.skipped).toEqual([
+      expect.objectContaining({
+        provider: 'mimo',
+        source: 'parse_fallback',
+        reason: 'MIMO_API_KEY is missing',
+      }),
+    ]);
+  });
 });

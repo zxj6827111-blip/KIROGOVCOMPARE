@@ -109,6 +109,14 @@ function normalizeModelSelection(modelInput: string): { providerName: string; mo
     return { providerName: 'openai', modelName: model.slice('openai/'.length) };
   }
 
+  if (lower.startsWith('mimo/')) {
+    return { providerName: 'mimo', modelName: model.slice('mimo/'.length) };
+  }
+
+  if (lower.includes('mimo')) {
+    return { providerName: 'mimo', modelName: model };
+  }
+
   if (lower.startsWith('gpt-')) {
     return { providerName: 'openai', modelName: model };
   }
@@ -168,6 +176,23 @@ function normalizeModelSelection(modelInput: string): { providerName: string; mo
       process.env.LLM_MODEL
     ),
   };
+}
+
+function resolveFallbackModel(currentModel: string): string {
+  const provider = resolveFirstNonEmpty(
+    process.env.GOV_INSIGHT_REPORT_FALLBACK_PROVIDER,
+    process.env.LLM_REPORT_FALLBACK_PROVIDER,
+    process.env.LLM_FALLBACK_PROVIDER
+  ).toLowerCase();
+
+  const model = resolveFirstNonEmpty(
+    process.env.GOV_INSIGHT_REPORT_FALLBACK_MODEL,
+    process.env.LLM_REPORT_FALLBACK_MODEL,
+    process.env.LLM_FALLBACK_MODEL
+  );
+
+  const fallbackModel = buildPrefixedModelValue(provider, model);
+  return fallbackModel && fallbackModel !== currentModel ? fallbackModel : '';
 }
 
 function normalizeError(error: unknown): { code: string; message: string } {
@@ -483,8 +508,9 @@ class GovInsightReportJobWorker {
 
   private async handleFailure(job: GovInsightReportJobRow, error: unknown): Promise<void> {
     const { code, message } = normalizeError(error);
+    const fallbackModel = resolveFallbackModel(job.model);
 
-    if (job.retry_count < job.max_retries) {
+    if (job.retry_count < job.max_retries && fallbackModel) {
       await pool.query(
         `
         UPDATE gov_insight_report_jobs
@@ -499,7 +525,7 @@ class GovInsightReportJobWorker {
             model = $6
         WHERE id = $7
         `,
-        [STEPS.QUEUED.progress, STEPS.QUEUED.code, STEPS.QUEUED.name, code, message, job.model, job.id]
+        [STEPS.QUEUED.progress, STEPS.QUEUED.code, STEPS.QUEUED.name, code, message, fallbackModel, job.id]
       );
       return;
     }

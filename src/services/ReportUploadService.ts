@@ -6,6 +6,7 @@ import { DATA_DIR, UPLOADS_DIR } from '../config/constants';
 import pool from '../config/database-llm';
 import { uuidv5, validateUuid } from '../utils/uuid';
 import { checkStoragePathExists } from './SourceFileGuardService';
+import { hasParsedContent } from '../utils/parsedContent';
 
 const NAMESPACE_uuid = '6ba7b810-9dad-11d1-80b4-00c04fd430c8'; // Standard namespace
 
@@ -74,6 +75,11 @@ function resolveProviderAndModel(modelInput?: string): { provider: string; model
     return { provider: 'modelscope', model: input.replace('modelscope/', '') };
   }
 
+  // 1.1 Explicit MiMo prefix
+  if (input.startsWith('mimo/')) {
+    return { provider: 'mimo', model: input.replace('mimo/', '') };
+  }
+
   // 1. Explicit Gemini prefix
   if (input.startsWith('gemini/')) {
     return { provider: 'gemini', model: input.replace('gemini/', '') };
@@ -89,11 +95,10 @@ function resolveProviderAndModel(modelInput?: string): { provider: string; model
     return { provider: 'zhipu', model: modelInput };
   }
 
-  // 3. Qwen / DeepSeek / MiMo / Kimi -> ModelScope
+  // 3. Qwen / DeepSeek / Kimi -> ModelScope
   if (
     input.includes('qwen') ||
     input.includes('deepseek') ||
-    input.includes('mimo') ||
     input.includes('kimi') ||
     input.includes('moonshot')
   ) {
@@ -132,6 +137,10 @@ function resolveProviderAndModel(modelInput?: string): { provider: string; model
     return { provider: 'zhipu', model: modelInput };
   }
 
+  if ((process.env.LLM_PARSE_PROVIDER || process.env.LLM_PROVIDER) === 'mimo') {
+    return { provider: 'mimo', model: modelInput };
+  }
+
   return { provider: defaultProvider, model: modelInput };
 }
 
@@ -166,28 +175,6 @@ function normalizeUnitName(input?: string | null, fallback: string = ''): string
     return candidate;
   }
   return String(fallback || '').trim();
-}
-
-function hasParsedContent(parsed: unknown): boolean {
-  if (parsed === null || parsed === undefined) return false;
-  if (typeof parsed === 'string') {
-    const trimmed = parsed.trim();
-    if (!trimmed || trimmed === '{}' || trimmed === 'null' || trimmed === '""') {
-      return false;
-    }
-    try {
-      return hasParsedContent(JSON.parse(trimmed));
-    } catch {
-      return true;
-    }
-  }
-  if (Array.isArray(parsed)) return parsed.length > 0;
-  if (typeof parsed !== 'object') return false;
-  const obj = parsed as Record<string, unknown>;
-  if (Array.isArray(obj.sections) && obj.sections.length > 0) return true;
-  if (obj.tables && typeof obj.tables === 'object' && Object.keys(obj.tables as object).length > 0) return true;
-  if (obj.report_type || obj.basic_info || obj.year) return true;
-  return Object.keys(obj).length > 0;
 }
 
 async function resolveOrCreateReport(regionId: number, year: number, unitName: string): Promise<{ id: number }> {

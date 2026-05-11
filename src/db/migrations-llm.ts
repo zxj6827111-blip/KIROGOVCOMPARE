@@ -160,6 +160,129 @@ CREATE TABLE IF NOT EXISTS report_version_parses (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS parse_runs (
+  id BIGSERIAL PRIMARY KEY,
+  report_version_id BIGINT NOT NULL REFERENCES report_versions(id) ON DELETE CASCADE,
+  job_id BIGINT REFERENCES jobs(id) ON DELETE SET NULL,
+  fingerprint VARCHAR(64) NOT NULL,
+  provider VARCHAR(50) NOT NULL,
+  model VARCHAR(100) NOT NULL,
+  prompt_version VARCHAR(50) NOT NULL,
+  parser_version VARCHAR(50) NOT NULL,
+  source_extractor_version VARCHAR(50) NOT NULL,
+  schema_version VARCHAR(50) NOT NULL,
+  stabilize_mode VARCHAR(20) NOT NULL,
+  rule_gate_enabled BOOLEAN NOT NULL,
+  source_gate_strategy VARCHAR(20) NOT NULL DEFAULT 'standard',
+  source_gate_uncertain_threshold INTEGER NOT NULL DEFAULT 10,
+  source_gate_high_confidence_blocking BOOLEAN NOT NULL DEFAULT TRUE,
+  source_gate_warning_threshold INTEGER NOT NULL DEFAULT 5,
+  config_json JSONB NOT NULL,
+  status VARCHAR(30) NOT NULL CHECK (status IN (
+    'created',
+    'running',
+    'accepted',
+    'superseded',
+    'failed',
+    'gate_failed',
+    'finalize_failed'
+  )),
+  intended_final_status VARCHAR(30) CHECK (
+    intended_final_status IS NULL
+    OR intended_final_status IN ('accepted', 'failed', 'gate_failed')
+  ),
+  is_current BOOLEAN NOT NULL DEFAULT FALSE,
+  superseded_by BIGINT REFERENCES parse_runs(id) ON DELETE SET NULL,
+  superseded_at TIMESTAMPTZ,
+  restored_from BIGINT REFERENCES parse_runs(id) ON DELETE SET NULL,
+  restored_at TIMESTAMPTZ,
+  draft_output_json JSONB,
+  draft_repairs_json JSONB,
+  draft_gate_result_json JSONB,
+  draft_consensus_result_json JSONB,
+  draft_source_snapshots_json JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  started_at TIMESTAMPTZ,
+  finished_at TIMESTAMPTZ,
+  accepted_at TIMESTAMPTZ,
+  output_json JSONB,
+  repairs_json JSONB,
+  gate_result_json JSONB,
+  consensus_result_json JSONB,
+  error_code VARCHAR(50),
+  error_message TEXT,
+  retry_of BIGINT REFERENCES parse_runs(id) ON DELETE SET NULL,
+  attempt INTEGER NOT NULL DEFAULT 1,
+  CONSTRAINT chk_parse_runs_current_must_be_accepted
+    CHECK (is_current = FALSE OR (status = 'accepted' AND output_json IS NOT NULL))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_parse_runs_version_current
+  ON parse_runs(report_version_id)
+  WHERE is_current = TRUE;
+
+CREATE INDEX IF NOT EXISTS idx_parse_runs_version_fingerprint
+  ON parse_runs(report_version_id, fingerprint);
+CREATE INDEX IF NOT EXISTS idx_parse_runs_superseded_by
+  ON parse_runs(superseded_by) WHERE superseded_by IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_parse_runs_restored_from
+  ON parse_runs(restored_from) WHERE restored_from IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_parse_runs_created ON parse_runs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_parse_runs_status ON parse_runs(status);
+CREATE INDEX IF NOT EXISTS idx_parse_runs_job ON parse_runs(job_id) WHERE job_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_parse_runs_version ON parse_runs(report_version_id);
+CREATE INDEX IF NOT EXISTS idx_parse_runs_is_current ON parse_runs(is_current) WHERE is_current = TRUE;
+
+CREATE TABLE IF NOT EXISTS source_snapshots (
+  id BIGSERIAL PRIMARY KEY,
+  parse_run_id BIGINT REFERENCES parse_runs(id) ON DELETE CASCADE,
+  report_version_id BIGINT NOT NULL REFERENCES report_versions(id) ON DELETE CASCADE,
+  source_type VARCHAR(30) NOT NULL,
+  source_path TEXT,
+  page_number INTEGER,
+  table_index INTEGER,
+  table_id VARCHAR(50),
+  row_index INTEGER,
+  col_index INTEGER,
+  row_span INTEGER NOT NULL DEFAULT 1,
+  col_span INTEGER NOT NULL DEFAULT 1,
+  row_header TEXT,
+  col_header TEXT,
+  cell_text TEXT,
+  normalized_text TEXT,
+  bbox_json JSONB,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_source_snapshots_parse_run
+  ON source_snapshots(parse_run_id) WHERE parse_run_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_source_snapshots_version
+  ON source_snapshots(report_version_id);
+CREATE INDEX IF NOT EXISTS idx_source_snapshots_table
+  ON source_snapshots(report_version_id, table_id, row_index, col_index);
+
+CREATE TABLE IF NOT EXISTS source_gate_results (
+  id BIGSERIAL PRIMARY KEY,
+  parse_run_id BIGINT NOT NULL REFERENCES parse_runs(id) ON DELETE CASCADE,
+  report_version_id BIGINT NOT NULL REFERENCES report_versions(id) ON DELETE CASCADE,
+  gate_version VARCHAR(50) NOT NULL DEFAULT 'v1',
+  strategy VARCHAR(20) NOT NULL DEFAULT 'standard',
+  status VARCHAR(30) NOT NULL CHECK (status IN ('passed', 'warning', 'blocked', 'not_assessable')),
+  uncertain_count INTEGER NOT NULL DEFAULT 0,
+  warning_count INTEGER NOT NULL DEFAULT 0,
+  blocker_count INTEGER NOT NULL DEFAULT 0,
+  result_json JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_source_gate_results_parse_run
+  ON source_gate_results(parse_run_id);
+CREATE INDEX IF NOT EXISTS idx_source_gate_results_version
+  ON source_gate_results(report_version_id);
+CREATE INDEX IF NOT EXISTS idx_source_gate_results_status
+  ON source_gate_results(status);
+
 -- Consistency check runs table
 CREATE TABLE IF NOT EXISTS report_consistency_runs (
   id BIGSERIAL PRIMARY KEY,
@@ -1030,6 +1153,137 @@ export async function runLLMMigrations(): Promise<void> {
     if ((repairRes.rowCount ?? 0) > 0) {
       console.log(`[Migrations] Fixed data integrity for ${repairRes.rowCount} reports (active version aligned)`);
     }
+
+    // ------------------------------------------------------------------------
+    // Parsing lifecycle foundation (v5.2): idempotent hardening for existing DBs.
+    // ------------------------------------------------------------------------
+    await pool.query(`
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS report_version_id BIGINT;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS job_id BIGINT;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS fingerprint VARCHAR(64);
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS provider VARCHAR(50);
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS model VARCHAR(100);
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS prompt_version VARCHAR(50);
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS parser_version VARCHAR(50);
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS source_extractor_version VARCHAR(50);
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS schema_version VARCHAR(50);
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS stabilize_mode VARCHAR(20);
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS rule_gate_enabled BOOLEAN;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS source_gate_strategy VARCHAR(20) DEFAULT 'standard';
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS source_gate_uncertain_threshold INTEGER DEFAULT 10;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS source_gate_high_confidence_blocking BOOLEAN DEFAULT TRUE;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS source_gate_warning_threshold INTEGER DEFAULT 5;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS config_json JSONB;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS status VARCHAR(30);
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS intended_final_status VARCHAR(30);
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS is_current BOOLEAN DEFAULT FALSE;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS superseded_by BIGINT;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS superseded_at TIMESTAMPTZ;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS restored_from BIGINT;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS restored_at TIMESTAMPTZ;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS draft_output_json JSONB;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS draft_repairs_json JSONB;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS draft_gate_result_json JSONB;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS draft_consensus_result_json JSONB;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS draft_source_snapshots_json JSONB;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS accepted_at TIMESTAMPTZ;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS output_json JSONB;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS repairs_json JSONB;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS gate_result_json JSONB;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS consensus_result_json JSONB;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS error_code VARCHAR(50);
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS error_message TEXT;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS retry_of BIGINT;
+      ALTER TABLE parse_runs ADD COLUMN IF NOT EXISTS attempt INTEGER DEFAULT 1;
+
+      UPDATE parse_runs
+      SET source_gate_strategy = COALESCE(source_gate_strategy, 'standard'),
+          source_gate_uncertain_threshold = COALESCE(source_gate_uncertain_threshold, 10),
+          source_gate_high_confidence_blocking = COALESCE(source_gate_high_confidence_blocking, TRUE),
+          source_gate_warning_threshold = COALESCE(source_gate_warning_threshold, 5),
+          is_current = COALESCE(is_current, FALSE),
+          created_at = COALESCE(created_at, NOW()),
+          attempt = COALESCE(attempt, 1);
+
+      UPDATE parse_runs
+      SET intended_final_status = status
+      WHERE intended_final_status IS NULL
+        AND status IN ('accepted', 'failed', 'gate_failed');
+    `);
+
+    await pool.query(`
+      DO $$
+      BEGIN
+        ALTER TABLE parse_runs
+          ADD CONSTRAINT fk_parse_runs_report_version
+          FOREIGN KEY (report_version_id) REFERENCES report_versions(id) ON DELETE CASCADE;
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$;
+
+      DO $$
+      BEGIN
+        ALTER TABLE parse_runs
+          ADD CONSTRAINT fk_parse_runs_job
+          FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$;
+
+      DO $$
+      BEGIN
+        ALTER TABLE parse_runs
+          ADD CONSTRAINT fk_parse_runs_superseded_by
+          FOREIGN KEY (superseded_by) REFERENCES parse_runs(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$;
+
+      DO $$
+      BEGIN
+        ALTER TABLE parse_runs
+          ADD CONSTRAINT fk_parse_runs_restored_from
+          FOREIGN KEY (restored_from) REFERENCES parse_runs(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$;
+
+      DO $$
+      BEGIN
+        ALTER TABLE parse_runs
+          ADD CONSTRAINT fk_parse_runs_retry_of
+          FOREIGN KEY (retry_of) REFERENCES parse_runs(id) ON DELETE SET NULL;
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END $$;
+
+      ALTER TABLE parse_runs DROP CONSTRAINT IF EXISTS parse_runs_status_check;
+      ALTER TABLE parse_runs ADD CONSTRAINT parse_runs_status_check
+        CHECK (status IN ('created', 'running', 'accepted', 'superseded', 'failed', 'gate_failed', 'finalize_failed'));
+
+      ALTER TABLE parse_runs DROP CONSTRAINT IF EXISTS parse_runs_intended_final_status_check;
+      ALTER TABLE parse_runs ADD CONSTRAINT parse_runs_intended_final_status_check
+        CHECK (intended_final_status IS NULL OR intended_final_status IN ('accepted', 'failed', 'gate_failed'));
+
+      ALTER TABLE parse_runs DROP CONSTRAINT IF EXISTS chk_parse_runs_current_must_be_accepted;
+      ALTER TABLE parse_runs ADD CONSTRAINT chk_parse_runs_current_must_be_accepted
+        CHECK (is_current = FALSE OR (status = 'accepted' AND output_json IS NOT NULL));
+
+      DROP INDEX IF EXISTS uq_parse_runs_version_fingerprint_accepted;
+      DROP INDEX IF EXISTS uq_parse_runs_version_fingerprint_history;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_parse_runs_version_current
+        ON parse_runs(report_version_id) WHERE is_current = TRUE;
+      CREATE INDEX IF NOT EXISTS idx_parse_runs_version_fingerprint
+        ON parse_runs(report_version_id, fingerprint);
+      CREATE INDEX IF NOT EXISTS idx_parse_runs_superseded_by
+        ON parse_runs(superseded_by) WHERE superseded_by IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_parse_runs_restored_from
+        ON parse_runs(restored_from) WHERE restored_from IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_parse_runs_created ON parse_runs(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_parse_runs_status ON parse_runs(status);
+      CREATE INDEX IF NOT EXISTS idx_parse_runs_job ON parse_runs(job_id) WHERE job_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_parse_runs_version ON parse_runs(report_version_id);
+      CREATE INDEX IF NOT EXISTS idx_parse_runs_is_current ON parse_runs(is_current) WHERE is_current = TRUE;
+    `);
 
     // 2. Sync is_active to match reports.active_version_id (best-effort)
     await pool.query(`

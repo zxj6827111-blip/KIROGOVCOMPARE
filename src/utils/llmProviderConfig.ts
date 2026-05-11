@@ -38,6 +38,10 @@ function resolveModelForProvider(provider: string, preferredModel: string, env: 
     return resolveFirstNonEmpty(preferredModel, env.MODELSCOPE_MODEL, env.LLM_MODEL);
   }
 
+  if (provider === 'mimo') {
+    return resolveFirstNonEmpty(preferredModel, env.MIMO_MODEL, env.LLM_MODEL);
+  }
+
   if (provider === 'nvidia' || provider === 'deepseek') {
     return resolveFirstNonEmpty(preferredModel, env.NVIDIA_MODEL, env.LLM_MODEL);
   }
@@ -89,6 +93,16 @@ function validateProviderConfig(providerName: string, modelName: string, env: En
 
   if (provider === 'modelscope') {
     return env.MODELSCOPE_API_KEY ? null : 'MODELSCOPE_API_KEY is missing';
+  }
+
+  if (provider === 'mimo') {
+    if (!env.MIMO_API_KEY) {
+      return 'MIMO_API_KEY is missing';
+    }
+    if (!env.MIMO_BASE_URL) {
+      return 'MIMO_BASE_URL is missing';
+    }
+    return null;
   }
 
   if (provider === 'zhipu') {

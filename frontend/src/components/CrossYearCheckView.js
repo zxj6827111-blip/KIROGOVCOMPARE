@@ -3,11 +3,22 @@ import React, { useState, useEffect } from 'react';
 import { apiClient } from '../apiClient';
 import { highlightNumber } from './DiffUtils';
 import { BarChart3, MapPin, Search, FileText, Table2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { getRowColFromPath, normalizeTablePath } from '../utils/tableRowColMapping';
 import './CrossYearCheckView.css';
 
 // 复制自 ConsistencyCheckView.js 的路径解析逻辑
 const parseLocationFromPath = (path) => {
     if (!path) return null;
+
+    const normalizedPath = normalizeTablePath(path);
+    const rowCol = getRowColFromPath(normalizedPath);
+    if (rowCol) {
+        const parts = [rowCol.table];
+        const rowLabel = rowCol.rowLabel || rowCol.name;
+        if (rowLabel) parts.push(`行：${rowLabel}`);
+        if (rowCol.colLabel) parts.push(`列：${rowCol.colLabel}`);
+        return parts.join(' / ');
+    }
 
     const pathMappings = {
         // 表三相关路径
@@ -46,19 +57,19 @@ const parseLocationFromPath = (path) => {
         'text.content': '正文内容',
     };
 
-    if (pathMappings[path]) {
-        return pathMappings[path];
+    if (pathMappings[normalizedPath]) {
+        return pathMappings[normalizedPath];
     }
 
     for (const [key, value] of Object.entries(pathMappings)) {
-        if (path.startsWith(key)) {
-            const suffix = path.replace(key, '').replace(/^\./, '');
+        if (normalizedPath.startsWith(key)) {
+            const suffix = normalizedPath.replace(key, '').replace(/^\./, '');
             return suffix ? `${value} → ${suffix}` : value;
         }
     }
 
     // Fallback
-    return path;
+    return normalizedPath;
 };
 
 // 提取详细位置信息
@@ -75,9 +86,12 @@ const getLocationInfo = (item) => {
 
     const values = item.evidence.values || {};
     const paths = item.evidence.paths || [];
+    const leftPaths = item.evidence.leftPaths || [];
+    const rightPaths = item.evidence.rightPaths || [];
 
-    paths.forEach(path => {
-        if (path.includes('tableData') || path.includes('reviewLitigationData')) {
+    [...leftPaths, ...rightPaths, ...paths].forEach(path => {
+        const normalizedPath = normalizeTablePath(path);
+        if (normalizedPath && (normalizedPath.includes('tableData') || normalizedPath.includes('reviewLitigationData') || normalizedPath.includes('activeDisclosureData'))) {
             const desc = parseLocationFromPath(path);
             if (desc && !result.tableSource) {
                 result.tableSource = desc;
@@ -101,7 +115,78 @@ const getLocationInfo = (item) => {
     return result;
 };
 
-const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightContent, yearA, yearB }) => {
+const renderIssueCard = (item) => {
+    const details = getLocationInfo(item);
+    const leftPaths = item.evidence?.leftPaths || [];
+    const rightPaths = item.evidence?.rightPaths || [];
+    const fallbackPaths = item.evidence?.paths || [];
+    const tableLocations = [...leftPaths, ...rightPaths, ...fallbackPaths]
+        .map((path) => parseLocationFromPath(path))
+        .filter(Boolean);
+    const uniqueLocations = [...new Set(tableLocations)];
+
+    return (
+        <div key={item.id} className="issue-card">
+            <div className="issue-header">
+                <span className="issue-title">{item.description || item.rule_name || item.title}</span>
+                <div className="issue-expr-row" style={{ display: 'none' }}>{item.expr}</div>
+                <div className="issue-values">
+                    左值: {item.left_value} | 右值: {item.right_value} | 差值: <span className="font-bold">{item.delta}</span>
+                </div>
+            </div>
+
+            {uniqueLocations.length > 0 && (
+                <div className="issue-table-locations">
+                    <div className="ds-header"><MapPin size={14} className="inline-block" /> 表格具体位置</div>
+                    {uniqueLocations.slice(0, 8).map((location, index) => (
+                        <div key={`${item.id}-loc-${index}`} className="issue-location-line">{location}</div>
+                    ))}
+                    {uniqueLocations.length > 8 && (
+                        <div className="issue-location-more">另有 {uniqueLocations.length - 8} 处相关单元格已在表格中高亮</div>
+                    )}
+                </div>
+            )}
+
+            {details && (
+                <div className="issue-detail">
+                    <div className="detail-section">
+                        <div className="ds-header"><MapPin size={14} className="inline-block" /> 数据定位</div>
+                        <div className="ds-body location-grid">
+                            <div className="loc-box text-side">
+                                <div className="loc-title"><FileText size={14} className="inline-block" /> 左值来源</div>
+                                <div className="loc-content">{details.textSource || parseLocationFromPath(leftPaths[0]) || '未定位'}</div>
+                                <div className="loc-val">
+                                    <span className="val-tag">{item.left_value}</span>
+                                </div>
+                            </div>
+                            <div className="arrow-divider">↔</div>
+                            <div className="loc-box table-side">
+                                <div className="loc-title"><Table2 size={14} className="inline-block" /> 右值来源</div>
+                                <div className="loc-content">{details.tableSource || parseLocationFromPath(rightPaths[0]) || '未定位'}</div>
+                                <div className="loc-val">
+                                    <span className="val-tag">{item.right_value}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {(details.context) && (
+                        <div className="detail-section">
+                            <div className="ds-header"><Search size={14} className="inline-block" /> 匹配文本</div>
+                            <div className="ds-body">
+                                <div className="context-content">
+                                    {details.context.replace(/<[^>]*>/g, '')}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+};
+
+const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightContent, yearA, yearB, onLeftIssuesChange }) => {
     const [leftIntraYearStatus, setLeftIntraYearStatus] = useState({ loading: true, issues: [], error: null });
     const [intraYearStatus, setIntraYearStatus] = useState({ loading: true, issues: [], error: null });
     const [crossYearStatus, setCrossYearStatus] = useState({ loading: true, diff: null, values: {} });
@@ -162,14 +247,16 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
                 }
 
                 setLeftIntraYearStatus({ loading: false, issues, error: null });
+                if (onLeftIssuesChange) onLeftIssuesChange(issues);
             } catch (err) {
                 console.error('Failed to fetch left report checks', err);
                 setLeftIntraYearStatus({ loading: false, issues: [], error: '无法获取勾稽结果' });
+                if (onLeftIssuesChange) onLeftIssuesChange([]);
             }
         };
 
         fetchLeftChecks();
-    }, [leftReportId]);
+    }, [leftReportId, onLeftIssuesChange]);
 
     // 2. 跨年数据计算
     useEffect(() => {
@@ -277,19 +364,7 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
 
                 {!leftIntraLoading && leftIntraIssues.length > 0 && (
                     <div className="issues-wrapper">
-                        {leftIntraIssues.map(item => {
-                            return (
-                                <div key={item.id} className="issue-card">
-                                    <div className="issue-header">
-                                        <span className="issue-title">{item.description || item.rule_name}</span>
-                                        <div className="issue-expr-row" style={{ display: 'none' }}>{item.expr}</div>
-                                        <div className="issue-values">
-                                            左值: {item.left_value} | 右值: {item.right_value} | 差值: <span className="font-bold">{item.delta}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })}
+                        {leftIntraIssues.map(item => renderIssueCard(item))}
                     </div>
                 )}
             </div>
@@ -309,61 +384,7 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
 
                 {!intraLoading && intraIssues.length > 0 && (
                     <div className="issues-wrapper">
-                        {intraIssues.map(item => {
-                            const details = getLocationInfo(item);
-                            return (
-                                <div key={item.id} className="issue-card">
-                                    {/* 红色头部 */}
-                                    <div className="issue-header">
-                                        <span className="issue-title">{item.description || item.rule_name}</span>
-                                        <div className="issue-expr-row" style={{ display: 'none' }}>{item.expr}</div>
-                                        <div className="issue-values">
-                                            左值: {item.left_value} | 右值: {item.right_value} | 差值: <span className="font-bold">{item.delta}</span>
-                                        </div>
-                                    </div>
-
-                                    {/* 详细内容区 */}
-                                    {details && (
-                                        <div className="issue-detail">
-                                            {/* 数据定位 */}
-                                            <div className="detail-section">
-                                                <div className="ds-header"><MapPin size={14} className="inline-block" /> 数据定位</div>
-                                                <div className="ds-body location-grid">
-                                                    <div className="loc-box text-side">
-                                                        <div className="loc-title"><FileText size={14} className="inline-block" /> 正文来源</div>
-                                                        <div className="loc-content">{details.textSource || '未定位'}</div>
-                                                        <div className="loc-val">
-                                                            <span className="val-tag">{item.left_value}</span>
-                                                        </div>
-                                                    </div>
-                                                    <div className="arrow-divider">↔</div>
-                                                    <div className="loc-box table-side">
-                                                        <div className="loc-title"><Table2 size={14} className="inline-block" /> 表格来源</div>
-                                                        <div className="loc-content">{details.tableSource || '未定位'}</div>
-                                                        <div className="loc-val">
-                                                            <span className="val-tag">{item.right_value}</span>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            {/* 匹配文本 */}
-                                            {(details.context) && (
-                                                <div className="detail-section">
-                                                    <div className="ds-header"><Search size={14} className="inline-block" /> 匹配文本</div>
-                                                    <div className="ds-body">
-                                                        <div className="context-content">
-                                                            {/* SECURITY FIX: Render as plain text to prevent XSS */}
-                                                            {details.context.replace(/<[^>]*>/g, '')}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })}
+                        {intraIssues.map(item => renderIssueCard(item))}
                     </div>
                 )}
             </div>

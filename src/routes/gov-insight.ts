@@ -46,6 +46,25 @@ function resolveGovInsightReportModel(): string {
   return buildPrefixedModelValue(provider, model);
 }
 
+function resolveGovInsightReportFallbackModel(currentModel: string): string {
+  const provider = String(
+    process.env.GOV_INSIGHT_REPORT_FALLBACK_PROVIDER ||
+    process.env.LLM_REPORT_FALLBACK_PROVIDER ||
+    process.env.LLM_FALLBACK_PROVIDER ||
+    ''
+  )
+    .trim()
+    .toLowerCase();
+
+  const model = resolveFirstNonEmpty(
+    process.env.GOV_INSIGHT_REPORT_FALLBACK_MODEL,
+    process.env.LLM_REPORT_FALLBACK_MODEL,
+    process.env.LLM_FALLBACK_MODEL
+  );
+  const fallbackModel = buildPrefixedModelValue(provider, model);
+  return fallbackModel && fallbackModel !== currentModel ? fallbackModel : '';
+}
+
 function toFiniteNumber(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -859,6 +878,7 @@ router.post('/ai-report/jobs', optionalAuthMiddleware, async (req: AuthRequest, 
     const regionId = parseRegionId(org_id);
     const yearNum = Number(year);
     const resolvedModel = String(model || resolveGovInsightReportModel()).trim();
+    const resolvedMaxRetries = resolveGovInsightReportFallbackModel(resolvedModel) ? 1 : 0;
     const resolvedConfig = resolveGovInsightRequestConfig(config);
     const useBackendPayload = use_backend_payload !== false;
 
@@ -942,8 +962,9 @@ router.post('/ai-report/jobs', optionalAuthMiddleware, async (req: AuthRequest, 
           prompt_version,
           output_schema_version,
           source_report_version_id,
+          max_retries,
           created_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
         RETURNING *
         `,
         [
@@ -960,6 +981,7 @@ router.post('/ai-report/jobs', optionalAuthMiddleware, async (req: AuthRequest, 
           GOVINSIGHT_PROMPT_VERSION,
           GOVINSIGHT_OUTPUT_SCHEMA_VERSION,
           resolvedSourceReportVersionId,
+          resolvedMaxRetries,
           req.user?.id || null,
         ]
       );
