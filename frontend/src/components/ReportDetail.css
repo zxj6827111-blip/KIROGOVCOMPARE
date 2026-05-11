@@ -1,13 +1,13 @@
 .report-detail {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
 .card {
   background: var(--bg-surface);
   border-radius: var(--radius-md);
-  padding: 24px;
+  padding: 20px;
   box-shadow: var(--shadow-sm);
   border: 1px solid var(--border-color);
 }
@@ -18,13 +18,18 @@
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .section {
-  margin-top: 20px;
-  padding-top: 20px;
+  margin-top: 16px;
+  padding-top: 16px;
   border-top: 1px solid var(--border-color);
+}
+
+.report-content-section {
+  margin-top: 8px;
+  padding-top: 12px;
 }
 
 .subtitle {
@@ -56,7 +61,7 @@
 
 /* Tab 切换样式 */
 .tabs-container {
-  margin: 24px 0;
+  margin: 12px 0 10px;
   border-bottom: 1px solid var(--border-color);
 }
 
@@ -203,6 +208,21 @@
 .actions {
   display: flex;
   gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.report-admin-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.report-danger-action {
+  opacity: 0.82;
 }
 
 table {
@@ -229,70 +249,107 @@ tr:last-child td {
 
 /* 结构化内容样式 */
 .structured-content {
-  margin-top: 20px;
+  margin-top: 12px;
+  width: 100%;
 }
 
-/* 元数据折叠按钮 */
-.metadata-toggle {
-  margin: 20px 0;
-  text-align: center;
-  padding: 16px;
-  background: var(--bg-surface-hover);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-color);
-}
-
-.metadata-toggle .secondary-btn {
-  width: auto;
-  min-width: 200px;
-}
-
-.content-header {
+.report-content-toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  gap: 16px;
+  margin: 0 0 18px;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, #fbfdff, #f7fafc);
+  border: 1px solid var(--border-color);
+  border-bottom-color: #d8e0ea;
+  border-radius: var(--radius-sm);
 }
 
-.content-header h3 {
+.report-content-toolbar h3 {
   margin: 0;
   color: var(--text-main);
   font-weight: 700;
+  font-size: 16px;
+}
+
+.report-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .sections-container {
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  margin-top: 20px;
+  gap: 36px;
+  margin-top: 18px;
+  width: 100%;
 }
 
 .section-item {
   background: var(--bg-surface);
   border-radius: var(--radius-md);
-  padding: 24px;
+  padding: 24px 26px;
   border: 1px solid var(--border-color);
   box-shadow: var(--shadow-sm);
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .section-title {
-  font-size: 18px;
+  font-size: 19px;
   font-weight: 700;
   color: var(--primary);
-  margin: 0 0 16px 0;
+  margin: 0 0 18px 0;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border-color);
 }
 
 .section-content {
-  margin-top: 16px;
+  margin-top: 18px;
 }
 
 .text-content {
   color: var(--text-main);
-  line-height: 1.8;
-  white-space: pre-line;
   font-size: 15px;
+  line-height: 1.86;
+}
+
+.report-content-body {
+  width: 100% !important;
+  max-width: none !important;
+  box-sizing: border-box;
+}
+
+.report-paragraph {
+  margin: 0 0 12px;
+  font-weight: 400;
+}
+
+.report-paragraph:last-child {
+  margin-bottom: 0;
+}
+
+.report-subsection-title {
+  color: #163b63;
+  font-weight: 700;
+}
+
+.report-subsection-block {
+  margin-top: 16px;
+}
+
+.missing-text-content {
+  color: var(--warning);
+  background: rgba(253, 214, 99, 0.1);
+  border: 1px solid rgba(253, 214, 99, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  font-size: 14px;
+  line-height: 1.6;
 }
 
 .unknown-type {
@@ -569,8 +626,8 @@ tr:last-child td {
 /* 报告标题横幅 */
 .report-title-banner {
   text-align: center;
-  padding: 32px 24px;
-  margin-bottom: 32px;
+  padding: 20px 20px;
+  margin-bottom: 14px;
   background: rgba(138, 180, 248, 0.1);
   border-radius: var(--radius-md);
   border: 1px solid rgba(138, 180, 248, 0.2);
@@ -579,7 +636,7 @@ tr:last-child td {
 .report-title-banner h2 {
   margin: 0;
   color: var(--primary);
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 700;
   letter-spacing: 0.5px;
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
@@ -814,6 +871,89 @@ tr:last-child td {
 .action-btn.danger:hover:not(:disabled) {
   background: var(--danger);
   color: #ffffff;
+}
+
+.parse-history-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.parse-history-toggle h3 {
+  margin: 0;
+}
+
+.parse-history-content {
+  margin-top: 12px;
+}
+
+.parse-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.parse-run-card {
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-surface-hover);
+}
+
+.parse-run-card.is-current {
+  border-color: var(--success);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.parse-run-card.status-gate_failed,
+.parse-run-card.status-failed,
+.parse-run-card.status-finalize_failed {
+  border-color: rgba(242, 139, 130, 0.35);
+}
+
+.parse-run-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.parse-run-status {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.2);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.parse-run-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 12px;
+  margin-top: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.parse-run-error {
+  margin: 10px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+  word-break: break-word;
+}
+
+.parse-run-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
 }
 
 @keyframes focus-pulse-warn {
@@ -1182,6 +1322,21 @@ tr:last-child td {
 }
 
 @media (max-width: 768px) {
+  .actions,
+  .report-admin-actions {
+    justify-content: flex-start;
+  }
+
+  .report-content-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .report-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   .trace-row-head,
   .trace-panel-header {
     flex-direction: column;
@@ -1190,5 +1345,22 @@ tr:last-child td {
   .trace-row-metrics,
   .trace-panel-actions {
     width: 100%;
+  }
+}
+
+@media print {
+  .actions,
+  .report-actions,
+  .report-technical-info,
+  .report-debug-panel,
+  .report-technical-toggle {
+    display: none !important;
+  }
+
+  .report-content-toolbar {
+    padding: 0 0 8px;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid #d8e0ea;
   }
 }
