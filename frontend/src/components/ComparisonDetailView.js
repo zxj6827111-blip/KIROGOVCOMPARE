@@ -6,6 +6,7 @@ import { ArrowLeft, Printer, Download, Loader2 } from 'lucide-react';
 import { Table2View, Table3View, Table4View, SimpleDiffTable } from './TableViews';
 import DiffText from './DiffText';
 import CrossYearCheckView from './CrossYearCheckView';
+import { normalizeTablePath } from '../utils/tableRowColMapping';
 
 // ---- Tokenization & Similarity Algorithm (Ported) ----
 const tokenizeText = (text) => {
@@ -20,6 +21,47 @@ const tokenizeText = (text) => {
 };
 
 const isPunctuation = (str) => /[-，。、；：？！“”‘’（）《》【】—….,;:?!'"()[\]\s]/.test(str);
+
+const isTableHighlightPath = (path) =>
+  path &&
+  (path.startsWith('tableData.') ||
+    path.startsWith('activeDisclosureData.') ||
+    path.startsWith('reviewLitigationData.'));
+
+const buildIssueHighlightCells = (issues = []) => {
+  const cells = [];
+  const seen = new Set();
+
+  const addPath = (rawPath, type) => {
+    const path = normalizeTablePath(rawPath);
+    if (!isTableHighlightPath(path)) return;
+    const key = `${type}:${path}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    cells.push({ path, type, scope: 'focus' });
+  };
+
+  issues
+    .filter((item) =>
+      ['FAIL', 'UNCERTAIN'].includes(item?.auto_status || item?.autoStatus) &&
+      item?.human_status !== 'dismissed'
+    )
+    .forEach((item) => {
+      const evidence = item.evidence || {};
+      const leftPaths = evidence.leftPaths || [];
+      const rightPaths = evidence.rightPaths || [];
+      const fallbackPaths = evidence.paths || [];
+
+      leftPaths.forEach((path) => addPath(path, 'left'));
+      rightPaths.forEach((path) => addPath(path, 'right'));
+
+      if (leftPaths.length === 0 && rightPaths.length === 0) {
+        fallbackPaths.forEach((path) => addPath(path, 'diff'));
+      }
+    });
+
+  return cells;
+};
 
 function calculateTextSimilarity(text1, text2) {
   if (!text1 && !text2) return 100;
@@ -79,6 +121,7 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
+  const [leftIssueHighlightCells, setLeftIssueHighlightCells] = useState([]);
   // Auto-print effect
   useEffect(() => {
     if (autoPrint && data && !loading && !error) {
@@ -93,6 +136,10 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
   // Highlight States
   const [highlightIdentical, setHighlightIdentical] = useState(true);
   const [highlightDiff, setHighlightDiff] = useState(false);
+
+  const handleLeftIssuesChange = useCallback((issues) => {
+    setLeftIssueHighlightCells(buildIssueHighlightCells(issues));
+  }, []);
 
   // Fetch Data
   const fetchData = useCallback(async () => {
@@ -419,6 +466,7 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
 
         {alignedSections.map((row, idx) => {
           const isWideTable = row.oldSec?.type === 'table_4';
+          const isTable3 = row.oldSec?.type === 'table_3' || row.newSec?.type === 'table_3';
 
           return (
             <div key={idx} className="bg-white rounded-lg shadow-sm p-1 mb-2">
@@ -428,9 +476,9 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
               </div>
 
               {/* Content Container: Switch between Grid and Stack */}
-              <div className={`comparison-grid grid ${isWideTable ? 'grid-cols-1' : 'grid-cols-2'} gap-2 px-2`}>
+              <div className={`comparison-grid comparison-grid--balanced ${isTable3 ? 'comparison-grid--table3' : ''} grid ${isWideTable ? 'grid-cols-1' : 'grid-cols-2'} gap-3 px-2`}>
                 {/* Left Column (Old Year) */}
-                <div className={`${isWideTable ? 'border-b border-gray-200 pb-4 mb-2' : 'border-r border-dashed border-gray-300 pr-2'}`}>
+                <div className={`comparison-pane comparison-pane--old ${isWideTable ? 'comparison-pane--stacked' : ''}`}>
                   {isWideTable && <div className="text-center font-bold text-gray-700 mb-2 bg-gray-50 p-1 rounded">{data.year_a} 年度 (旧)</div>}
 
                   {row.oldSec ? (
@@ -444,15 +492,15 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
                         />
                       )}
                       {/* Compact tables for view */}
-                      {row.oldSec.type === 'table_2' && row.oldSec.activeDisclosureData && <Table2View data={row.oldSec.activeDisclosureData} />}
-                      {row.oldSec.type === 'table_3' && row.oldSec.tableData && <Table3View data={row.oldSec.tableData} compact={true} />}
-                      {row.oldSec.type === 'table_4' && row.oldSec.reviewLitigationData && <Table4View data={row.oldSec.reviewLitigationData} />}
+                      {row.oldSec.type === 'table_2' && row.oldSec.activeDisclosureData && <Table2View data={row.oldSec.activeDisclosureData} highlightCells={leftIssueHighlightCells} />}
+                      {row.oldSec.type === 'table_3' && row.oldSec.tableData && <Table3View data={row.oldSec.tableData} compact={true} highlightCells={leftIssueHighlightCells} />}
+                      {row.oldSec.type === 'table_4' && row.oldSec.reviewLitigationData && <Table4View data={row.oldSec.reviewLitigationData} highlightCells={leftIssueHighlightCells} />}
                     </>
                   ) : <span className="text-gray-400 italic">无内容</span>}
                 </div>
 
                 {/* Right Column (New Year) */}
-                <div className={`${isWideTable ? '' : 'pl-2'}`}>
+                <div className={`comparison-pane comparison-pane--new ${isWideTable ? 'comparison-pane--stacked' : ''}`}>
                   {isWideTable && <div className="text-center font-bold text-blue-900 mb-2 bg-blue-50 p-1 rounded">{data.year_b} 年度 (新)</div>}
 
                   {row.newSec ? (
@@ -490,6 +538,7 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
         rightContent={data.right_content}
         yearA={data.year_a}
         yearB={data.year_b}
+        onLeftIssuesChange={handleLeftIssuesChange}
       />
     </div>
   );

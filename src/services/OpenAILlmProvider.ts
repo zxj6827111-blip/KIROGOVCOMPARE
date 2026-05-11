@@ -8,7 +8,7 @@ import {
     buildParseResponseSchema,
     buildStrictParseSystemInstruction,
     loadUserText,
-    stripMarkdownJsonFences,
+    parseStructuredJsonFromText,
 } from './LlmCommon';
 import {
     AnnualReportSplitResult,
@@ -26,6 +26,9 @@ import {
     buildTable4ParseSystemInstruction,
     hasMeaningfulTable4Data,
     mergeSegmentedAnnualReportParse,
+    normalizeTable2ParseResponse,
+    normalizeTable3ParseResponse,
+    normalizeTable4ParseResponse,
     resolveSegmentedBodyParseResponse,
     splitAnnualReportForSegmentedParse,
     tryParseFlattenedTable4,
@@ -105,9 +108,9 @@ export class OpenAILlmProvider implements LlmProvider {
 
             if (segmentedParseEnabled) {
                 const split = splitAnnualReportForSegmentedParse(sourceText);
-                if (split.canUseSegmentedParse) {
+                if (this.canUseSegmentedParse(split)) {
                     console.log(
-                        `[OpenAI] Using segmented parse with lengths body=${split.bodyText.length}, table2=${split.table2Text.length}, table3=${split.table3Text.length}, table4=${split.table4Text.length}`
+                        `[OpenAI] Using ${split.canUseSegmentedParse ? 'segmented' : 'partial segmented'} parse with lengths body=${split.bodyText.length}, table2=${split.table2Text.length}, table3=${split.table3Text.length}, table4=${split.table4Text.length}`
                     );
                     parsed = await this.parseSegmentedAnnualReport(split, parseTemperature, signal);
                 } else {
@@ -147,6 +150,29 @@ export class OpenAILlmProvider implements LlmProvider {
         }
     }
 
+    private canUseSegmentedParse(split: AnnualReportSplitResult): boolean {
+        if (split.canUseSegmentedParse) {
+            return true;
+        }
+
+        if (!parseBooleanEnv(process.env.OPENAI_PARTIAL_SEGMENTED_PARSE_ENABLED, true)) {
+            return false;
+        }
+
+        return !!split.segments.overallSituation && !!split.segments.problemsAndImprovements && !!split.table2Text && !!split.table3Text;
+    }
+
+    private buildEmptyTable4ParseResponse(): Table4ParseResponse {
+        const emptyBlock = { maintain: null, correct: null, other: null, unfinished: null, total: null };
+        return {
+            reviewLitigationData: {
+                review: { ...emptyBlock },
+                litigationDirect: { ...emptyBlock },
+                litigationPostReview: { ...emptyBlock },
+            },
+        };
+    }
+
     private async parseFullDocument(
         sourceText: string,
         temperature: number,
@@ -176,7 +202,7 @@ export class OpenAILlmProvider implements LlmProvider {
         signal?: AbortSignal
     ): Promise<any> {
         try {
-            const table2 = await this.requestStructuredJson<Table2ParseResponse>(
+            const table2 = normalizeTable2ParseResponse(await this.requestStructuredJson<Table2ParseResponse>(
                 {
                     prompt: buildTable2ParsePrompt(this.truncatePrompt(split.table2Text, 'segmented_table_2')),
                     systemInstruction: buildTable2ParseSystemInstruction(),
@@ -190,9 +216,9 @@ export class OpenAILlmProvider implements LlmProvider {
                 },
                 'segmented_table_2',
                 signal
-            );
+            ));
 
-            const table3 = await this.requestStructuredJson<Table3ParseResponse>(
+            const table3 = normalizeTable3ParseResponse(await this.requestStructuredJson<Table3ParseResponse>(
                 {
                     prompt: buildTable3ParsePrompt(this.truncatePrompt(split.table3Text, 'segmented_table_3')),
                     systemInstruction: buildTable3ParseSystemInstruction(),
@@ -206,15 +232,18 @@ export class OpenAILlmProvider implements LlmProvider {
                 },
                 'segmented_table_3',
                 signal
-            );
+            ));
 
             let table4: Table4ParseResponse;
-            const deterministicTable4 = tryParseFlattenedTable4(split.table4Text);
-            if (deterministicTable4) {
+            const deterministicTable4 = split.table4Text ? tryParseFlattenedTable4(split.table4Text) : null;
+            if (!split.table4Text) {
+                console.log('[OpenAI] table_4 section missing in partial segmented parse; using empty table_4.');
+                table4 = this.buildEmptyTable4ParseResponse();
+            } else if (deterministicTable4) {
                 console.log('[OpenAI] Parsed table_4 via deterministic flattened-row fallback.');
                 table4 = { reviewLitigationData: deterministicTable4 };
             } else {
-                table4 = await this.requestStructuredJson<Table4ParseResponse>(
+                table4 = normalizeTable4ParseResponse(await this.requestStructuredJson<Table4ParseResponse>(
                     {
                         prompt: buildTable4ParsePrompt(this.truncatePrompt(split.table4Text, 'segmented_table_4')),
                         systemInstruction: buildTable4ParseSystemInstruction(),
@@ -228,7 +257,7 @@ export class OpenAILlmProvider implements LlmProvider {
                     },
                     'segmented_table_4',
                     signal
-                );
+                ));
 
                 if (!hasMeaningfulTable4Data(table4?.reviewLitigationData)) {
                     const fallbackTable4 = tryParseFlattenedTable4(split.table4Text);
@@ -305,7 +334,7 @@ export class OpenAILlmProvider implements LlmProvider {
         console.log(`[OpenAI] ${label} response preview:`, text.slice(0, 500));
 
         try {
-            return JSON.parse(stripMarkdownJsonFences(text));
+            return parseStructuredJsonFromText<T>(text);
         } catch (error: any) {
             const reason = error instanceof Error ? error.message : String(error);
             throw new LlmProviderError(`OpenAI ${label} returned invalid JSON: ${reason}`, 'json_parse_error');

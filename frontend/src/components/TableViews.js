@@ -223,15 +223,15 @@ const Table3View = ({ data, compact = false, highlightCells = [] }) => {
           ))}
         </div>
       )}
-      <div className={compact ? 'overflow-x-auto gov-table-scroll gov-table-scroll--wide' : 'overflow-x-auto min-w-[900px] gov-table-scroll gov-table-scroll--wide'}>
+      <div className={cx('gov-table-scroll gov-table-scroll--wide', compact ? 'gov-table-scroll--fit' : 'overflow-x-auto min-w-[900px]')}>
         <table className="comparison-table table-fixed gov-data-table gov-data-table--table3">
           {/* Columns Config */}
           <colgroup>
             {/* Approximate widths */}
-            <col style={{ width: compact ? '40px' : '50px' }} />
-            <col style={{ width: compact ? '100px' : '150px' }} />
-            <col style={{ width: compact ? '200px' : '300px' }} />
-            <col span={7} style={{ width: 'auto' }} />
+            <col style={{ width: compact ? '5%' : '50px' }} />
+            <col style={{ width: compact ? '10%' : '150px' }} />
+            <col style={{ width: compact ? '26%' : '300px' }} />
+            <col span={7} style={{ width: compact ? '8.43%' : 'auto' }} />
           </colgroup>
 
           <thead>

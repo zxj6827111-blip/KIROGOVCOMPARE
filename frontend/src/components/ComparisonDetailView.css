@@ -12,6 +12,39 @@
     box-sizing: border-box;
 }
 
+.comparison-grid--balanced {
+    align-items: stretch;
+}
+
+.comparison-pane {
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1px dashed #CBD5E1;
+    border-radius: 8px;
+    background: #FFFFFF;
+}
+
+.comparison-pane--old {
+    border-left: 4px solid #94A3B8;
+}
+
+.comparison-pane--new {
+    border-left: 4px solid #3B82F6;
+}
+
+.comparison-pane--stacked {
+    border-left-width: 4px;
+}
+
+.comparison-grid--table3 {
+    gap: 12px;
+}
+
+.comparison-grid--table3 .comparison-pane {
+    padding: 6px;
+    overflow: hidden;
+}
+
 /* --- Interactive Spreadsheet Table Style --- */
 
 /* --- Interactive Spreadsheet Table Style --- */
@@ -98,6 +131,78 @@ table.comparison-table {
     color: #FFFFFF;
     font-size: 10px;
     line-height: 1.2;
+}
+
+.comparison-table .cell-focus,
+.comparison-table .cell-focus-left,
+.comparison-table .cell-focus-right,
+.comparison-table .cell-focus-both {
+    position: relative;
+    z-index: 1;
+    font-weight: 700;
+}
+
+.comparison-table .cell-focus {
+    background: #FEF3C7 !important;
+    box-shadow: inset 0 0 0 2px rgba(245, 158, 11, 0.9);
+    color: #92400E;
+}
+
+.comparison-table .cell-focus-left {
+    background: #DBEAFE !important;
+    box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.9);
+    color: #1E3A8A;
+}
+
+.comparison-table .cell-focus-right {
+    background: #FFEDD5 !important;
+    box-shadow: inset 0 0 0 2px rgba(234, 88, 12, 0.9);
+    color: #9A3412;
+}
+
+.comparison-table .cell-focus-both {
+    background: #F3E8FF !important;
+    box-shadow: inset 0 0 0 2px rgba(126, 34, 206, 0.9);
+    color: #6B21A8;
+}
+
+.comparison-table .cell-focus::after,
+.comparison-table .cell-focus-left::after,
+.comparison-table .cell-focus-right::after,
+.comparison-table .cell-focus-both::after {
+    content: attr(data-hl-side);
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    color: #fff;
+    font-size: 10px;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: 4px;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.18);
+}
+
+.comparison-table .cell-focus::after {
+    background: #F59E0B;
+}
+
+.comparison-table .cell-focus-left::after {
+    background: #2563EB;
+}
+
+.comparison-table .cell-focus-right::after {
+    background: #EA580C;
+}
+
+.comparison-table .cell-focus-both::after {
+    background: #7E22CE;
+}
+
+.comparison-table .cell-focus:not([data-hl-side])::after,
+.comparison-table .cell-focus-left:not([data-hl-side])::after,
+.comparison-table .cell-focus-right:not([data-hl-side])::after,
+.comparison-table .cell-focus-both:not([data-hl-side])::after {
+    display: none;
 }
 
 /* No vertical borders logic */

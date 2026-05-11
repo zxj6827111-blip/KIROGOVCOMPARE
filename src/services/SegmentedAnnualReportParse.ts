@@ -1,4 +1,5 @@
 import { buildTable3Skeleton } from './LlmCommon';
+import { injectCommonRules } from './PromptRules';
 
 type JsonSchema = Record<string, unknown>;
 type ParsedSection = Record<string, unknown>;
@@ -28,12 +29,17 @@ const TABLE_TITLES = {
 } as const;
 
 const SECTION_PATTERNS: Record<SegmentKey, RegExp[]> = {
-  overallSituation: [/^\s*\u4e00\u3001/],
-  activeDisclosure: [/^\s*\u4e8c\u3001/, /^\s*##\s*\u8868[\u4e8c2]/i],
-  applicationRequests: [/^\s*\u4e09\u3001/, /^\s*##\s*\u8868[\u4e093]/i],
-  reviewLitigation: [/^\s*\u56db\u3001/, /^\s*##\s*\u8868[\u56db4]/i],
-  problemsAndImprovements: [/^\s*\u4e94\u3001/],
-  otherMatters: [/^\s*\u516d\u3001/],
+  overallSituation: [/^\s*#{0,6}\s*\u4e00\u3001/, /^\s*[（(]\u4e00[）)]\s*\u4e3b\u52a8\u516c\u5f00/],
+  activeDisclosure: [/^\s*#{0,6}\s*\u4e8c\u3001/, /^\s*##\s*\u8868[\u4e8c2]/i],
+  applicationRequests: [/^\s*#{0,6}\s*\u4e09\u3001/, /^\s*##\s*\u8868[\u4e093]/i],
+  reviewLitigation: [/^\s*#{0,6}\s*\u56db\u3001/, /^\s*##\s*\u8868[\u56db4]/i],
+  problemsAndImprovements: [/^\s*#{0,6}\s*\u4e94\u3001/],
+  otherMatters: [
+    /^\s*#{0,6}\s*\u516d\u3001/,
+    /^\s*[（(]\u4e00[）)]\s*\u8d2f\u5f7b\u843d\u5b9e\u653f\u52a1\u516c\u5f00\u5e74\u5ea6\u5de5\u4f5c\u8981\u70b9\u60c5\u51b5/,
+    /^\s*[（(]\u4e8c[）)]\s*\u6536\u53d6\u4fe1\u606f\u5904\u7406\u8d39\u60c5\u51b5/,
+    /^\s*\u5176\u4ed6\u9700\u8981\u62a5\u544a\u7684\u4e8b\u9879/,
+  ],
 };
 
 const BODY_KEYS: Array<Extract<SegmentKey, 'overallSituation' | 'problemsAndImprovements' | 'otherMatters'>> = [
@@ -126,12 +132,161 @@ function normalizeOptionalText(value: unknown): string | null {
   return normalized || null;
 }
 
+function stripLeadingSectionTitle(content: string | null, title: string): string | null {
+  const normalized = normalizeOptionalText(content);
+  if (!normalized) {
+    return null;
+  }
+
+  const escapedTitle = title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const stripped = normalized
+    .replace(new RegExp(`^\\s*#{0,6}\\s*${escapedTitle}\\s*`, 'u'), '')
+    .trim();
+
+  return stripped || normalized;
+}
+
+function isPlainObject(value: unknown): value is Record<string, any> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function pickFirst(obj: Record<string, any> | null | undefined, keys: string[]): unknown {
+  if (!obj) return undefined;
+  for (const key of keys) {
+    if (obj[key] !== undefined) {
+      return obj[key];
+    }
+  }
+  return undefined;
+}
+
+function normalizeTable2Row(row: unknown, fieldMap: Record<string, string[]>): Record<string, unknown> | null {
+  const emptyRow = Object.fromEntries(Object.keys(fieldMap).map((targetKey) => [targetKey, null]));
+  if (!isPlainObject(row)) {
+    return emptyRow;
+  }
+
+  const normalized: Record<string, unknown> = {};
+  for (const [targetKey, aliases] of Object.entries(fieldMap)) {
+    normalized[targetKey] = pickFirst(row, [targetKey, ...aliases]) ?? null;
+  }
+  return normalized;
+}
+
+function normalizeTable4Block(block: unknown): Table4Block | null {
+  if (!isPlainObject(block)) {
+    return null;
+  }
+
+  return {
+    maintain: (pickFirst(block, ['maintain', 'resultMaintained', 'maintained', '维持', '结果维持']) ?? null) as CellValue,
+    correct: (pickFirst(block, ['correct', 'resultCorrected', 'corrected', '纠正', '结果纠正']) ?? null) as CellValue,
+    other: (pickFirst(block, ['other', 'otherResults', 'otherResult', '其他', '其他结果']) ?? null) as CellValue,
+    unfinished: (pickFirst(block, ['unfinished', 'pending', 'notClosed', 'unclosed', '未审结', '尚未审结']) ?? null) as CellValue,
+    total: (pickFirst(block, ['total', 'sum', '合计', '总计']) ?? null) as CellValue,
+  };
+}
+
+export function normalizeTable2ParseResponse(response: unknown): Table2ParseResponse {
+  const source = isPlainObject(response) ? response : {};
+  const data = isPlainObject(source.activeDisclosureData)
+    ? source.activeDisclosureData
+    : isPlainObject(source.table_2)
+      ? source.table_2
+      : source;
+
+  return {
+    activeDisclosureData: {
+      regulations: normalizeTable2Row(data.regulations, {
+        made: ['created', 'formulated', 'issued', '制定', '制发'],
+        repealed: ['abolished', 'repeal', '废止'],
+        valid: ['effective', 'currentlyEffective', '现行有效'],
+      }),
+      normativeDocuments: normalizeTable2Row(data.normativeDocuments, {
+        made: ['created', 'formulated', 'issued', '制定', '制发'],
+        repealed: ['abolished', 'repeal', '废止'],
+        valid: ['effective', 'currentlyEffective', '现行有效'],
+      }),
+      licensing: normalizeTable2Row(data.licensing, { processed: ['handled', 'count', 'processedCount', '处理决定数量'] }),
+      punishment: normalizeTable2Row(data.punishment, { processed: ['handled', 'count', 'processedCount', '处理决定数量'] }),
+      coercion: normalizeTable2Row(data.coercion, { processed: ['handled', 'count', 'processedCount', '处理决定数量'] }),
+      fees: normalizeTable2Row(data.fees, { amount: ['processed', 'count', 'total', '收费金额'] }),
+    },
+  };
+}
+
+export function normalizeTable3ParseResponse(response: unknown): Table3ParseResponse {
+  const source = isPlainObject(response) ? response : {};
+  return {
+    tableData: (isPlainObject(source.tableData) ? source.tableData : isPlainObject(source.table_3) ? source.table_3 : source) as Record<string, unknown>,
+  };
+}
+
+export function normalizeTable4ParseResponse(response: unknown): Table4ParseResponse {
+  const source = isPlainObject(response) ? response : {};
+  const data = isPlainObject(source.reviewLitigationData)
+    ? source.reviewLitigationData
+    : isPlainObject(source.table_4)
+      ? source.table_4
+      : source;
+  const review = pickFirst(data, ['review', 'administrativeReview', '行政复议']);
+  const litigationDirect = pickFirst(data, [
+    'litigationDirect',
+    'directLitigation',
+    'litigation_direct',
+    '未经复议直接起诉',
+    '未经复议直接诉讼',
+  ]);
+  const litigationPostReview = pickFirst(data, [
+    'litigationPostReview',
+    'postReviewLitigation',
+    'litigation_post_review',
+    '复议后起诉',
+    '复议后诉讼',
+  ]);
+
+  return {
+    reviewLitigationData: {
+      review: normalizeTable4Block(review) || blockFromCells([]),
+      litigationDirect: normalizeTable4Block(litigationDirect) || blockFromCells([]),
+      litigationPostReview: normalizeTable4Block(litigationPostReview) || blockFromCells([]),
+    },
+  };
+}
+
 function findFirstMatchingLine(lines: string[], patterns: RegExp[]): number {
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index].trim();
     if (!line) continue;
     if (patterns.some((pattern) => pattern.test(line))) {
       return index;
+    }
+  }
+  return -1;
+}
+
+function findFirstMatchingLineFrom(lines: string[], patterns: RegExp[], startIndex: number): number {
+  const start = Math.max(0, startIndex);
+  for (let index = start; index < lines.length; index += 1) {
+    const line = lines[index].trim();
+    if (!line) continue;
+    if (patterns.some((pattern) => pattern.test(line))) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function findLeadInStartForAnnualReport(lines: string[]): number {
+  const scanLimit = Math.min(lines.length, 20);
+  for (let index = 0; index < scanLimit; index += 1) {
+    const line = lines[index].trim();
+    if (!line) continue;
+    if (/^\s*\u6b63\u6587\s*$/.test(line)) {
+      continue;
+    }
+    if (/\u5e74\u5ea6\u62a5\u544a/.test(line)) {
+      return index + 1;
     }
   }
   return -1;
@@ -156,6 +311,21 @@ function toCellValue(raw: string): CellValue {
   return trimmed;
 }
 
+function isTable4PlaceholderText(text: string): boolean {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return true;
+  if (trimmed === '/' || trimmed === '／' || trimmed === '-' || trimmed === '--' || trimmed === '—' || trimmed === '－－') {
+    return true;
+  }
+  if (/^[-—–:\/\\\s]+$/.test(trimmed)) {
+    return true;
+  }
+  if (/^[-—–]{2,}$/.test(trimmed) || /^\/+$/.test(trimmed)) {
+    return true;
+  }
+  return false;
+}
+
 function blockFromCells(cells: CellValue[]): Table4Block {
   return {
     maintain: cells[0] ?? null,
@@ -178,10 +348,42 @@ export function splitAnnualReportForSegmentedParse(text: string): AnnualReportSp
     'otherMatters',
   ];
 
+  const canonicalOverallStart = findFirstMatchingLine(lines, SECTION_PATTERNS.overallSituation.slice(0, 1));
+  const inferredOverallStart = canonicalOverallStart >= 0 ? canonicalOverallStart : findLeadInStartForAnnualReport(lines);
+
   const starts = orderedKeys.reduce<Record<SegmentKey, number>>((acc, key) => {
+    if (key === 'overallSituation') {
+      const fallbackStart = inferredOverallStart >= 0 ? inferredOverallStart : findFirstMatchingLine(lines, SECTION_PATTERNS[key]);
+      acc[key] = fallbackStart;
+      return acc;
+    }
+
     acc[key] = findFirstMatchingLine(lines, SECTION_PATTERNS[key]);
     return acc;
   }, {} as Record<SegmentKey, number>);
+
+  if (starts.problemsAndImprovements < 0 && starts.reviewLitigation >= 0) {
+    starts.problemsAndImprovements = findFirstMatchingLineFrom(
+      lines,
+      [
+        /^\s*[（(]\u4e00[）)]\s*\u5b58\u5728\u7684\u4e3b\u8981\u95ee\u9898/,
+        /^\s*1\u3001.+(?:\u6709\u5f85|\u4e0d\u8db3|\u95ee\u9898|\u52a0\u5f3a|\u6df1\u5316|\u63d0\u5347)/,
+      ],
+      starts.reviewLitigation + 1
+    );
+  }
+
+  if (starts.otherMatters < 0 && starts.problemsAndImprovements >= 0) {
+    starts.otherMatters = findFirstMatchingLineFrom(
+      lines,
+      [
+        /^\s*[（(]\u4e00[）)]\s*\u8d2f\u5f7b\u843d\u5b9e\u653f\u52a1\u516c\u5f00\u5e74\u5ea6\u5de5\u4f5c\u8981\u70b9\u60c5\u51b5/,
+        /^\s*\u8d2f\u5f7b\u843d\u5b9e\u653f\u52a1\u516c\u5f00\u5e74\u5ea6\u5de5\u4f5c\u8981\u70b9\u60c5\u51b5/,
+        /^\s*[（(]\u4e8c[）)]\s*\u6536\u53d6\u4fe1\u606f\u5904\u7406\u8d39\u60c5\u51b5/,
+      ],
+      starts.problemsAndImprovements + 1
+    );
+  }
 
   const segments = orderedKeys.reduce<Record<SegmentKey, string | null>>((acc, key, index) => {
     const start = starts[key];
@@ -266,12 +468,18 @@ export function resolveSegmentedBodyParseResponse(
   split: Pick<AnnualReportSplitResult, 'segments'>
 ): BodyParseResponse {
   return {
-    overallSituation: resolveBodySectionContent(split.segments.overallSituation, body?.overallSituation),
-    problemsAndImprovements: resolveBodySectionContent(
-      split.segments.problemsAndImprovements,
-      body?.problemsAndImprovements
+    overallSituation: stripLeadingSectionTitle(
+      resolveBodySectionContent(split.segments.overallSituation, body?.overallSituation),
+      TITLES.overallSituation
     ),
-    otherMatters: resolveBodySectionContent(split.segments.otherMatters, body?.otherMatters),
+    problemsAndImprovements: stripLeadingSectionTitle(
+      resolveBodySectionContent(split.segments.problemsAndImprovements, body?.problemsAndImprovements),
+      TITLES.problemsAndImprovements
+    ),
+    otherMatters: stripLeadingSectionTitle(
+      resolveBodySectionContent(split.segments.otherMatters, body?.otherMatters),
+      TITLES.otherMatters
+    ),
   };
 }
 
@@ -417,13 +625,13 @@ export function normalizeAnnualReportOutputFromSource<T>(
 }
 
 export function buildTable2ParseSystemInstruction(): string {
-  return [
+  return injectCommonRules([
     'You extract section 2 (active disclosure table) from a Chinese government information disclosure annual report.',
     'Return ONLY JSON that matches the schema.',
     'Preserve slash or dash markers as strings when they appear in cells.',
     'Use null only for truly blank cells.',
     'Map the rows to regulations, normativeDocuments, licensing, punishment, coercion, and fees.',
-  ].join('\n');
+  ].join('\n'));
 }
 
 export function buildTable2ParsePrompt(table2Text: string): string {
@@ -506,14 +714,14 @@ export function buildTable2ParseResponseSchema(): JsonSchema {
 }
 
 export function buildTable3ParseSystemInstruction(): string {
-  return [
+  return injectCommonRules([
     'You extract section 3 (received and processed disclosure requests) from a Chinese government information disclosure annual report.',
     'Return ONLY JSON that matches the schema.',
     'Preserve slash or dash markers as strings when they appear in cells.',
     'Use null only for truly blank cells.',
     'Use this exact output skeleton for tableData:',
     JSON.stringify(cloneTable3Skeleton(), null, 2),
-  ].join('\n');
+  ].join('\n'));
 }
 
 export function buildTable3ParsePrompt(table3Text: string): string {
@@ -549,14 +757,14 @@ export function buildTable3ParseResponseSchema(): JsonSchema {
 }
 
 export function buildTable4ParseSystemInstruction(): string {
-  return [
+  return injectCommonRules([
     'You extract section 4 (administrative review and litigation table) from a Chinese government information disclosure annual report.',
     'Return ONLY JSON that matches the schema.',
     'Important flattened-row rule: if the input contains one markdown row with 15 consecutive cells, map cells 1-5 to review, 6-10 to litigationDirect, and 11-15 to litigationPostReview.',
     'Map review to \u884c\u653f\u590d\u8bae, litigationDirect to \u672a\u7ecf\u590d\u8bae\u76f4\u63a5\u8d77\u8bc9, and litigationPostReview to \u590d\u8bae\u540e\u8d77\u8bc9.',
     'Preserve slash or dash markers as strings when they appear in cells.',
     'Use null only for truly blank cells.',
-  ].join('\n');
+  ].join('\n'), { includeTable4Rules: true });
 }
 
 export function buildTable4ParsePrompt(table4Text: string): string {
@@ -602,6 +810,10 @@ export function tryParseFlattenedTable4(table4Text: string): Table4Data | null {
       continue;
     }
 
+    if (cells.every((cell) => isTable4PlaceholderText(cell))) {
+      continue;
+    }
+
     const candidate = cells.slice(0, 15).map(toCellValue);
     const hasMeaningfulValue = candidate.some((value) => value !== null && value !== '');
     if (!hasMeaningfulValue) {
@@ -634,7 +846,11 @@ export function hasMeaningfulTable4Data(value: unknown): value is Table4Data {
     if (
       fields.some((field) => {
         const cell = node[field];
-        return cell !== null && cell !== undefined && String(cell).trim() !== '';
+        if (cell === null || cell === undefined) {
+          return false;
+        }
+        const normalized = String(cell).trim();
+        return normalized !== '' && !isTable4PlaceholderText(normalized);
       })
     ) {
       return true;

@@ -2,6 +2,7 @@ import express from 'express';
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx';
 import pool from '../config/database-llm';
 import { authMiddleware } from '../middleware/auth';
+import { hasParsedContent } from '../utils/parsedContent';
 
 const router = express.Router();
 
@@ -26,12 +27,7 @@ function parseJsonSafe(value: any): any {
 
 function isParsedReady(version: ParsedVersion | undefined): boolean {
   if (!version) return false;
-  if (version.parsed_json === null || version.parsed_json === undefined) return false;
-  const parsed = parseJsonSafe(version.parsed_json);
-  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-    return Object.keys(parsed).length > 0;
-  }
-  return true;
+  return hasParsedContent(parseJsonSafe(version.parsed_json));
 }
 
 async function buildLatestJob(comparisonId: number): Promise<any> {

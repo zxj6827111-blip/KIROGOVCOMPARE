@@ -3,6 +3,7 @@ import path from 'path';
 import { LlmParseRequest } from './LlmProvider';
 import PdfParseService from './PdfParseService';
 import HtmlParseService from './HtmlParseService';
+import { injectCommonRules } from './PromptRules';
 
 export interface LoadedContent {
     text: string;
@@ -17,6 +18,115 @@ export function stripMarkdownJsonFences(text: string): string {
         .replace(/```json\s*/gi, '')
         .replace(/```\s*/g, '')
         .trim();
+}
+
+function decodeLiteralHexEscapeRun(run: string): string {
+    const bytes = Array.from(run.matchAll(/\\x([0-9a-fA-F]{2})/g)).map((match) => parseInt(match[1], 16));
+    if (bytes.length === 0) {
+        return run;
+    }
+
+    return Buffer.from(bytes).toString('utf8').replace(/\uFFFD/g, '');
+}
+
+function decodeLiteralHexEscapes(text: string): string {
+    return String(text || '')
+        .replace(/(?:\\x[0-9a-fA-F]{2}){2,}/g, (run) => decodeLiteralHexEscapeRun(run))
+        .replace(/\\x[0-9a-fA-F]{2}/g, ' ');
+}
+
+export function sanitizeLoadedText(text: string): string {
+    return decodeLiteralHexEscapes(text)
+        .replace(/^\uFEFF/, '')
+        .replace(/\r\n?/g, '\n')
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, ' ')
+        .replace(/\uFFFD{2,}/g, '\uFFFD')
+        .trim();
+}
+
+export function extractFirstJsonObject(text: string): string | null {
+    const source = stripMarkdownJsonFences(text);
+    const start = source.indexOf('{');
+    if (start < 0) {
+        return null;
+    }
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let index = start; index < source.length; index += 1) {
+        const char = source[index];
+
+        if (inString) {
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (char === '\\') {
+                escaped = true;
+                continue;
+            }
+            if (char === '"') {
+                inString = false;
+            }
+            continue;
+        }
+
+        if (char === '"') {
+            inString = true;
+            continue;
+        }
+
+        if (char === '{') {
+            depth += 1;
+            continue;
+        }
+
+        if (char === '}') {
+            depth -= 1;
+            if (depth === 0) {
+                return source.slice(start, index + 1);
+            }
+        }
+    }
+
+    return null;
+}
+
+function repairJsonText(text: string): string {
+    return decodeLiteralHexEscapes(text).replace(/\\(?!["\\/bfnrtu])/g, '\\\\');
+}
+
+export function parseStructuredJsonFromText<T = any>(text: string): T {
+    const cleaned = stripMarkdownJsonFences(text);
+    let lastError: unknown = null;
+    const candidates = [cleaned, extractFirstJsonObject(cleaned)].filter(
+        (candidate, index, values): candidate is string => !!candidate && values.indexOf(candidate) === index
+    );
+
+    for (const candidate of candidates) {
+        try {
+            return JSON.parse(candidate) as T;
+        } catch (error) {
+            lastError = error;
+        }
+
+        const repaired = repairJsonText(candidate);
+        if (repaired !== candidate) {
+            try {
+                return JSON.parse(repaired) as T;
+            } catch (error) {
+                lastError = error;
+            }
+        }
+    }
+
+    try {
+        return JSON.parse(cleaned) as T;
+    } catch (fallbackError) {
+        throw lastError || fallbackError;
+    }
 }
 
 export function buildTable3Skeleton(): any {
@@ -193,14 +303,15 @@ export function buildSystemInstruction(): string {
         ),
     ].join('\n');
 
-    return system;
+    return injectCommonRules(system, { includeTable4Rules: true });
 }
 
 export function buildStrictParseSystemInstruction(): string {
-    return (
+    return injectCommonRules(
         buildSystemInstruction() +
         '\nIMPORTANT: For "text" sections (Section 1, 5, 6), you MUST extract the FULL text content from the original document. Do NOT summarize. Do NOT use placeholders like "..." or "Wait for user content". If the text is present in the document, return it verbatim.\n' +
-        'IMPORTANT: Preserve special markers exactly. If a cell contains "/", "-", "—", or "空", output the same string. If a cell is blank, output null or "". Only output 0 when the cell explicitly shows "0".'
+        'IMPORTANT: Preserve special markers exactly. If a cell contains "/", "-", "—", or "空", output the same string. If a cell is blank, output null or "". Only output 0 when the cell explicitly shows "0".',
+        { includeTable4Rules: true }
     );
 }
 
@@ -311,7 +422,7 @@ export async function loadUserText(absolutePath: string, request: LlmParseReques
     // Text/Markdown/JSON Handling
     if (lower.endsWith('.txt') || lower.endsWith('.md') || lower.endsWith('.json')) {
         try {
-            const content = fs.readFileSync(absolutePath, 'utf-8');
+            const content = sanitizeLoadedText(fs.readFileSync(absolutePath, 'utf-8'));
             return { text: content, metadata: { format: lower.endsWith('.md') ? 'markdown' : 'text' } };
         } catch (error) {
             return { text: `Text read failed. File metadata: ${JSON.stringify(request)}`, metadata: {} };
