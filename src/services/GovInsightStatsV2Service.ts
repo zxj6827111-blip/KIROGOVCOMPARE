@@ -3,6 +3,7 @@ import { canonicalUnitsService } from './CanonicalUnitsService';
 import {
   GOVINSIGHT_CANONICAL_MAPPING_VERSION,
   GOVINSIGHT_METRIC_VERSION,
+  MaterializeStatus,
 } from './GovInsightReportProtocol';
 
 interface MaterializeOptions {

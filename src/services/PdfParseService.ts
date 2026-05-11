@@ -1,7 +1,18 @@
 import fs from 'fs/promises';
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.js';
 
-const pdfjs = (pdfjsLib as any).default || pdfjsLib;
+type PdfJsModule = {
+  getDocument: (options: Record<string, unknown>) => { promise: Promise<any> };
+  OPS?: Record<string, number>;
+};
+
+let pdfjsPromise: Promise<PdfJsModule> | null = null;
+
+function loadPdfjs(): Promise<PdfJsModule> {
+  if (!pdfjsPromise) {
+    pdfjsPromise = import('pdfjs-dist/legacy/build/pdf.mjs').then((mod: any) => mod.default || mod);
+  }
+  return pdfjsPromise;
+}
 
 export interface PdfCell {
   content: string;
@@ -375,8 +386,14 @@ export class PdfParseService {
 
   async parsePDF(filePath: string, _assetId?: string): Promise<ParseResult> {
     try {
+      const pdfjs = await loadPdfjs();
       const data = new Uint8Array(await fs.readFile(filePath));
-      const loadingTask = pdfjs.getDocument({ data, disableWorker: true });
+      const loadingTask = pdfjs.getDocument({
+        data,
+        disableWorker: true,
+        disableFontFace: true,
+        isEvalSupported: false,
+      });
       const pdf = await loadingTask.promise;
 
       const allLines: string[] = [];
@@ -469,7 +486,7 @@ export class PdfParseService {
         // 2. Parse stroke locations from operator list
         try {
           const ops = await page.getOperatorList();
-          const OPS = pdfjsLib.OPS;
+          const OPS = pdfjs.OPS;
           if (OPS && ops.argsArray) {
             // Track current drawing position
             let currentX = 0;

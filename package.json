@@ -16,6 +16,17 @@
     "stop:llm": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/llm-stop.ps1 -Port 8787",
     "restart:llm": "npm run stop:llm && npm run build && npm run start:llm",
     "generate:gov-report": "node -r ts-node/register/transpile-only scripts/generate-gov-insight-report.ts",
+    "govinsight:phase1:bootstrap": "node -r ts-node/register/transpile-only scripts/govinsight-phase1-bootstrap.ts",
+    "govinsight:phase1:verify": "node -r ts-node/register/transpile-only scripts/govinsight-phase1-verify.ts",
+    "govinsight:phase1:reconcile": "node -r ts-node/register/transpile-only scripts/govinsight-phase1-reconcile.ts",
+    "govinsight:phase1:regression": "node -r ts-node/register/transpile-only scripts/govinsight-phase1-regression.ts",
+    "govinsight:phase2:leader-cockpit:verify": "node -r ts-node/register/transpile-only scripts/govinsight-phase2-leader-cockpit-verify.ts",
+    "govinsight:phase2:multicity-reconcile": "node -r ts-node/register/transpile-only scripts/govinsight-phase2-multicity-reconcile.ts",
+    "govinsight:phase2:report-protocol:verify": "node -r ts-node/register/transpile-only scripts/govinsight-phase2-report-protocol-verify.ts",
+    "govinsight:phase2:report-result-reconcile": "node -r ts-node/register/transpile-only scripts/govinsight-phase2-report-result-reconcile.ts",
+    "govinsight:phase3:backfill-missing-city-reports": "node -r ts-node/register/transpile-only scripts/govinsight-phase3-backfill-missing-city-reports.ts",
+    "govinsight:phase3:regenerate-city-ai-reports": "node -r ts-node/register/transpile-only scripts/govinsight-phase3-regenerate-city-ai-reports.ts",
+    "govinsight:phase3:repair-ai-reports": "node -r ts-node/register/transpile-only scripts/govinsight-phase3-repair-ai-reports.ts",
     "test:relay": "ts-node scripts/test-model-connectivity.ts",
     "build": "tsc && node scripts/copy-public.js",
     "start": "node -r dotenv/config dist/index-llm.js",
@@ -53,10 +64,10 @@
     "@types/archiver": "^7.0.0",
     "@types/ejs": "^3.1.5",
     "archiver": "^7.0.1",
-    "aws-sdk": "^2.1500.0",
     "axios": "^1.6.2",
-    "bull": "^4.11.5",
+    "bullmq": "^5.76.3",
     "cheerio": "^1.1.2",
+    "csv-parse": "^6.2.1",
     "diff": "^8.0.2",
     "diff-match-patch": "^1.0.5",
     "docx": "^8.5.0",
@@ -65,13 +76,13 @@
     "express": "^4.18.2",
     "multer": "^1.4.5-lts.1",
     "openai": "^6.17.0",
-    "pdfjs-dist": "^3.11.174",
+    "pdfjs-dist": "^5.6.205",
     "pdfkit": "^0.17.2",
     "pg": "^8.11.3",
     "puppeteer": "^24.34.0",
+    "read-excel-file": "^9.0.6",
     "redis": "^4.6.12",
-    "uuid": "^9.0.1",
-    "xlsx": "^0.18.5"
+    "write-excel-file": "^4.0.2"
   },
   "devDependencies": {
     "@types/cheerio": "^0.22.35",
@@ -83,7 +94,6 @@
     "@types/pdfkit": "^0.17.4",
     "@types/pg": "^8.11.2",
     "@types/supertest": "^2.0.12",
-    "@types/uuid": "^9.0.7",
     "@typescript-eslint/eslint-plugin": "^6.17.0",
     "@typescript-eslint/parser": "^6.17.0",
     "cross-env": "^7.0.3",
@@ -95,5 +105,9 @@
     "ts-jest": "^29.1.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
+  },
+  "overrides": {
+    "minimatch": "^9.0.9",
+    "tar": "^7.5.13"
   }
 }

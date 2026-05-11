@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import { calculateFileHash } from '../utils/fileHash';
 import { DATA_DIR, UPLOADS_DIR } from '../config/constants';
 import pool from '../config/database-llm';
-import { v5 as uuidv5, validate as validateUuid } from 'uuid';
+import { uuidv5, validateUuid } from '../utils/uuid';
 import { checkStoragePathExists } from './SourceFileGuardService';
 import { hasParsedContent } from '../utils/parsedContent';
 

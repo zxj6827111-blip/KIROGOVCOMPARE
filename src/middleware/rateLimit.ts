@@ -32,11 +32,7 @@ type RedisStoreOptions = {
 };
 
 function defaultKeyGenerator(req: Request): string {
-  const forwarded = req.headers['x-forwarded-for'];
-  const ip = Array.isArray(forwarded)
-    ? forwarded[0]
-    : forwarded?.split(',')[0]?.trim();
-  return ip || req.ip || 'unknown';
+  return req.ip || req.socket.remoteAddress || 'unknown';
 }
 
 class MemoryRateLimitStore implements RateLimitStore {

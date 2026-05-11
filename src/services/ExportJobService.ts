@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
+import { uuidv4 } from '../utils/uuid';
 import pool from '../config/database';
 import { ExportJob } from '../types/models';
 import { ExportType } from '../types';

@@ -2,7 +2,9 @@ import OpenAI from 'openai';
 import axios from 'axios';
 import path from 'path';
 import fs from 'fs';
+import { fetch as undiciFetch } from 'undici';
 import { calculateFileHash } from '../utils/fileHash';
+import { getProxyDispatcher, resolveProxyUrl, sanitizeProxyUrlForLog } from '../utils/httpProxy';
 import { LlmParseRequest, LlmParseResult, LlmProvider, LlmProviderError } from './LlmProvider';
 import {
     buildParseResponseSchema,
@@ -81,10 +83,26 @@ export class OpenAILlmProvider implements LlmProvider {
         if (!this.baseURL) {
             throw new LlmProviderError('OPENAI_BASE_URL is required for OpenAI-compatible provider', 'openai_missing_base_url');
         }
+        const proxyUrl = this.resolveProxyUrl();
+        const dispatcher = getProxyDispatcher(proxyUrl);
+        if (proxyUrl) {
+            console.log(`[OpenAI:${this.provider}] Using proxy ${sanitizeProxyUrlForLog(proxyUrl)}`);
+        }
         this.client = new OpenAI({
             apiKey: this.apiKey,
             baseURL: this.baseURL,
+            fetch: dispatcher
+                ? ((input: any, init?: any) => undiciFetch(input, { ...(init || {}), dispatcher: init?.dispatcher || dispatcher } as any)) as any
+                : undefined,
         });
+    }
+
+    private resolveProxyUrl(): string {
+        if (this.provider === 'gemini_openai') {
+            return resolveProxyUrl(['GEMINI_OPENAI_PROXY_URL', 'GEMINI_PROXY_URL', 'HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY']);
+        }
+
+        return resolveProxyUrl(['OPENAI_PROXY_URL', 'HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY']);
     }
 
     async parse(request: LlmParseRequest, signal?: AbortSignal): Promise<LlmParseResult> {
@@ -342,20 +360,26 @@ export class OpenAILlmProvider implements LlmProvider {
     }
 
     async generate(prompt: string, systemInstruction?: string, config?: any): Promise<any> {
-        const text = await this.requestText({
-            prompt,
-            systemInstruction,
-            temperature: config?.temperature,
-            maxOutputTokens: config?.maxOutputTokens,
-            responseMimeType: config?.responseMimeType,
-            responseSchema: config?.responseSchema,
-            responseSchemaName: config?.responseSchemaName || 'generated_response',
-            responseSchemaDescription: config?.responseSchemaDescription,
-            responseStrict: config?.responseStrict,
-            timeoutMs: config?.timeoutMs,
-        });
+        try {
+            const text = await this.requestText({
+                prompt,
+                systemInstruction,
+                temperature: config?.temperature,
+                maxOutputTokens: config?.maxOutputTokens,
+                responseMimeType: config?.responseMimeType,
+                responseSchema: config?.responseSchema,
+                responseSchemaName: config?.responseSchemaName || 'generated_response',
+                responseSchemaDescription: config?.responseSchemaDescription,
+                responseStrict: config?.responseStrict,
+                timeoutMs: config?.timeoutMs,
+                apiMode: config?.apiMode,
+                reasoningEffort: config?.reasoningEffort,
+            });
 
-        return { text };
+            return { text };
+        } catch (error) {
+            throw this.normalizeError(error);
+        }
     }
 
     private async requestText(
@@ -370,15 +394,18 @@ export class OpenAILlmProvider implements LlmProvider {
             responseSchemaDescription?: string;
             responseStrict?: boolean;
             timeoutMs?: number;
+            apiMode?: string;
+            reasoningEffort?: string;
         },
         signal?: AbortSignal
     ): Promise<string> {
         const maxAttempts = this.resolveTransientRetryAttempts();
         let lastError: any = null;
+        const apiMode = this.resolveApiMode(config.apiMode);
 
         for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
             try {
-                if (this.apiMode === 'chat_completions') {
+                if (apiMode === 'chat_completions') {
                     return await this.requestTextViaChatCompletions(config, signal);
                 }
                 return await this.requestTextViaResponses(config, signal);
@@ -408,6 +435,7 @@ export class OpenAILlmProvider implements LlmProvider {
         responseSchemaName?: string;
         responseSchemaDescription?: string;
         responseStrict?: boolean;
+        reasoningEffort?: string;
         timeoutMs?: number;
     }, signal?: AbortSignal): Promise<string> {
         let firstError: any = null;
@@ -431,7 +459,7 @@ export class OpenAILlmProvider implements LlmProvider {
                     max_output_tokens: config.maxOutputTokens,
                     temperature: config.temperature,
                     store: !parseBooleanEnv(process.env.OPENAI_DISABLE_RESPONSE_STORAGE, true),
-                    reasoning: this.buildReasoningConfig(),
+                    reasoning: this.buildReasoningConfig(config.reasoningEffort),
                     text: this.buildResponsesTextConfig(config),
                 } as any, {
                     signal: scopedSignal,
@@ -480,13 +508,102 @@ export class OpenAILlmProvider implements LlmProvider {
         temperature?: number;
         maxOutputTokens?: number;
         responseMimeType?: string;
+        responseSchema?: unknown;
+        responseSchemaName?: string;
+        responseSchemaDescription?: string;
+        responseStrict?: boolean;
+        reasoningEffort?: string;
         timeoutMs?: number;
     }, signal?: AbortSignal): Promise<string> {
         const requestTimeoutMs = this.resolveRequestTimeoutMs(config.timeoutMs);
         const { signal: scopedSignal, dispose } = this.createScopedAbortSignal(signal, requestTimeoutMs);
 
         try {
-            const response = await this.client.chat.completions.create({
+            if (this.shouldPreferRawChatCompletions()) {
+                return await this.requestTextViaRawChatCompletions(config, scopedSignal, requestTimeoutMs);
+            }
+
+            try {
+                const response = await this.client.chat.completions.create({
+                    model: this.model,
+                    messages: [
+                        {
+                            role: 'system',
+                            content: config.systemInstruction || '',
+                        },
+                        {
+                            role: 'user',
+                            content: config.prompt,
+                        },
+                    ],
+                    max_tokens: config.maxOutputTokens,
+                    temperature: config.temperature,
+                    response_format: this.buildChatResponseFormat(config),
+                } as any, {
+                    signal: scopedSignal,
+                    timeout: requestTimeoutMs,
+                } as any);
+
+                const text = this.extractChatCompletionText(response);
+                if (text) {
+                    return text;
+                }
+
+                console.warn('[OpenAI] Chat Completions SDK returned no content, retrying via raw HTTP fallback.');
+            } catch (error) {
+                const normalized = this.normalizeError(error);
+                if (normalized.code !== 'openai_empty_response') {
+                    throw normalized;
+                }
+                console.warn('[OpenAI] Chat Completions SDK returned empty content, retrying via raw HTTP fallback.');
+            }
+
+            return await this.requestTextViaRawChatCompletions(config, scopedSignal, requestTimeoutMs);
+        } finally {
+            dispose();
+        }
+    }
+
+    private shouldPreferRawChatCompletions(): boolean {
+        return !/api\.openai\.com/i.test(this.baseURL);
+    }
+
+    private extractChatCompletionText(response: any): string {
+        const content = response?.choices?.[0]?.message?.content;
+        if (typeof content === 'string') {
+            return content.trim();
+        }
+
+        if (Array.isArray(content)) {
+            return content
+                .map((item) => {
+                    if (typeof item === 'string') return item;
+                    if (item?.type === 'text' && typeof item?.text === 'string') return item.text;
+                    return '';
+                })
+                .join('')
+                .trim();
+        }
+
+        return '';
+    }
+
+    private async requestTextViaRawChatCompletions(config: {
+        prompt: string;
+        systemInstruction?: string;
+        temperature?: number;
+        maxOutputTokens?: number;
+        responseMimeType?: string;
+        responseSchema?: unknown;
+        responseSchemaName?: string;
+        responseSchemaDescription?: string;
+        responseStrict?: boolean;
+        timeoutMs?: number;
+    }, signal?: AbortSignal, requestTimeoutMs?: number): Promise<string> {
+        const url = `${this.baseURL.replace(/\/+$/, '')}/chat/completions`;
+        const response = await axios.post(
+            url,
+            {
                 model: this.model,
                 messages: [
                     {
@@ -501,20 +618,52 @@ export class OpenAILlmProvider implements LlmProvider {
                 max_tokens: config.maxOutputTokens,
                 temperature: config.temperature,
                 response_format: this.buildChatResponseFormat(config),
-            } as any, {
-                signal: scopedSignal,
-                timeout: requestTimeoutMs,
-            } as any);
-
-            const text = response.choices?.[0]?.message?.content;
-            if (!text) {
-                throw new LlmProviderError('OpenAI chat completion missing content', 'openai_empty_response');
+            },
+            {
+                headers: {
+                    Authorization: `Bearer ${this.apiKey}`,
+                    'Content-Type': 'application/json',
+                },
+                responseType: 'text',
+                signal,
+                timeout: requestTimeoutMs ?? this.resolveRequestTimeoutMs(config.timeoutMs),
+                transformResponse: [(data) => data],
+                validateStatus: () => true,
             }
+        );
 
-            return text;
-        } finally {
-            dispose();
+        if (response.status >= 400) {
+            throw this.normalizeError({
+                response: {
+                    status: response.status,
+                    data: response.data,
+                },
+                status: response.status,
+                message: String(response.data || ''),
+            });
         }
+
+        const raw = String(response.data || '').trim();
+        if (!raw) {
+            throw new LlmProviderError('OpenAI raw chat completion missing content', 'openai_empty_response');
+        }
+
+        try {
+            const parsed = JSON.parse(raw);
+            const text = this.extractChatCompletionText(parsed);
+            if (text) {
+                return text;
+            }
+        } catch {
+            // Fall through to plain-text/SSE parsing.
+        }
+
+        const sseText = this.extractResponseTextFromSse(raw);
+        if (sseText) {
+            return sseText;
+        }
+
+        throw new LlmProviderError('OpenAI raw chat completion missing content', 'openai_empty_response');
     }
 
     private buildResponsesTextConfig(config: {
@@ -573,7 +722,25 @@ export class OpenAILlmProvider implements LlmProvider {
         return undefined;
     }
 
-    private buildChatResponseFormat(config: { responseMimeType?: string }): any {
+    private buildChatResponseFormat(config: {
+        responseMimeType?: string;
+        responseSchema?: unknown;
+        responseSchemaName?: string;
+        responseSchemaDescription?: string;
+        responseStrict?: boolean;
+    }): any {
+        if (config.responseSchema) {
+            return {
+                type: 'json_schema',
+                json_schema: {
+                    name: config.responseSchemaName || 'structured_output',
+                    description: config.responseSchemaDescription,
+                    schema: config.responseSchema,
+                    strict: config.responseStrict ?? false,
+                },
+            };
+        }
+
         const requestedMime = String(config.responseMimeType || '').toLowerCase();
         if (requestedMime.includes('json') || (process.env.OPENAI_RESPONSE_FORMAT || '').trim().toLowerCase() === 'json_object') {
             return { type: 'json_object' };
@@ -581,8 +748,8 @@ export class OpenAILlmProvider implements LlmProvider {
         return undefined;
     }
 
-    private buildReasoningConfig(): { effort: string } | undefined {
-        const effort = (process.env.OPENAI_REASONING_EFFORT || '').trim().toLowerCase();
+    private buildReasoningConfig(preferredEffort?: string): { effort: string } | undefined {
+        const effort = String(preferredEffort || process.env.OPENAI_REASONING_EFFORT || '').trim().toLowerCase();
         if (!effort) {
             return undefined;
         }
@@ -590,6 +757,11 @@ export class OpenAILlmProvider implements LlmProvider {
             return undefined;
         }
         return { effort };
+    }
+
+    private resolveApiMode(preferredMode?: string): string {
+        const mode = String(preferredMode || this.apiMode || 'responses').trim().toLowerCase();
+        return mode === 'chat_completions' ? 'chat_completions' : 'responses';
     }
 
     private extractResponseText(response: any): string {
@@ -621,6 +793,7 @@ export class OpenAILlmProvider implements LlmProvider {
         responseSchemaName?: string;
         responseSchemaDescription?: string;
         responseStrict?: boolean;
+        reasoningEffort?: string;
         timeoutMs?: number;
     }, signal?: AbortSignal, requestTimeoutMs?: number): Promise<string> {
         const url = `${this.baseURL.replace(/\/+$/, '')}/responses`;
@@ -641,7 +814,7 @@ export class OpenAILlmProvider implements LlmProvider {
                 max_output_tokens: config.maxOutputTokens,
                 temperature: config.temperature,
                 store: !parseBooleanEnv(process.env.OPENAI_DISABLE_RESPONSE_STORAGE, true),
-                reasoning: this.buildReasoningConfig(),
+                reasoning: this.buildReasoningConfig(config.reasoningEffort),
                 text: this.buildResponsesTextConfig(config),
                 stream: true,
             },
@@ -878,4 +1051,3 @@ export class OpenAILlmProvider implements LlmProvider {
         return new LlmProviderError(`OpenAI API request failed: ${message}`, 'openai_request_error');
     }
 }
-

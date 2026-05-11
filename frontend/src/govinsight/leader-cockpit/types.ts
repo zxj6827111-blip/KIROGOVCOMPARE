@@ -243,6 +243,9 @@ export interface EntityComparisonModel {
     reportCoverage?: string; // 有年报/总数
     fieldCoverage?: string; // 关键字段齐全/总数
     parseSuccessRate?: string; // 解析成功/有年报
+    statsCoverage?: string; // 已进入 stats_v2 / 总数
+    analyzableCoverage?: string; // 非 blocked、可直接分析 / 总数
+    officialCoverage?: string; // 正式口径 / 总数
   };
   // Enhancement C: Management Actions (District only)
   managementActions?: {

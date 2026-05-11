@@ -9,6 +9,7 @@ import { buildRegionTree, loadEntityData } from '../data';
 import { fetchOrgs } from '../api';
 import { getCurrentUser } from '../../apiClient';
 import { canAccessLeaderCockpit, isLeaderCockpitAdmin, isLeaderCockpitEnabled } from '../leader-cockpit/access';
+import { isDistrictLikeGovInsightEntity } from '../utils/entityClassification';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -39,6 +40,19 @@ const findEntityById = (nodes: EntityProfile[], targetId: string): EntityProfile
   return null;
 };
 
+const findEntityPath = (nodes: EntityProfile[], targetId: string): EntityProfile[] => {
+  for (const node of nodes) {
+    if (node.id === targetId) return [node];
+    if (node.children?.length) {
+      const childPath = findEntityPath(node.children, targetId);
+      if (childPath.length) {
+        return [node, ...childPath];
+      }
+    }
+  }
+  return [];
+};
+
 const pickInitialEntity = (tree: EntityProfile[]): EntityProfile | null => {
   if (!tree.length) return null;
 
@@ -63,12 +77,8 @@ const partitionChildren = (children: EntityProfile[]) => {
   const geo: EntityProfile[] = [];
   const depts: EntityProfile[] = [];
 
-  // Suffixes that indicate a Geographic/Administrative Area
-  const geoSuffixes = ['区', '县', '市', '街道', '镇', '乡', '办事处', '园区', '新区', '开发区'];
-
   children.forEach(c => {
-    // Exact match suffix or special logic
-    const isGeo = geoSuffixes.some(suffix => c.name.endsWith(suffix));
+    const isGeo = isDistrictLikeGovInsightEntity(c);
     if (isGeo) {
       geo.push(c);
     } else {
@@ -85,6 +95,16 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const canShowLeaderCockpit = canAccessLeaderCockpit(user)
     && (isLeaderCockpitEnabled() || isLeaderCockpitAdmin(user));
   const isLeaderCockpitRoute = location.pathname === '/leader-cockpit';
+  const sectionLabels: Record<string, string> = {
+    '/': '全景态势',
+    '/portrait': '精准画像',
+    '/operations': '履职效能',
+    '/risk': '法治风控',
+    '/policy': '制度供给',
+    '/benchmark': '横向对标',
+    '/report': '智能辅策',
+  };
+  const currentSectionLabel = sectionLabels[location.pathname] || '治理分析';
 
   const [regionTree, setRegionTree] = useState<EntityProfile[]>([]);
   const [currentEntity, setCurrentEntity] = useState<EntityProfile | null>(null);
@@ -120,32 +140,17 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   useEffect(() => {
     if (!currentEntity) return;
 
-    // Check conditions with detailed logging
     const hasEntityData = currentEntity.data && currentEntity.data.length > 0;
     const hasChildren = currentEntity.children && currentEntity.children.length > 0;
     const childrenWithData = hasChildren
       ? currentEntity.children!.filter(c => c.data && c.data.length > 0).length
       : 0;
 
-    console.log('[Layout] Data check:', {
-      entity: currentEntity.name,
-      hasEntityData,
-      childrenCount: currentEntity.children?.length || 0,
-      childrenWithData
-    });
-
-    // Need to load if entity has no data OR children need data
     const needsLoading = !hasEntityData || (hasChildren && childrenWithData === 0);
 
-    console.log('[Layout] needsLoading:', needsLoading);
-
     if (needsLoading) {
-      console.log('[Layout] %cTriggering loadEntityData', 'color: orange; font-weight: bold;');
       setIsLoading(true);
       loadEntityData(currentEntity).then(updated => {
-        console.log('[Layout] %cloadEntityData completed', 'color: green; font-weight: bold;', {
-          childrenWithData: updated.children?.filter(c => c.data.length > 0).length
-        });
         setCurrentEntity(updated);
         setIsLoading(false);
       });
@@ -165,6 +170,14 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    if (!isMenuOpen || !currentEntity) return;
+    const currentPath = findEntityPath(regionTree, currentEntity.id);
+    setLevel1(currentPath[0] || null);
+    setLevel2(currentPath[1] || null);
+    setLevel3(currentPath[2] || null);
+  }, [isMenuOpen, regionTree, currentEntity]);
 
   const handleSelectEntity = (entity: EntityProfile) => {
     setCurrentEntity(entity);
@@ -221,7 +234,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             e.stopPropagation();
             handleSelectEntity(item);
           }}
-          title={`切换数据视角至：${item.name}`}
+          title={`切换当前分析视角至：${item.name}`}
           className={`mr-2 px-2 py-0.5 text-[10px] rounded border transition-all flex items-center ${isActive
             ? 'bg-emerald-100 text-emerald-700 border-emerald-200 cursor-default'
             : 'bg-white text-slate-500 border-slate-200 opacity-0 group-hover:opacity-100 hover:bg-blue-600 hover:text-white hover:border-blue-600'
@@ -239,10 +252,14 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const renderCascaderPanel = (panelClassName: string) => (
     <div className={panelClassName}>
+      {(() => {
+        const isMunicipalityRoot = !!level1 && level1.type === 'city' && (!level1.parentPath || level1.parentPath.length === 0);
+        return (
+          <>
       {/* Column 1: Province */}
       <div className="w-48 min-w-[180px] border-r border-slate-100 overflow-y-auto bg-slate-50/50 backdrop-blur-sm">
         <div className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider sticky top-0 bg-slate-50/90 backdrop-blur-md z-10 border-b border-slate-100">
-          1. Province
+          1. 省级
         </div>
         {regionTree.map((prov) => renderRow(
           prov,
@@ -256,20 +273,53 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       {/* Column 2: City */}
       <div className="w-48 min-w-[180px] border-r border-slate-100 overflow-y-auto bg-white/50 backdrop-blur-sm">
         <div className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider sticky top-0 bg-white/90 backdrop-blur-md z-10 border-b border-slate-100">
-          2. City
+          {isMunicipalityRoot ? '2. 区县 / 功能区' : '2. 地市'}
         </div>
         {level1 ? (
-          level1.children?.map((city) => renderRow(
-            city,
-            level2?.id === city.id,
-            currentEntity?.id === city.id,
-            () => { setLevel2(city); setLevel3(null); },
-            !!city.children
-          ))
+          isMunicipalityRoot ? (() => {
+            const { geo, depts } = partitionChildren(level1.children ?? []);
+            return (
+              <>
+                {geo.map((item) => renderRow(
+                  item,
+                  level2?.id === item.id,
+                  currentEntity?.id === item.id,
+                  () => { setLevel2(item); setLevel3(null); },
+                  !!item.children
+                ))}
+
+                {geo.length > 0 && depts.length > 0 && (
+                  <div className="px-3 py-1.5 bg-slate-100/50 text-[10px] text-slate-400 font-bold border-t border-b border-slate-100 mt-1">
+                    市直部门
+                  </div>
+                )}
+
+                {depts.map((item) => renderRow(
+                  item,
+                  level2?.id === item.id,
+                  currentEntity?.id === item.id,
+                  () => { setLevel2(item); setLevel3(null); },
+                  !!item.children
+                ))}
+
+                {geo.length === 0 && depts.length === 0 && (
+                  <div className="p-4 text-center text-xs text-slate-400">暂无下级单位</div>
+                )}
+              </>
+            );
+          })() : (
+            level1.children?.map((city) => renderRow(
+              city,
+              level2?.id === city.id,
+              currentEntity?.id === city.id,
+              () => { setLevel2(city); setLevel3(null); },
+              !!city.children
+            ))
+          )
         ) : (
           <div className="p-6 text-center text-xs text-slate-400 flex flex-col items-center">
             <MousePointerClick className="w-6 h-6 mb-2 opacity-50" />
-            Select a province
+            请先选择省级单位
           </div>
         )}
       </div>
@@ -277,7 +327,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
       {/* Column 3: District */}
       <div className="w-72 min-w-[240px] border-r border-slate-100 overflow-y-auto bg-slate-50/50 backdrop-blur-sm">
         <div className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider sticky top-0 bg-slate-50/90 backdrop-blur-md z-10 border-b border-slate-100">
-          3. District / County
+          {isMunicipalityRoot ? '3. 部门 / 镇街' : '3. 区县 / 功能区'}
         </div>
         {level2 ? (
           level2.children && level2.children.length ? (() => {
@@ -294,7 +344,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
                 {geo.length > 0 && depts.length > 0 && (
                   <div className="px-3 py-1.5 bg-slate-100/50 text-[10px] text-slate-400 font-bold border-t border-b border-slate-100 mt-1">
-                    Departments
+                    市直部门
                   </div>
                 )}
 
@@ -307,22 +357,24 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                 ))}
 
                 {geo.length === 0 && depts.length === 0 && (
-                  <div className="p-4 text-center text-xs text-slate-400">No data</div>
+                  <div className="p-4 text-center text-xs text-slate-400">暂无可展示数据</div>
                 )}
               </>
             );
           })() : (
-            <div className="p-4 text-center text-xs text-slate-400">No children</div>
+            <div className="p-4 text-center text-xs text-slate-400">暂无下级单位</div>
           )
         ) : (
-          <div className="p-6 text-center text-xs text-slate-400">Select a city</div>
+          <div className="p-6 text-center text-xs text-slate-400">
+            {isMunicipalityRoot ? '请先选择区县或市直部门' : '请先选择地市单位'}
+          </div>
         )}
       </div>
 
       {/* Column 4: Department/Street */}
       <div className="w-72 min-w-[240px] overflow-y-auto bg-white/50 backdrop-blur-sm">
         <div className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider sticky top-0 bg-white/90 backdrop-blur-md z-10 border-b border-slate-100">
-          4. Department / Street
+          {isMunicipalityRoot ? '4. 下级单位' : '4. 部门 / 镇街'}
         </div>
         {level3 ? (
           level3.children && level3.children.length ? (() => {
@@ -347,13 +399,13 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             if (geo.length === 0 && depts.length === 0) {
               return (
                 <div className="p-6 flex flex-col items-center justify-center text-slate-400 h-full">
-                  <span className="text-xs mb-3 text-center">No data<br />(last level)</span>
+                  <span className="text-xs mb-3 text-center">暂无下级单位<br />(已到最末层)</span>
                   {level3 && currentEntity?.id !== level3.id && (
                     <button
                       onClick={() => handleSelectEntity(level3)}
                       className="text-xs bg-indigo-600 text-white px-4 py-2 rounded-full hover:bg-indigo-700 shadow-md hover:shadow-lg transition-all"
                     >
-                      Analyze {level3.name}
+                      分析 {level3.name}
                     </button>
                   )}
                 </div>
@@ -366,7 +418,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
                 {geo.length > 0 && depts.length > 0 && (
                   <div className="px-3 py-1.5 bg-slate-100/50 text-[10px] text-slate-400 font-bold border-t border-b border-slate-100 mt-1">
-                    Departments
+                    直属部门
                   </div>
                 )}
 
@@ -375,21 +427,24 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             );
           })() : (
             <div className="p-6 flex flex-col items-center justify-center text-slate-400 h-full">
-              <span className="text-xs mb-3 text-center">No data<br />(last level)</span>
+              <span className="text-xs mb-3 text-center">暂无下级单位<br />(已到最末层)</span>
               {level3 && currentEntity?.id !== level3.id && (
                 <button
                   onClick={() => handleSelectEntity(level3)}
                   className="text-xs bg-indigo-600 text-white px-4 py-2 rounded-full hover:bg-indigo-700 shadow-md hover:shadow-lg transition-all"
                 >
-                  Analyze {level3.name}
+                  分析 {level3.name}
                 </button>
               )}
             </div>
           )
         ) : (
-          <div className="p-6 text-center text-xs text-slate-400">Select a district</div>
+          <div className="p-6 text-center text-xs text-slate-400">请先选择区县或功能区</div>
         )}
       </div>
+          </>
+        );
+      })()}
     </div>
   );
 
@@ -439,9 +494,9 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                   type="button"
                   onClick={() => navigate('/leader-cockpit')}
                   className="inline-flex items-center px-3 py-1.5 text-xs font-semibold rounded-md border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
-                  title="领导驾驶舱（演示模式）"
+                  title="进入领导驾驶舱"
                 >
-                  领导驾驶舱（演示模式）
+                  领导驾驶舱
                 </button>
               )}
               {/* Tech Spec Download Button - Moved here */}
@@ -466,172 +521,15 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
 
                 {/* CASCADER DROPDOWN */}
                 {isMenuOpen && (
-                  <div className="absolute right-0 top-full mt-2 bg-white rounded-lg shadow-2xl border border-slate-200 z-[100] flex overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200 h-[420px]">
-
-                    {/* Column 1: Province */}
-                    <div className="w-48 min-w-[180px] border-r border-slate-100 overflow-y-auto bg-slate-50/50 backdrop-blur-sm">
-                      <div className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider sticky top-0 bg-slate-50/90 backdrop-blur-md z-10 border-b border-slate-100">
-                        1. 省/直辖市
-                      </div>
-                      {regionTree.map(prov => renderRow(
-                        prov,
-                        level1?.id === prov.id,
-                        currentEntity?.id === prov.id,
-                        () => { setLevel1(prov); setLevel2(null); setLevel3(null); },
-                        true
-                      ))}
-                    </div>
-
-                    {/* Column 2: City */}
-                    <div className="w-48 min-w-[180px] border-r border-slate-100 overflow-y-auto bg-white/50 backdrop-blur-sm">
-                      <div className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider sticky top-0 bg-white/90 backdrop-blur-md z-10 border-b border-slate-100">
-                        2. 地级市
-                      </div>
-                      {level1 ? (
-                        level1.children?.map(city => renderRow(
-                          city,
-                          level2?.id === city.id,
-                          currentEntity?.id === city.id,
-                          () => { setLevel2(city); setLevel3(null); },
-                          !!city.children
-                        ))
-                      ) : (
-                        <div className="p-6 text-center text-xs text-slate-400 flex flex-col items-center">
-                          <MousePointerClick className="w-6 h-6 mb-2 opacity-50" />
-                          请先选择左侧省份
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Column 3: District */}
-                    <div className="w-72 min-w-[240px] border-r border-slate-100 overflow-y-auto bg-slate-50/50 backdrop-blur-sm">
-                      <div className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider sticky top-0 bg-slate-50/90 backdrop-blur-md z-10 border-b border-slate-100">
-                        3. 区/县
-                      </div>
-                      {level2 ? (
-                        level2.children ? (() => {
-                          const { geo, depts } = partitionChildren(level2.children);
-                          return (
-                            <>
-                              {/* Geographic List */}
-                              {geo.length > 0 && geo.map(dist => renderRow(
-                                dist,
-                                level3?.id === dist.id,
-                                currentEntity?.id === dist.id,
-                                () => { setLevel3(dist); },
-                                !!dist.children
-                              ))}
-
-                              {/* Divider if both exist */}
-                              {geo.length > 0 && depts.length > 0 && (
-                                <div className="px-3 py-1.5 bg-slate-100/50 text-[10px] text-slate-400 font-bold border-t border-b border-slate-100 mt-1">
-                                  直属部门
-                                </div>
-                              )}
-
-                              {/* Departments List */}
-                              {depts.map(dist => renderRow(
-                                dist,
-                                level3?.id === dist.id,
-                                currentEntity?.id === dist.id,
-                                () => { setLevel3(dist); },
-                                !!dist.children
-                              ))}
-
-                              {/* Fallback if both empty (unlikely if children exists) */}
-                              {geo.length === 0 && depts.length === 0 && (
-                                <div className="p-4 text-center text-xs text-slate-400">无数据</div>
-                              )}
-                            </>
-                          );
-                        })() : <div className="p-4 text-center text-xs text-slate-400">无下级区划</div>
-                      ) : (
-                        <div className="p-6 text-center text-xs text-slate-400">请先选择城市</div>
-                      )}
-                    </div>
-
-                    {/* Column 4: Department/Street */}
-                    <div className="w-72 min-w-[240px] overflow-y-auto bg-white/50 backdrop-blur-sm">
-                      <div className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider sticky top-0 bg-white/90 backdrop-blur-md z-10 border-b border-slate-100">
-                        4. 部门/街道
-                      </div>
-                      {level3 ? (
-                        level3.children ? (() => {
-                          const { geo, depts } = partitionChildren(level3.children);
-                          const renderItem = (dept: EntityProfile) => (
-                            <div
-                              key={dept.id}
-                              onClick={() => handleSelectEntity(dept)}
-                              title={dept.name}
-                              className={`px-3 py-2 text-sm cursor-pointer flex items-center justify-between group transition-colors ${currentEntity?.id === dept.id
-                                ? 'bg-indigo-50 text-indigo-700 font-bold border-l-2 border-indigo-500'
-                                : 'text-slate-700 hover:bg-slate-50 hover:text-indigo-600'
-                                }`}
-                            >
-                              <div className="flex items-center min-w-0">
-                                {currentEntity?.id === dept.id && <Check className="w-3.5 h-3.5 mr-2 text-indigo-500 flex-shrink-0" />}
-                                <span className="truncate">{dept.name}</span>
-                              </div>
-                            </div>
-                          );
-
-                          if (geo.length === 0 && depts.length === 0) {
-                            return (
-                              <div className="p-6 flex flex-col items-center justify-center text-slate-400 h-full">
-                                <span className="text-xs mb-3 text-center">该区域暂无部门数据<br />(已到达最末级)</span>
-                                {level3 && currentEntity?.id !== level3.id && (
-                                  <button
-                                    onClick={() => handleSelectEntity(level3)}
-                                    className="text-xs bg-indigo-600 text-white px-4 py-2 rounded-full hover:bg-indigo-700 shadow-md hover:shadow-lg transition-all"
-                                  >
-                                    分析 {level3.name} 本级
-                                  </button>
-                                )}
-                              </div>
-                            );
-                          }
-
-                          return (
-                            <>
-                              {/* Geographic List (Streets/Towns) */}
-                              {geo.length > 0 && geo.map(renderItem)}
-
-                              {/* Divider */}
-                              {geo.length > 0 && depts.length > 0 && (
-                                <div className="px-3 py-1.5 bg-slate-100/50 text-[10px] text-slate-400 font-bold border-t border-b border-slate-100 mt-1">
-                                  直属部门
-                                </div>
-                              )}
-
-                              {/* Departments List */}
-                              {depts.map(renderItem)}
-                            </>
-                          )
-                        })() : (
-                          <div className="p-6 flex flex-col items-center justify-center text-slate-400 h-full">
-                            <span className="text-xs mb-3 text-center">该区域暂无部门数据<br />(已到达最末级)</span>
-                            {level3 && currentEntity?.id !== level3.id && (
-                              <button
-                                onClick={() => handleSelectEntity(level3)}
-                                className="text-xs bg-indigo-600 text-white px-4 py-2 rounded-full hover:bg-indigo-700 shadow-md hover:shadow-lg transition-all"
-                              >
-                                分析 {level3.name} 本级
-                              </button>
-                            )}
-                          </div>
-                        )
-                      ) : (
-                        <div className="p-6 text-center text-xs text-slate-400">请先选择区县</div>
-                      )}
-                    </div>
-
-                  </div>
+                  renderCascaderPanel(
+                    'absolute right-0 top-full mt-2 bg-white rounded-lg shadow-2xl border border-slate-200 z-[100] flex overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200 h-[420px]'
+                  )
                 )}
               </div>
 
               <div className="flex items-center space-x-2 text-xs">
                 <span className={`h-2 w-2 rounded-full ${isLoading ? 'bg-amber-500' : 'bg-emerald-500'} animate-pulse`}></span>
-                <span className="text-slate-500">{isLoading ? '同步中' : '在线'}</span>
+                <span className="text-slate-500">{isLoading ? '数据加载中' : '已同步'}</span>
               </div>
             </div>
           </div>
@@ -655,7 +553,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                 <span>数据中心</span>
                 <ChevronRight className="w-4 h-4 mx-1" />
                 <span className="font-medium text-slate-800">
-                  {subNavItems.find(i => i.path === location.pathname)?.label || '治理分析'}
+                  {currentSectionLabel}
                 </span>
                 {location.pathname === '/report' && (
                   <span className="ml-auto flex items-center text-blue-600 bg-blue-50 px-2 py-0.5 rounded text-xs">

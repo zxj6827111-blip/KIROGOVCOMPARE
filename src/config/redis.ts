@@ -1,6 +1,6 @@
-import { createClient } from 'redis';
+import { createClient, type RedisClientType } from 'redis';
 
-const redisClient = createClient({
+const redisClient: RedisClientType = createClient({
   socket: {
     host: process.env.REDIS_HOST || 'localhost',
     port: parseInt(process.env.REDIS_PORT || '6379'),

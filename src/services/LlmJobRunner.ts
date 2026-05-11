@@ -1179,7 +1179,7 @@ export class LlmJobRunner {
     return JSON.stringify(result.output, null, 2);
   }
 
-  private getProvider(_attempt: number): LlmProvider {
+  private getProvider(attempt: number): LlmProvider {
     if (!this.primaryProvider) {
       const parsePrimary = resolveParsePrimaryConfig();
       this.primaryProvider = createLlmProvider(parsePrimary.provider, parsePrimary.model);
