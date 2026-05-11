@@ -1,7 +1,7 @@
 import axios, { AxiosError } from 'axios';
 import * as fs from 'fs';
 import * as path from 'path';
-import { v4 as uuidv4 } from 'uuid';
+import { uuidv4 } from '../utils/uuid';
 import { validateURLSecurity, validateRedirectURL } from '../utils/urlValidator';
 import StorageService from './StorageService';
 import { calculateFileHash } from '../utils/fileHash';
@@ -12,6 +12,12 @@ const MAX_REDIRECTS = 5;
 const CONNECT_TIMEOUT = 10000; // 10秒
 const READ_TIMEOUT = 30000; // 30秒
 const MAX_DOWNLOAD_SIZE = 100 * 1024 * 1024; // 100MB
+
+function headerValueToString(value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (Array.isArray(value)) return value.map(String).join(',');
+  return String(value);
+}
 
 export interface DownloadResult {
   success: boolean;
@@ -157,7 +163,7 @@ export class URLDownloadService {
       }
 
       // 检查内容大小
-      const contentLength = parseInt(response.headers['content-length'] || '0');
+      const contentLength = parseInt(headerValueToString(response.headers['content-length']) || '0', 10);
       if (contentLength > MAX_DOWNLOAD_SIZE) {
         return { success: false, error: `文件大小超过限制（最大${MAX_DOWNLOAD_SIZE / 1024 / 1024}MB）` };
       }
@@ -188,7 +194,7 @@ export class URLDownloadService {
             success: true,
             filePath: tempFilePath,
             fileName,
-            contentType: response.headers['content-type'],
+            contentType: headerValueToString(response.headers['content-type']),
           });
         });
         writeStream.on('error', (error) => {

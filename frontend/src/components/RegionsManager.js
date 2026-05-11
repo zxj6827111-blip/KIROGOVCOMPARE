@@ -674,7 +674,7 @@ function RegionsManager() {
                   id="batch-file-upload"
                   type="file"
                   className="hidden"
-                  accept=".xlsx,.xls,.csv"
+                  accept=".xlsx,.csv"
                   onChange={(e) => setBatchFile(e.target.files?.[0] || null)}
                 />
               </label>

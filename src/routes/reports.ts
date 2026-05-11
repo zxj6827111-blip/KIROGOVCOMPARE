@@ -10,17 +10,35 @@ import { consistencyCheckService } from '../services/ConsistencyCheckService';
 import { materializeService } from '../services/data-center/MaterializeService';
 import { govInsightStatsService } from '../services/GovInsightStatsService';
 import { llmJobRunner } from '../services/LlmJobRunner';
+import { parseRunService } from '../services/ParseRunService';
 import PdfParseService from '../services/PdfParseService';
 import HtmlParseService from '../services/HtmlParseService';
 import { authMiddleware, requirePermission, AuthRequest } from '../middleware/auth';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 import { checkStoragePathExists } from '../services/SourceFileGuardService';
+import { hasParsedContent } from '../utils/parsedContent';
 
 const router = express.Router();
 
 const tempDir = UPLOADS_TMP_DIR;
 if (!fs.existsSync(tempDir)) {
   fs.mkdirSync(tempDir, { recursive: true });
+}
+
+const DEFAULT_REPORT_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
+const configuredReportUploadMaxBytes = Number(process.env.REPORT_UPLOAD_MAX_BYTES);
+const REPORT_UPLOAD_MAX_BYTES =
+  Number.isFinite(configuredReportUploadMaxBytes) && configuredReportUploadMaxBytes > 0
+    ? configuredReportUploadMaxBytes
+    : DEFAULT_REPORT_UPLOAD_MAX_BYTES;
+
+function sanitizeUploadFileName(originalName: string): string {
+  const baseName = path.basename(originalName || 'report');
+  const cleaned = baseName
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || 'report';
 }
 
 // Helper to safely parse JSON from DB (Postgres driver usually returns object for JSON columns, but handle strings too)
@@ -32,18 +50,6 @@ function parseDbJson(value: any): any {
   } catch {
     return null;
   }
-}
-
-function hasParsedContent(parsed: any): boolean {
-  if (!parsed) return false;
-  if (typeof parsed === 'string') return parsed.trim().length > 0;
-  if (Array.isArray(parsed)) return parsed.length > 0;
-  if (typeof parsed !== 'object') return false;
-  if (Array.isArray(parsed.sections) && parsed.sections.length > 0) return true;
-  if (parsed.tables && typeof parsed.tables === 'object' && Object.keys(parsed.tables).length > 0) return true;
-  if (parsed.report_type || parsed.basic_info || parsed.year) return true;
-  // Fallback: any non-empty object counts as content
-  return Object.keys(parsed).length > 0;
 }
 
 let rawTextColumnExistsCache: boolean | null = null;
@@ -113,6 +119,31 @@ async function loadReportVersion(reportId: number, versionId: number) {
     [reportId, versionId]
   );
   return result.rows[0] || null;
+}
+
+async function authorizeReportAccess(req: AuthRequest, reportId: number) {
+  const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
+  if (allowedRegionIds && allowedRegionIds.length === 0) {
+    return { ok: false as const, status: 403, error: 'forbidden' };
+  }
+
+  const reportRes = await pool.query(
+    `SELECT id, region_id, active_version_id
+     FROM reports
+     WHERE id = $1
+     LIMIT 1`,
+    [reportId]
+  );
+  const report = reportRes.rows[0];
+  if (!report) {
+    return { ok: false as const, status: 404, error: 'report not found' };
+  }
+
+  if (allowedRegionIds && !allowedRegionIds.includes(Number(report.region_id))) {
+    return { ok: false as const, status: 403, error: 'forbidden' };
+  }
+
+  return { ok: true as const, report };
 }
 
 async function countOpenReviewIssues(versionId: number): Promise<number> {
@@ -380,7 +411,7 @@ const upload = multer({
     filename: (_req, file, cb) => {
       // Truncate filename if too long to avoid ENAMETOOLONG error
       const MAX_NAME_BYTES = 100;
-      let safeName = file.originalname;
+      let safeName = sanitizeUploadFileName(file.originalname);
 
       const byteLength = Buffer.byteLength(safeName, 'utf8');
       if (byteLength > MAX_NAME_BYTES) {
@@ -418,10 +449,30 @@ const upload = multer({
       cb(new Error('仅支持 PDF、HTML、TXT 或 Markdown 文件'));
     }
   },
+  limits: {
+    fileSize: REPORT_UPLOAD_MAX_BYTES,
+    files: 1,
+  },
 });
 
+const handleReportUpload: express.RequestHandler = (req, res, next) => {
+  upload.single('file')(req, res, (error) => {
+    if (error instanceof multer.MulterError) {
+      const status = error.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+      return res.status(status).json({
+        error: error.code === 'LIMIT_FILE_SIZE' ? 'file_too_large' : 'invalid_upload',
+        maxBytes: REPORT_UPLOAD_MAX_BYTES,
+      });
+    }
+    if (error) {
+      return res.status(400).json({ error: error.message || 'invalid_upload' });
+    }
+    next();
+  });
+};
+
 // Protect upload route
-router.post('/reports', authMiddleware, requirePermission('upload_reports'), upload.single('file'), async (req: AuthRequest, res) => {
+router.post('/reports', authMiddleware, requirePermission('upload_reports'), handleReportUpload, async (req: AuthRequest, res) => {
   const tmpFilePath = req.file?.path;
   try {
     const regionId = Number(req.body.region_id);
@@ -514,7 +565,7 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), upl
     }
 
     if (error instanceof multer.MulterError) {
-      return res.status(400).json({ error: `涓婁紶閿欒: ${error.message}` });
+      return res.status(400).json({ error: `上传错误: ${error.message}` });
     }
 
     console.error('Upload error:', error);
@@ -697,6 +748,188 @@ router.post('/reports/:id/parse', authMiddleware, requirePermission('upload_repo
     return res.json({ job_id: jobId, status: 'queued' });
   } catch (error) {
     console.error('Error re-parsing report:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/reports/:id/parse-history', authMiddleware, requirePermission('upload_reports'), async (req: AuthRequest, res) => {
+  try {
+    const reportId = Number(req.params.id);
+    const versionIdRaw = req.query.version_id;
+    const requestedVersionId = versionIdRaw !== undefined ? Number(versionIdRaw) : null;
+    if (!reportId || Number.isNaN(reportId) || !Number.isInteger(reportId) || reportId < 1) {
+      return res.status(400).json({ error: 'report_id 无效' });
+    }
+
+    const auth = await authorizeReportAccess(req, reportId);
+    if (!auth.ok) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+
+    const params: any[] = [reportId];
+    let versionFilter = '';
+    if (requestedVersionId && Number.isInteger(requestedVersionId) && requestedVersionId > 0) {
+      const version = await loadReportVersion(reportId, requestedVersionId);
+      if (!version) {
+        return res.status(404).json({ error: 'target version not found' });
+      }
+      params.push(requestedVersionId);
+      versionFilter = `AND rv.id = $${params.length}`;
+    }
+
+    const history = await pool.query(
+      `SELECT
+         pr.id,
+         pr.report_version_id,
+         pr.job_id,
+         pr.fingerprint,
+         pr.provider,
+         pr.model,
+         pr.prompt_version,
+         pr.parser_version,
+         pr.source_extractor_version,
+         pr.schema_version,
+         pr.stabilize_mode,
+         pr.rule_gate_enabled,
+         pr.source_gate_strategy,
+         pr.source_gate_uncertain_threshold,
+         pr.source_gate_high_confidence_blocking,
+         pr.source_gate_warning_threshold,
+         pr.status,
+         pr.intended_final_status,
+         pr.is_current,
+         pr.superseded_by,
+         pr.superseded_at,
+         pr.restored_from,
+         pr.restored_at,
+         pr.error_code,
+         pr.error_message,
+         pr.attempt,
+         pr.created_at,
+         pr.started_at,
+         pr.finished_at,
+         pr.accepted_at,
+         pr.gate_result_json,
+         sgr.status AS source_gate_status,
+         sgr.uncertain_count AS source_gate_uncertain_count,
+         sgr.warning_count AS source_gate_warning_count,
+         sgr.blocker_count AS source_gate_blocker_count
+       FROM report_versions rv
+       JOIN parse_runs pr ON pr.report_version_id = rv.id
+       LEFT JOIN LATERAL (
+         SELECT status, uncertain_count, warning_count, blocker_count
+         FROM source_gate_results
+         WHERE parse_run_id = pr.id
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1
+       ) sgr ON TRUE
+       WHERE rv.report_id = $1
+         ${versionFilter}
+       ORDER BY pr.created_at DESC, pr.id DESC`,
+      params
+    );
+
+    return res.json({ report_id: reportId, parse_runs: history.rows });
+  } catch (error) {
+    console.error('Error loading parse history:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/reports/:id/switch-current-parse', authMiddleware, requirePermission('upload_reports'), async (req: AuthRequest, res) => {
+  try {
+    const reportId = Number(req.params.id);
+    const versionId = Number(req.body?.version_id);
+    const parseRunId = Number(req.body?.parse_run_id);
+    if (!reportId || !versionId || !parseRunId) {
+      return res.status(400).json({ error: 'report_id/version_id/parse_run_id 无效' });
+    }
+
+    const auth = await authorizeReportAccess(req, reportId);
+    if (!auth.ok) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+    const version = await loadReportVersion(reportId, versionId);
+    if (!version) {
+      return res.status(404).json({ error: 'target version not found' });
+    }
+
+    await parseRunService.switchCurrentParseRun(versionId, parseRunId);
+    return res.json({ ok: true, report_id: reportId, version_id: versionId, parse_run_id: parseRunId });
+  } catch (error: any) {
+    console.error('Error switching current parse:', error);
+    const message = String(error?.message || '');
+    if (message.includes('parse_run')) {
+      return res.status(409).json({ error: message });
+    }
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/reports/:id/restore-superseded-parse', authMiddleware, requirePermission('upload_reports'), async (req: AuthRequest, res) => {
+  try {
+    const reportId = Number(req.params.id);
+    const versionId = Number(req.body?.version_id);
+    const parseRunId = Number(req.body?.parse_run_id);
+    if (!reportId || !versionId || !parseRunId) {
+      return res.status(400).json({ error: 'report_id/version_id/parse_run_id 无效' });
+    }
+
+    const auth = await authorizeReportAccess(req, reportId);
+    if (!auth.ok) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+    const version = await loadReportVersion(reportId, versionId);
+    if (!version) {
+      return res.status(404).json({ error: 'target version not found' });
+    }
+
+    await parseRunService.restoreSupersededParseRun(versionId, parseRunId);
+    return res.json({ ok: true, report_id: reportId, version_id: versionId, parse_run_id: parseRunId });
+  } catch (error: any) {
+    console.error('Error restoring superseded parse:', error);
+    const message = String(error?.message || '');
+    if (message.includes('parse_run')) {
+      return res.status(409).json({ error: message });
+    }
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/reports/:id/retry-finalize', authMiddleware, requirePermission('upload_reports'), async (req: AuthRequest, res) => {
+  try {
+    const reportId = Number(req.params.id);
+    const parseRunId = Number(req.body?.parse_run_id);
+    if (!reportId || !parseRunId) {
+      return res.status(400).json({ error: 'report_id/parse_run_id 无效' });
+    }
+
+    const auth = await authorizeReportAccess(req, reportId);
+    if (!auth.ok) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+
+    const ownership = await pool.query(
+      `SELECT pr.report_version_id
+       FROM parse_runs pr
+       JOIN report_versions rv ON rv.id = pr.report_version_id
+       WHERE pr.id = $1
+         AND rv.report_id = $2
+       LIMIT 1`,
+      [parseRunId, reportId]
+    );
+    if (!ownership.rows[0]) {
+      return res.status(404).json({ error: 'parse_run not found' });
+    }
+
+    await parseRunService.retryFinalizeParseRun(parseRunId);
+    return res.json({ ok: true, report_id: reportId, parse_run_id: parseRunId });
+  } catch (error: any) {
+    console.error('Error retrying finalize:', error);
+    const message = String(error?.message || '');
+    if (message.includes('parse_run') || message.includes('final_status')) {
+      return res.status(409).json({ error: message });
+    }
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

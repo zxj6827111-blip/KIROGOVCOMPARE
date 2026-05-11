@@ -13,6 +13,7 @@ export type SupportedLlmProvider =
   | 'gemini'
   | 'gemini_openai'
   | 'modelscope'
+  | 'mimo'
   | 'zhipu'
   | 'nvidia'
   | 'deepseek'
@@ -31,6 +32,9 @@ function resolveProviderName(): SupportedLlmProvider {
   }
   if (provider === 'modelscope') {
     return 'modelscope';
+  }
+  if (provider === 'mimo') {
+    return 'mimo';
   }
   if (provider === 'zhipu') {
     return 'zhipu';
@@ -119,6 +123,29 @@ export function createLlmProvider(providerName?: string, modelName?: string): Ll
     }
 
     return new ModelScopeLlmProvider(apiKey, model);
+  }
+
+  if (provider === 'mimo') {
+    const apiKey = process.env.MIMO_API_KEY;
+    const model = resolveFirstNonEmpty(modelName, process.env.MIMO_MODEL, process.env.LLM_MODEL);
+    const baseURL = resolveFirstNonEmpty(process.env.MIMO_BASE_URL);
+    const apiMode = (process.env.MIMO_API_MODE || 'chat_completions').trim().toLowerCase();
+
+    if (!apiKey) {
+      throw new LlmProviderError('MIMO_API_KEY is required for MiMo provider', 'mimo_missing_api_key');
+    }
+    if (!model) {
+      throw new LlmProviderError('MIMO_MODEL or LLM_MODEL is required for MiMo provider', 'mimo_missing_model');
+    }
+    if (!baseURL) {
+      throw new LlmProviderError('MIMO_BASE_URL is required for MiMo provider', 'mimo_missing_base_url');
+    }
+
+    return new OpenAILlmProvider(apiKey, model, {
+      baseURL,
+      apiMode,
+      providerLabel: 'mimo',
+    });
   }
 
   if (provider === 'nvidia' || provider === 'deepseek' || provider === 'kimi') {

@@ -140,6 +140,34 @@ export interface ReportContextPayload {
   dataQuality: DataQualityStatus;
 }
 
+export interface AuxiliaryRiskLevelDefinition {
+  rating: ReportRating;
+  title: string;
+  summary: string;
+  thresholdText: string;
+}
+
+export interface AuxiliaryRiskLevelExplanation {
+  currentLevelText: string;
+  rating: ReportRating;
+  riskLabel: string;
+  reason: string;
+  currentBasis: string[];
+  levelCount: number;
+  levels: AuxiliaryRiskLevelDefinition[];
+}
+
+export type AuxiliaryRiskThresholdStatus = 'stable' | 'attention' | 'critical';
+
+export interface AuxiliaryRiskThresholdMetric {
+  key: string;
+  label: string;
+  valueText: string;
+  thresholdText: string;
+  description: string;
+  status: AuxiliaryRiskThresholdStatus;
+}
+
 export interface ReportMetadata {
   reportTitle: string;
   summaryLine: string;
@@ -261,9 +289,129 @@ interface LegacyAIReportResponse {
   summary?: unknown;
 }
 
+export interface GovInsightBackendScorecard {
+  key: string;
+  label: string;
+  unit: '%' | '件';
+  current: number;
+  previous: number | null;
+  changePct: number | null;
+  status: 'good' | 'watch' | 'risk';
+}
+
+export interface GovInsightBackendDataQualityCheck {
+  key: string;
+  label: string;
+  passed: boolean;
+  actual: number | null;
+  expected: number | null;
+  note: string;
+}
+
+export interface GovInsightBackendReportPayload {
+  version?: string;
+  materializeStatus?: string;
+  metricsSnapshot?: {
+    version?: string;
+    regionId?: number;
+    year?: number;
+    materializeStatus?: string;
+    acceptedTotal?: number;
+    newReceived?: number;
+    carriedOver?: number;
+    carriedForward?: number;
+    resolvedTotal?: number;
+    substantiveRate?: number;
+    unableRate?: number;
+    noInfoShareInUnable?: number;
+    revRate?: number;
+    litRate?: number;
+    overallCorrectionRate?: number;
+    carryForwardRate?: number;
+    scorecards?: GovInsightBackendScorecard[];
+  };
+  dataQuality?: {
+    hasAnomaly?: boolean;
+    materializeStatus?: string;
+    factConclusionAllowed?: boolean;
+    warnings?: string[];
+    checks?: GovInsightBackendDataQualityCheck[];
+  };
+  riskAssessment?: {
+    rating?: ReportRating;
+    riskLabel?: string;
+    reason?: string;
+  };
+  metadataSeeds?: Partial<ReportMetadata>;
+  riskPrioritySeeds?: Array<Partial<RiskItem> & { sequence?: number }>;
+  rectificationTaskSkeleton?: Partial<RectificationTaskItem>[];
+  appendixSkeleton?: {
+    metricAuditRows?: Partial<AppendixMetricRow>[];
+    usageBoundaries?: Partial<AppendixBoundaryItem>[];
+    supplementDataItems?: Partial<AppendixSupplementItem>[];
+  };
+  contentBoundaries?: {
+    factConclusionAllowed?: boolean;
+    factConstraint?: string;
+    analysisConstraint?: string;
+    prohibitedScopes?: string[];
+    appendixGenerationRule?: string;
+  };
+  hierarchyAnalysis?: {
+    districtCoverage?: {
+      available?: boolean;
+      total?: number;
+      reportCoverage?: string;
+      parseSuccessRate?: string;
+      statsCoverage?: string;
+      analyzableCoverage?: string;
+      officialCoverage?: string;
+    };
+    departmentCoverage?: {
+      available?: boolean;
+      total?: number;
+      reportCoverage?: string;
+      parseSuccessRate?: string;
+      statsCoverage?: string;
+      analyzableCoverage?: string;
+      officialCoverage?: string;
+    };
+    districtFocus?: Array<{
+      regionId?: number;
+      orgId?: string;
+      orgName?: string;
+      unitType?: string;
+      materializeStatus?: string | null;
+      riskLevel?: string | null;
+      riskReason?: string | null;
+      newApplications?: number | null;
+      acceptedTotal?: number | null;
+      disclosureRate?: number | null;
+      correctionRate?: number | null;
+      isSampleSufficient?: boolean;
+    }>;
+    departmentFocus?: Array<{
+      regionId?: number;
+      orgId?: string;
+      orgName?: string;
+      unitType?: string;
+      materializeStatus?: string | null;
+      riskLevel?: string | null;
+      riskReason?: string | null;
+      newApplications?: number | null;
+      acceptedTotal?: number | null;
+      disclosureRate?: number | null;
+      correctionRate?: number | null;
+      isSampleSufficient?: boolean;
+    }>;
+  };
+}
+
 interface StoredNarrativeEnvelope {
   _reportFormat: 'govInsightNarrativeV1' | 'govInsightFormalReportV2';
-  narrative: Record<string, unknown>;
+  narrative?: Record<string, unknown> | null;
+  reportContent?: Record<string, unknown> | null;
+  reportPayload?: GovInsightBackendReportPayload | null;
 }
 
 type CompatibleEnhancedAIReportResponse = Omit<EnhancedAIReportResponse, 'version'> & {
@@ -286,6 +434,49 @@ const TASK_TYPE_VALUES: RectificationTaskType[] = [
 ];
 
 const TASK_PRIORITY_VALUES: RectificationTaskPriority[] = ['近期立即推进', '年内持续推进', '中期完善'];
+
+const legacyText = (...codePoints: number[]): string => String.fromCodePoint(...codePoints);
+
+const LEGACY_RISK_PRIORITY_MAP: Record<string, RiskPriorityLevel> = {
+  '首要关注事项': '首要关注事项',
+  '当前应优先关注': '首要关注事项',
+  [legacyText(0x68e3, 0x682c, 0xe6e6, 0x934f, 0x866b, 0x655e, 0x6d5c, 0x5b2e, 0x300d)]: '首要关注事项',
+  '重点关注事项': '重点关注事项',
+  '需重点关注': '重点关注事项',
+  [legacyText(0x95b2, 0x5d87, 0x5063, 0x934f, 0x866b, 0x655e, 0x6d5c, 0x5b2e, 0x300d)]: '重点关注事项',
+  '持续跟踪事项': '持续跟踪事项',
+  '需持续跟踪': '持续跟踪事项',
+  '需持续关注': '持续跟踪事项',
+  [legacyText(0x93b8, 0x4f7a, 0x753b, 0x74ba, 0x71bb, 0x91dc, 0x6d5c, 0x5b2e, 0x300d)]: '持续跟踪事项',
+};
+
+const LEGACY_TASK_TYPE_MAP: Record<string, RectificationTaskType> = {
+  '机制建设类': '机制建设类',
+  '机制建设': '机制建设类',
+  '制度建设类': '机制建设类',
+  '规范整治类': '规范整治类',
+  '规范治理类': '规范整治类',
+  '规范整改类': '规范整治类',
+  '能力提升类': '能力提升类',
+  '能力建设类': '能力提升类',
+  '平台治理类': '平台治理类',
+  '平台优化类': '平台治理类',
+  '监督保障类': '监督保障类',
+  '监督落实类': '监督保障类',
+};
+
+const LEGACY_TASK_PRIORITY_MAP: Record<string, RectificationTaskPriority> = {
+  '近期立即推进': '近期立即推进',
+  '立即推进': '近期立即推进',
+  '近期推进': '近期立即推进',
+  '尽快推进': '近期立即推进',
+  '年内持续推进': '年内持续推进',
+  '年内推进': '年内持续推进',
+  '持续推进': '年内持续推进',
+  '中期完善': '中期完善',
+  '中期推进': '中期完善',
+  '中长期完善': '中期完善',
+};
 
 const safeDivide = (num: number, den: number): number => {
   if (!den) return 0;
@@ -549,7 +740,6 @@ const buildDataQualityStatus = (data: AnnualData): DataQualityStatus => {
     detail?.other.overdueFee,
     detail?.other.other
   );
-  const ignoreDetailSum = untreatedDetailSum + otherDetailSum;
 
   const checks: ReconciliationCheck[] = [
     {
@@ -663,6 +853,189 @@ export const determineRating = (
   }
 
   return { rating: 'B', riskLabel: '总体可控，部分风险需持续关注', reason: '整体运行可控，但重点环节仍需加强过程管控。' };
+};
+
+const AUXILIARY_RISK_LEVEL_DEFINITIONS: AuxiliaryRiskLevelDefinition[] = [
+  {
+    rating: 'A',
+    title: '总体平稳',
+    summary: '说明当前关键风险指标处于相对稳定区间，整体运行较为平稳。',
+    thresholdText: '行政复议纠错占比 < 10%，行政诉讼纠错占比 < 10%，且结转率 <= 3%。',
+  },
+  {
+    rating: 'B',
+    title: '持续关注',
+    summary: '说明整体总体可控，但部分重点环节仍需持续盯办和跟踪落实。',
+    thresholdText:
+      '未达到 A 级稳态区间，也未触发 C 级集中攻坚阈值；如出现数据异常、办理压力偏高或“无法提供”结构异常，也会判为 B 级。',
+  },
+  {
+    rating: 'C',
+    title: '集中攻坚',
+    summary: '说明重点问题已经比较明显，需要集中整改和专题推动。',
+    thresholdText:
+      '任一项达到阈值即进入 C 级：行政复议纠错占比 >= 25%，行政诉讼纠错占比 >= 18%，整体纠正占比 >= 20%，或结转率 >= 8%。',
+  },
+];
+
+export const buildAuxiliaryRiskLevelExplanation = (
+  current: ReportMetricsSnapshot,
+  previous: ReportMetricsSnapshot | null,
+  dataQuality: DataQualityStatus,
+  override?: Partial<{ rating: ReportRating; riskLabel: string; reason: string }>
+): AuxiliaryRiskLevelExplanation => {
+  const ratingResult = {
+    ...determineRating(current, previous, dataQuality),
+    ...override,
+  };
+  const currentBasis: string[] = [];
+  const revGrowth = changePct(current.revTotal, previous?.revTotal || 0);
+
+  if (dataQuality.hasAnomaly) {
+    currentBasis.push('当前存在数据勾稽异常或质量阻塞，正式成文前应先复核源数据。');
+  } else if (ratingResult.rating === 'A') {
+    currentBasis.push(`行政复议纠错占比为 ${formatPercent(current.revRate)}，低于 10% 稳态线。`);
+    currentBasis.push(`行政诉讼纠错占比为 ${formatPercent(current.litRate)}，低于 10% 稳态线。`);
+    currentBasis.push(`结转率为 ${formatPercent(current.carryForwardRate)}，处于 3% 以内。`);
+  } else if (ratingResult.rating === 'C') {
+    if (current.revRate >= 25) {
+      currentBasis.push(`行政复议纠错占比为 ${formatPercent(current.revRate)}，达到 25% 攻坚阈值。`);
+    }
+    if (current.litRate >= 18) {
+      currentBasis.push(`行政诉讼纠错占比为 ${formatPercent(current.litRate)}，达到 18% 攻坚阈值。`);
+    }
+    if (current.overallCorrectionRate >= 20) {
+      currentBasis.push(`整体纠正占比为 ${formatPercent(current.overallCorrectionRate)}，达到 20% 攻坚阈值。`);
+    }
+    if (current.carryForwardRate >= 8) {
+      currentBasis.push(`结转率为 ${formatPercent(current.carryForwardRate)}，达到 8% 攻坚阈值。`);
+    }
+  } else {
+    if (revGrowth !== null && revGrowth > 40) {
+      currentBasis.push(`行政复议量较上年增长 ${formatChangePct(revGrowth)}，提示办理压力和争议风险正在抬升。`);
+    }
+    if (current.unableRate >= 30) {
+      currentBasis.push(`“无法提供”占比为 ${formatPercent(current.unableRate)}，达到 30% 关注阈值。`);
+    }
+    if (current.noInfoShareInUnable >= 80) {
+      currentBasis.push(
+        `“本机关不掌握相关信息”占无法提供比重为 ${formatPercent(current.noInfoShareInUnable)}，达到 80% 关注阈值。`
+      );
+    }
+    if (!currentBasis.length) {
+      currentBasis.push('当前核心指标未进入 A 级稳态区间，同时也未触发 C 级集中攻坚阈值，因此归入 B 级持续关注档。');
+    }
+  }
+
+  return {
+    currentLevelText: `${ratingResult.rating}级（${ratingResult.riskLabel}）`,
+    rating: ratingResult.rating,
+    riskLabel: ratingResult.riskLabel,
+    reason: ratingResult.reason,
+    currentBasis,
+    levelCount: AUXILIARY_RISK_LEVEL_DEFINITIONS.length,
+    levels: AUXILIARY_RISK_LEVEL_DEFINITIONS,
+  };
+};
+
+export const filterClientFacingWarnings = (warnings?: string[]): string[] =>
+  Array.isArray(warnings) ? warnings.filter((item) => !/派生风险分值/.test(item)) : [];
+
+export const buildAuxiliaryRiskThresholdMetrics = (
+  current: ReportMetricsSnapshot,
+  previous: ReportMetricsSnapshot | null
+): AuxiliaryRiskThresholdMetric[] => {
+  const revGrowth = changePct(current.revTotal, previous?.revTotal || 0);
+  const metrics: AuxiliaryRiskThresholdMetric[] = [
+    {
+      key: 'rev-rate',
+      label: '行政复议纠错占比',
+      valueText: formatPercent(current.revRate),
+      thresholdText: 'A 级稳态线 < 10%，C 级攻坚线 >= 25%',
+      description:
+        current.revRate >= 25
+          ? '已触达 C 级攻坚阈值，说明纠错压力已经偏高。'
+          : current.revRate < 10
+            ? '处于 A 级稳态区间。'
+            : '暂未进入 A 级稳态区间，仍需持续关注。',
+      status: current.revRate >= 25 ? 'critical' : current.revRate < 10 ? 'stable' : 'attention',
+    },
+    {
+      key: 'lit-rate',
+      label: '行政诉讼纠错占比',
+      valueText: formatPercent(current.litRate),
+      thresholdText: 'A 级稳态线 < 10%，C 级攻坚线 >= 18%',
+      description:
+        current.litRate >= 18
+          ? '已触达 C 级攻坚阈值，说明争议化风险较明显。'
+          : current.litRate < 10
+            ? '处于 A 级稳态区间。'
+            : '仍在关注区间，需要继续跟踪。',
+      status: current.litRate >= 18 ? 'critical' : current.litRate < 10 ? 'stable' : 'attention',
+    },
+    {
+      key: 'carry-forward-rate',
+      label: '结转率',
+      valueText: formatPercent(current.carryForwardRate),
+      thresholdText: 'A 级稳态线 <= 3%，C 级攻坚线 >= 8%',
+      description:
+        current.carryForwardRate >= 8
+          ? '已触达 C 级攻坚阈值，说明积压或跨周期压力偏大。'
+          : current.carryForwardRate <= 3
+            ? '处于 A 级稳态区间。'
+            : '暂未回到稳态区间，还要继续压降。',
+      status: current.carryForwardRate >= 8 ? 'critical' : current.carryForwardRate <= 3 ? 'stable' : 'attention',
+    },
+    {
+      key: 'overall-correction-rate',
+      label: '整体纠正占比',
+      valueText: formatPercent(current.overallCorrectionRate),
+      thresholdText: 'C 级攻坚线 >= 20%',
+      description:
+        current.overallCorrectionRate >= 20
+          ? '已触达 C 级攻坚阈值，说明前端办理与复核支撑需要集中提升。'
+          : '尚未触达 C 级攻坚阈值。',
+      status: current.overallCorrectionRate >= 20 ? 'critical' : 'stable',
+    },
+    {
+      key: 'unable-rate',
+      label: '无法提供占比',
+      valueText: formatPercent(current.unableRate),
+      thresholdText: 'B 级关注线 >= 30%',
+      description:
+        current.unableRate >= 30
+          ? '已达到 B 级关注线，提示公开供给或办理口径仍需关注。'
+          : '未达到 B 级关注线。',
+      status: current.unableRate >= 30 ? 'attention' : 'stable',
+    },
+    {
+      key: 'no-info-share',
+      label: '不掌握信息占比',
+      valueText: formatPercent(current.noInfoShareInUnable),
+      thresholdText: 'B 级关注线 >= 80%',
+      description:
+        current.noInfoShareInUnable >= 80
+          ? '已达到 B 级关注线，提示检索留痕和协同调取仍需补强。'
+          : '未达到 B 级关注线。',
+      status: current.noInfoShareInUnable >= 80 ? 'attention' : 'stable',
+    },
+  ];
+
+  if (revGrowth !== null) {
+    metrics.unshift({
+      key: 'rev-growth',
+      label: '行政复议量同比',
+      valueText: formatChangePct(revGrowth),
+      thresholdText: 'B 级关注线 > 40%',
+      description:
+        revGrowth > 40
+          ? '已超过 B 级关注线，说明办理压力和争议风险正在抬升。'
+          : '未达到 B 级关注线。',
+      status: revGrowth > 40 ? 'attention' : 'stable',
+    });
+  }
+
+  return metrics;
 };
 
 const toSignal = (value: number | null): ReportSignal => {
@@ -1113,6 +1486,8 @@ const buildRuleBasedConfirmedFacts = (
       points: [
         `根据公开数据，本年新收申请${formatInteger(current.newReceived)}件，上年结转${formatInteger(current.carriedOver)}件，受理总量${formatInteger(current.acceptedTotal)}件，结转下年${formatInteger(current.carriedForward)}件。`,
         `根据公开数据，予以公开${formatInteger(current.publicCount)}件，部分公开${formatInteger(current.partialCount)}件，不予公开${formatInteger(current.notOpenCount)}件，无法提供${formatInteger(current.unableCount)}件，不予处理${formatInteger(current.ignoreCount)}件，其他处理${formatInteger(current.otherCount)}件。`,
+        `根据公开数据，实质公开率${formatPercent(current.substantiveRate)}，无法提供占比${formatPercent(current.unableRate)}。`,
+        `根据公开数据，“本机关不掌握相关信息”${formatInteger(current.noInfoCount)}件，占“无法提供”比重${formatPercent(current.noInfoShareInUnable)}。`,
         `根据公开数据，自然人申请占比${formatPercent(current.naturalShare)}，法人及其他组织申请占比${formatPercent(current.legalShare)}。`,
       ],
     },
@@ -1121,6 +1496,7 @@ const buildRuleBasedConfirmedFacts = (
       points: [
         `根据公开数据，行政复议${formatInteger(current.revTotal)}件，其中纠正${formatInteger(current.revCorrected)}件。`,
         `根据公开数据，行政诉讼${formatInteger(current.litTotal)}件，其中纠正${formatInteger(current.litCorrected)}件。`,
+        `根据公开数据，行政复议和行政诉讼合计${formatInteger(current.disputesTotal)}件，其中纠正${formatInteger(current.disputesCorrected)}件。`,
         `根据公开数据，复议纠正占比${formatPercent(current.revRate)}，诉讼纠正占比${formatPercent(current.litRate)}，整体纠正占比${formatPercent(current.overallCorrectionRate)}。`,
       ],
     },
@@ -1206,9 +1582,9 @@ const buildRuleBasedPrudentAnalyses = (
 const buildRuleBasedUnansweredQuestions = (): UnansweredQuestionItem[] =>
   [
     {
-      question: '当前尚难判断各县区、各部门之间的差异程度及重点问题是否集中于少数单位。',
-      currentLimit: '现有数据以年度汇总口径为主，缺少按县区、按部门拆分后的明细台账。',
-      nextDataNeeded: '补充县区和部门分户统计台账、季度监测数据及重点单位问题清单后，可进一步开展差异分析。',
+      question: '当前尚不足以形成覆盖全部县区、部门的正式比较结论。',
+      currentLimit: '现有年度统计和监测结果可对已纳入监测范围且达到样本门槛的单位作内部重点样本提示，但尚不足以形成覆盖全部单位的正式比较或考核结论。',
+      nextDataNeeded: '补充全口径分户统计台账、连续监测数据和同口径复核结果后，可进一步形成更完整的比较分析。',
     },
     {
       question: '当前尚难准确识别高频申请主题分布及其变化情况。',
@@ -1456,11 +1832,11 @@ const buildAppendixBoundaries = (): AppendixBoundaryItem[] =>
   [
     {
       title: '适用范围',
-      description: '本报告适用于年度综合研判、问题识别、任务部署和内部督办，不直接替代业务台账和正式通报材料。',
+      description: '本报告适用于年度工作研判、问题识别、任务部署和内部督办，可作为领导掌握情况和安排工作的参考。',
     },
     {
-      title: '不适用范围',
-      description: '本报告不适用于县区排名、部门排序、单一案件责任认定、个案定性和正式考核结论。',
+      title: '排序与考核边界',
+      description: '本报告不形成覆盖全部县区、部门的正式排名，不作为正式考核结论；对已纳入监测范围且达到样本门槛的单位，可按既定阈值作内部重点样本提示，供研判和督办参考。',
     },
     {
       title: '事实使用边界',
@@ -1468,7 +1844,7 @@ const buildAppendixBoundaries = (): AppendixBoundaryItem[] =>
     },
     {
       title: '深化分析条件',
-      description: '需结合申请台账、案件文书、明细分类数据和季度监测数据，方可进一步开展原因分类、领域分布和重点单位分析。',
+      description: '如需形成正式比较结论、责任认定或更细分的原因分析，仍需结合申请台账、案件文书、明细分类数据和连续监测数据进一步核实。',
     },
   ].map((item) => ({
     title: softenInferenceText(item.title),
@@ -1532,59 +1908,6 @@ const buildReportAppendices = (context: ReportContextPayload): ReportAppendices 
   usageBoundaries: buildAppendixBoundaries(),
   supplementDataItems: buildAppendixSupplementItems(),
 });
-
-export const buildAiNarrativePrompt = (context: ReportContextPayload): string => {
-  return `
-请根据输入的政务公开年度报告摘要、结构化统计数据及上年同期数据，生成一份“准正式定稿版”的政府信息公开智能辅策报告，供政府政务公开分管领导内部审阅使用。
-
-【目标】
-在现有成熟目录结构基础上，进一步提升正式程度、风险事项主次感、整改任务分办感、结语收束感和数据边界表达。
-
-【固定目录结构】
-一、总体判断
-二、需要重点关注的风险事项
-三、基于年报可以确认的事实
-四、基于数据作出的审慎分析
-五、当前报告尚无法充分回答的问题
-六、下一步工作建议与整改任务清单
-七、结语
-
-【核心约束】
-1. 首页指标、同比、占比、纠正率、整体纠正占比、结转率均已由程序计算，请直接使用，不要自行重算。
-2. 不得自行生成上年同期值、县区排名、部门排序、原因分类、典型案例。
-3. 如果 dataQuality.factConclusionAllowed 为 false，则“基于年报可以确认的事实”章节不得展开事实性结论，应明确写出“数据勾稽异常，需复核源数据”。
-4. 附件由系统程序生成，你只需返回正文结构化内容。
-
-【写法要求】
-1. metadata.summaryLine 必须写成“综合判断：……”式机关化表达，不得出现系统状态页措辞。
-2. overallJudgments 写成“总体概述 + 3—4条关键判断”，不要写成“判断1/判断2”。
-3. riskItems 必须区分“首要关注事项 / 重点关注事项 / 持续跟踪事项”，不得同权罗列。
-4. confirmedFacts 只能写年度报告摘要和结构化数据能够直接证明的事实，不得加入推断性归因。
-5. prudentAnalyses 必须使用审慎措辞，如“表明、提示、反映出、可能存在、一定程度上说明、需持续关注”。
-6. unansweredQuestions 必须保留，采用“问题 + 当前边界 + 后续补数建议”的表达。
-7. rectificationTasks 必须写成可分办、可督办、可跟踪的任务分解表。
-
-【风险事项默认优先级】
-1. 首要关注：依申请公开承压上行风险、答复规范性及复议诉讼风险、“本机关不掌握相关信息”占比较高所反映的检索协同和口径适用风险。
-2. 重点关注：实质公开率及公开供给匹配风险、基层能力与法治审查支撑风险。
-3. 持续跟踪：政务新媒体内容审核和平台运行风险、政策解读质效及精准触达问题。
-
-【任务分解表字段】
-sequence、taskName、taskType、priority、problem、measure、leadUnit、supportUnits、responsibilityLevel、deadline、milestones、trackingIndicator、supervisionMethod。
-
-【风格约束】
-1. 统一采用政府机关正式材料风格。
-2. 不得使用“显著、明显、大幅、持续向好、成效明显”等无充分支撑词。
-3. 不得将辅助研判标签写成正式考核结论。
-4. 不要写成宣传稿、产品说明书或 AI 自动分析稿。
-
-【输出要求】
-仅返回合法 JSON，不要输出 Markdown，不要补充解释文字。
-
-输入数据如下：
-${JSON.stringify(context, null, 2)}
-`.trim();
-};
 
 export const getNarrativeResponseSchema = () => ({
   type: 'object',
@@ -1729,6 +2052,16 @@ const sanitizeMetadata = (
   };
 };
 
+const appendFallbackTail = <T,>(items: T[], fallback: T[], maxItems: number): T[] => {
+  if (!fallback.length) {
+    return items.slice(0, maxItems);
+  }
+  if (!items.length) {
+    return fallback.slice(0, maxItems);
+  }
+  return [...items, ...fallback.slice(items.length, maxItems)].slice(0, maxItems);
+};
+
 const sanitizeOverallJudgments = (value: unknown, fallback: OverallJudgmentItem[]): OverallJudgmentItem[] => {
   if (!Array.isArray(value)) return fallback;
   const normalized = value
@@ -1744,24 +2077,55 @@ const sanitizeOverallJudgments = (value: unknown, fallback: OverallJudgmentItem[
     .filter((item) => item.heading && item.factBasis && item.riskJudgment && item.managementImplication)
     .slice(0, 4);
 
-  return normalized.length ? normalized : fallback;
+  return appendFallbackTail(normalized, fallback, Math.max(fallback.length, 4));
 };
 
-const normalizeRiskPriority = (value: unknown): RiskPriorityLevel => {
+const normalizeRiskPriority = (
+  value: unknown,
+  fallback: RiskPriorityLevel = '首要关注事项'
+): RiskPriorityLevel => {
   const normalized = softenInferenceText(value);
-  if (normalized === '重点关注事项') return '重点关注事项';
-  if (normalized === '持续跟踪事项' || normalized === '需持续跟踪') return '持续跟踪事项';
-  if (normalized === '当前应优先关注') return '首要关注事项';
-  return '首要关注事项';
+  if (LEGACY_RISK_PRIORITY_MAP[normalized]) return LEGACY_RISK_PRIORITY_MAP[normalized];
+  if (normalized.includes('重点')) return '重点关注事项';
+  if (normalized.includes('跟踪') || normalized.includes('持续')) return '持续跟踪事项';
+  if (normalized.includes('首要') || normalized.includes('优先')) return '首要关注事项';
+  return fallback;
+};
+
+const normalizeRectificationTaskType = (
+  value: unknown,
+  fallback: RectificationTaskType = '机制建设类'
+): RectificationTaskType => {
+  const normalized = softenInferenceText(value);
+  if (LEGACY_TASK_TYPE_MAP[normalized]) return LEGACY_TASK_TYPE_MAP[normalized];
+  if (normalized.includes('机制') || normalized.includes('制度')) return '机制建设类';
+  if (normalized.includes('规范') || normalized.includes('整改') || normalized.includes('整治')) return '规范整治类';
+  if (normalized.includes('能力') || normalized.includes('培训')) return '能力提升类';
+  if (normalized.includes('平台') || normalized.includes('系统')) return '平台治理类';
+  if (normalized.includes('监督') || normalized.includes('考核') || normalized.includes('保障')) return '监督保障类';
+  return fallback;
+};
+
+const normalizeRectificationTaskPriority = (
+  value: unknown,
+  fallback: RectificationTaskPriority = '近期立即推进'
+): RectificationTaskPriority => {
+  const normalized = softenInferenceText(value);
+  if (LEGACY_TASK_PRIORITY_MAP[normalized]) return LEGACY_TASK_PRIORITY_MAP[normalized];
+  if (normalized.includes('立即') || normalized.includes('近期') || normalized.includes('尽快')) return '近期立即推进';
+  if (normalized.includes('年内') || normalized.includes('持续')) return '年内持续推进';
+  if (normalized.includes('中期') || normalized.includes('中长期')) return '中期完善';
+  return fallback;
 };
 
 const sanitizeRiskItems = (value: unknown, fallback: RiskItem[]): RiskItem[] => {
   if (!Array.isArray(value)) return fallback;
   const normalized = value
-    .map((item) => {
+    .map((item, index) => {
       const obj = typeof item === 'object' && item ? (item as Record<string, unknown>) : {};
+      const fallbackItem = fallback[index] || fallback[fallback.length - 1];
       return {
-        priorityLevel: normalizeRiskPriority(obj.priorityLevel),
+        priorityLevel: normalizeRiskPriority(obj.priorityLevel, fallbackItem?.priorityLevel || '首要关注事项'),
         riskName: softenInferenceText(obj.riskName),
         basis: softenInferenceText(obj.basis),
         manifestation: softenInferenceText(obj.manifestation),
@@ -1770,10 +2134,12 @@ const sanitizeRiskItems = (value: unknown, fallback: RiskItem[]): RiskItem[] => 
       };
     })
     .filter((item) => item.riskName && item.basis && item.manifestation && item.impact && item.focus)
-    .slice(0, 7)
+    .slice(0, 5)
     .sort((a, b) => RISK_PRIORITY_ORDER[a.priorityLevel] - RISK_PRIORITY_ORDER[b.priorityLevel]);
 
-  return normalized.length ? normalized : fallback;
+  return appendFallbackTail(normalized, fallback, Math.max(fallback.length, 5)).sort(
+    (a, b) => RISK_PRIORITY_ORDER[a.priorityLevel] - RISK_PRIORITY_ORDER[b.priorityLevel]
+  );
 };
 
 const sanitizeFactGroups = (value: unknown, fallback: FactGroupItem[]): FactGroupItem[] => {
@@ -1841,12 +2207,8 @@ const sanitizeRectificationTasks = (
     .map((item, index) => {
       const obj = typeof item === 'object' && item ? (item as Record<string, unknown>) : {};
       const fallbackItem = fallback[index] || fallback[fallback.length - 1];
-      const taskType = TASK_TYPE_VALUES.includes(obj.taskType as RectificationTaskType)
-        ? (obj.taskType as RectificationTaskType)
-        : fallbackItem?.taskType || '机制建设类';
-      const priority = TASK_PRIORITY_VALUES.includes(obj.priority as RectificationTaskPriority)
-        ? (obj.priority as RectificationTaskPriority)
-        : fallbackItem?.priority || '近期立即推进';
+      const taskType = normalizeRectificationTaskType(obj.taskType, fallbackItem?.taskType || '机制建设类');
+      const priority = normalizeRectificationTaskPriority(obj.priority, fallbackItem?.priority || '近期立即推进');
 
       return {
         sequence: Number(obj.sequence || index + 1),
@@ -1880,7 +2242,7 @@ const sanitizeRectificationTasks = (
     )
     .slice(0, 10);
 
-  return normalized.length ? normalized : fallback;
+  return appendFallbackTail(normalized, fallback, Math.max(fallback.length, 7));
 };
 
 const isFormalStoredEnvelope = (value: unknown): value is StoredNarrativeEnvelope => {
@@ -1889,8 +2251,10 @@ const isFormalStoredEnvelope = (value: unknown): value is StoredNarrativeEnvelop
     !!obj &&
     typeof obj === 'object' &&
     (obj._reportFormat === FORMAL_REPORT_FORMAT || obj._reportFormat === 'govInsightNarrativeV1') &&
-    !!obj.narrative &&
-    typeof obj.narrative === 'object'
+    (
+      (!!obj.narrative && typeof obj.narrative === 'object') ||
+      (!!obj.reportContent && typeof obj.reportContent === 'object')
+    )
   );
 };
 
@@ -1925,48 +2289,327 @@ const isNormalizedFormalReport = (value: unknown): value is CompatibleEnhancedAI
   );
 };
 
+const isBackendReportPayload = (value: unknown): value is GovInsightBackendReportPayload => {
+  if (!value || typeof value !== 'object') return false;
+  const obj = value as GovInsightBackendReportPayload;
+  return Boolean(obj.metricsSnapshot || obj.dataQuality || obj.riskAssessment || obj.version === 'report_payload_v1');
+};
+
+const toReportSignal = (value: number | null): ReportSignal => {
+  if (value === null || Number.isNaN(value) || Math.abs(value) < 0.05) return 'flat';
+  return value > 0 ? 'up' : 'down';
+};
+
+const normalizeBackendScorecards = (
+  backendPayload: GovInsightBackendReportPayload | null | undefined,
+  fallback: ScorecardItem[]
+): ScorecardItem[] => {
+  const rawItems = backendPayload?.metricsSnapshot?.scorecards;
+  if (!Array.isArray(rawItems) || rawItems.length === 0) {
+    return fallback;
+  }
+
+  const fallbackByKey = new Map(fallback.map((item) => [item.key, item]));
+
+  return rawItems.map((item, index) => {
+    const fallbackItem = fallbackByKey.get(String(item?.key || '')) || fallback[index] || fallback[0];
+    const current = Number(item?.current || 0);
+    const previous = item?.previous === null || item?.previous === undefined ? fallbackItem?.previous ?? 0 : Number(item.previous);
+    const change = item?.changePct === null || item?.changePct === undefined ? fallbackItem?.changePct ?? null : Number(item.changePct);
+    return {
+      key: String(item?.key || fallbackItem?.key || `scorecard_${index}`),
+      label: String(item?.label || fallbackItem?.label || ''),
+      unit: item?.unit || fallbackItem?.unit || '%',
+      current,
+      previous,
+      changePct: change,
+      signal: toReportSignal(change),
+      status: item?.status || fallbackItem?.status || 'watch',
+      interpretation: fallbackItem?.interpretation || `${String(item?.label || '指标')}已按后端指标快照展示。`,
+    };
+  });
+};
+
+const normalizeBackendDataQuality = (
+  backendPayload: GovInsightBackendReportPayload | null | undefined,
+  fallback: DataQualityStatus
+): DataQualityStatus => {
+  const payloadQuality = backendPayload?.dataQuality;
+  if (!payloadQuality) return fallback;
+
+  const warnings = Array.isArray(payloadQuality.warnings)
+    ? payloadQuality.warnings.map((item) => normalizeText(item)).filter(Boolean)
+    : fallback.warnings;
+  const reconciliationChecks = Array.isArray(payloadQuality.checks)
+    ? payloadQuality.checks.map((item) => ({
+        key: String(item?.key || ''),
+        label: String(item?.label || ''),
+        expected: item?.expected === null || item?.expected === undefined ? 0 : Number(item.expected),
+        actual: item?.actual === null || item?.actual === undefined ? 0 : Number(item.actual),
+        passed: Boolean(item?.passed),
+        note: normalizeText(item?.note),
+      }))
+    : fallback.reconciliationChecks;
+  const materializeStatus = String(payloadQuality.materializeStatus || backendPayload?.materializeStatus || '');
+  const hasAnomaly = Boolean(payloadQuality.hasAnomaly);
+  const contentBoundaryAllowed = backendPayload?.contentBoundaries?.factConclusionAllowed;
+  const factConclusionAllowed =
+    typeof contentBoundaryAllowed === 'boolean'
+      ? contentBoundaryAllowed
+      : typeof payloadQuality.factConclusionAllowed === 'boolean'
+        ? payloadQuality.factConclusionAllowed
+        : !hasAnomaly && !materializeStatus.startsWith('blocked_');
+
+  return {
+    hasAnomaly,
+    factConclusionAllowed,
+    warnings,
+    reconciliationChecks,
+  };
+};
+
+const normalizeBackendMetricsSnapshot = (
+  backendPayload: GovInsightBackendReportPayload | null | undefined,
+  fallback: ReportMetricsSnapshot
+): ReportMetricsSnapshot => {
+  const payloadMetrics = backendPayload?.metricsSnapshot;
+  if (!payloadMetrics) return fallback;
+
+  return {
+    ...fallback,
+    year: payloadMetrics.year === undefined ? fallback.year : Number(payloadMetrics.year),
+    newReceived:
+      payloadMetrics.newReceived === undefined ? fallback.newReceived : Number(payloadMetrics.newReceived),
+    carriedOver:
+      payloadMetrics.carriedOver === undefined ? fallback.carriedOver : Number(payloadMetrics.carriedOver),
+    acceptedTotal:
+      payloadMetrics.acceptedTotal === undefined ? fallback.acceptedTotal : Number(payloadMetrics.acceptedTotal),
+    carriedForward:
+      payloadMetrics.carriedForward === undefined ? fallback.carriedForward : Number(payloadMetrics.carriedForward),
+    resolvedTotal:
+      payloadMetrics.resolvedTotal === undefined ? fallback.resolvedTotal : Number(payloadMetrics.resolvedTotal),
+    substantiveRate:
+      payloadMetrics.substantiveRate === undefined ? fallback.substantiveRate : Number(payloadMetrics.substantiveRate),
+    unableRate: payloadMetrics.unableRate === undefined ? fallback.unableRate : Number(payloadMetrics.unableRate),
+    noInfoShareInUnable:
+      payloadMetrics.noInfoShareInUnable === undefined
+        ? fallback.noInfoShareInUnable
+        : Number(payloadMetrics.noInfoShareInUnable),
+    revRate: payloadMetrics.revRate === undefined ? fallback.revRate : Number(payloadMetrics.revRate),
+    litRate: payloadMetrics.litRate === undefined ? fallback.litRate : Number(payloadMetrics.litRate),
+    overallCorrectionRate:
+      payloadMetrics.overallCorrectionRate === undefined
+        ? fallback.overallCorrectionRate
+        : Number(payloadMetrics.overallCorrectionRate),
+    carryForwardRate:
+      payloadMetrics.carryForwardRate === undefined
+        ? fallback.carryForwardRate
+        : Number(payloadMetrics.carryForwardRate),
+  };
+};
+
+const applyBackendPayloadToContext = (
+  context: ReportContextPayload,
+  backendPayload: GovInsightBackendReportPayload | null | undefined
+): ReportContextPayload => {
+  if (!isBackendReportPayload(backendPayload)) {
+    return context;
+  }
+
+  const current = normalizeBackendMetricsSnapshot(backendPayload, context.current);
+  const dataQuality = normalizeBackendDataQuality(backendPayload, context.dataQuality);
+  const rating = backendPayload.riskAssessment?.rating || context.rating;
+  const riskLabel = normalizeText(backendPayload.riskAssessment?.riskLabel) || context.riskLabel;
+
+  return {
+    ...context,
+    current,
+    rating,
+    riskLabel,
+    dataQuality,
+    topSignals: buildTopSignals(current, context.previous, dataQuality),
+    dataWarnings: buildDataWarnings(current, context.previous, context.annualReportSummary, dataQuality),
+  };
+};
+
+const normalizeBackendMetadata = (
+  backendPayload: GovInsightBackendReportPayload | null | undefined,
+  fallback: ReportMetadata,
+  context: ReportContextPayload | null | undefined
+): ReportMetadata => {
+  if (!backendPayload?.metadataSeeds || !context) return fallback;
+  return sanitizeMetadata(backendPayload.metadataSeeds, fallback, context);
+};
+
+const normalizeBackendRiskItems = (
+  backendPayload: GovInsightBackendReportPayload | null | undefined,
+  fallback: RiskItem[]
+): RiskItem[] => {
+  const riskPrioritySeeds = backendPayload?.riskPrioritySeeds;
+  if (!Array.isArray(riskPrioritySeeds) || riskPrioritySeeds.length === 0) {
+    return fallback;
+  }
+  return sanitizeRiskItems(riskPrioritySeeds, fallback);
+};
+
+const normalizeBackendRectificationTasks = (
+  backendPayload: GovInsightBackendReportPayload | null | undefined,
+  fallback: RectificationTaskItem[]
+): RectificationTaskItem[] => {
+  const rectificationTaskSkeleton = backendPayload?.rectificationTaskSkeleton;
+  if (!Array.isArray(rectificationTaskSkeleton) || rectificationTaskSkeleton.length === 0) {
+    return fallback;
+  }
+  return sanitizeRectificationTasks(rectificationTaskSkeleton, fallback);
+};
+
+const normalizeBackendAppendices = (
+  backendPayload: GovInsightBackendReportPayload | null | undefined,
+  fallback: ReportAppendices,
+  dataQuality: DataQualityStatus
+): ReportAppendices => {
+  const metricAuditRowsRaw = backendPayload?.appendixSkeleton?.metricAuditRows;
+  const usageBoundariesRaw = backendPayload?.appendixSkeleton?.usageBoundaries;
+  const supplementItemsRaw = backendPayload?.appendixSkeleton?.supplementDataItems;
+  const metricAuditRowSource = Array.isArray(metricAuditRowsRaw) ? metricAuditRowsRaw : null;
+  const usageBoundarySource = Array.isArray(usageBoundariesRaw) ? usageBoundariesRaw : null;
+  const supplementSource = Array.isArray(supplementItemsRaw) ? supplementItemsRaw : null;
+  const metricAuditRows = metricAuditRowSource
+    ? metricAuditRowSource
+        .map((item) => ({
+          indicator: softenInferenceText(item?.indicator || ''),
+          sourceFields: softenInferenceText(item?.sourceFields || ''),
+          formula: softenInferenceText(item?.formula || ''),
+          currentValue: softenInferenceText(item?.currentValue || ''),
+          previousValue: softenInferenceText(item?.previousValue || ''),
+          reconciliationNote: softenInferenceText(item?.reconciliationNote || ''),
+        }))
+        .filter((item) => item.indicator && item.sourceFields && item.formula)
+    : fallback.metricAuditRows;
+  const usageBoundaries = usageBoundarySource
+    ? usageBoundarySource
+        .map((item) => ({
+          title: softenInferenceText(item?.title || ''),
+          description: softenInferenceText(item?.description || ''),
+        }))
+        .filter((item) => item.title && item.description)
+    : fallback.usageBoundaries;
+  const supplementDataItems = supplementSource
+    ? supplementSource
+        .map((item) => ({
+          item: softenInferenceText(item?.item || ''),
+          purpose: softenInferenceText(item?.purpose || ''),
+          suggestedSource: softenInferenceText(item?.suggestedSource || ''),
+          note: softenInferenceText(item?.note || ''),
+        }))
+        .filter((item) => item.item && item.purpose && item.suggestedSource && item.note)
+    : fallback.supplementDataItems;
+
+  return {
+    metricAuditRows: metricAuditRows.length ? metricAuditRows : fallback.metricAuditRows,
+    reconciliationChecks: dataQuality.reconciliationChecks,
+    usageBoundaries: usageBoundaries.length ? usageBoundaries : fallback.usageBoundaries,
+    supplementDataItems: supplementDataItems.length ? supplementDataItems : fallback.supplementDataItems,
+  };
+};
+
+const mergeBackendPayloadIntoReport = (
+  report: EnhancedAIReportResponse,
+  backendPayload?: GovInsightBackendReportPayload | null,
+  _context?: ReportContextPayload | null
+): EnhancedAIReportResponse => {
+  if (!isBackendReportPayload(backendPayload)) {
+    return report;
+  }
+
+  const scorecards = normalizeBackendScorecards(backendPayload, report.scorecards);
+  const dataQuality = normalizeBackendDataQuality(backendPayload, report.dataQuality);
+  const riskAssessment = backendPayload.riskAssessment;
+  const appendices = normalizeBackendAppendices(backendPayload, report.appendices, dataQuality);
+
+  return {
+    ...report,
+    metadata: {
+      ...report.metadata,
+      auxiliaryRiskLevel:
+        riskAssessment?.rating && riskAssessment?.riskLabel
+          ? `${riskAssessment.rating}级（${riskAssessment.riskLabel}）`
+          : report.metadata.auxiliaryRiskLevel,
+    },
+    scorecards,
+    dataQuality,
+    appendices,
+  };
+};
+
 export const buildRuleBasedEnhancedReport = (
   entity: EntityProfile,
   year: number,
-  annualReportSummary?: AnnualReportSummary | null
+  annualReportSummary?: AnnualReportSummary | null,
+  backendPayload?: GovInsightBackendReportPayload | null
 ): EnhancedAIReportResponse | null => {
   const current = entity.data.find((item) => item.year === year);
   if (!current) return null;
   const previous = entity.data.find((item) => item.year === year - 1) || null;
-  const context = buildReportContextPayload(entity.name, current, previous, undefined, annualReportSummary);
+  const context = applyBackendPayloadToContext(
+    buildReportContextPayload(entity.name, current, previous, undefined, annualReportSummary),
+    backendPayload
+  );
+  const baseDataQuality = context.dataQuality;
+  const baseMetadata = normalizeBackendMetadata(backendPayload, metadataFallback(context), context);
+  const baseRiskItems = normalizeBackendRiskItems(backendPayload, buildRuleBasedRiskItems(context, annualReportSummary));
+  const baseRectificationTasks = normalizeBackendRectificationTasks(backendPayload, buildRuleBasedRectificationTasks());
+  const baseAppendices = normalizeBackendAppendices(backendPayload, buildReportAppendices(context), baseDataQuality);
 
-  return {
+  return mergeBackendPayloadIntoReport({
     version: 'v4',
-    metadata: metadataFallback(context),
+    metadata: baseMetadata,
     overallJudgments: buildRuleBasedOverallJudgments(context, annualReportSummary),
-    riskItems: buildRuleBasedRiskItems(context, annualReportSummary),
+    riskItems: baseRiskItems,
     confirmedFacts: buildRuleBasedConfirmedFacts(context, annualReportSummary),
     prudentAnalyses: buildRuleBasedPrudentAnalyses(context, annualReportSummary),
     unansweredQuestions: buildRuleBasedUnansweredQuestions(),
-    rectificationTasks: buildRuleBasedRectificationTasks(),
+    rectificationTasks: baseRectificationTasks,
     closing: buildRuleBasedClosing(context),
     notes: buildRuleBasedNotes(context),
     scorecards: buildScorecards(context.current, context.previous),
-    dataQuality: context.dataQuality,
-    appendices: buildReportAppendices(context),
-  };
+    dataQuality: baseDataQuality,
+    appendices: baseAppendices,
+  }, backendPayload, context);
+};
+
+export const buildPayloadBackedEnhancedReport = (
+  entity: EntityProfile,
+  year: number,
+  annualReportSummary?: AnnualReportSummary | null,
+  backendPayload?: GovInsightBackendReportPayload | null
+): EnhancedAIReportResponse | null => {
+  if (!isBackendReportPayload(backendPayload)) {
+    return null;
+  }
+
+  return buildRuleBasedEnhancedReport(entity, year, annualReportSummary, backendPayload);
 };
 
 const buildEnhancedReportFromNarrative = (
   narrative: Record<string, unknown>,
   entity: EntityProfile,
   year: number,
-  annualReportSummary?: AnnualReportSummary | null
+  annualReportSummary?: AnnualReportSummary | null,
+  backendPayload?: GovInsightBackendReportPayload | null
 ): EnhancedAIReportResponse | null => {
   const current = entity.data.find((item) => item.year === year);
   if (!current) return null;
   const previous = entity.data.find((item) => item.year === year - 1) || null;
-  const context = buildReportContextPayload(entity.name, current, previous, undefined, annualReportSummary);
-  const fallback = buildRuleBasedEnhancedReport(entity, year, annualReportSummary);
+  const context = applyBackendPayloadToContext(
+    buildReportContextPayload(entity.name, current, previous, undefined, annualReportSummary),
+    backendPayload
+  );
+  const fallback = buildRuleBasedEnhancedReport(entity, year, annualReportSummary, backendPayload);
   if (!fallback) return null;
   if (!isFormalNarrativePayload(narrative)) return fallback;
 
-  return {
+  return mergeBackendPayloadIntoReport({
     version: 'v4',
     metadata: sanitizeMetadata(narrative.metadata, fallback.metadata, context),
     overallJudgments: context.dataQuality.hasAnomaly
@@ -1984,23 +2627,31 @@ const buildEnhancedReportFromNarrative = (
     scorecards: buildScorecards(context.current, context.previous),
     dataQuality: context.dataQuality,
     appendices: buildReportAppendices(context),
-  };
+  }, backendPayload, context);
 };
 
 export const normalizeReportData = (
   raw: unknown,
   entity: EntityProfile,
   year: number,
-  annualReportSummary?: AnnualReportSummary | null
+  annualReportSummary?: AnnualReportSummary | null,
+  backendPayload?: GovInsightBackendReportPayload | null
 ): EnhancedAIReportResponse | null => {
   const current = entity.data.find((item) => item.year === year) || null;
   const previous = entity.data.find((item) => item.year === year - 1) || null;
-  const context = current ? buildReportContextPayload(entity.name, current, previous, undefined, annualReportSummary) : null;
-  const fallback = buildRuleBasedEnhancedReport(entity, year, annualReportSummary);
+  const embeddedPayload = isFormalStoredEnvelope(raw) && isBackendReportPayload(raw.reportPayload) ? raw.reportPayload : null;
+  const effectiveBackendPayload = isBackendReportPayload(backendPayload) ? backendPayload : embeddedPayload;
+  const context = current
+    ? applyBackendPayloadToContext(
+        buildReportContextPayload(entity.name, current, previous, undefined, annualReportSummary),
+        effectiveBackendPayload
+      )
+    : null;
+  const fallback = buildRuleBasedEnhancedReport(entity, year, annualReportSummary, effectiveBackendPayload);
 
   if (isNormalizedFormalReport(raw)) {
     if (!context || !fallback) return { ...raw, version: 'v4' as const };
-    return {
+    return mergeBackendPayloadIntoReport({
       version: 'v4',
       metadata: sanitizeMetadata(raw.metadata, fallback.metadata, context),
       overallJudgments: context.dataQuality.hasAnomaly
@@ -2018,15 +2669,27 @@ export const normalizeReportData = (
       scorecards: buildScorecards(context.current, context.previous),
       dataQuality: context.dataQuality,
       appendices: buildReportAppendices(context),
-    };
+    }, effectiveBackendPayload, context);
   }
 
   if (isFormalStoredEnvelope(raw)) {
-    return buildEnhancedReportFromNarrative(raw.narrative, entity, year, annualReportSummary);
+    if (raw.reportContent && isNormalizedFormalReport(raw.reportContent)) {
+      return mergeBackendPayloadIntoReport({
+        ...raw.reportContent,
+        version: 'v4',
+      }, effectiveBackendPayload, context);
+    }
+    return buildEnhancedReportFromNarrative(raw.narrative || {}, entity, year, annualReportSummary, effectiveBackendPayload);
   }
 
   if (isFormalNarrativePayload(raw)) {
-    return buildEnhancedReportFromNarrative(raw as Record<string, unknown>, entity, year, annualReportSummary);
+    return buildEnhancedReportFromNarrative(
+      raw as Record<string, unknown>,
+      entity,
+      year,
+      annualReportSummary,
+      effectiveBackendPayload
+    );
   }
 
   const legacy = raw as LegacyAIReportResponse;

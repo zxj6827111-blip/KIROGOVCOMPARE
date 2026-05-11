@@ -6,6 +6,7 @@ import { calculateReportMetrics } from '../utils/reportAnalysis';
 import { ComparisonReportData } from '../services/PdfExportService';
 import { calculateDiffs, renderDiffHtml } from '../utils/diffRenderer';
 import { compareRegionsByCityManagementOrder } from '../utils/regionSort';
+import { hasParsedContent } from '../utils/parsedContent';
 
 const router = express.Router();
 
@@ -17,6 +18,121 @@ function parseDbJson(value: any): any {
   } catch {
     return null;
   }
+}
+
+interface ActiveParsedReport {
+  reportId: number;
+  regionId: number;
+  year: number;
+  activeVersionId: number | null;
+  versionId: number | null;
+  parsedJson: any;
+  ready: boolean;
+  notReadyReason: string | null;
+}
+
+async function fetchActiveParsedReport(reportId: number): Promise<ActiveParsedReport | null> {
+  const result = await pool.query(
+    `SELECT
+       r.id AS report_id,
+       r.region_id,
+       r.year,
+       r.active_version_id,
+       rv.id AS version_id,
+       rv.parsed_json
+     FROM reports r
+     LEFT JOIN report_versions rv ON rv.id = r.active_version_id
+     WHERE r.id = $1
+     LIMIT 1`,
+    [reportId]
+  );
+  const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
+
+  const parsedJson = parseDbJson(row.parsed_json);
+  const hasActiveVersion = Boolean(row.version_id);
+  const ready = hasActiveVersion && hasParsedContent(parsedJson);
+  let notReadyReason: string | null = null;
+  if (!hasActiveVersion) {
+    notReadyReason = 'not_published';
+  } else if (!hasParsedContent(parsedJson)) {
+    notReadyReason = 'empty_parsed_content';
+  }
+
+  return {
+    reportId: Number(row.report_id),
+    regionId: Number(row.region_id),
+    year: Number(row.year),
+    activeVersionId: row.active_version_id ? Number(row.active_version_id) : null,
+    versionId: row.version_id ? Number(row.version_id) : null,
+    parsedJson,
+    ready,
+    notReadyReason,
+  };
+}
+
+function collectNotReadySides(
+  leftReport: ActiveParsedReport | null,
+  rightReport: ActiveParsedReport | null
+): Array<{ side: 'left' | 'right'; report_id: number | null; reason: string }> {
+  const sides: Array<{ side: 'left' | 'right'; report_id: number | null; reason: string }> = [];
+  if (!leftReport || !leftReport.ready) {
+    sides.push({
+      side: 'left',
+      report_id: leftReport?.reportId ?? null,
+      reason: leftReport?.notReadyReason || 'report_not_found',
+    });
+  }
+  if (!rightReport || !rightReport.ready) {
+    sides.push({
+      side: 'right',
+      report_id: rightReport?.reportId ?? null,
+      reason: rightReport?.notReadyReason || 'report_not_found',
+    });
+  }
+  return sides;
+}
+
+async function countOpenReviewIssues(versionId: number | null): Promise<number> {
+  if (!versionId) {
+    return 0;
+  }
+  const result = await pool.query(
+    `SELECT COUNT(*) AS count
+     FROM report_consistency_items
+     WHERE report_version_id = $1
+       AND auto_status IN ('FAIL', 'UNCERTAIN')
+       AND COALESCE(human_status, 'pending') != 'dismissed'`,
+    [versionId]
+  );
+  return Number(result.rows[0]?.count || 0);
+}
+
+async function ensureComparisonJob(comparisonId: number, reportId: number, versionId: number | null): Promise<number> {
+  const existingJobRes = await pool.query(
+    `SELECT id
+     FROM jobs
+     WHERE comparison_id = $1
+       AND kind = 'compare'
+       AND status IN ('queued', 'running')
+     ORDER BY id DESC
+     LIMIT 1`,
+    [comparisonId]
+  );
+  const existingJob = existingJobRes.rows[0];
+  if (existingJob?.id) {
+    return Number(existingJob.id);
+  }
+
+  const newJobRes = await pool.query(
+    `INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, comparison_id)
+     VALUES ($1, $2, 'compare', 'queued', 0, 'QUEUED', '等待处理', $3)
+     RETURNING id`,
+    [reportId, versionId, comparisonId]
+  );
+  return Number(newJobRes.rows[0].id);
 }
 
 /**
@@ -642,110 +758,98 @@ router.post('/create', authMiddleware, async (req: AuthRequest, res: Response) =
       return res.status(400).json({ error: '不允许同年度比较：year_a 和 year_b 必须不同' });
     }
 
-    // Check if comparison already exists
-    const existingRes = await pool.query(`
-      SELECT id FROM comparisons 
-      WHERE region_id = $1 
-        AND year_a = $2 
-        AND year_b = $3
-    `, [region_id, year_a, year_b]);
-    const existing = existingRes.rows;
+    let leftReport = await fetchActiveParsedReport(Number(left_report_id));
+    let rightReport = await fetchActiveParsedReport(Number(right_report_id));
+    if (!leftReport || !rightReport) {
+      return res.status(404).json({ error: '报告不存在' });
+    }
 
-    if (existing && existing.length > 0) {
-      return res.json({
-        success: true,
-        message: '比较已存在',
-        comparisonId: existing[0].id
+    if (leftReport.regionId !== rightReport.regionId) {
+      return res.status(400).json({ error: '两份报告必须属于同一地区' });
+    }
+
+    if (Number(region_id) !== leftReport.regionId) {
+      return res.status(400).json({ error: '地区与报告不匹配' });
+    }
+
+    if (leftReport.year === rightReport.year) {
+      return res.status(400).json({ error: '不允许同年度比较：两份报告必须来自不同年份' });
+    }
+
+    if (leftReport.year > rightReport.year) {
+      [leftReport, rightReport] = [rightReport, leftReport];
+    }
+
+    const notReadySides = collectNotReadySides(leftReport, rightReport);
+    if (notReadySides.length > 0) {
+      return res.status(409).json({
+        error: '报告尚未发布或解析内容为空，暂不能生成比对',
+        error_code: 'PARSE_NOT_READY',
+        details: { not_ready_sides: notReadySides },
       });
     }
 
-    // Calculate Metrics
-    let similarity = 0;
-    let checkStatus: string | null = null;
-    try {
-      const leftRes = await pool.query(`
-        SELECT rv.parsed_json
-        FROM reports r
-        JOIN report_versions rv ON rv.id = r.active_version_id
-        WHERE r.id = $1
-      `, [left_report_id]);
-      const rightRes = await pool.query(`
-        SELECT rv.parsed_json
-        FROM reports r
-        JOIN report_versions rv ON rv.id = r.active_version_id
-        WHERE r.id = $1
-      `, [right_report_id]);
+    const metrics = calculateReportMetrics(leftReport.parsedJson, rightReport.parsedJson);
+    const similarity = metrics.similarity;
+    let checkStatus: string | null = metrics.checkStatus;
 
-      const leftJson = parseDbJson(leftRes.rows[0]?.parsed_json) || { sections: [] };
-      const rightJson = parseDbJson(rightRes.rows[0]?.parsed_json) || { sections: [] };
-
-      const metrics = calculateReportMetrics(leftJson, rightJson);
-      similarity = metrics.similarity;
-      checkStatus = metrics.checkStatus;
-
-      // Additionally, check for individual report consistency issues
-      const leftVersionRes = await pool.query(`SELECT active_version_id as id FROM reports WHERE id=$1`, [left_report_id]);
-      const rightVersionRes = await pool.query(`SELECT active_version_id as id FROM reports WHERE id=$1`, [right_report_id]);
-
-      const leftVersionId = leftVersionRes.rows[0]?.id;
-      const rightVersionId = rightVersionRes.rows[0]?.id;
-
-      const leftIssuesRes = leftVersionId ? await pool.query(`
-        SELECT COUNT(*) as cnt FROM report_consistency_items 
-        WHERE report_version_id=$1 
-        AND auto_status='FAIL' 
-        AND human_status='pending'
-      `, [leftVersionId]) : { rows: [{ cnt: 0 }] };
-      const leftIssues = parseInt(leftIssuesRes.rows[0].cnt) || 0;
-
-      const rightIssuesRes = rightVersionId ? await pool.query(`
-        SELECT COUNT(*) as cnt FROM report_consistency_items 
-        WHERE report_version_id=$1 
-        AND auto_status='FAIL' 
-        AND human_status='pending'
-      `, [rightVersionId]) : { rows: [{ cnt: 0 }] };
-      const rightIssues = parseInt(rightIssuesRes.rows[0].cnt) || 0;
-
-      // Combine cross-year and intra-report checks
-      if (leftIssues > 0 || rightIssues > 0) {
-        const issueDesc = [];
-        if (checkStatus && checkStatus.startsWith('异常')) {
-          issueDesc.push(checkStatus.replace('异常(', '').replace(')', ''));
-        }
-        if (leftIssues > 0) issueDesc.push(`${year_a}年校验${leftIssues}项`);
-        if (rightIssues > 0) issueDesc.push(`${year_b}年校验${rightIssues}项`);
-        checkStatus = `异常(${issueDesc.join('|')})`;
-      } else if (!checkStatus) {
-        // No cross-year issues and no intra issues found
-        checkStatus = '正常';
+    const leftIssues = await countOpenReviewIssues(leftReport.versionId);
+    const rightIssues = await countOpenReviewIssues(rightReport.versionId);
+    if (leftIssues > 0 || rightIssues > 0) {
+      const issueDesc: string[] = [];
+      if (checkStatus && checkStatus.startsWith('异常')) {
+        issueDesc.push(checkStatus.replace('异常(', '').replace(')', ''));
       }
-    } catch (e) {
-      console.error('Error calculating metrics during creation:', e);
+      if (leftIssues > 0) issueDesc.push(`${leftReport.year}年校验${leftIssues}项`);
+      if (rightIssues > 0) issueDesc.push(`${rightReport.year}年校验${rightIssues}项`);
+      checkStatus = `异常(${issueDesc.join('|')})`;
+    } else if (!checkStatus) {
+      checkStatus = '正常';
     }
 
-    // Create comparison record
-    await pool.query(`
-      INSERT INTO comparisons (region_id, year_a, year_b, left_report_id, right_report_id, similarity, check_status, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-    `, [region_id, year_a, year_b, left_report_id, right_report_id, similarity, checkStatus || null]);
+    const comparisonRes = await pool.query(`
+      INSERT INTO comparisons (
+        region_id,
+        year_a,
+        year_b,
+        left_report_id,
+        right_report_id,
+        similarity,
+        check_status,
+        created_at,
+        updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+      ON CONFLICT (region_id, year_a, year_b)
+      DO UPDATE SET
+        left_report_id = EXCLUDED.left_report_id,
+        right_report_id = EXCLUDED.right_report_id,
+        similarity = EXCLUDED.similarity,
+        check_status = EXCLUDED.check_status,
+        updated_at = NOW()
+      RETURNING id
+    `, [
+      leftReport.regionId,
+      leftReport.year,
+      rightReport.year,
+      leftReport.reportId,
+      rightReport.reportId,
+      similarity,
+      checkStatus || null,
+    ]);
+    const comparisonId = Number(comparisonRes.rows[0]?.id);
 
-    const createdRes = await pool.query(`
-      SELECT id FROM comparisons 
-      WHERE region_id = $1 
-        AND left_report_id = $2 
-        AND right_report_id = $3
-      ORDER BY id DESC LIMIT 1
-    `, [region_id, left_report_id, right_report_id]);
-    const created = createdRes.rows;
-
-    if (!created || created.length === 0) {
+    if (!comparisonId) {
       return res.status(500).json({ error: '创建失败' });
     }
 
+    const jobId = await ensureComparisonJob(comparisonId, leftReport.reportId, leftReport.versionId);
+
     res.json({
       success: true,
-      message: '比对记录创建成功',
-      comparisonId: created[0].id
+      message: '比对任务已创建',
+      comparisonId,
+      jobId,
     });
   } catch (error: any) {
     console.error('Error creating comparison:', error);
@@ -801,19 +905,17 @@ router.get('/:id/result', authMiddleware, async (req: AuthRequest, res: Response
       }
     }
 
-    // Get content
-    const leftVersionsRes = await pool.query(`
-      SELECT rv.parsed_json, rp.year
-      FROM reports rp
-      JOIN report_versions rv ON rv.id = rp.active_version_id
-      WHERE rp.id = $1
-    `, [comparison.left_report_id]);
-    const rightVersionsRes = await pool.query(`
-      SELECT rv.parsed_json, rp.year
-      FROM reports rp
-      JOIN report_versions rv ON rv.id = rp.active_version_id
-      WHERE rp.id = $1
-    `, [comparison.right_report_id]);
+    // Get content from published active versions only.
+    const leftReport = await fetchActiveParsedReport(Number(comparison.left_report_id));
+    const rightReport = await fetchActiveParsedReport(Number(comparison.right_report_id));
+    const notReadySides = collectNotReadySides(leftReport, rightReport);
+    if (notReadySides.length > 0) {
+      return res.status(409).json({
+        error: '比对内容尚未就绪：报告未发布或解析内容为空',
+        error_code: 'COMPARISON_CONTENT_NOT_READY',
+        details: { not_ready_sides: notReadySides },
+      });
+    }
 
     const resultsRes = await pool.query(`
       SELECT cr.diff_json, cr.created_at
@@ -821,8 +923,8 @@ router.get('/:id/result', authMiddleware, async (req: AuthRequest, res: Response
       WHERE cr.comparison_id = $1
     `, [comparisonId]);
 
-    const leftContent = parseDbJson(leftVersionsRes.rows[0]?.parsed_json);
-    const rightContent = parseDbJson(rightVersionsRes.rows[0]?.parsed_json);
+    const leftContent = leftReport!.parsedJson;
+    const rightContent = rightReport!.parsedJson;
     const diffJson = parseDbJson(resultsRes.rows[0]?.diff_json);
 
     res.json({
@@ -930,21 +1032,19 @@ router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Res
       SELECT diff_json FROM comparison_results WHERE comparison_id = $1
     `, [comparisonId]);
 
-    const leftVersionsRes = await pool.query(`
-      SELECT rv.parsed_json, rp.year
-      FROM reports rp
-      JOIN report_versions rv ON rv.id = rp.active_version_id
-      WHERE rp.id = $1
-    `, [comparison.left_report_id]);
-    const rightVersionsRes = await pool.query(`
-      SELECT rv.parsed_json, rp.year
-      FROM reports rp
-      JOIN report_versions rv ON rv.id = rp.active_version_id
-      WHERE rp.id = $1
-    `, [comparison.right_report_id]);
+    const leftActiveReport = await fetchActiveParsedReport(Number(comparison.left_report_id));
+    const rightActiveReport = await fetchActiveParsedReport(Number(comparison.right_report_id));
+    const notReadySides = collectNotReadySides(leftActiveReport, rightActiveReport);
+    if (notReadySides.length > 0) {
+      return res.status(409).json({
+        error: '比对内容尚未就绪：报告未发布或解析内容为空',
+        error_code: 'COMPARISON_CONTENT_NOT_READY',
+        details: { not_ready_sides: notReadySides },
+      });
+    }
 
-    const leftContent = parseDbJson(leftVersionsRes.rows[0]?.parsed_json) || { sections: [] };
-    const rightContent = parseDbJson(rightVersionsRes.rows[0]?.parsed_json) || { sections: [] };
+    const leftContent = leftActiveReport!.parsedJson;
+    const rightContent = rightActiveReport!.parsedJson;
 
     const reportA = {
       meta: { id: comparison.left_report_id, year: comparison.year_a, unitName: comparison.region_name },

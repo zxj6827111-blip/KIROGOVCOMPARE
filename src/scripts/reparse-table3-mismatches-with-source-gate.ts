@@ -781,7 +781,7 @@ function extractNarrativeTotals(text: string): Partial<Totals> {
   if (newReceived !== null) output.new_received = newReceived;
   if (output.new_received === null || output.new_received === undefined) {
     const acceptedReceived = firstRegexNumber(normalized, [
-      /鍙楃悊[^0-9]{0,20}鏀垮簻淇℃伅鍏紑鐢宠[^0-9]{0,20}(\d{1,9})\s*浠?/,
+      /受理[^0-9]{0,20}政府信息公开申请[^0-9]{0,20}(\d{1,9})\s*件?/,
     ]);
     if (acceptedReceived !== null) {
       output.new_received = acceptedReceived;

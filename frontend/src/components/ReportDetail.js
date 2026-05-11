@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import './ReportDetail.css';
-import { apiClient } from '../apiClient';
+import { apiClient, getCurrentUser } from '../apiClient';
 import { Table2View, Table3View, Table4View } from './TableViews';
 import { normalizeTablePath } from '../utils/tableRowColMapping';
 import { buildTable3TraceModel } from '../utils/reportTrace';
@@ -34,6 +34,8 @@ const deepParseJson = (input, maxDepth = 3) => {
   return current;
 };
 
+const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const pick = (obj, keys = []) => {
   if (!obj || typeof obj !== 'object') return undefined;
   for (const key of keys) {
@@ -53,6 +55,93 @@ const hasMeaningfulObjectData = (obj) => {
 
 const getErrorMessage = (err, fallback = '请求失败') =>
   err?.response?.data?.error || err?.message || fallback;
+
+const getUserCanMaintainReports = (user) =>
+  Boolean(
+    user &&
+      (user.username === 'admin' ||
+        user.id === 1 ||
+        user.permissions?.upload_reports ||
+        user.permissions?.delete_reports ||
+        user.permissions?.manage_jobs)
+  );
+
+const stripLeadingSectionTitle = (content, title) => {
+  if (typeof content !== 'string') return content;
+  const normalizedTitle = String(title || '').trim();
+  const normalizedContent = content.trim();
+  if (!normalizedTitle || !normalizedContent.startsWith(normalizedTitle)) {
+    return content;
+  }
+  return normalizedContent.slice(normalizedTitle.length).trimStart();
+};
+
+const splitReportTextBlocks = (content) => {
+  if (typeof content !== 'string') return [];
+  const normalized = content.replace(/\r\n/g, '\n').trim();
+  if (!normalized) return [];
+  const baseBlocks = normalized
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  return baseBlocks.flatMap((block) => {
+    const markerRegex = /（[一二三四五六七八九十]+）/g;
+    const matches = [...block.matchAll(markerRegex)];
+    if (matches.length === 0) return [block];
+
+    const parts = [];
+    let cursor = 0;
+    matches.forEach((match, index) => {
+      const markerStart = match.index ?? 0;
+      if (markerStart > cursor) {
+        const before = block.slice(cursor, markerStart).trim();
+        if (before) parts.push(before);
+      }
+
+      const nextMarkerStart = matches[index + 1]?.index ?? block.length;
+      const subsectionBlock = block.slice(markerStart, nextMarkerStart).trim();
+      if (subsectionBlock) parts.push(subsectionBlock);
+      cursor = nextMarkerStart;
+    });
+
+    if (cursor < block.length) {
+      const tail = block.slice(cursor).trim();
+      if (tail) parts.push(tail);
+    }
+    return parts;
+  });
+};
+
+const getReportSubsectionParts = (block) => {
+  const normalized = String(block || '').trim();
+  if (!/^（[一二三四五六七八九十]+）/.test(normalized)) return null;
+
+  const marker = normalized.match(/^（[一二三四五六七八九十]+）/)?.[0] || '';
+  const markerEnd = marker.length;
+  const headingSearch = normalized.slice(markerEnd, Math.min(normalized.length, markerEnd + 48));
+  const titleEndingIndex = headingSearch.indexOf('情况');
+  let headingEnd = titleEndingIndex >= 0 ? markerEnd + titleEndingIndex + 2 : -1;
+
+  if (headingEnd < 0) {
+    const separatorMatch = normalized.slice(markerEnd).match(/[\s，,。；;]/);
+    if (separatorMatch?.index !== undefined && separatorMatch.index > 0) {
+      headingEnd = markerEnd + separatorMatch.index;
+    }
+  }
+
+  if (headingEnd <= markerEnd || headingEnd > markerEnd + 48) return null;
+
+  return {
+    heading: normalized.slice(0, headingEnd),
+    rest: normalized.slice(headingEnd),
+  };
+};
+
+const getReportTextBlockClass = (block) => {
+  if (getReportSubsectionParts(block)) return 'report-paragraph report-subsection-block';
+  return 'report-paragraph';
+};
 
 const createTable3Skeleton = () => ({
   naturalPerson: {
@@ -749,12 +838,7 @@ const buildDisplayParsedJson = (factsPayload, parsedPayload) => {
 
   const tableTypes = new Set(['table_2', 'table_3', 'table_4']);
 
-  const parsedTextSections = parsedSections.filter(
-    (section) =>
-      section?.type === 'text' &&
-      typeof section?.content === 'string' &&
-      section.content.trim().length > 0
-  );
+  const parsedTextSections = parsedSections.filter((section) => section?.type === 'text');
 
   const parsedOtherSections = parsedSections.filter(
     (section) => section && !tableTypes.has(section.type) && section.type !== 'text'
@@ -795,6 +879,12 @@ const buildDisplayParsedJson = (factsPayload, parsedPayload) => {
 
 function ReportDetail({ reportId: propReportId, onBack }) {
   const reportId = propReportId || window.location.pathname.split('/').pop();
+  const currentUser = getCurrentUser();
+  const canMaintainReports = getUserCanMaintainReports(currentUser);
+  // Technical diagnostics stay opt-in via URL so the formal report view is clean by default.
+  const technicalModeEnabled =
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('debug') === 'true';
   const [report, setReport] = useState(null);
   const [factsPayload, setFactsPayload] = useState(null);
   const [factsLoadError, setFactsLoadError] = useState('');
@@ -812,6 +902,11 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const [showVersionHistory, setShowVersionHistory] = useState(false); // 版本历史折叠
   const [versionHistory, setVersionHistory] = useState(null); // 历史版本列表数据
   const [versionsLoading, setVersionsLoading] = useState(false);
+  const [showParseHistory, setShowParseHistory] = useState(false);
+  const [parseHistory, setParseHistory] = useState(null);
+  const [parseHistoryLoading, setParseHistoryLoading] = useState(false);
+  const [parseHistoryError, setParseHistoryError] = useState('');
+  const [parseActionId, setParseActionId] = useState(null);
   const [showTracePanel, setShowTracePanel] = useState(false);
   const [traceLoading, setTraceLoading] = useState(false);
   const [traceError, setTraceError] = useState('');
@@ -885,6 +980,24 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     }
   };
 
+  const loadParseHistory = async (targetReportId = reportId, targetVersionId = workingVersionId) => {
+    if (!targetReportId) return;
+
+    setParseHistoryLoading(true);
+    setParseHistoryError('');
+    try {
+      const params = targetVersionId ? { params: { version_id: targetVersionId } } : undefined;
+      const resp = await apiClient.get(`/reports/${targetReportId}/parse-history`, params);
+      setParseHistory(resp.data?.parse_runs || []);
+    } catch (err) {
+      console.error('Failed to fetch parse history:', err);
+      setParseHistory([]);
+      setParseHistoryError(getErrorMessage(err, '解析历史加载失败'));
+    } finally {
+      setParseHistoryLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadReportAndFacts(reportId, { errorPrefix: '加载报告详情失败' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -921,7 +1034,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
             item.human_status !== 'dismissed' &&
             (item.auto_status === 'FAIL' || item.auto_status === 'UNCERTAIN')
           ) {
-            // 鎻愬彇璐ㄩ噺瀹¤闂锛圫ection 5/6锛?
+            // 提取质量审计问题（Section 5/6）
             const groupKey = group.groupKey || group.group_key;
             if (groupKey === 'quality') {
               if (item.check_key === 'narrative_sec5_gap') {
@@ -959,10 +1072,15 @@ function ReportDetail({ reportId: propReportId, onBack }) {
             // Text Info extraction
             allPaths.forEach((p) => {
               if (p.includes('text') || p.includes('content')) {
-                // 鎻愬彇鏂囨湰闂淇℃伅
+                // 提取文本问题信息
                 const textValue = item.evidence?.values?.textValue;
                 if (textValue) {
-                  textInfos.push({ value: textValue, context: item.evidence?.values?.context });
+                  textInfos.push({
+                    value: textValue,
+                    context: item.evidence?.values?.context,
+                    matchedText: item.evidence?.values?.matchedText,
+                    sectionIndex: item.evidence?.values?.sectionIndex,
+                  });
                 }
               }
             });
@@ -1089,11 +1207,11 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   };
 
   useEffect(() => {
-    if (showTracePanel && reportId && workingVersionId) {
+    if (technicalModeEnabled && showTracePanel && reportId && workingVersionId) {
       loadTraceData(reportId, workingVersionId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showTracePanel, reportId, workingVersionId]);
+  }, [technicalModeEnabled, showTracePanel, reportId, workingVersionId]);
 
   const refresh = async () => {
     if (!reportId) return;
@@ -1101,7 +1219,10 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     if (showVersionHistory) {
       await loadVersionHistory(reportId);
     }
-    if (showTracePanel && workingVersionId) {
+    if (showParseHistory) {
+      await loadParseHistory(reportId, workingVersionId);
+    }
+    if (technicalModeEnabled && showTracePanel && workingVersionId) {
       await loadTraceData(reportId, workingVersionId);
     }
   };
@@ -1146,7 +1267,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
 
   const handleDelete = async () => {
     if (!reportId) return;
-    if (!window.confirm(`纭鍒犻櫎鎶ュ憡 #${reportId} 吗？`)) return;
+    if (!window.confirm(`确认删除报告 #${reportId} 吗？`)) return;
     setError('');
     setLoading(true);
     try {
@@ -1157,6 +1278,43 @@ function ReportDetail({ reportId: propReportId, onBack }) {
       setError(`删除失败：${message}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleParseAction = async (run, action) => {
+    if (!reportId || !run?.id || !run?.report_version_id) return;
+
+    const actionLabels = {
+      switch: '切换当前解析',
+      restore: '恢复历史解析',
+      retry: '重试提交',
+    };
+    const label = actionLabels[action] || '执行操作';
+    if (!window.confirm(`确认${label} #${run.id} 吗？`)) return;
+
+    setParseActionId(`${action}:${run.id}`);
+    setParseHistoryError('');
+    try {
+      if (action === 'switch') {
+        await apiClient.post(`/reports/${reportId}/switch-current-parse`, {
+          version_id: run.report_version_id,
+          parse_run_id: run.id,
+        });
+      } else if (action === 'restore') {
+        await apiClient.post(`/reports/${reportId}/restore-superseded-parse`, {
+          version_id: run.report_version_id,
+          parse_run_id: run.id,
+        });
+      } else if (action === 'retry') {
+        await apiClient.post(`/reports/${reportId}/retry-finalize`, {
+          parse_run_id: run.id,
+        });
+      }
+      await refresh();
+    } catch (err) {
+      setParseHistoryError(`${label}失败：${getErrorMessage(err)}`);
+    } finally {
+      setParseActionId(null);
     }
   };
 
@@ -1193,49 +1351,79 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   };
 
   // 对文本中的问题数字进行高亮 - SECURITY FIX: Use safe React elements instead of dangerouslySetInnerHTML
-  const highlightTextIssues = (text, highlights) => {
+  const highlightTextIssues = (text, highlights, sectionIndex) => {
     if (!highlights || highlights.length === 0 || !text) return text;
 
-    // Collect all values to highlight
-    const valuesToHighlight = highlights
-      .map((h) => h.value)
-      .filter((v) => v !== null && v !== undefined)
-      .map((v) => String(v));
+    const sourceText = String(text);
+    const ranges = [];
 
-    if (valuesToHighlight.length === 0) return text;
-
-    // Build result as React elements
-    const elements = [];
-    let remainingText = String(text);
-    let keyIndex = 0;
-
-    // For each value to highlight, split and reconstruct
-    for (const numStr of valuesToHighlight) {
-      const parts = remainingText.split(numStr);
-      if (parts.length > 1) {
-        const newParts = [];
-        for (let idx = 0; idx < parts.length; idx += 1) {
-          const part = parts[idx];
-          if (part) newParts.push(part);
-          if (idx < parts.length - 1) {
-            newParts.push(
-              <mark key={`hl-${keyIndex}`} className="text-warning">
-                {numStr}
-              </mark>
-            );
-            keyIndex += 1;
-          }
-        }
-        // Convert back to components
-        if (elements.length === 0) {
-          elements.push(...newParts);
-        }
-        remainingText = parts.join(`{{HL${numStr}HL}}`);
+    highlights.forEach((highlight) => {
+      if (
+        highlight?.sectionIndex &&
+        sectionIndex &&
+        Number(highlight.sectionIndex) !== Number(sectionIndex)
+      ) {
+        return;
       }
-    }
 
-    // If no highlights found, return original text
-    if (elements.length === 0) return text;
+      const matchedText = typeof highlight?.matchedText === 'string' ? highlight.matchedText : '';
+      if (matchedText) {
+        const start = sourceText.indexOf(matchedText);
+        if (start >= 0) {
+          ranges.push({ start, end: start + matchedText.length });
+          return;
+        }
+      }
+
+      const context = typeof highlight?.context === 'string'
+        ? highlight.context.replace(/^\.\.\./, '').replace(/\.\.\.$/, '')
+        : '';
+      const value = highlight?.value !== null && highlight?.value !== undefined
+        ? String(highlight.value)
+        : '';
+      const contextStart = context ? sourceText.indexOf(context) : -1;
+      if (contextStart >= 0 && value) {
+        const valueMatch = context.match(new RegExp(`(?<!\\d)${escapeRegExp(value)}(?!\\d)`));
+        if (valueMatch?.index !== undefined) {
+          const start = contextStart + valueMatch.index;
+          ranges.push({ start, end: start + value.length });
+        }
+      }
+    });
+
+    if (ranges.length === 0) return text;
+
+    const mergedRanges = ranges
+      .filter((range) => range.start >= 0 && range.end > range.start)
+      .sort((left, right) => left.start - right.start)
+      .reduce((acc, range) => {
+        const last = acc[acc.length - 1];
+        if (!last || range.start > last.end) {
+          acc.push({ ...range });
+        } else if (range.end > last.end) {
+          last.end = range.end;
+        }
+        return acc;
+      }, []);
+
+    if (mergedRanges.length === 0) return text;
+
+    const elements = [];
+    let cursor = 0;
+    mergedRanges.forEach((range, index) => {
+      if (range.start > cursor) {
+        elements.push(sourceText.slice(cursor, range.start));
+      }
+      elements.push(
+        <mark key={`hl-${index}`} className="text-warning">
+          {sourceText.slice(range.start, range.end)}
+        </mark>
+      );
+      cursor = range.end;
+    });
+    if (cursor < sourceText.length) {
+      elements.push(sourceText.slice(cursor));
+    }
 
     return <span>{elements}</span>;
   };
@@ -1270,7 +1458,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
       return renderStructuredContent(normalized);
     }
 
-    // 鍚﹀垯鏄剧ず鍘熷JSON
+    // 否则显示原始 JSON
     const text = typeof normalized === 'string' ? normalized : JSON.stringify(normalized, null, 2);
     const preview = text.length > 600 ? `${text.slice(0, 600)}...` : text;
 
@@ -1287,8 +1475,11 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const renderStructuredContent = (parsed) => {
     if (!parsed || !parsed.sections) return null;
 
-    // 对sections杩涜鎺掑簭锛屽皢鏍囬鏀惧湪鏈€鍓嶉潰
-    const sections = [...parsed.sections];
+    // 对 sections 进行排序，将标题放在最前面
+    const sections = parsed.sections.map((section, originalIndex) => ({
+      ...section,
+      __originalSectionIndex: originalIndex + 1,
+    }));
     sections.sort((a, b) => {
       const titleA = String(a?.title || '');
       const titleB = String(b?.title || '');
@@ -1321,10 +1512,10 @@ function ReportDetail({ reportId: propReportId, onBack }) {
 
     return (
       <div className="structured-content">
-        <div className="content-header">
-          <div />
-          <div>
-            <button className="btn-edit" onClick={handleEditClick} style={{ marginRight: '10px' }}>
+        <div className="report-content-toolbar">
+          <h3>报告正文</h3>
+          <div className="report-actions">
+            <button className="btn-edit" onClick={handleEditClick}>
               编辑全部
             </button>
             <button className="secondary-btn" onClick={() => setShowParsed((prev) => !prev)}>
@@ -1376,7 +1567,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                     )}
                 </h4>
                 <div className="section-content">
-                  {/* 鏄剧ず璐ㄩ噺闂璇︽儏 */}
+                  {/* 显示质量问题详情 */}
                   {String(section?.title || '').includes('\u4e94') &&
                     qualityIssues.sec5 &&
                     qualityIssues.sec5.length > 0 && (
@@ -1401,9 +1592,46 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                         ))}
                       </div>
                     )}
-                  {section.type === 'text' && (
-                    <div className="text-content">
-                      {highlightTextIssues(section.content, highlightTexts)}
+                  {section.type === 'text' &&
+                    typeof section.content === 'string' &&
+                    section.content.trim() && (
+                      <div className="text-content report-content-body">
+                        {splitReportTextBlocks(
+                          stripLeadingSectionTitle(section.content, section.title)
+                        ).map((block, blockIndex) => {
+                          const subsectionParts = getReportSubsectionParts(block);
+                          const sectionIndex = section.__originalSectionIndex || idx + 1;
+                          return (
+                            <p
+                              key={`${idx}-text-block-${blockIndex}`}
+                              className={getReportTextBlockClass(block)}
+                            >
+                              {subsectionParts ? (
+                                <>
+                                  <span className="report-subsection-title">
+                                    {highlightTextIssues(
+                                      subsectionParts.heading,
+                                      highlightTexts,
+                                      sectionIndex
+                                    )}
+                                  </span>
+                                  {highlightTextIssues(
+                                    subsectionParts.rest,
+                                    highlightTexts,
+                                    sectionIndex
+                                  )}
+                                </>
+                              ) : (
+                                highlightTextIssues(block, highlightTexts, sectionIndex)
+                              )}
+                            </p>
+                          );
+                        })}
+                      </div>
+                    )}
+                  {section.type === 'text' && (!section.content || !String(section.content).trim()) && (
+                    <div className="missing-text-content">
+                      该段正文未解析出来，请重新解析或检查源文件文本抽取结果。
                     </div>
                   )}
                   {section.type === 'table_2' && section.activeDisclosureData && (
@@ -1427,7 +1655,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                   )}
                   {!['text', 'table_2', 'table_3', 'table_4'].includes(section.type) && (
                     <div className="unknown-type">
-                      <p className="meta">鏈煡绫诲瀷: {section.type}</p>
+                      <p className="meta">未知类型：{section.type}</p>
                       <pre>{JSON.stringify(section, null, 2)}</pre>
                     </div>
                   )}
@@ -1535,6 +1763,127 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     </section>
   );
 
+  const formatParseStatusLabel = (status) => {
+    switch (status) {
+      case 'accepted':
+        return '已接受';
+      case 'superseded':
+        return '已替换';
+      case 'gate_failed':
+        return '门禁失败';
+      case 'failed':
+        return '解析失败';
+      case 'finalize_failed':
+        return '提交失败';
+      case 'running':
+        return '运行中';
+      case 'created':
+        return '已创建';
+      default:
+        return status || '-';
+    }
+  };
+
+  const formatDateTime = (value) => {
+    if (!value) return '-';
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+  };
+
+  const renderParseHistoryPanel = () => (
+    <section className="section">
+      <div
+        className="version-history-header parse-history-toggle"
+        onClick={async () => {
+          const nextShow = !showParseHistory;
+          setShowParseHistory(nextShow);
+          if (nextShow) {
+            await loadParseHistory(reportId, workingVersionId);
+          }
+        }}
+      >
+        <span>{showParseHistory ? '▼' : '▶'}</span>
+        <h3>解析历史 {parseHistory ? `(${parseHistory.length})` : ''}</h3>
+      </div>
+
+      {showParseHistory && (
+        <div className="parse-history-content">
+          {parseHistoryError && <div className="alert error">{parseHistoryError}</div>}
+          {parseHistoryLoading ? (
+            <p>加载中...</p>
+          ) : parseHistory && parseHistory.length > 0 ? (
+            <div className="parse-history-list">
+              {parseHistory.map((run) => {
+                const isBusy = Boolean(parseActionId && parseActionId.endsWith(`:${run.id}`));
+                return (
+                  <div
+                    key={run.id}
+                    className={`parse-run-card status-${run.status || 'unknown'} ${run.is_current ? 'is-current' : ''}`}
+                  >
+                    <div className="parse-run-head">
+                      <div>
+                        <strong>#{run.id} {run.is_current ? '当前' : ''}</strong>
+                        <span className="parse-run-status">{formatParseStatusLabel(run.status)}</span>
+                      </div>
+                      <span className="meta">{formatDateTime(run.created_at)}</span>
+                    </div>
+                    <div className="parse-run-grid">
+                      <span>version #{run.report_version_id}</span>
+                      <span>{run.provider || '-'} / {run.model || '-'}</span>
+                      <span>prompt {run.prompt_version || '-'}</span>
+                      <span>attempt {run.attempt || 1}</span>
+                      <span>source gate {run.source_gate_status || '-'}</span>
+                      <span>
+                        U/W/B {Number(run.source_gate_uncertain_count || 0)}/
+                        {Number(run.source_gate_warning_count || 0)}/
+                        {Number(run.source_gate_blocker_count || 0)}
+                      </span>
+                    </div>
+                    {run.error_message && <p className="parse-run-error">{run.error_message}</p>}
+                    <div className="parse-run-actions">
+                      {run.status === 'accepted' && !run.is_current && (
+                        <button
+                          type="button"
+                          className="secondary-btn"
+                          disabled={isBusy}
+                          onClick={() => handleParseAction(run, 'switch')}
+                        >
+                          设为当前
+                        </button>
+                      )}
+                      {run.status === 'superseded' && (
+                        <button
+                          type="button"
+                          className="secondary-btn"
+                          disabled={isBusy}
+                          onClick={() => handleParseAction(run, 'restore')}
+                        >
+                          恢复为当前
+                        </button>
+                      )}
+                      {run.status === 'finalize_failed' && (
+                        <button
+                          type="button"
+                          className="secondary-btn"
+                          disabled={isBusy}
+                          onClick={() => handleParseAction(run, 'retry')}
+                        >
+                          重试提交
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="meta">暂无解析历史</p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+
   const formatTraceValue = (value) => {
     if (value === null || value === undefined || value === '') return '-';
     return String(value);
@@ -1598,8 +1947,11 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     );
   };
 
-  const renderTracePanel = () => (
-    <div className="trace-panel">
+  const renderTracePanel = () => {
+    if (!technicalModeEnabled) return null;
+
+    return (
+    <div className="trace-panel report-debug-panel">
       <div className="trace-panel-header">
         <div>
           <h3>问题溯源面板</h3>
@@ -1758,7 +2110,8 @@ function ReportDetail({ reportId: propReportId, onBack }) {
         </div>
       )}
     </div>
-  );
+    );
+  };
 
   const getPublishErrorMessage = (err) => {
     const code = err?.response?.data?.error;
@@ -1803,18 +2156,34 @@ function ReportDetail({ reportId: propReportId, onBack }) {
         <div className="detail-header">
           <div>
             <h2>报告详情</h2>
-            <p className="subtitle">查看报告、待复核版本与正式发布版本信息</p>
+            <p className="subtitle">查看政府信息公开年度报告正文与数据表格</p>
           </div>
           <div className="actions">
-            <button className="action-btn" onClick={refresh} disabled={loading}>
-              刷新
-            </button>
-            <button className="action-btn" onClick={handleReparse} disabled={loading}>
-              自动解析
-            </button>
-            <button className="action-btn danger" onClick={handleDelete} disabled={loading}>
-              删除报告
-            </button>
+            {technicalModeEnabled && (
+              <button
+                className="action-btn report-technical-toggle"
+                onClick={() => setShowMetadata(!showMetadata)}
+              >
+                {showMetadata ? '隐藏技术信息' : '显示技术信息'}
+              </button>
+            )}
+            {canMaintainReports && (
+              <div className="report-admin-actions">
+                <button className="action-btn" onClick={refresh} disabled={loading}>
+                  刷新
+                </button>
+                <button className="action-btn" onClick={handleReparse} disabled={loading}>
+                  自动解析
+                </button>
+                <button
+                  className="action-btn danger report-danger-action"
+                  onClick={handleDelete}
+                  disabled={loading}
+                >
+                  删除报告
+                </button>
+              </div>
+            )}
             <button className="action-btn" onClick={handleBack}>
               返回上一层
             </button>
@@ -1826,16 +2195,9 @@ function ReportDetail({ reportId: propReportId, onBack }) {
 
         {!loading && !error && report && (
           <>
-            {/* 元数据折叠按钮 */}
-            <div className="metadata-toggle">
-              <button className="secondary-btn" onClick={() => setShowMetadata(!showMetadata)}>
-                {showMetadata ? '隐藏技术信息' : '显示技术信息（报告信息、任务、版本等）'}
-              </button>
-            </div>
-
-            {/* 可折叠的元数据部分 */}
-            {showMetadata && (
-              <>
+            {/* 技术诊断信息仅在显式 debug 模式下允许展开，普通报告视图不渲染。 */}
+            {technicalModeEnabled && showMetadata && (
+              <div className="report-technical-info">
                 <section className="section">
                   <h3>报告信息</h3>
                   <div className="grid">
@@ -1863,6 +2225,8 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                 {renderVersionDetail('待复核版本', pendingVersion, '当前没有待复核版本')}
 
                 {/* 折叠式版本历史 */}
+                {renderParseHistoryPanel()}
+
                 <section className="section">
                   <div
                     className="version-history-header"
@@ -1980,7 +2344,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                     </div>
                   )}
                 </section>
-              </>
+              </div>
             )}
 
             {/* Tab 切换 */}
@@ -2007,23 +2371,25 @@ function ReportDetail({ reportId: propReportId, onBack }) {
               </div>
             </div>
 
-            {/* Tab 鍐呭 */}
+            {/* Tab 内容 */}
             {activeTab === 'content' && (
-              <section className="section">
+              <section className="section report-content-section">
                 <div className="report-title-banner">
                   <h2>
                     {report?.year || ''}年{report?.region_name || report?.region?.name || ''}
                     政府信息公开年报
                   </h2>
                 </div>
-                {hasPendingReview && (
+                {technicalModeEnabled && hasPendingReview && (
                   <p className="meta">
                     当前页面默认展示待复核版本 #{pendingVersion?.version_id}
                     {activeVersion ? `；正式发布版本为 #${activeVersion.version_id}` : '；当前尚无正式发布版本'}。
                   </p>
                 )}
-                {factsLoadError && <div className="alert error">{factsLoadError}</div>}
-                {!usingFactsSource && !factsLoadError && (
+                {technicalModeEnabled && factsLoadError && (
+                  <div className="alert error">{factsLoadError}</div>
+                )}
+                {technicalModeEnabled && !usingFactsSource && !factsLoadError && (
                   <p className="meta">facts 数据尚未就绪，暂不展示表格。</p>
                 )}
                 {renderTracePanel()}

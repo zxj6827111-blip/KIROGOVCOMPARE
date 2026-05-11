@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { DiffSummary, SuspiciousPoint } from '../types/models';
 import { AISuggestion } from '../models/AISuggestion';
-import { v4 as uuidv4 } from 'uuid';
+import { uuidv4 } from '../utils/uuid';
 import pool from '../config/database';
 
 export interface AISuggestionOptions {

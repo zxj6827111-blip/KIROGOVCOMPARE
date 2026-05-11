@@ -11,7 +11,6 @@ const router = express.Router();
 router.post('/login', async (req: Request, res: Response) => {
   try {
     const { username, password } = req.body;
-    console.log('[Auth] Login attempt:', { username, body: req.body });
 
     if (!username || !password) {
       return res.status(400).json({ error: '请输入用户名和密码' });
@@ -24,7 +23,6 @@ router.post('/login', async (req: Request, res: Response) => {
     const users = result.rows;
 
     if (!users || users.length === 0) {
-      console.log('[Auth] User not found:', username);
       return res.status(401).json({ error: '用户名或密码错误' });
     }
 
@@ -32,7 +30,6 @@ router.post('/login', async (req: Request, res: Response) => {
 
     // Verify password
     const isMatch = verifyPassword(password, user.password_hash);
-    console.log('[Auth] Password match result:', isMatch);
     if (!isMatch) {
       return res.status(401).json({ error: '用户名或密码错误' });
     }

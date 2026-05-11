@@ -1,7 +1,11 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EntityContext } from '../components/Layout';
-import { fetchOrgs } from '../api';
+import {
+  fetchLeaderCockpitComparison,
+  fetchLeaderCockpitModel,
+  fetchOrgs,
+} from '../api';
 import { buildRegionTree } from '../data';
 import { getCurrentUser } from '../../apiClient';
 import { canAccessLeaderCockpit, isLeaderCockpitAdmin, isLeaderCockpitEnabled } from './access';
@@ -10,11 +14,18 @@ import {
   LEADER_COCKPIT_DEFAULT_YEAR,
 } from './config';
 import { DEFAULT_STABLE_SAMPLE } from './riskPolicy';
-import { buildLeaderCockpitModel, buildEntityComparisonModel } from './selectors';
+import {
+  buildEntityComparisonModel,
+  buildLeaderCockpitModel,
+  decorateEntityComparisonModel,
+  decorateLeaderCockpitModel,
+} from './selectors';
 import type {
   ActionPackTemplateInstance,
+  EntityComparisonModel,
   EvidenceItem,
   LeaderCockpitReport,
+  LeaderCockpitModel,
   MetricDefinition,
   ViewLevel,
 } from './types';
@@ -29,14 +40,19 @@ import { Step2Reasons } from './sections/Step2Reasons';
 import { Step3Funnel } from './sections/Step3Funnel';
 import { Step4ActionPack } from './sections/Step4ActionPack';
 import { Step5Report } from './sections/Step5Report';
-import { diagnoseDistrictData } from '../utils/diagnose';
 
 const steps = ['总览', '原因结构', '风险漏斗', '行动包', 'AI报告'];
+
+const isLegacyLeaderCockpitFallbackEnabled = () => {
+  if (typeof window === 'undefined') return false;
+  return window.localStorage.getItem('govinsight_legacy_cockpit_fallback') === 'true';
+};
 
 export const LeaderCockpit: React.FC = () => {
   const navigate = useNavigate();
   const { entity, setEntity, openSelector } = useContext(EntityContext);
   const user = getCurrentUser();
+  const legacyFallbackEnabled = isLegacyLeaderCockpitFallbackEnabled();
   const canAccess = canAccessLeaderCockpit(user)
     && (isLeaderCockpitEnabled() || isLeaderCockpitAdmin(user));
 
@@ -56,6 +72,12 @@ export const LeaderCockpit: React.FC = () => {
   const [activeEvidence, setActiveEvidence] = useState<EvidenceItem[] | null>(null);
   const [selectedActionPack, setSelectedActionPack] = useState<ActionPackTemplateInstance | null>(null);
   const [report, setReport] = useState<LeaderCockpitReport>({});
+  const [model, setModel] = useState<LeaderCockpitModel | null>(null);
+  const [comparisonModel, setComparisonModel] = useState<EntityComparisonModel | null>(null);
+  const [loadingModel, setLoadingModel] = useState(false);
+  const [loadingComparison, setLoadingComparison] = useState(false);
+  const [backendModelNotice, setBackendModelNotice] = useState('');
+  const [backendComparisonNotice, setBackendComparisonNotice] = useState('');
 
   const defaultCityApplied = useRef(false);
   const defaultYearApplied = useRef(false);
@@ -119,35 +141,131 @@ export const LeaderCockpit: React.FC = () => {
     }
   }, [availableYears, year]);
 
-  const model = useMemo(() => {
-    if (!entity) return null;
-    return buildLeaderCockpitModel(entity, year);
-  }, [entity, year]);
+  useEffect(() => {
+    let cancelled = false;
 
-  const comparisonModel = useMemo(() => {
-    if (!entity || viewLevel === 'city') return null;
+    if (!entity) {
+      setModel(null);
+      setBackendModelNotice('');
+      return () => {
+        cancelled = true;
+      };
+    }
 
-    // 诊断数据加载情况
-    console.log('[LeaderCockpit] Building comparison model for:', {
-      entityName: entity.name,
-      viewLevel,
-      year,
-      childrenCount: entity.children?.length,
-      childrenWithData: entity.children?.filter(c => c.data && c.data.length > 0).length
-    });
+    setLoadingModel(true);
+    setBackendModelNotice('');
+    fetchLeaderCockpitModel(entity.id, year)
+      .then((backendModel) => {
+        if (cancelled) return;
+        if (backendModel) {
+          setModel(decorateLeaderCockpitModel(backendModel));
+          return;
+        }
+        if (legacyFallbackEnabled) {
+          setModel(decorateLeaderCockpitModel(buildLeaderCockpitModel(entity, year)));
+          setBackendModelNotice('当前通过排障开关启用了前端旧版驾驶舱兜底，请尽快切回后端正式结果。');
+          return;
+        }
+        setModel(null);
+        setBackendModelNotice('领导驾驶舱当前仅消费后端规则结果；该单位暂未返回后端驾驶舱模型。');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        if (legacyFallbackEnabled) {
+          setModel(decorateLeaderCockpitModel(buildLeaderCockpitModel(entity, year)));
+          setBackendModelNotice('后端驾驶舱接口加载失败，已通过排障开关临时启用前端旧版兜底模型。');
+          return;
+        }
+        setModel(null);
+        setBackendModelNotice('后端驾驶舱接口加载失败，系统不再默认使用前端本地重算。');
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingModel(false);
+        }
+      });
 
-    // 调用诊断工具
-    diagnoseDistrictData(entity);
+    return () => {
+      cancelled = true;
+    };
+  }, [entity, year, legacyFallbackEnabled]);
 
-    return buildEntityComparisonModel(entity, year, viewLevel, {
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!entity || viewLevel === 'city') {
+      setComparisonModel(null);
+      setBackendComparisonNotice('');
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setLoadingComparison(true);
+    setBackendComparisonNotice('');
+    fetchLeaderCockpitComparison(entity.id, year, viewLevel, {
       disclosureMethod,
       correctionMethod,
       includesCarryOver,
       enableStableSample
-    });
-  }, [entity, year, viewLevel, disclosureMethod, correctionMethod, includesCarryOver, enableStableSample]);
+    })
+      .then((backendModel) => {
+        if (cancelled) return;
+        if (backendModel) {
+          setComparisonModel(decorateEntityComparisonModel(backendModel));
+          return;
+        }
+        if (legacyFallbackEnabled) {
+          setComparisonModel(
+            decorateEntityComparisonModel(
+              buildEntityComparisonModel(entity, year, viewLevel, {
+                disclosureMethod,
+                correctionMethod,
+                includesCarryOver,
+                enableStableSample
+              })
+            )
+          );
+          setBackendComparisonNotice('当前通过排障开关启用了前端旧版对比模型，请尽快切回后端正式结果。');
+          return;
+        }
+        setComparisonModel(null);
+        setBackendComparisonNotice('该层级当前未返回后端对比模型，已停止前端本地重算。');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        if (legacyFallbackEnabled) {
+          setComparisonModel(
+            decorateEntityComparisonModel(
+              buildEntityComparisonModel(entity, year, viewLevel, {
+                disclosureMethod,
+                correctionMethod,
+                includesCarryOver,
+                enableStableSample
+              })
+            )
+          );
+          setBackendComparisonNotice('后端对比接口加载失败，已通过排障开关临时启用前端旧版对比模型。');
+          return;
+        }
+        setComparisonModel(null);
+        setBackendComparisonNotice('后端对比接口加载失败，系统不再默认使用前端本地重算。');
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingComparison(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [entity, year, viewLevel, disclosureMethod, correctionMethod, includesCarryOver, enableStableSample, legacyFallbackEnabled]);
 
   const showComparison = viewLevel !== 'city' && comparisonModel !== null;
+  const backendOnlySourceNotice = !legacyFallbackEnabled
+    ? `当前结果默认来自后端正式${showComparison ? '驾驶舱模型与对比接口' : '驾驶舱模型'}，前端仅负责展示、交互与显式排障开关。`
+    : '';
 
   if (!canAccess) {
     return (
@@ -157,10 +275,18 @@ export const LeaderCockpit: React.FC = () => {
     );
   }
 
-  if (!model) {
+  if (!model && loadingModel) {
     return (
       <div className="bg-white rounded-lg border border-dashed border-slate-200 p-10 text-center text-slate-500">
         正在加载驾驶舱数据...
+      </div>
+    );
+  }
+
+  if (!model) {
+    return (
+      <div className="bg-white rounded-lg border border-dashed border-slate-200 p-10 text-center text-slate-500">
+        当前单位暂无可用驾驶舱数据。
       </div>
     );
   }
@@ -222,11 +348,16 @@ export const LeaderCockpit: React.FC = () => {
         onViewLevelChange={setViewLevel}
         onExit={() => navigate('/')}
       />
-      {model.meta.notices.length > 0 && (
+      {(model.meta.notices.length > 0 || backendModelNotice || backendComparisonNotice) && (
         <div className="bg-amber-50 border border-amber-200 text-amber-700 text-xs rounded-lg px-4 py-2">
-          {model.meta.notices.join(' / ')}
+          {[...model.meta.notices, backendModelNotice, backendComparisonNotice].filter(Boolean).join(' / ')}
         </div>
       )}
+      {backendOnlySourceNotice ? (
+        <div className="bg-sky-50 border border-sky-200 text-sky-700 text-xs rounded-lg px-4 py-2">
+          {backendOnlySourceNotice}
+        </div>
+      ) : null}
 
       {currentStep === 0 && (
         <div className="space-y-6">
@@ -255,6 +386,10 @@ export const LeaderCockpit: React.FC = () => {
                 onToggleCarryOver={() => setIncludesCarryOver(prev => !prev)}
               />
             </>
+          ) : viewLevel !== 'city' && loadingComparison ? (
+            <div className="bg-white rounded-lg border border-dashed border-slate-200 p-10 text-center text-slate-500">
+              正在加载对比模型...
+            </div>
           ) : (
             <Step1Overview
               model={model}

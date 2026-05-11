@@ -4,20 +4,19 @@
   "description": "政府信息公开年度报告差异比对系统 - 前端",
   "private": true,
   "dependencies": {
-    "@google/genai": "^1.37.0",
-    "autoprefixer": "^10.4.20",
     "axios": "^1.6.2",
     "lucide-react": "^0.562.0",
-    "postcss": "^8.4.49",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.12.0",
-    "react-scripts": "5.0.1",
-    "recharts": "^3.6.0",
-    "tailwindcss": "^3.4.17"
+    "recharts": "^3.6.0"
   },
   "devDependencies": {
+    "@babel/core": "^7.29.0",
+    "@babel/preset-env": "^7.29.2",
+    "@babel/preset-react": "^7.28.5",
+    "@babel/preset-typescript": "^7.28.5",
     "@testing-library/jest-dom": "^6.1.4",
     "@testing-library/react": "^14.0.0",
     "@testing-library/user-event": "^14.5.1",
@@ -25,19 +24,31 @@
     "@types/node": "^25.0.9",
     "@types/react": "^19.2.8",
     "@types/react-dom": "^19.2.3",
-    "typescript": "5.1.6"
+    "autoprefixer": "^10.4.20",
+    "babel-jest": "^30.3.0",
+    "babel-loader": "^10.1.1",
+    "copy-webpack-plugin": "^14.0.0",
+    "css-loader": "^7.1.4",
+    "css-minimizer-webpack-plugin": "^8.0.0",
+    "html-webpack-plugin": "^5.6.7",
+    "identity-obj-proxy": "^3.0.0",
+    "jest": "^30.3.0",
+    "jest-environment-jsdom": "^30.3.0",
+    "mini-css-extract-plugin": "^2.10.2",
+    "postcss": "^8.5.10",
+    "postcss-loader": "^8.2.1",
+    "style-loader": "^4.0.0",
+    "tailwindcss": "^3.4.17",
+    "terser-webpack-plugin": "^5.5.0",
+    "typescript": "5.1.6",
+    "webpack": "^5.106.2",
+    "webpack-cli": "^7.0.2"
   },
   "scripts": {
-    "start": "set PORT=3001&& set HOST=0.0.0.0&& set WDS_SOCKET_HOST=localhost&& set DANGEROUSLY_DISABLE_HOST_CHECK=true&& node scripts/react-scripts-wrapper.js start",
+    "start": "node scripts/dev-server.js",
     "typecheck": "tsc --noEmit",
-    "build": "npm run typecheck && node --max-old-space-size=2048 scripts/react-scripts-wrapper.js build",
-    "test": "react-scripts test",
-    "eject": "react-scripts eject"
-  },
-  "eslintConfig": {
-    "extends": [
-      "react-app"
-    ]
+    "build": "npm run typecheck && webpack --mode production",
+    "test": "jest --runInBand"
   },
   "browserslist": {
     "production": [
@@ -50,6 +61,5 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
-  },
-  "proxy": "http://localhost:8787"
+  }
 }

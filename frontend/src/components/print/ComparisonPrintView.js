@@ -22,7 +22,7 @@ const tokenizeText = (text) => {
 };
 
 const isPunctuation = (str) => {
-    return /[-???????????????????.,;:?!'"()[\]\s]/.test(str);
+    return /[-,.;:?!'"()[\]\s，。；：？！、“”‘’（）【】《》]/.test(str);
 };
 
 function calculateTextSimilarity(text1, text2) {
@@ -118,7 +118,15 @@ function ComparisonPrintView({ comparisonId }) {
     // Default: show identical parts highlight (yellow), hide diff highlight (red)
     const searchParams = useMemo(() => new URLSearchParams(window.location.search), []);
     const highlightIdentical = searchParams.get('highlightIdentical') !== 'false'; // default true
-    const highlightDiff = searchParams.get('highlightDiff') === 'true'; // default false
+    const highlightDiff = searchParams.get('highlightDiff') === 'true'; // default false
+
+    useEffect(() => {
+        const url = new URL(window.location.href);
+        if (url.searchParams.has('service_token')) {
+            url.searchParams.delete('service_token');
+            window.history.replaceState(null, '', url.toString());
+        }
+    }, []);
 
     // Fetch data directly from API (auth required)
     useEffect(() => {

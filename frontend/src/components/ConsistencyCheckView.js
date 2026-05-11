@@ -125,7 +125,8 @@ const highlightNumber = (text, number) => {
   if (!text || number === null || number === undefined) return text;
   const numStr = String(number);
   // 使用 <mark> 标签包裹数字，CSS 会提供高亮样式
-  const regex = new RegExp(`(${numStr})`, 'g');
+  const escaped = numStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`(?<!\\d)(${escaped})(?!\\d)`, 'g');
   return text.replace(regex, '<mark class="num-highlight">$1</mark>');
 };
 

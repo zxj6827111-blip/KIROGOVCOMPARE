@@ -166,6 +166,30 @@
     /* Slight contrast for detail area */
 }
 
+.issue-table-locations {
+    padding: 16px 24px;
+    background: #fff7ed;
+    border-bottom: 1px solid #fed7aa;
+}
+
+.issue-location-line {
+    margin: 6px 0;
+    padding: 8px 10px;
+    background: #fff;
+    border: 1px solid #fed7aa;
+    border-radius: 6px;
+    color: #7c2d12;
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.issue-location-more {
+    margin-top: 8px;
+    color: #9a3412;
+    font-size: 12px;
+    font-weight: 600;
+}
+
 .detail-section {
     margin-bottom: 24px;
     border: none;

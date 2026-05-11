@@ -221,17 +221,17 @@ export const EntityComparisonTable: React.FC<EntityComparisonTableProps> = ({
                     <div className="ml-6 pl-6 border-l border-blue-200/60">
                         <div className="text-xs font-medium text-slate-500 mb-2">数据质量概览</div>
                         <div className="space-y-1.5 text-[10px] text-slate-600">
-                            <div className="flex justify-between gap-6" title="已接入年报的主体比例">
-                                <span>年报接入:</span>
-                                <span className="font-mono font-bold text-slate-800">{statistics.reportCoverage || '-/-'}</span>
+                            <div className="flex justify-between gap-6" title="已进入 gov_open_annual_stats_v2 的主体比例">
+                                <span>底座接入:</span>
+                                <span className="font-mono font-bold text-slate-800">{statistics.statsCoverage || statistics.reportCoverage || '-/-'}</span>
                             </div>
-                            <div className="flex justify-between gap-6" title="关键字段完整的主体比例">
-                                <span>字段完整:</span>
-                                <span className="font-mono font-bold text-slate-800">{statistics.fieldCoverage || '-/-'}</span>
+                            <div className="flex justify-between gap-6" title="非 blocked、可直接用于比较分析的主体比例">
+                                <span>可直接分析:</span>
+                                <span className="font-mono font-bold text-slate-800">{statistics.analyzableCoverage || statistics.fieldCoverage || '-/-'}</span>
                             </div>
-                            <div className="flex justify-between gap-6" title="已接入年报中成功解析出关键数据的比例">
-                                <span>解析成功:</span>
-                                <span className="font-mono font-bold text-emerald-600">{statistics.parseSuccessRate || '-'}</span>
+                            <div className="flex justify-between gap-6" title="materialize_status = official 的主体比例">
+                                <span>正式口径:</span>
+                                <span className="font-mono font-bold text-emerald-600">{statistics.officialCoverage || statistics.parseSuccessRate || '-'}</span>
                             </div>
                         </div>
                     </div>

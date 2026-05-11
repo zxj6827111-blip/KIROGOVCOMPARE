@@ -21,6 +21,7 @@ check_db*.js
 uploads/
 output/
 tmp/
+backups/
 *.swp
 *.swo
 *~
@@ -35,3 +36,5 @@ test-report*.json
 frontend/temp-*.json
 .playwright-cli/
 tmp-upload-report.md
+.npm-cache/
+.eslintcache*

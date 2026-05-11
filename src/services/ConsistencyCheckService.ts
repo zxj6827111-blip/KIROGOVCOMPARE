@@ -94,6 +94,16 @@ export interface ConsistencyItem {
 
 const ENGINE_VERSION = 'v2';
 
+interface TextPattern {
+    regex: RegExp;
+    field: string;
+    table: 'table3' | 'table4';
+    path: string;
+    getValue: () => number | null;
+    name: string;
+    extract?: (content: string) => RegExpMatchArray | null;
+}
+
 export class ConsistencyCheckService {
     /**
      * Parse a number from various formats: number, string, "-", "—", "", null
@@ -135,6 +145,22 @@ export class ConsistencyCheckService {
             }
         }
         return hasValue ? sum : null;
+    }
+
+    private extractTotalProcessedTextMatch(content: string): RegExpMatchArray | null {
+        if (!content) return null;
+
+        const patterns = [
+            /(?:答复|办结|办理结果(?:总计)?|处理结果(?:总计)?)(?:政府信息公开申请)?(?:总计|共计|共|数量)?\s*(\d+)\s*件/,
+            /(?:办理结果(?:总计)?|处理结果(?:总计)?)(?:为|是|：|:)?\s*(\d+)\s*件/,
+        ];
+
+        for (const pattern of patterns) {
+            const match = content.match(pattern);
+            if (match) return match;
+        }
+
+        return null;
     }
 
     /**
@@ -568,14 +594,7 @@ export class ConsistencyCheckService {
         }
 
         // Basic patterns for extracting key numbers from text
-        const patterns: Array<{
-            regex: RegExp;
-            field: string;
-            table: 'table3' | 'table4';
-            path: string;
-            getValue: () => number | null;
-            name: string;
-        }> = [
+        const patterns: TextPattern[] = [
                 {
                     regex: /本年(?:度)?新收.*?(\d+)\s*件/,
                     field: 'newReceived',
@@ -604,13 +623,16 @@ export class ConsistencyCheckService {
                 {
                     // Tighten the gap before the number so narrative phrases like
                     // "办理政府信息公开申请。...受理3259件，答复3278件" do not
-                    // incorrectly capture the earlier received-count.
-                    regex: /(?:答复|办结|办理结果(?:总计)?|处理结果(?:总计)?|处理|办理)(?:政府信息公开申请)?(?:总计|共计|共|数量)?[^0-9\r\n]{0,20}(\d+)\s*件/,
+                    // incorrectly capture the earlier received-count. Also avoid
+                    // treating following branch numbers, e.g. "办结，8件申请人撤销",
+                    // as the total processed count.
+                    regex: /(?:答复|办结|办理结果(?:总计)?|处理结果(?:总计)?)(?:政府信息公开申请)?(?:总计|共计|共|数量)?\s*(\d+)\s*件/,
                     field: 'totalProcessed',
                     table: 'table3',
                     path: 'tableData.total.results.totalProcessed',
                     getValue: () => this.parseNumber(tableData?.total?.results?.totalProcessed),
                     name: '办理结果总计',
+                    extract: (content) => this.extractTotalProcessedTextMatch(content),
                 },
                 {
                     regex: /结转下年度(?:继续办理)?.*?(\d+)\s*件/,
@@ -649,7 +671,7 @@ export class ConsistencyCheckService {
         // Search in each text section separately to track position
         for (const pattern of patterns) {
             for (const section of textSections) {
-                const match = section.content.match(pattern.regex);
+                const match = pattern.extract ? pattern.extract(section.content) : section.content.match(pattern.regex);
                 if (match) {
                     const textValue = parseInt(match[1], 10);
                     const tableValue = pattern.getValue();

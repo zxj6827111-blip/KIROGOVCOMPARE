@@ -223,7 +223,7 @@ router.post('/notifications/read-all', async (req, res) => {
 
     let scopeClause = '';
     const params: any[] = [];
-    let paramIndex = 1;
+    const paramIndex = 1;
 
     if (allowedRegionIds && user) {
       // WHERE read_at IS NULL AND (...)

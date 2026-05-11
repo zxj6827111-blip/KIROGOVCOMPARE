@@ -1,5 +1,8 @@
 import type { AnnualData, EntityProfile } from '../types';
 import {
+  classifyGovInsightEntity,
+} from '../utils/entityClassification';
+import {
   LEADER_COCKPIT_CONNECTIONS,
   LEADER_COCKPIT_SERIES_YEARS,
 } from './config';
@@ -344,6 +347,52 @@ const buildAttributions = (
   }));
 };
 
+export const decorateLeaderCockpitModel = (
+  model: LeaderCockpitModel | null
+): LeaderCockpitModel | null => {
+  if (!model) return null;
+
+  const withMeta = <T extends MetricValue>(metric: T, key: keyof typeof metricDefinitions): T => ({
+    ...metric,
+    definition: metric.definition || metricDefinitions[key],
+    evidence: metric.evidence || metricEvidence[key],
+  });
+
+  return {
+    ...model,
+    metrics: {
+      ...model.metrics,
+      newApplications: withMeta(model.metrics.newApplications, 'newApplications'),
+      acceptedTotal: withMeta(model.metrics.acceptedTotal, 'acceptedTotal'),
+      substantiveDisclosureRate: withMeta(model.metrics.substantiveDisclosureRate, 'substantiveDisclosureRate'),
+      reconsiderationCorrectionRate: withMeta(model.metrics.reconsiderationCorrectionRate, 'reconsiderationCorrectionRate'),
+    },
+    funnel: {
+      ...model.funnel,
+      newApplications: withMeta(model.funnel.newApplications, 'newApplications'),
+      disputeCases: withMeta(model.funnel.disputeCases, 'disputeConversion'),
+      correctionCases: withMeta(model.funnel.correctionCases, 'correctionConversion'),
+      rates: {
+        disputeConversion: withMeta(model.funnel.rates.disputeConversion, 'disputeConversion'),
+        correctionConversion: withMeta(model.funnel.rates.correctionConversion, 'correctionConversion'),
+        correctionRate: withMeta(model.funnel.rates.correctionRate, 'correctionRate'),
+      },
+    },
+  };
+};
+
+export const decorateEntityComparisonModel = <T extends import('./types').EntityComparisonModel | null>(model: T): T => {
+  return model;
+};
+
+/**
+ * Fallback-only client builder.
+ * Backend `/leader-cockpit/model` is the primary source of truth.
+ */
+/**
+ * @deprecated Phase 2 fallback only. Production traffic should consume backend
+ * leader-cockpit models and use this builder only under an explicit debug flag.
+ */
 export const buildLeaderCockpitModel = (
   entity: EntityProfile | null,
   year: number
@@ -589,23 +638,10 @@ export const buildLeaderCockpitModel = (
   return model;
 };
 
-// Entity Classification Helpers
-const isDistrictName = (name: string): boolean => {
-  const districtSuffixes = ['区', '县', '开发区', '园区', '文旅区', '高新区'];
-  return districtSuffixes.some(suffix => name.endsWith(suffix));
-};
-
-const isDepartmentName = (name: string): boolean => {
-  const departmentSuffixes = ['局', '委员会', '委', '办', '中心', '院', '馆', '所', '署', '厅'];
-  return departmentSuffixes.some(suffix => name.endsWith(suffix));
-};
-
 type EntityType = 'district' | 'department' | 'unknown';
 
-const classifyEntity = (name: string): EntityType => {
-  if (isDistrictName(name)) return 'district';
-  if (isDepartmentName(name)) return 'department';
-  return 'unknown';
+const classifyEntity = (entity: EntityProfile): EntityType => {
+  return classifyGovInsightEntity(entity);
 };
 
 // Build Entity Comparison Model
@@ -645,6 +681,14 @@ const classifyMissingType = (entity: EntityProfile, year: number): MissingType =
 // const generateInterviewList = ...
 // const generateGovernanceSuggestions = ...
 
+/**
+ * Fallback-only client builder.
+ * Backend `/leader-cockpit/comparison` is the primary source of truth.
+ */
+/**
+ * @deprecated Phase 2 fallback only. Production traffic should consume backend
+ * comparison models and use this builder only under an explicit debug flag.
+ */
 export const buildEntityComparisonModel = (
   cityEntity: EntityProfile | null,
   year: number,
@@ -670,10 +714,8 @@ export const buildEntityComparisonModel = (
   // Filter children by view level
   const targetType: EntityType = viewLevel === 'district' ? 'district' : 'department';
   const filteredChildren = (cityEntity.children || []).filter(
-    child => classifyEntity(child.name) === targetType
+    child => classifyEntity(child) === targetType
   );
-
-  console.log(`[buildEntityComparisonModel] ${viewLevel} view, calibration:`, calibration);
 
   if (filteredChildren.length === 0) return null;
 

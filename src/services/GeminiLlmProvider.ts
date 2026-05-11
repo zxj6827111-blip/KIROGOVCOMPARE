@@ -1,7 +1,8 @@
-import axios, { AxiosError } from 'axios';
 import fs from 'fs';
 import path from 'path';
+import { Dispatcher, fetch as undiciFetch } from 'undici';
 import { calculateFileHash } from '../utils/fileHash';
+import { getProxyDispatcher, resolveProxyUrl, sanitizeProxyUrlForLog } from '../utils/httpProxy';
 import { LlmParseRequest, LlmParseResult, LlmProvider, LlmProviderError } from './LlmProvider';
 import PdfParseService from './PdfParseService';
 import HtmlParseService from './HtmlParseService';
@@ -337,8 +338,90 @@ async function loadUserText(absolutePath: string, request: LlmParseRequest): Pro
 
 export class GeminiLlmProvider implements LlmProvider {
   private readonly provider = 'gemini';
+  private readonly dispatcher?: Dispatcher;
 
-  constructor(private readonly apiKey: string, private readonly model: string) { }
+  constructor(private readonly apiKey: string, private readonly model: string) {
+    const proxyUrl = resolveProxyUrl(['GEMINI_PROXY_URL', 'HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY']);
+    this.dispatcher = getProxyDispatcher(proxyUrl);
+    if (proxyUrl) {
+      console.log(`[Gemini] Using proxy ${sanitizeProxyUrlForLog(proxyUrl)}`);
+    }
+  }
+
+  private buildRequestSignal(signal: AbortSignal | undefined, timeoutMs: number): {
+    signal: AbortSignal;
+    cleanup: () => void;
+    didTimeout: () => boolean;
+  } {
+    const controller = new AbortController();
+    let timedOut = false;
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+
+    const combinedSignal = signal
+      ? AbortSignal.any([signal, controller.signal])
+      : controller.signal;
+
+    return {
+      signal: combinedSignal,
+      cleanup: () => clearTimeout(timer),
+      didTimeout: () => timedOut,
+    };
+  }
+
+  private async postGemini<T>(
+    url: string,
+    payload: unknown,
+    timeoutMs: number,
+    signal?: AbortSignal
+  ): Promise<T> {
+    const requestUrl = new URL(url);
+    requestUrl.searchParams.set('key', this.apiKey);
+
+    const { signal: requestSignal, cleanup, didTimeout } = this.buildRequestSignal(signal, timeoutMs);
+
+    try {
+      const response = await undiciFetch(requestUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        dispatcher: this.dispatcher,
+        signal: requestSignal,
+      });
+
+      const rawText = await response.text();
+
+      if (!response.ok) {
+        const preview = rawText.trim().slice(0, 240);
+        throw new LlmProviderError(
+          `Gemini request failed with status ${response.status}: ${response.statusText}${preview ? ` | ${preview}` : ''}`,
+          'gemini_http_error'
+        );
+      }
+
+      if (!rawText.trim()) {
+        throw new LlmProviderError('Gemini response body is empty', 'gemini_empty_response');
+      }
+
+      return JSON.parse(rawText) as T;
+    } catch (error) {
+      if (error instanceof LlmProviderError) {
+        throw error;
+      }
+
+      if (didTimeout()) {
+        throw new LlmProviderError(`Gemini request timed out after ${timeoutMs}ms`, 'gemini_timeout');
+      }
+
+      const message = error instanceof Error ? error.message : String(error || 'Gemini request failed');
+      throw new LlmProviderError(message, 'gemini_request_error');
+    } finally {
+      cleanup();
+    }
+  }
 
   async parse(request: LlmParseRequest, signal?: AbortSignal): Promise<LlmParseResult> {
     const absolutePath = path.isAbsolute(request.storagePath)
@@ -398,16 +481,11 @@ export class GeminiLlmProvider implements LlmProvider {
         },
       };
 
-      const response = await axios.post<GeminiResponse>(url, requestPayload, {
-        params: { key: this.apiKey },
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 300000,
-        signal: signal,
-      });
+      const response = await this.postGemini<GeminiResponse>(url, requestPayload, 300000, signal);
 
-      const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
       if (!text) {
-        console.error('[Gemini] Response missing content:', JSON.stringify(response.data));
+        console.error('[Gemini] Response missing content:', JSON.stringify(response));
         throw new LlmProviderError('Gemini response missing content', 'gemini_empty_response');
       }
       console.log('[Gemini] Raw Response (Preview):', text.slice(0, 500));
@@ -452,13 +530,8 @@ export class GeminiLlmProvider implements LlmProvider {
           },
         };
 
-        const inlineResponse = await axios.post<GeminiResponse>(url, inlinePayload, {
-          params: { key: this.apiKey },
-          headers: { 'Content-Type': 'application/json' },
-          timeout: 300000,
-          signal: signal,
-        });
-        const inlineText = inlineResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+        const inlineResponse = await this.postGemini<GeminiResponse>(url, inlinePayload, 300000, signal);
+        const inlineText = inlineResponse.candidates?.[0]?.content?.parts?.[0]?.text;
         if (inlineText) {
           console.log('[Gemini] Inline PDF Response (Preview):', inlineText.slice(0, 500));
           const inlineParsed = parseGeminiJsonText(inlineText);
@@ -504,14 +577,7 @@ export class GeminiLlmProvider implements LlmProvider {
         throw error;
       }
 
-      const axiosError = error as AxiosError;
-      if (axiosError?.response) {
-        const status = axiosError.response.status;
-        const statusText = axiosError.response.statusText || 'unknown_error';
-        throw new LlmProviderError(`Gemini request failed with status ${status}: ${statusText}`, 'gemini_http_error');
-      }
-
-      const message = axiosError?.message || 'Gemini request failed';
+      const message = error instanceof Error ? error.message : String(error || 'Gemini request failed');
       throw new LlmProviderError(message, 'gemini_request_error');
     }
   }
@@ -531,7 +597,7 @@ export class GeminiLlmProvider implements LlmProvider {
     }
 
     try {
-      const response = await axios.post<GeminiResponse>(
+      const response = await this.postGemini<GeminiResponse>(
         url,
         {
           contents: [
@@ -545,21 +611,17 @@ export class GeminiLlmProvider implements LlmProvider {
           } : undefined,
           generationConfig,
         },
-        {
-          params: { key: this.apiKey },
-          headers: { 'Content-Type': 'application/json' },
-          timeout: 120000,
-        }
+        120000
       );
 
-      const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
       if (!text) {
         throw new Error('Gemini response missing content');
       }
       return { text };
     } catch (error) {
-      if (axios.isAxiosError(error) && error.response) {
-        throw new Error(`Gemini API Error: ${error.response.status} ${JSON.stringify(error.response.data)}`);
+      if (error instanceof LlmProviderError) {
+        throw error;
       }
       throw error;
     }

@@ -99,10 +99,25 @@ export interface AnnualData {
 
 export type EntityType = 'province' | 'city' | 'district' | 'department';
 
+export type CanonicalEntityType =
+  | 'province'
+  | 'city'
+  | 'district'
+  | 'department'
+  | 'town_street'
+  | 'functional_zone'
+  | 'unknown';
+
 export interface EntityProfile {
   id: string;
   name: string;
   type: EntityType;
+  regionId?: number;
+  canonicalUnitType?: CanonicalEntityType;
+  canonicalParentRegionId?: number | null;
+  cityRegionId?: number | null;
+  materializeStatus?: string | null;
+  isOfficial?: boolean;
   data: AnnualData[];
   children?: EntityProfile[]; // For hierarchical navigation
   parentPath?: string[]; // Helper for breadcrumbs e.g. ["江苏省", "南京市"]
@@ -116,11 +131,19 @@ export interface ApiResponse<T> {
 }
 
 export interface AnnualDataRecord {
+  region_id?: number;
   year: number;
   org_id: string;
   org_name: string;
   org_type: string;
   parent_id: string | null;
+  canonical_unit_type?: CanonicalEntityType | null;
+  canonical_parent_region_id?: string | null;
+  city_region_id?: string | null;
+  materialize_status?: string | null;
+  is_official?: boolean;
+  metric_version?: string | null;
+  mapping_version?: string | null;
   // 规章
   reg_published: number;
   reg_active: number;
@@ -180,4 +203,10 @@ export interface OrgItem {
   name: string;
   type: string;
   parent_id: string | null;
+  region_id?: number;
+  canonical_unit_type?: CanonicalEntityType | null;
+  canonical_parent_region_id?: string | null;
+  city_region_id?: string | null;
+  materialize_status?: string | null;
+  is_official?: boolean;
 }

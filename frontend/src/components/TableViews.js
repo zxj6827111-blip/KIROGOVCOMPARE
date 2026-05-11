@@ -1,6 +1,9 @@
 import React from 'react';
 import { TrendingUp } from 'lucide-react';
 import { analyzeTable3Diagnostics, getTable3SuspiciousCell } from '../utils/table3Diagnostics';
+import './GovDataTable.css';
+
+const cx = (...classes) => classes.filter(Boolean).join(' ');
 
 // Table 2: Active Disclosure - Matched to PDF format
 const Table2View = ({ data, highlightCells = [] }) => {
@@ -13,7 +16,7 @@ const Table2View = ({ data, highlightCells = [] }) => {
     return (
       <td
         colSpan={colSpan}
-        className={meta.className}
+        className={cx('gov-table-number-cell', meta.className)}
         data-cell-path={fullPath || undefined}
         data-hl-side={meta.sideLabel || undefined}
       >
@@ -23,15 +26,16 @@ const Table2View = ({ data, highlightCells = [] }) => {
   };
 
   return (
-    <div className="comparison-table-container">
-      <table className="comparison-table">
+    <div className="comparison-table-container gov-table-card gov-table-card--table2">
+      <div className="gov-table-scroll">
+        <table className="comparison-table gov-data-table gov-data-table--table2">
         <thead>
           {/* Header 1 */}
-          <tr>
-            <th colSpan={4}>第二十条第（一）项</th>
+          <tr className="gov-table-section-row">
+            <th colSpan={4} className="gov-table-section-heading">第二十条第（一）项</th>
           </tr>
-          <tr>
-            <th width="25%">信息内容</th>
+          <tr className="gov-table-column-row">
+            <th width="25%" className="gov-table-text-header">信息内容</th>
             <th width="25%">本年制发件数</th>
             <th width="25%">本年废止件数</th>
             <th width="25%">现行有效件数</th>
@@ -39,62 +43,63 @@ const Table2View = ({ data, highlightCells = [] }) => {
         </thead>
         <tbody>
           <tr>
-            <td>规章</td>
+            <td className="gov-table-text-cell">规章</td>
             {renderCell(data.regulations?.made, 'regulations.made')}
             {renderCell(data.regulations?.repealed, 'regulations.repealed')}
             {renderCell(data.regulations?.valid, 'regulations.valid')}
           </tr>
           <tr>
-            <td>行政规范性文件</td>
+            <td className="gov-table-text-cell">行政规范性文件</td>
             {renderCell(data.normativeDocuments?.made, 'normativeDocuments.made')}
             {renderCell(data.normativeDocuments?.repealed, 'normativeDocuments.repealed')}
             {renderCell(data.normativeDocuments?.valid, 'normativeDocuments.valid')}
           </tr>
 
           {/* Header 2 */}
-          <tr>
-            <th colSpan={4}>第二十条第（五）项</th>
+          <tr className="gov-table-section-row">
+            <th colSpan={4} className="gov-table-section-heading">第二十条第（五）项</th>
           </tr>
-          <tr>
-            <th>信息内容</th>
+          <tr className="gov-table-column-row">
+            <th className="gov-table-text-header">信息内容</th>
             <th colSpan={3}>本年处理决定数量</th>
           </tr>
           <tr>
-            <td>行政许可</td>
+            <td className="gov-table-text-cell">行政许可</td>
             {renderCell(data.licensing?.processed, 'licensing.processed', 3)}
           </tr>
 
           {/* Header 3 */}
-          <tr>
-            <th colSpan={4}>第二十条第（六）项</th>
+          <tr className="gov-table-section-row">
+            <th colSpan={4} className="gov-table-section-heading">第二十条第（六）项</th>
           </tr>
-          <tr>
-            <th>信息内容</th>
+          <tr className="gov-table-column-row">
+            <th className="gov-table-text-header">信息内容</th>
             <th colSpan={3}>本年处理决定数量</th>
           </tr>
           <tr>
-            <td>行政处罚</td>
+            <td className="gov-table-text-cell">行政处罚</td>
             {renderCell(data.punishment?.processed, 'punishment.processed', 3)}
           </tr>
           <tr>
-            <td>行政强制</td>
+            <td className="gov-table-text-cell">行政强制</td>
             {renderCell(data.coercion?.processed, 'coercion.processed', 3)}
           </tr>
 
           {/* Header 4 */}
-          <tr>
-            <th colSpan={4}>第二十条第（八）项</th>
+          <tr className="gov-table-section-row">
+            <th colSpan={4} className="gov-table-section-heading">第二十条第（八）项</th>
           </tr>
-          <tr>
-            <th>信息内容</th>
+          <tr className="gov-table-column-row">
+            <th className="gov-table-text-header">信息内容</th>
             <th colSpan={3}>本年收费金额（单位：万元）</th>
           </tr>
           <tr>
-            <td>行政事业性收费</td>
+            <td className="gov-table-text-cell">行政事业性收费</td>
             {renderCell(data.fees?.amount, 'fees.amount', 3)}
           </tr>
         </tbody>
       </table>
+      </div>
     </div>
   );
 };
@@ -190,7 +195,12 @@ const Table3View = ({ data, compact = false, highlightCells = [] }) => {
 
     return (
       <td
-        className={`text-center table3-number-cell ${meta.className} ${suspicious ? 'cell-suspicious-fragment' : ''}`}
+        className={cx(
+          'text-center table3-number-cell gov-table-number-cell',
+          category === 'total' && 'gov-table-total-cell',
+          meta.className,
+          suspicious && 'cell-suspicious-fragment'
+        )}
         data-cell-path={fullPath || undefined}
         data-hl-side={meta.sideLabel || undefined}
         data-suspicious-label={suspicious?.marker || undefined}
@@ -202,7 +212,7 @@ const Table3View = ({ data, compact = false, highlightCells = [] }) => {
   };
 
   return (
-    <div className={`comparison-table-container ${compact ? 'shadow-none' : ''}`}>
+    <div className={cx('comparison-table-container gov-table-card gov-table-card--table3', compact && 'shadow-none gov-table-card--compact')}>
       {diagnosticMessages.length > 0 && (
         <div className="table-diagnostic-banner">
           <div className="table-diagnostic-title">疑似拆格告警</div>
@@ -213,45 +223,45 @@ const Table3View = ({ data, compact = false, highlightCells = [] }) => {
           ))}
         </div>
       )}
-      <div className={compact ? 'overflow-x-auto' : 'overflow-x-auto min-w-[900px]'}>
-        <table className="comparison-table table-fixed">
+      <div className={cx('gov-table-scroll gov-table-scroll--wide', compact ? 'gov-table-scroll--fit' : 'overflow-x-auto min-w-[900px]')}>
+        <table className="comparison-table table-fixed gov-data-table gov-data-table--table3">
           {/* Columns Config */}
           <colgroup>
             {/* Approximate widths */}
-            <col style={{ width: compact ? '40px' : '50px' }} />
-            <col style={{ width: compact ? '100px' : '150px' }} />
-            <col style={{ width: compact ? '200px' : '300px' }} />
-            <col span={7} style={{ width: 'auto' }} />
+            <col style={{ width: compact ? '5%' : '50px' }} />
+            <col style={{ width: compact ? '10%' : '150px' }} />
+            <col style={{ width: compact ? '26%' : '300px' }} />
+            <col span={7} style={{ width: compact ? '8.43%' : 'auto' }} />
           </colgroup>
 
           <thead>
-            <tr>
-              <th rowSpan={3} colSpan={3} className="bg-gray-50 font-normal text-left align-top leading-tight">
+            <tr className="gov-table-header-row gov-table-header-row--level1">
+              <th rowSpan={3} colSpan={3} className="bg-gray-50 font-normal text-left align-top leading-tight gov-table-note-cell gov-table-header-level-1">
                 <div style={{ transform: 'scale(0.9)', transformOrigin: 'top left', width: '110%' }}>
                   （本列数据的勾稽关系为：第一项加第二项之和，等于第三项加第四项之和）
                 </div>
               </th>
-              <th colSpan={7} className="text-center bg-gray-50">申请人情况</th>
+              <th colSpan={7} className="text-center bg-gray-50 gov-table-header-level-1">申请人情况</th>
             </tr>
 
-            <tr>
-              <th rowSpan={2} className="bg-gray-50">自然人</th>
-              <th colSpan={5} className="text-center bg-gray-50">法人或其他组织</th>
-              <th rowSpan={2} className="bg-gray-50">总计</th>
+            <tr className="gov-table-header-row gov-table-header-row--level2">
+              <th rowSpan={2} className="bg-gray-50 gov-table-header-level-2 gov-table-group-start">自然人</th>
+              <th colSpan={5} className="text-center bg-gray-50 gov-table-header-level-2 gov-table-group-start gov-table-group-end">法人或其他组织</th>
+              <th rowSpan={2} className="bg-gray-50 gov-table-header-level-2 gov-table-total-header gov-table-group-start">总计</th>
             </tr>
 
-            <tr>
-              <th className="font-normal bg-gray-50">商业<br />企业</th>
-              <th className="font-normal bg-gray-50">科研<br />机构</th>
-              <th className="font-normal bg-gray-50">社会公益<br />组织</th>
-              <th className="font-normal bg-gray-50">法律服务<br />机构</th>
-              <th className="font-normal bg-gray-50">其他</th>
+            <tr className="gov-table-header-row gov-table-header-row--level3">
+              <th className="font-normal bg-gray-50 gov-table-header-level-3 gov-table-group-start">商业<br />企业</th>
+              <th className="font-normal bg-gray-50 gov-table-header-level-3">科研<br />机构</th>
+              <th className="font-normal bg-gray-50 gov-table-header-level-3">社会公益<br />组织</th>
+              <th className="font-normal bg-gray-50 gov-table-header-level-3">法律服务<br />机构</th>
+              <th className="font-normal bg-gray-50 gov-table-header-level-3 gov-table-group-end">其他</th>
             </tr>
           </thead>
 
           <tbody>
-            <tr>
-              <td className="font-bold" colSpan={3}>一、本年新收政府信息公开申请数量</td>
+            <tr className="gov-table-major-row">
+              <td className="font-bold gov-table-text-cell gov-table-primary-label" colSpan={3}>一、本年新收政府信息公开申请数量</td>
               {renderCell(val('naturalPerson', 'newReceived'), 'naturalPerson', 'newReceived')}
               {renderCell(val('commercial', 'newReceived'), 'legalPerson.commercial', 'newReceived')}
               {renderCell(val('research', 'newReceived'), 'legalPerson.research', 'newReceived')}
@@ -261,8 +271,8 @@ const Table3View = ({ data, compact = false, highlightCells = [] }) => {
               {renderCell(val('total', 'newReceived'), 'total', 'newReceived')}
             </tr>
 
-            <tr>
-              <td className="font-bold" colSpan={3}>二、上年结转政府信息公开申请数量</td>
+            <tr className="gov-table-major-row">
+              <td className="font-bold gov-table-text-cell gov-table-primary-label" colSpan={3}>二、上年结转政府信息公开申请数量</td>
               {renderCell(val('naturalPerson', 'carriedOver'), 'naturalPerson', 'carriedOver')}
               {renderCell(val('commercial', 'carriedOver'), 'legalPerson.commercial', 'carriedOver')}
               {renderCell(val('research', 'carriedOver'), 'legalPerson.research', 'carriedOver')}
@@ -274,8 +284,8 @@ const Table3View = ({ data, compact = false, highlightCells = [] }) => {
 
             {/* Results Section */}
             <tr>
-              <td rowSpan={22} className="align-top pt-4 font-bold text-center">三<br />、<br />本<br />年<br />度<br />办<br />理<br />结<br />果</td>
-              <td colSpan={2}>（一）予以公开</td>
+              <td rowSpan={22} className="align-top pt-4 font-bold text-center gov-table-section-cell gov-table-vertical-section">三<br />、<br />本<br />年<br />度<br />办<br />理<br />结<br />果</td>
+              <td colSpan={2} className="gov-table-text-cell gov-table-subsection-label">（一）予以公开</td>
               {renderCell(val('naturalPerson', 'results.granted'), 'naturalPerson', 'results.granted')}
               {renderCell(val('commercial', 'results.granted'), 'legalPerson.commercial', 'results.granted')}
               {renderCell(val('research', 'results.granted'), 'legalPerson.research', 'results.granted')}
@@ -286,7 +296,7 @@ const Table3View = ({ data, compact = false, highlightCells = [] }) => {
             </tr>
 
             <tr>
-              <td colSpan={2}>（二）部分公开</td>
+              <td colSpan={2} className="gov-table-text-cell gov-table-subsection-label">（二）部分公开</td>
               {renderCell(val('naturalPerson', 'results.partialGrant'), 'naturalPerson', 'results.partialGrant')}
               {renderCell(val('commercial', 'results.partialGrant'), 'legalPerson.commercial', 'results.partialGrant')}
               {renderCell(val('research', 'results.partialGrant'), 'legalPerson.research', 'results.partialGrant')}
@@ -307,8 +317,8 @@ const Table3View = ({ data, compact = false, highlightCells = [] }) => {
               { label: '8.属于行政查询事项', k: 'adminQuery' },
             ].map((item, i) => (
               <tr key={item.k}>
-                {i === 0 && <td rowSpan={8} className="text-center">（三）<br />不予<br />公开</td>}
-                <td>{item.label}</td>
+                {i === 0 && <td rowSpan={8} className="text-center gov-table-section-cell">（三）<br />不予<br />公开</td>}
+                <td className="gov-table-text-cell">{item.label}</td>
                 {renderCell(deniedVal('naturalPerson', item.k), 'naturalPerson', `results.denied.${item.k}`)}
                 {renderCell(deniedVal('commercial', item.k), 'legalPerson.commercial', `results.denied.${item.k}`)}
                 {renderCell(deniedVal('research', item.k), 'legalPerson.research', `results.denied.${item.k}`)}
@@ -325,8 +335,8 @@ const Table3View = ({ data, compact = false, highlightCells = [] }) => {
               { label: '3.补正后申请内容仍不明确', k: 'unclear' },
             ].map((item, i) => (
               <tr key={item.k}>
-                {i === 0 && <td rowSpan={3} className="text-center">（四）<br />无法<br />提供</td>}
-                <td>{item.label}</td>
+                {i === 0 && <td rowSpan={3} className="text-center gov-table-section-cell">（四）<br />无法<br />提供</td>}
+                <td className="gov-table-text-cell">{item.label}</td>
                 {renderCell(unableVal('naturalPerson', item.k), 'naturalPerson', `results.unableToProvide.${item.k}`)}
                 {renderCell(unableVal('commercial', item.k), 'legalPerson.commercial', `results.unableToProvide.${item.k}`)}
                 {renderCell(unableVal('research', item.k), 'legalPerson.research', `results.unableToProvide.${item.k}`)}
@@ -345,8 +355,8 @@ const Table3View = ({ data, compact = false, highlightCells = [] }) => {
               { label: '5.要求行政机关确认或重新出具已获取信息', k: 'confirmInfo' },
             ].map((item, i) => (
               <tr key={item.k}>
-                {i === 0 && <td rowSpan={5} className="text-center">（五）<br />不予<br />处理</td>}
-                <td>{item.label}</td>
+                {i === 0 && <td rowSpan={5} className="text-center gov-table-section-cell">（五）<br />不予<br />处理</td>}
+                <td className="gov-table-text-cell">{item.label}</td>
                 {renderCell(notProcessedVal('naturalPerson', item.k), 'naturalPerson', `results.notProcessed.${item.k}`)}
                 {renderCell(notProcessedVal('commercial', item.k), 'legalPerson.commercial', `results.notProcessed.${item.k}`)}
                 {renderCell(notProcessedVal('research', item.k), 'legalPerson.research', `results.notProcessed.${item.k}`)}
@@ -363,8 +373,8 @@ const Table3View = ({ data, compact = false, highlightCells = [] }) => {
               { label: '3.其他', k: 'otherReasons' },
             ].map((item, i) => (
               <tr key={item.k}>
-                {i === 0 && <td rowSpan={3} className="text-center">（六）<br />其他<br />处理</td>}
-                <td>{item.label}</td>
+                {i === 0 && <td rowSpan={3} className="text-center gov-table-section-cell">（六）<br />其他<br />处理</td>}
+                <td className="gov-table-text-cell">{item.label}</td>
                 {renderCell(otherVal('naturalPerson', item.k), 'naturalPerson', `results.other.${item.k}`)}
                 {renderCell(otherVal('commercial', item.k), 'legalPerson.commercial', `results.other.${item.k}`)}
                 {renderCell(otherVal('research', item.k), 'legalPerson.research', `results.other.${item.k}`)}
@@ -375,8 +385,8 @@ const Table3View = ({ data, compact = false, highlightCells = [] }) => {
               </tr>
             ))}
 
-            <tr className="bg-gray-50">
-              <td className="font-bold" colSpan={2}>（七）总计</td>
+            <tr className="bg-gray-50 gov-table-total-row">
+              <td className="font-bold gov-table-text-cell gov-table-primary-label" colSpan={2}>（七）总计</td>
               {renderCell(val('naturalPerson', 'results.totalProcessed'), 'naturalPerson', 'results.totalProcessed')}
               {renderCell(val('commercial', 'results.totalProcessed'), 'legalPerson.commercial', 'results.totalProcessed')}
               {renderCell(val('research', 'results.totalProcessed'), 'legalPerson.research', 'results.totalProcessed')}
@@ -386,8 +396,8 @@ const Table3View = ({ data, compact = false, highlightCells = [] }) => {
               {renderCell(val('total', 'results.totalProcessed'), 'total', 'results.totalProcessed')}
             </tr>
 
-            <tr>
-              <td className="font-bold" colSpan={3}>四、结转下年度继续办理</td>
+            <tr className="gov-table-major-row">
+              <td className="font-bold gov-table-text-cell gov-table-primary-label" colSpan={3}>四、结转下年度继续办理</td>
               {renderCell(val('naturalPerson', 'results.carriedForward'), 'naturalPerson', 'results.carriedForward')}
               {renderCell(val('commercial', 'results.carriedForward'), 'legalPerson.commercial', 'results.carriedForward')}
               {renderCell(val('research', 'results.carriedForward'), 'legalPerson.research', 'results.carriedForward')}
@@ -414,7 +424,7 @@ const Table4View = ({ data, highlightCells = [] }) => {
 
     return (
       <td
-        className={`${extraClass} ${meta.className}`}
+        className={cx('gov-table-number-cell', extraClass, meta.className)}
         data-cell-path={fullPath}
         data-hl-side={meta.sideLabel || undefined}
       >
@@ -424,39 +434,40 @@ const Table4View = ({ data, highlightCells = [] }) => {
   };
 
   return (
-    <div className="comparison-table-container">
-      <table className="comparison-table text-center table-fixed">
+    <div className="comparison-table-container gov-table-card gov-table-card--table4">
+      <div className="gov-table-scroll gov-table-scroll--legal">
+      <table className="comparison-table text-center table-fixed gov-data-table gov-data-table--table4">
         <colgroup>
           {Array.from({ length: 15 }).map((_, i) => (
             <col key={i} style={{ width: '6.66%' }} />
           ))}
         </colgroup>
         <thead>
-          <tr>
-            <th colSpan={5} className="text-center">行政复议</th>
-            <th colSpan={10} className="text-center">行政诉讼</th>
+          <tr className="gov-table-header-row gov-table-header-row--level1">
+            <th colSpan={5} className="text-center gov-table-header-level-1 gov-table-group-end">行政复议</th>
+            <th colSpan={10} className="text-center gov-table-header-level-1">行政诉讼</th>
           </tr>
-          <tr>
-            <th rowSpan={2}>结果维持</th>
-            <th rowSpan={2}>结果纠正</th>
-            <th rowSpan={2}>其他结果</th>
-            <th rowSpan={2}>尚未审结</th>
-            <th rowSpan={2}>总计</th>
-            <th colSpan={5} className="text-center">未经复议直接起诉</th>
-            <th colSpan={5} className="text-center">复议后起诉</th>
+          <tr className="gov-table-header-row gov-table-header-row--level2">
+            <th rowSpan={2} className="gov-table-header-level-2">结果维持</th>
+            <th rowSpan={2} className="gov-table-header-level-2">结果纠正</th>
+            <th rowSpan={2} className="gov-table-header-level-2">其他结果</th>
+            <th rowSpan={2} className="gov-table-header-level-2">尚未审结</th>
+            <th rowSpan={2} className="gov-table-header-level-2 gov-table-total-header gov-table-group-end">总计</th>
+            <th colSpan={5} className="text-center gov-table-header-level-2 gov-table-group-start gov-table-group-end">未经复议直接起诉</th>
+            <th colSpan={5} className="text-center gov-table-header-level-2 gov-table-group-start">复议后起诉</th>
           </tr>
-          <tr>
+          <tr className="gov-table-header-row gov-table-header-row--level3">
             {/* Sub-headers */}
-            <th>结果维持</th>
-            <th>结果纠正</th>
-            <th>其他结果</th>
-            <th>尚未审结</th>
-            <th>总计</th>
-            <th>结果维持</th>
-            <th>结果纠正</th>
-            <th>其他结果</th>
-            <th>尚未审结</th>
-            <th>总计</th>
+            <th className="gov-table-header-level-3">结果维持</th>
+            <th className="gov-table-header-level-3">结果纠正</th>
+            <th className="gov-table-header-level-3">其他结果</th>
+            <th className="gov-table-header-level-3">尚未审结</th>
+            <th className="gov-table-header-level-3 gov-table-total-header gov-table-group-end">总计</th>
+            <th className="gov-table-header-level-3">结果维持</th>
+            <th className="gov-table-header-level-3">结果纠正</th>
+            <th className="gov-table-header-level-3">其他结果</th>
+            <th className="gov-table-header-level-3">尚未审结</th>
+            <th className="gov-table-header-level-3 gov-table-total-header">总计</th>
           </tr>
         </thead>
         <tbody>
@@ -466,22 +477,23 @@ const Table4View = ({ data, highlightCells = [] }) => {
             {renderCell(data.review?.correct, 'review', 'correct')}
             {renderCell(data.review?.other, 'review', 'other')}
             {renderCell(data.review?.unfinished, 'review', 'unfinished')}
-            {renderCell(data.review?.total, 'review', 'total', 'font-bold')}
+            {renderCell(data.review?.total, 'review', 'total', 'font-bold gov-table-total-cell gov-table-group-end')}
             {/* Litigation Direct Data */}
             {renderCell(data.litigationDirect?.maintain, 'litigationDirect', 'maintain')}
             {renderCell(data.litigationDirect?.correct, 'litigationDirect', 'correct')}
             {renderCell(data.litigationDirect?.other, 'litigationDirect', 'other')}
             {renderCell(data.litigationDirect?.unfinished, 'litigationDirect', 'unfinished')}
-            {renderCell(data.litigationDirect?.total, 'litigationDirect', 'total', 'font-bold')}
+            {renderCell(data.litigationDirect?.total, 'litigationDirect', 'total', 'font-bold gov-table-total-cell gov-table-group-end')}
             {/* Litigation Post-Review Data */}
             {renderCell(data.litigationPostReview?.maintain, 'litigationPostReview', 'maintain')}
             {renderCell(data.litigationPostReview?.correct, 'litigationPostReview', 'correct')}
             {renderCell(data.litigationPostReview?.other, 'litigationPostReview', 'other')}
             {renderCell(data.litigationPostReview?.unfinished, 'litigationPostReview', 'unfinished')}
-            {renderCell(data.litigationPostReview?.total, 'litigationPostReview', 'total', 'font-bold')}
+            {renderCell(data.litigationPostReview?.total, 'litigationPostReview', 'total', 'font-bold gov-table-total-cell')}
           </tr>
         </tbody>
       </table>
+      </div>
     </div>
   );
 };

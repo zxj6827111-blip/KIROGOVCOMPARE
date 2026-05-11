@@ -1,5 +1,23 @@
-
+/**
+ * @deprecated
+ * This adapter reflects a stale legacy shape and must not be used as the
+ * source of truth for new GovInsight work.
+ *
+ * Phase 1 note:
+ * - field names diverge from the live API (`fee_amount` vs `fees_amount`)
+ * - detailed outcome fields are incomplete
+ * - backendization work should consume `frontend/src/govinsight/data.ts`
+ *   and backend payload contracts instead
+ */
 import { AnnualData, EntityProfile, EntityType } from '../types';
+
+let warnedDeprecatedAdapter = false;
+
+const warnDeprecatedAdapter = () => {
+  if (warnedDeprecatedAdapter || typeof console === 'undefined') return;
+  warnedDeprecatedAdapter = true;
+  console.warn('[GovInsight] frontend/src/govinsight/services/adapter.ts is deprecated and should not be used for new development.');
+};
 
 // 1. 定义后端原始数据的接口 (根据您实际数据库字段修改)
 export interface RawDBRecord {
@@ -49,6 +67,7 @@ export interface RawDBRecord {
 
 // 2. 转换函数：将一行数据库记录 -> 转换为 AnnualData 对象
 export const transformYearData = (record: RawDBRecord): AnnualData => {
+  warnDeprecatedAdapter();
   return {
     year: record.year,
     regulations: {
@@ -107,6 +126,7 @@ export const transformYearData = (record: RawDBRecord): AnnualData => {
 
 // 3. 聚合函数：将多行记录 -> 转换为 EntityProfile
 export const transformToEntity = (records: RawDBRecord[]): EntityProfile | null => {
+  warnDeprecatedAdapter();
   if (!records || records.length === 0) return null;
 
   // 假设这些记录属于同一个组织

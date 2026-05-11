@@ -333,6 +333,70 @@ describe('ConsistencyCheckService', () => {
             expect(processedItem?.rightValue).toBe(3278);
             expect(processedItem?.autoStatus).toBe('PASS');
         });
+
+        it('should not treat a following withdrawn count as total processed', () => {
+            const fixtureWithWithdrawnBranchCount = {
+                sections: [
+                    {
+                        type: 'table_3',
+                        tableData: {
+                            total: {
+                                newReceived: 19,
+                                carriedOver: 0,
+                                results: {
+                                    totalProcessed: 19,
+                                    carriedForward: 0,
+                                },
+                            },
+                        },
+                    },
+                    {
+                        type: 'text',
+                        title: '一、总体情况',
+                        content: '2025 年打浦桥街道共受理政府信息公开申请 19 件，其中 11 件均按规定程序办结，8 件申请人主动撤销。',
+                    },
+                ],
+            };
+
+            const items = service.runChecks(fixtureWithWithdrawnBranchCount);
+            const processedItem = items.find(i => i.checkKey === 'text_vs_table3_totalProcessed');
+
+            expect(processedItem).toBeUndefined();
+        });
+
+        it('should not treat carried-over handling text as total processed when a reply count follows', () => {
+            const fixtureWithCarriedOverAndReplyCounts = {
+                sections: [
+                    {
+                        type: 'table_3',
+                        tableData: {
+                            total: {
+                                newReceived: 10,
+                                carriedOver: 1,
+                                results: {
+                                    totalProcessed: 11,
+                                    carriedForward: 0,
+                                },
+                            },
+                        },
+                    },
+                    {
+                        type: 'text',
+                        title: '一、总体情况',
+                        content: '2025年受理信息公开申请10件，办理上年度结转申请1件。答复11件，均在法定期限内答复。',
+                    },
+                ],
+            };
+
+            const items = service.runChecks(fixtureWithCarriedOverAndReplyCounts);
+            const processedItem = items.find(i => i.checkKey === 'text_vs_table3_totalProcessed');
+
+            expect(processedItem).toBeDefined();
+            expect(processedItem?.leftValue).toBe(11);
+            expect(processedItem?.rightValue).toBe(11);
+            expect(processedItem?.autoStatus).toBe('PASS');
+            expect(processedItem?.evidenceJson.values.matchedText).toBe('答复11件');
+        });
     });
 
     // ... (existing fingerprint stability test) ...
