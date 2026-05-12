@@ -11,6 +11,8 @@ const router: Router = express.Router();
 const SERVICE_TOKEN_TTL_MS = 5 * 60 * 1000;
 const PDF_EXPORT_DEBUG = process.env.PDF_EXPORT_DEBUG === '1';
 const PDF_EXPORT_HYDRATE_WAIT_MS = Number(process.env.PDF_EXPORT_HYDRATE_WAIT_MS || 1500);
+const PDF_EXPORT_PRINT_READY_TIMEOUT_MS = Number(process.env.PDF_EXPORT_PRINT_READY_TIMEOUT_MS || 45000);
+const PRINT_READY_SELECTOR = '#comparison-content[data-print-ready="true"]';
 
 /**
  * Check if a URL is accessible
@@ -195,12 +197,12 @@ router.get('/:id/pdf', authMiddleware, async (req: AuthRequest, res: Response) =
             }
         }
 
-        // Try to wait for content, but with fallback
+        // Try to wait for fully hydrated print content, but with useful diagnostics.
         try {
-            await page.waitForSelector('#comparison-content', { timeout: 10000 });
-            console.log(`[PDF Export] Found #comparison-content element`);
+            await page.waitForSelector(PRINT_READY_SELECTOR, { timeout: PDF_EXPORT_PRINT_READY_TIMEOUT_MS });
+            console.log(`[PDF Export] Print page reported ready`);
         } catch (e) {
-            console.log(`[PDF Export] #comparison-content not found, checking for error state...`);
+            console.log(`[PDF Export] Print-ready marker not found, checking page state...`);
             // Check if there's an error message
             const errorElement = await page.$('.text-red-500');
             if (errorElement) {
@@ -213,8 +215,14 @@ router.get('/:id/pdf', authMiddleware, async (req: AuthRequest, res: Response) =
                 const loadingText = await page.evaluate(el => el?.textContent, loadingElement);
                 throw new Error(`Page still loading: ${loadingText}`);
             }
-            throw new Error('Content failed to load - #comparison-content not found');
+            const contentElement = await page.$('#comparison-content');
+            if (!contentElement) {
+                throw new Error('Content failed to load - #comparison-content not found');
+            }
+            console.warn(`[PDF Export] Print page did not become ready in time, proceeding with rendered content`);
         }
+
+        await new Promise(resolve => setTimeout(resolve, 500));
 
         // 获取页面标题用于文件名
         const pageTitle = await page.title();
@@ -223,8 +231,8 @@ router.get('/:id/pdf', authMiddleware, async (req: AuthRequest, res: Response) =
 
         // 生成 PDF (横向A4布局，更适合表格展示)
         const pdfBuffer = await page.pdf({
-            format: 'A4',
-            landscape: true,
+            width: '297mm',
+            height: '210mm',
             printBackground: true,
             margin: {
                 top: '10mm',
@@ -233,7 +241,7 @@ router.get('/:id/pdf', authMiddleware, async (req: AuthRequest, res: Response) =
                 right: '10mm'
             },
             displayHeaderFooter: false,
-            preferCSSPageSize: false
+            preferCSSPageSize: true
         });
 
         console.log(`[PDF Export] PDF generated successfully, size: ${pdfBuffer.length} bytes`);

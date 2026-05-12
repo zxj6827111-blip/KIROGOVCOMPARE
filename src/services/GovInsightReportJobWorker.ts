@@ -2,6 +2,7 @@ import pool from '../config/database-llm';
 import { createLlmProvider } from './LlmProviderFactory';
 import { LlmProviderError } from './LlmProvider';
 import { buildPrefixedModelValue, resolveFirstNonEmpty } from '../utils/aiEnv';
+import { parseStructuredJsonFromText } from './LlmCommon';
 import { govInsightReportPayloadService } from './GovInsightReportPayloadService';
 import {
   buildGovInsightNarrativeResponseSchema,
@@ -51,6 +52,31 @@ const STEPS = {
 
 function stripJsonFences(text: string): string {
   return text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function synthesizeNarrativeFallback(
+  reportPayload: unknown,
+  overrides?: Record<string, unknown>
+): Record<string, unknown> | null {
+  if (!isPlainRecord(reportPayload)) {
+    return null;
+  }
+
+  const repairedNarrative = synthesizeGovInsightNarrativeFromPayload(reportPayload, overrides);
+  if (!repairedNarrative) {
+    return null;
+  }
+
+  const repairedValidation = validateGovInsightNarrative(repairedNarrative);
+  return repairedValidation.valid ? repairedNarrative : null;
 }
 
 function parseRequestConfig(raw: unknown): Record<string, unknown> {
@@ -369,23 +395,24 @@ class GovInsightReportJobWorker {
         throw new LlmProviderError('empty_model_response', 'empty_model_response');
       }
 
-      let parsed: Record<string, unknown>;
+      let narrative: Record<string, unknown> | null = null;
       try {
-        parsed = JSON.parse(stripJsonFences(text));
+        const parsed = parseStructuredJsonFromText<unknown>(stripJsonFences(text));
+        narrative = isPlainRecord(parsed) ? parsed : {};
       } catch (error) {
-        throw new LlmProviderError(
-          `json_parse_failed: ${error instanceof Error ? error.message : String(error)}`,
-          'json_parse_failed'
+        narrative = synthesizeNarrativeFallback(reportPayload);
+        if (!narrative) {
+          throw new LlmProviderError(`json_parse_failed: ${errorMessage(error)}`, 'json_parse_failed');
+        }
+
+        console.warn(
+          `[GovInsightReportJobWorker] Job ${job.id} model output failed JSON parsing; repaired via report payload synthesis. Error: ${errorMessage(error)}`
         );
       }
 
-      let narrative = parsed;
       const narrativeValidation = validateGovInsightNarrative(narrative);
       if (!narrativeValidation.valid) {
-        const repairedNarrative =
-          reportPayload && typeof reportPayload === 'object'
-            ? synthesizeGovInsightNarrativeFromPayload(reportPayload as Record<string, unknown>, narrative as any)
-            : null;
+        const repairedNarrative = synthesizeNarrativeFallback(reportPayload, narrative);
 
         if (!repairedNarrative) {
           throw new LlmProviderError(

@@ -56,6 +56,149 @@ const hasMeaningfulObjectData = (obj) => {
 const getErrorMessage = (err, fallback = '请求失败') =>
   err?.response?.data?.error || err?.message || fallback;
 
+const DISPLAY_TEXT_THRESHOLD = 100;
+const TABLE_SECTION_TYPES = new Set(['table_2', 'table_3', 'table_4']);
+const DISPLAY_TEXT_KEYS = new Set(['content', 'text']);
+const DISPLAY_STRUCTURED_KEYS = new Set(['sections', 'subsections', 'children', 'items', 'content', 'paragraphs']);
+const DISPLAY_TABLE_DATA_KEYS = new Set([
+  'activeDisclosureData',
+  'tableData',
+  'reviewLitigationData',
+  'tables',
+]);
+const DISPLAY_METADATA_KEYS = new Set([
+  'type',
+  'title',
+  'file_hash',
+  'file_size',
+  'report_id',
+  'version_id',
+  'generated_at',
+  'storage_path',
+  'visual_audit',
+]);
+const EMPTY_TABLE_TEXT_VALUES = new Set([
+  '',
+  '0',
+  '0.0',
+  '0.00',
+  '/',
+  '-',
+  '--',
+  '\u2014',
+  '\u65e0',
+  '\u6682\u65e0',
+  'null',
+  'undefined',
+]);
+const EMPTY_SOURCE_TABLE_NOTICE =
+  '\u539f\u59cb\u6587\u4ef6\u6ca1\u6709\u6709\u6548\u6b63\u6587\uff0c\u7cfb\u7edf\u5df2\u9690\u85cf\u7531\u7a7a\u6a21\u677f\u751f\u6210\u7684\u8868\u683c\uff1b\u8bf7\u4e0a\u4f20\u5305\u542b\u6b63\u6587\u6216\u9644\u4ef6\u5185\u5bb9\u7684\u62a5\u544a\u540e\u91cd\u65b0\u89e3\u6790\u3002';
+const NO_VALID_CONTENT_NOTICE =
+  '\u5f53\u524d\u62a5\u544a\u6ca1\u6709\u53ef\u5c55\u793a\u7684\u6b63\u6587\u6216\u8868\u683c\u6570\u636e\uff0c\u8bf7\u68c0\u67e5\u539f\u59cb\u6587\u4ef6\u540e\u91cd\u65b0\u4e0a\u4f20\u3002';
+
+const isMeaningfulDisplayTableValue = (value) => {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'number') return Number.isFinite(value) && value !== 0;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    const compact = trimmed.replace(/[,，\s]/g, '');
+    if (EMPTY_TABLE_TEXT_VALUES.has(trimmed) || EMPTY_TABLE_TEXT_VALUES.has(compact)) {
+      return false;
+    }
+    const numeric = Number(compact);
+    return !Number.isFinite(numeric) || numeric !== 0;
+  }
+  if (typeof value === 'boolean') return value;
+  return false;
+};
+
+const hasMeaningfulDisplayTableData = (node) => {
+  if (Array.isArray(node)) {
+    return node.some(hasMeaningfulDisplayTableData);
+  }
+
+  if (!node || typeof node !== 'object') {
+    return isMeaningfulDisplayTableValue(node);
+  }
+
+  return Object.values(node).some((value) => hasMeaningfulDisplayTableData(value));
+};
+
+const getSectionTablePayload = (section) => {
+  if (!section || typeof section !== 'object') return null;
+  if (section.type === 'table_2') return section.activeDisclosureData;
+  if (section.type === 'table_3') return section.tableData;
+  if (section.type === 'table_4') return section.reviewLitigationData;
+  return null;
+};
+
+const hasMeaningfulParsedTableData = (parsed) => {
+  if (!parsed || typeof parsed !== 'object') return false;
+
+  if (Array.isArray(parsed.sections)) {
+    return parsed.sections.some((section) => hasMeaningfulDisplayTableData(getSectionTablePayload(section)));
+  }
+
+  return (
+    hasMeaningfulDisplayTableData(parsed.activeDisclosureData) ||
+    hasMeaningfulDisplayTableData(parsed.tableData) ||
+    hasMeaningfulDisplayTableData(parsed.reviewLitigationData) ||
+    hasMeaningfulDisplayTableData(parsed.tables)
+  );
+};
+
+const getDisplayNarrativeTextLength = (node, parentKey = '') => {
+  if (node === null || node === undefined) return 0;
+
+  if (typeof node === 'string') {
+    return DISPLAY_TEXT_KEYS.has(parentKey) ? node.trim().length : 0;
+  }
+
+  if (Array.isArray(node)) {
+    return node.reduce((sum, item) => sum + getDisplayNarrativeTextLength(item, parentKey), 0);
+  }
+
+  if (typeof node !== 'object') return 0;
+
+  return Object.entries(node).reduce((sum, [key, value]) => {
+    if (DISPLAY_METADATA_KEYS.has(key) || DISPLAY_TABLE_DATA_KEYS.has(key)) {
+      return sum;
+    }
+
+    if (
+      DISPLAY_STRUCTURED_KEYS.has(key) ||
+      DISPLAY_TEXT_KEYS.has(key) ||
+      parentKey === 'sections' ||
+      parentKey === 'subsections' ||
+      parentKey === 'paragraphs' ||
+      parentKey === 'content'
+    ) {
+      return sum + getDisplayNarrativeTextLength(value, key);
+    }
+
+    return sum;
+  }, 0);
+};
+
+const getDisplayContentQuality = (parsed, versionQuality) => {
+  const parsedTextLength = getDisplayNarrativeTextLength(parsed);
+  const hasMeaningfulTableData = hasMeaningfulParsedTableData(parsed);
+  const suppressByVersionQuality = Boolean(versionQuality?.suppress_display_tables);
+
+  return {
+    suppressAllTables: suppressByVersionQuality,
+    suppressTables:
+      suppressByVersionQuality ||
+      (parsedTextLength < DISPLAY_TEXT_THRESHOLD && !hasMeaningfulTableData),
+  };
+};
+
+const shouldSuppressDisplayTableSection = (section, displayQuality) =>
+  TABLE_SECTION_TYPES.has(section?.type) &&
+  (displayQuality?.suppressAllTables ||
+    (displayQuality?.suppressTables &&
+      !hasMeaningfulDisplayTableData(getSectionTablePayload(section))));
+
 const getUserCanMaintainReports = (user) =>
   Boolean(
     user &&
@@ -1476,10 +1619,17 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     if (!parsed || !parsed.sections) return null;
 
     // 对 sections 进行排序，将标题放在最前面
-    const sections = parsed.sections.map((section, originalIndex) => ({
+    const displayQuality = getDisplayContentQuality(parsed, workingVersion?.content_quality);
+    const rawSections = parsed.sections.map((section, originalIndex) => ({
       ...section,
       __originalSectionIndex: originalIndex + 1,
     }));
+    const suppressedTableCount = rawSections.filter((section) =>
+      shouldSuppressDisplayTableSection(section, displayQuality)
+    ).length;
+    const sections = rawSections.filter(
+      (section) => !shouldSuppressDisplayTableSection(section, displayQuality)
+    );
     sections.sort((a, b) => {
       const titleA = String(a?.title || '');
       const titleB = String(b?.title || '');
@@ -1539,7 +1689,19 @@ function ReportDetail({ reportId: propReportId, onBack }) {
         )}
 
         {showParsed && (
-          <div className="sections-container">
+          <>
+            {suppressedTableCount > 0 && (
+              <div className="missing-text-content empty-source-table-notice">
+                {EMPTY_SOURCE_TABLE_NOTICE}
+              </div>
+            )}
+            {sections.length === 0 && (
+              <div className="missing-text-content empty-source-table-notice">
+                {NO_VALID_CONTENT_NOTICE}
+              </div>
+            )}
+            {sections.length > 0 && (
+              <div className="sections-container">
             {sections.map((section, idx) => (
               <div key={idx} className="section-item">
                 <h4 className="section-title">
@@ -1662,7 +1824,9 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                 </div>
               </div>
             ))}
-          </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     );

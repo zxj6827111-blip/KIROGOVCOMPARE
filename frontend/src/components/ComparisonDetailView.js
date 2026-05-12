@@ -356,7 +356,12 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
   };
 
   const handlePrint = () => {
-    window.print();
+    const params = new URLSearchParams({
+      autoPrint: 'true',
+      highlightIdentical: String(highlightIdentical),
+      highlightDiff: String(highlightDiff),
+    });
+    window.open(`/print/comparison/${comparisonId}?${params.toString()}`, '_blank', 'noopener,noreferrer');
   };
 
   if (loading) return <div className="p-8 text-center text-gray-500">加载中...</div>;

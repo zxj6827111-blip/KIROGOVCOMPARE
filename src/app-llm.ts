@@ -1,5 +1,7 @@
 import express from 'express';
 import dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs';
 import { dbType } from './config/database-llm';
 import llmHealthRouter from './routes/llm-health';
 import llmRegionsRouter from './routes/llm-regions';
@@ -111,6 +113,19 @@ export function createLlmApp(): express.Express {
   app.use('/api/report-maintenance', reportMaintenanceRouter);
   app.use('/api/pdf-jobs', pdfJobsRouter);
   app.use('/api/ai', require('./routes/ai').default);
+
+  const publicDir = path.resolve(process.cwd(), 'dist', 'public');
+  const indexHtmlPath = path.join(publicDir, 'index.html');
+  if (fs.existsSync(indexHtmlPath)) {
+    app.use(express.static(publicDir));
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api')) {
+        next();
+        return;
+      }
+      res.sendFile(indexHtmlPath);
+    });
+  }
 
   app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     console.error('Error:', redactSensitive(err));

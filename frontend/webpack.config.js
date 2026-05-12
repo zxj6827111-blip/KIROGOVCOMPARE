@@ -115,6 +115,7 @@ module.exports = (_env, argv = {}) => {
           {
             from: path.resolve(__dirname, 'public'),
             to: path.resolve(__dirname, 'build'),
+            filter: (resourcePath) => path.basename(resourcePath).toLowerCase() !== 'index.html',
             globOptions: {
               ignore: ['**/index.html'],
             },

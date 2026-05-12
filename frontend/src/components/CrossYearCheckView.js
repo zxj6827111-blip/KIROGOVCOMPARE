@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { apiClient } from '../apiClient';
 import { highlightNumber } from './DiffUtils';
 import { BarChart3, MapPin, Search, FileText, Table2, CheckCircle2, AlertCircle } from 'lucide-react';
@@ -186,19 +186,26 @@ const renderIssueCard = (item) => {
     );
 };
 
-const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightContent, yearA, yearB, onLeftIssuesChange }) => {
+const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightContent, yearA, yearB, onLeftIssuesChange, onReadyChange, authToken }) => {
     const [leftIntraYearStatus, setLeftIntraYearStatus] = useState({ loading: true, issues: [], error: null });
     const [intraYearStatus, setIntraYearStatus] = useState({ loading: true, issues: [], error: null });
     const [crossYearStatus, setCrossYearStatus] = useState({ loading: true, diff: null, values: {} });
     const [table2Status, setTable2Status] = useState({ loading: true, checks: [] });
+    const authRequestConfig = useMemo(
+        () => (authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : undefined),
+        [authToken]
+    );
 
     // 1. 获取新报告的内部勾稽状态
     useEffect(() => {
-        if (!rightReportId) return;
+        if (!rightReportId) {
+            setIntraYearStatus({ loading: false, issues: [], error: null });
+            return;
+        }
 
         const fetchChecks = async () => {
             try {
-                const response = await apiClient.get(`/reports/${rightReportId}/checks`);
+                const response = await apiClient.get(`/reports/${rightReportId}/checks`, authRequestConfig);
                 const data = response.data?.data || response.data;
 
                 let issues = [];
@@ -222,15 +229,19 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
         };
 
         fetchChecks();
-    }, [rightReportId]);
+    }, [rightReportId, authRequestConfig]);
 
     // 1.5 获取旧报告的内部勾稽状态
     useEffect(() => {
-        if (!leftReportId) return;
+        if (!leftReportId) {
+            setLeftIntraYearStatus({ loading: false, issues: [], error: null });
+            if (onLeftIssuesChange) onLeftIssuesChange([]);
+            return;
+        }
 
         const fetchLeftChecks = async () => {
             try {
-                const response = await apiClient.get(`/reports/${leftReportId}/checks`);
+                const response = await apiClient.get(`/reports/${leftReportId}/checks`, authRequestConfig);
                 const data = response.data?.data || response.data;
 
                 let issues = [];
@@ -256,7 +267,7 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
         };
 
         fetchLeftChecks();
-    }, [leftReportId, onLeftIssuesChange]);
+    }, [leftReportId, onLeftIssuesChange, authRequestConfig]);
 
     // 2. 跨年数据计算
     useEffect(() => {
@@ -342,6 +353,11 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
     const { values: crossValues, diff: crossDiff } = crossYearStatus;
     const { checks: table2Checks } = table2Status;
     const table2HasIssues = table2Checks.some(c => c.diff);
+    const checksReady = !leftIntraLoading && !intraLoading && !crossYearStatus.loading && !table2Status.loading;
+
+    useEffect(() => {
+        if (onReadyChange) onReadyChange(checksReady);
+    }, [checksReady, onReadyChange]);
 
     return (
         <div className="cross-check-card break-inside-avoid">
