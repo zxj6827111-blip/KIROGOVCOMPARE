@@ -1,15 +1,16 @@
 .comparison-history {
     padding: 20px;
-    max-width: 1400px;
+    max-width: 1680px;
     margin: 0 auto;
 }
 
-.history-header {
+.comparison-history .history-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 20px;
     gap: 20px;
+    width: 100%;
 }
 
 .history-header h2 {
@@ -26,28 +27,48 @@
     color: #4b5563;
 }
 
-.filter-bar {
+.comparison-history .comparison-filter-bar {
     display: flex;
-    gap: 12px;
     align-items: center;
-    flex: 1;
+    justify-content: space-between;
+    gap: 24px;
+    width: 100%;
+}
+
+.comparison-history .comparison-filter-left,
+.comparison-history .comparison-filter-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: nowrap;
+}
+
+.comparison-history .comparison-filter-left {
+    min-width: 0;
+}
+
+.comparison-history .comparison-filter-actions {
+    justify-content: flex-end;
+    margin-left: auto;
 }
 
 /* Input with Icon Wrapper */
-.input-with-icon {
+.comparison-history .input-with-icon {
     position: relative;
     display: flex;
     align-items: center;
+    flex: 0 0 auto;
 }
 
-.input-icon {
+.comparison-history .input-icon {
     position: absolute;
     left: 10px;
     color: #9ca3af;
     pointer-events: none;
 }
 
-.filter-input {
+.comparison-history .filter-input {
+    width: 100%;
     padding: 8px 12px 8px 36px;
     /* Left padding for icon */
     border: 1px solid #e5e7eb;
@@ -60,13 +81,21 @@
     box-sizing: border-box;
 }
 
-.filter-input:focus {
+.comparison-history .region-filter-input {
+    width: 286px;
+}
+
+.comparison-history .year-filter-input {
+    width: 150px;
+}
+
+.comparison-history .filter-input:focus {
     border-color: #3b82f6;
     box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
 }
 
 /* Search Button */
-.search-btn {
+.comparison-history .search-btn {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -84,12 +113,12 @@
     white-space: nowrap;
 }
 
-.search-btn:hover {
+.comparison-history .search-btn:hover {
     background-color: #2563eb;
 }
 
 /* Refresh Button (Iconic) */
-.iconic-btn {
+.comparison-history .iconic-btn {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -106,18 +135,18 @@
     transition: all 0.2s;
 }
 
-.iconic-btn:hover:not(:disabled) {
+.comparison-history .iconic-btn:hover:not(:disabled) {
     background-color: #f9fafb;
     border-color: #d1d5db;
     color: #1f2937;
 }
 
-.iconic-btn:disabled {
+.comparison-history .iconic-btn:disabled {
     opacity: 0.6;
     cursor: not-allowed;
 }
 
-.filter-toggle-btn {
+.comparison-history .filter-toggle-btn {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -134,37 +163,37 @@
     white-space: nowrap;
 }
 
-.filter-toggle-btn:hover {
+.comparison-history .filter-toggle-btn:hover {
     background-color: #f9fafb;
     border-color: #d1d5db;
     color: #1f2937;
 }
 
-.filter-toggle-btn.active {
+.comparison-history .filter-toggle-btn.active {
     background-color: #fef2f2;
     border-color: #fecaca;
     color: #ef4444;
 }
 
-.filter-toggle-btn.active:hover {
+.comparison-history .filter-toggle-btn.active:hover {
     background-color: #fee2e2;
     border-color: #fca5a5;
 }
 
 /* 一键比对按钮 */
-.batch-create-btn {
+.comparison-history .batch-create-btn {
     background-color: #fef3c7;
     border-color: #fcd34d;
     color: #b45309;
 }
 
-.batch-create-btn:hover:not(:disabled) {
+.comparison-history .batch-create-btn:hover:not(:disabled) {
     background-color: #fde68a;
     border-color: #fbbf24;
     color: #92400e;
 }
 
-.batch-create-btn:disabled {
+.comparison-history .batch-create-btn:disabled {
     opacity: 0.6;
     cursor: not-allowed;
 }
@@ -191,7 +220,7 @@
     color: #9ca3af;
 }
 
-.history-table {
+.comparison-history .history-table {
     width: 100%;
     border-collapse: separate;
     border-spacing: 0;
@@ -201,7 +230,7 @@
     overflow: hidden;
 }
 
-.history-table th {
+.comparison-history .history-table th {
     background-color: #f9fafb;
     padding: 12px 16px;
     text-align: left;
@@ -211,7 +240,7 @@
     font-size: 0.9rem;
 }
 
-.history-table td {
+.comparison-history .history-table td {
     padding: 12px 16px;
     border-bottom: 1px solid #e5e7eb;
     color: #1f2937;
@@ -219,7 +248,7 @@
     vertical-align: middle;
 }
 
-.history-table tr:last-child td {
+.comparison-history .history-table tr:last-child td {
     border-bottom: none;
 }
 
@@ -239,15 +268,20 @@
     color: #9ca3af;
 }
 
-.actions {
+.comparison-history .actions {
     display: flex;
     gap: 8px;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
 }
 
-.icon-btn {
+.comparison-history .icon-btn {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 4px;
+    min-width: 0;
     padding: 6px 10px;
     border: 1px solid transparent;
     border-radius: 4px;
@@ -255,43 +289,44 @@
     cursor: pointer;
     font-size: 0.85rem;
     transition: all 0.2s;
+    white-space: nowrap;
 }
 
-.icon-btn span {
+.comparison-history .icon-btn span {
     display: inline-block;
 }
 
 /* View Button */
-.icon-btn.view {
+.comparison-history .icon-btn.view {
     color: #3b82f6;
     border-color: #dbeafe;
     background-color: #eff6ff;
 }
 
-.icon-btn.view:hover {
+.comparison-history .icon-btn.view:hover {
     background-color: #dbeafe;
 }
 
 /* Print Button */
-.icon-btn.print {
+.comparison-history .icon-btn.print {
     color: #4b5563;
     border-color: #e5e7eb;
     background-color: #f3f4f6;
 }
 
-.icon-btn.print:hover {
+.comparison-history .icon-btn.print:hover {
     background-color: #e5e7eb;
     color: #1f2937;
 }
 
 /* Delete Button */
-.icon-btn.delete {
+.comparison-history .icon-btn.delete {
     color: #ef4444;
     border-color: #fee2e2;
     background-color: #fef2f2;
 }
 
-.icon-btn.delete:hover {
+.comparison-history .icon-btn.delete:hover {
     background-color: #fee2e2;
 }
 
@@ -436,16 +471,16 @@
 }
 
 /* Selected row highlight */
-.history-table tr.selected-row {
+.comparison-history .history-table tr.selected-row {
     background-color: #eff6ff;
 }
 
-.history-table tr.selected-row:hover {
+.comparison-history .history-table tr.selected-row:hover {
     background-color: #dbeafe;
 }
 
 /* Checkbox styling */
-.history-table input[type="checkbox"] {
+.comparison-history .history-table input[type="checkbox"] {
     width: 16px;
     height: 16px;
     cursor: pointer;
@@ -455,7 +490,7 @@
 /* ====== Tree Table Styles ====== */
 
 /* Summary Bar */
-.summary-bar {
+.comparison-history .summary-bar {
     display: flex;
     gap: 20px;
     padding: 12px 16px;
@@ -464,7 +499,7 @@
     margin-bottom: 16px;
 }
 
-.summary-item {
+.comparison-history .summary-item {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -472,47 +507,47 @@
     color: #64748b;
 }
 
-.summary-item strong {
+.comparison-history .summary-item strong {
     color: #1e293b;
 }
 
-.summary-item.issue {
+.comparison-history .summary-item.issue {
     color: #ef4444;
 }
 
-.summary-item.issue strong {
+.comparison-history .summary-item.issue strong {
     color: #ef4444;
 }
 
 /* Tree Table */
-.tree-table {
+.comparison-history .tree-table {
     border-collapse: separate;
     border-spacing: 0;
 }
 
 /* Region Header Row */
-.region-header-row {
+.comparison-history .region-header-row {
     background: linear-gradient(to right, #f1f5f9, #f8fafc);
     cursor: pointer;
     transition: background 0.2s;
 }
 
-.region-header-row:hover {
+.comparison-history .region-header-row:hover {
     background: linear-gradient(to right, #e2e8f0, #f1f5f9);
 }
 
-.region-header-row td {
+.comparison-history .region-header-row td {
     padding: 12px 16px;
     border-bottom: 1px solid #e2e8f0;
 }
 
-.region-header-content {
+.comparison-history .region-header-content {
     display: flex;
     align-items: center;
     gap: 8px;
 }
 
-.expand-icon {
+.comparison-history .expand-icon {
     width: 20px;
     height: 20px;
     display: flex;
@@ -521,19 +556,19 @@
     color: #94a3b8;
 }
 
-.region-header-row .region-name {
+.comparison-history .region-header-row .region-name {
     font-weight: 600;
     color: #1e293b;
     font-size: 0.95rem;
 }
 
-.region-stats {
+.comparison-history .region-stats {
     display: flex;
     gap: 8px;
     margin-left: auto;
 }
 
-.stat-badge {
+.comparison-history .stat-badge {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -544,75 +579,75 @@
     color: #64748b;
 }
 
-.stat-badge.issue {
+.comparison-history .stat-badge.issue {
     background: #fef2f2;
     color: #ef4444;
 }
 
 /* Level-based styling */
-.region-header-row.level-1 {
+.comparison-history .region-header-row.level-1 {
     background: linear-gradient(to right, #dbeafe, #eff6ff);
 }
 
-.region-header-row.level-1 .region-name {
+.comparison-history .region-header-row.level-1 .region-name {
     font-size: 1rem;
     color: #1e40af;
 }
 
-.region-header-row.level-2 {
+.comparison-history .region-header-row.level-2 {
     background: linear-gradient(to right, #f0fdf4, #f8fafc);
 }
 
-.region-header-row.level-2 .region-name {
+.comparison-history .region-header-row.level-2 .region-name {
     color: #166534;
 }
 
-.region-header-row.level-3 {
+.comparison-history .region-header-row.level-3 {
     background: #fafafa;
 }
 
 /* Comparison Row */
-.comparison-row {
+.comparison-history .comparison-row {
     transition: background 0.15s;
 }
 
-.comparison-row:hover {
+.comparison-history .comparison-row:hover {
     background: #f8fafc;
 }
 
-.comparison-row td {
+.comparison-history .comparison-row td {
     padding: 10px 16px;
     border-bottom: 1px solid #f1f5f9;
     vertical-align: middle;
 }
 
-.comparison-row.selected-row {
+.comparison-history .comparison-row.selected-row {
     background: #eff6ff;
 }
 
-.sub-region-name {
+.comparison-history .sub-region-name {
     font-size: 0.9rem;
     color: #475569;
 }
 
 /* Cell Styling */
-.cell-year {
+.comparison-history .cell-year {
     font-weight: 600;
     color: #3b82f6;
     white-space: nowrap;
 }
 
-.cell-date {
+.comparison-history .cell-date {
     font-size: 0.85rem;
     color: #64748b;
     white-space: nowrap;
 }
 
-.cell-similarity {
+.comparison-history .cell-similarity {
     text-align: center;
 }
 
-.similarity-value {
+.comparison-history .similarity-value {
     display: inline-block;
     padding: 2px 8px;
     border-radius: 4px;
@@ -620,23 +655,23 @@
     font-size: 0.9rem;
 }
 
-.similarity-value.high {
+.comparison-history .similarity-value.high {
     background: #fef2f2;
     color: #dc2626;
 }
 
-.similarity-value.medium {
+.comparison-history .similarity-value.medium {
     background: #fef3c7;
     color: #d97706;
 }
 
-.similarity-value.low {
+.comparison-history .similarity-value.low {
     background: #f0fdf4;
     color: #16a34a;
 }
 
 /* Status Badge */
-.status-badge {
+.comparison-history .status-badge {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -647,40 +682,52 @@
     white-space: nowrap;
 }
 
-.status-badge.issue {
+.comparison-history .status-badge.issue {
     background: #fef2f2;
     color: #dc2626;
 }
 
-.status-badge.ok {
+.comparison-history .status-badge.ok {
     background: #f0fdf4;
     color: #16a34a;
 }
 
 /* Actions */
-.cell-actions {
+.comparison-history .cell-actions {
     white-space: nowrap;
+    width: 220px;
 }
 
 /* Responsive */
 @media (max-width: 1024px) {
+    .comparison-history .comparison-filter-bar {
+        align-items: flex-start;
+        flex-direction: column;
+    }
 
-    .history-table th,
-    .history-table td {
+    .comparison-history .comparison-filter-left,
+    .comparison-history .comparison-filter-actions {
+        flex-wrap: wrap;
+        width: 100%;
+    }
+
+    .comparison-history .comparison-filter-actions {
+        justify-content: flex-start;
+        margin-left: 0;
+    }
+
+    .comparison-history .history-table th,
+    .comparison-history .history-table td {
         padding: 8px 10px;
     }
 
-    .icon-btn span {
-        display: none;
-    }
-
-    .icon-btn {
-        padding: 6px;
+    .comparison-history .icon-btn {
+        padding: 6px 8px;
     }
 }
 
 /* Loading Row for Lazy Loading */
-.loading-row td {
+.comparison-history .loading-row td {
     padding: 16px;
     text-align: left;
     color: #64748b;
@@ -688,7 +735,7 @@
     border-bottom: 1px solid #f1f5f9;
 }
 
-.loading-indicator {
+.comparison-history .loading-indicator {
     display: inline-flex;
     align-items: center;
     gap: 8px;
@@ -697,24 +744,24 @@
 }
 
 
-.loading-indicator svg {
+.comparison-history .loading-indicator svg {
     color: #3b82f6;
 }
 
-.summary-item.failure {
+.comparison-history .summary-item.failure {
     color: #d32f2f;
 }
 
-.summary-item.failure strong {
+.comparison-history .summary-item.failure strong {
     color: #d32f2f;
 }
 
-.clickable {
+.comparison-history .clickable {
     cursor: pointer;
     transition: opacity 0.2s;
 }
 
-.clickable:hover {
+.comparison-history .clickable:hover {
     opacity: 0.8;
     text-decoration: underline;
 }

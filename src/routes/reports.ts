@@ -17,6 +17,7 @@ import { authMiddleware, requirePermission, AuthRequest } from '../middleware/au
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 import { checkStoragePathExists } from '../services/SourceFileGuardService';
 import { hasParsedContent } from '../utils/parsedContent';
+import { getReportContentQuality } from '../utils/reportMaintenance';
 
 const router = express.Router();
 
@@ -174,13 +175,23 @@ function mapVersionRow(row: any) {
     return null;
   }
 
+  const parsedJson = parseDbJson(row.parsed_json);
+
   return {
     version_id: Number(row.id),
     file_name: row.file_name,
     file_hash: row.file_hash,
     storage_path: row.storage_path,
     text_path: row.text_path,
-    parsed_json: parseDbJson(row.parsed_json),
+    parsed_json: parsedJson,
+    content_quality: getReportContentQuality({
+      report_id: row.report_id,
+      region_id: row.region_id ?? '',
+      year: row.year ?? '',
+      effective_version_id: row.id,
+      parsed_json: parsedJson,
+      raw_text: typeof row.raw_text === 'string' ? row.raw_text : null,
+    }),
     provider: row.provider,
     model: row.model,
     prompt_version: row.prompt_version,

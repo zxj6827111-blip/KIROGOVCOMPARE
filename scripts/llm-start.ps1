@@ -58,7 +58,10 @@ Write-Host "Err: $errPath"
 
 $windowStyle = if ($ShowWindow) { 'Normal' } else { 'Hidden' }
 
-$proc = Start-Process -FilePath "node" -ArgumentList "dist\\index-llm.js" -WorkingDirectory $root -RedirectStandardOutput $LogPath -RedirectStandardError $errPath -WindowStyle $windowStyle -PassThru
+# Use cmd.exe for file redirection. PowerShell Start-Process redirection can fail
+# on Windows when the inherited environment contains both Path and PATH.
+$cmdLine = ('set "PORT={0}" && node -r dotenv/config dist\index-llm.js 1> "{1}" 2> "{2}"' -f $Port, $LogPath, $errPath)
+$proc = Start-Process -FilePath "cmd.exe" -ArgumentList @('/d', '/s', '/c', $cmdLine) -WorkingDirectory $root -WindowStyle $windowStyle -PassThru
 $proc.Id | Out-File -FilePath $pidFile -Encoding ascii
 Write-Host "Started. PID: $($proc.Id) (pid file: $pidFile)" -ForegroundColor Green
 Write-Host "Health: http://127.0.0.1:$Port/api/health"

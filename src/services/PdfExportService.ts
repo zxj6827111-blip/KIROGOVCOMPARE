@@ -64,11 +64,13 @@ class PdfExportService {
         waitUntil: 'networkidle0',
         timeout: 60000
       });
+      await page.emulateMediaType('print');
 
       // 3. Generate PDF
       await page.pdf({
         path: outputPath,
-        format: 'A4',
+        width: '297mm',
+        height: '210mm',
         printBackground: true,
         margin: {
           top: '20mm',
@@ -82,7 +84,8 @@ class PdfExportService {
                 <div style="font-size: 8px; color: #9ca3af; text-align: center; width: 100%; font-family: sans-serif;">
                     Page <span class="pageNumber"></span> of <span class="totalPages"></span>
                 </div>
-            `
+            `,
+        preferCSSPageSize: false
       });
 
       console.log(`[PdfExportService] PDF generated at ${outputPath}`);

@@ -3,11 +3,15 @@
  * Print view for Puppeteer PDF export.
  * Requires auth; supports service_token in query string.
  */
-import React, { useEffect, useState, useMemo } from 'react';
-import '../ComparisonDetailView.css';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import '../ComparisonDetailView.css';
+
+import './ComparisonPrintView.css';
 import { Table2View, Table3View, Table4View, SimpleDiffTable } from '../TableViews';
 import DiffText from '../DiffText';
-import CrossYearCheckView from '../CrossYearCheckView';
+import CrossYearCheckView from '../CrossYearCheckView';
+
+import { normalizeTablePath } from '../../utils/tableRowColMapping';
 
 // ---- Tokenization & Similarity Algorithm (Same as ComparisonDetailView) ----
 const tokenizeText = (text) => {
@@ -42,53 +46,123 @@ function calculateTextSimilarity(text1, text2) {
     return Math.round((2 * intersection / union) * 100);
 }
 
-// Helper for Table 3 Rows
-const getTable3Rows = (data) => {
+const readPath = (obj, path) => {
+    if (!obj || !path) return undefined;
+    return path.split('.').reduce((acc, key) => (acc == null ? undefined : acc[key]), obj);
+};
+
+const firstDefined = (...values) => values.find(value => value !== undefined && value !== null);
+
+const isTableHighlightPath = (path) =>
+    path &&
+    (path.startsWith('tableData.') ||
+        path.startsWith('activeDisclosureData.') ||
+        path.startsWith('reviewLitigationData.'));
+
+const buildIssueHighlightCells = (issues = []) => {
+    const cells = [];
+    const seen = new Set();
+
+    const addPath = (rawPath, type) => {
+        const path = normalizeTablePath(rawPath);
+        if (!isTableHighlightPath(path)) return;
+        const key = `${type}:${path}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        cells.push({ path, type, scope: 'focus' });
+    };
+
+    issues
+        .filter((item) =>
+            ['FAIL', 'UNCERTAIN'].includes(item?.auto_status || item?.autoStatus) &&
+            item?.human_status !== 'dismissed'
+        )
+        .forEach((item) => {
+            const evidence = item.evidence || {};
+            const leftPaths = evidence.leftPaths || [];
+            const rightPaths = evidence.rightPaths || [];
+            const fallbackPaths = evidence.paths || [];
+
+            leftPaths.forEach((path) => addPath(path, 'left'));
+            rightPaths.forEach((path) => addPath(path, 'right'));
+
+            if (leftPaths.length === 0 && rightPaths.length === 0) {
+                fallbackPaths.forEach((path) => addPath(path, 'diff'));
+            }
+        });
+
+    return cells;
+};
+
+// Helper for Table 3 Rows
+const getTable3Rows = (data) => {
     if (!data || !data.total || !data.total.results) return [];
     const t = data.total;
-    const r = t.results;
-    return [
+    const value = (...paths) => firstDefined(...paths.map(path => readPath(t, path)));
+
+    return [
         { label: '本年新收政府信息公开申请数量', val: t.newReceived },
         { label: '上年结转政府信息公开申请数量', val: t.carriedOver },
-        { label: '予以公开', val: r.granted },
-        { label: '部分公开', val: r.partialGrant },
-        { label: '不予公开-属于国家秘密', val: r.denied?.stateSecret },
-        { label: '不予公开-其他法律行政法规禁止公开', val: r.denied?.lawForbidden },
-        { label: '不予公开-危及"三安全一稳定"', val: r.denied?.safetyStability },
-        { label: '不予公开-保护第三方合法权益', val: r.denied?.thirdPartyRights },
-        { label: '不予公开-属于工作秘密', val: r.denied?.workSecret },
-        { label: '不予公开-属于内部事务信息', val: r.denied?.internalAffairs },
-        { label: '不予公开-属于内部管理信息', val: r.denied?.internalManagement },
-        { label: '不予公开-属于过程性信息', val: r.denied?.processInfo },
-        { label: '不予公开-属于行政执法案卷', val: r.denied?.enforcementDossier },
-        { label: '不予公开-属于行政查询事项', val: r.denied?.queryMatter },
-        { label: '无法提供-非政府公开信息', val: r.unableToProvide?.notGovInfo },
-        { label: '无法提供-信息不存在', val: r.unableToProvide?.notExist },
-        { label: '无法提供-非本机关负责公开', val: r.unableToProvide?.notResponsible },
-        { label: '不予处理-信访举报投诉类', val: r.notProcessed?.petition },
-        { label: '不予处理-重复申请', val: r.notProcessed?.duplicateRequest },
-        { label: '不予处理-要求提供公开出版物', val: r.notProcessed?.requirePublication },
-        { label: '不予处理-无正当理由大量反复申请', val: r.notProcessed?.unreasonableRequest },
-        { label: '不予处理-要求行政机关确认或重新出具', val: r.notProcessed?.requireConfirm },
-        { label: '不予处理-无法联系到申请人', val: r.notProcessed?.noContact },
-        { label: '其他处理', val: r.other },
-        { label: '结转下年度继续办理', val: r.carriedForward },
+        { label: '予以公开', val: value('results.granted') },
+        { label: '部分公开', val: value('results.partialGrant') },
+        { label: '不予公开-属于国家秘密', val: value('results.denied.stateSecret') },
+        { label: '不予公开-其他法律行政法规禁止公开', val: value('results.denied.lawForbidden') },
+        { label: '不予公开-危及"三安全一稳定"', val: value('results.denied.safetyStability') },
+        { label: '不予公开-保护第三方合法权益', val: value('results.denied.thirdPartyRights') },
+        { label: '不予公开-属于工作秘密', val: value('results.denied.workSecret') },
+        { label: '不予公开-属于内部事务信息', val: value('results.denied.internalAffairs') },
+        { label: '不予公开-属于内部管理信息', val: value('results.denied.internalManagement') },
+        { label: '不予公开-属于过程性信息', val: value('results.denied.processInfo') },
+        { label: '不予公开-属于行政执法案卷', val: value('results.denied.enforcementDossier', 'results.denied.enforcementCase') },
+        { label: '不予公开-属于行政查询事项', val: value('results.denied.queryMatter', 'results.denied.adminQuery') },
+        { label: '无法提供-本机关不掌握相关政府信息', val: value('results.unableToProvide.noInfo', 'results.unableToProvide.notGovInfo') },
+        { label: '无法提供-没有现成信息需要另行制作', val: value('results.unableToProvide.needCreation', 'results.unableToProvide.notExist') },
+        { label: '无法提供-补正后申请内容仍不明确', val: value('results.unableToProvide.unclear', 'results.unableToProvide.notResponsible') },
+        { label: '不予处理-信访举报投诉类申请', val: value('results.notProcessed.complaint', 'results.notProcessed.petition') },
+        { label: '不予处理-重复申请', val: value('results.notProcessed.repeat', 'results.notProcessed.duplicateRequest') },
+        { label: '不予处理-要求提供公开出版物', val: value('results.notProcessed.publication', 'results.notProcessed.requirePublication') },
+        { label: '不予处理-无正当理由大量反复申请', val: value('results.notProcessed.massiveRequests', 'results.notProcessed.unreasonableRequest') },
+        { label: '不予处理-要求行政机关确认或重新出具', val: value('results.notProcessed.confirmInfo', 'results.notProcessed.requireConfirm') },
+        { label: '不予处理-无法联系到申请人', val: value('results.notProcessed.noContact') },
+        { label: '其他处理-申请人逾期不补正', val: value('results.other.overdueCorrection') },
+        { label: '其他处理-申请人逾期未按收费通知缴费', val: value('results.other.overdueFee') },
+
+        { label: '其他处理-其他', val: value('results.other.otherReasons', 'results.other') },
+
+        { label: '总计', val: value('results.totalProcessed') },
+
+        { label: '结转下年度继续办理', val: value('results.carriedForward') },
     ].filter(row => row.val !== undefined && row.val !== null);
 };
 
 // Helper for Table 4 Rows
 const getTable4Rows = (data) => {
-    if (!data) return [];
-    return [
-        { label: '行政复议-维持', val: data.review?.maintain },
-        { label: '行政复议-撤销/变更/确认违法', val: data.review?.corrected },
-        { label: '行政复议-其他', val: data.review?.other },
-        { label: '行政诉讼(未经复议)-维持', val: data.litigationDirect?.maintain },
-        { label: '行政诉讼(未经复议)-撤销/变更/确认违法', val: data.litigationDirect?.corrected },
-        { label: '行政诉讼(未经复议)-其他', val: data.litigationDirect?.other },
-        { label: '行政诉讼(经复议)-维持', val: data.litigationAfterReview?.maintain },
-        { label: '行政诉讼(经复议)-撤销/变更/确认违法', val: data.litigationAfterReview?.corrected },
-        { label: '行政诉讼(经复议)-其他', val: data.litigationAfterReview?.other },
+    if (!data) return [];
+
+    const value = (...paths) => firstDefined(...paths.map(path => readPath(data, path)));
+
+    return [
+        { label: '行政复议-维持', val: value('review.maintain') },
+        { label: '行政复议-撤销/变更/确认违法', val: value('review.correct', 'review.corrected') },
+        { label: '行政复议-其他', val: value('review.other') },
+        { label: '行政复议-尚未审结', val: value('review.unfinished') },
+        { label: '行政复议-总计', val: value('review.total') },
+        { label: '行政诉讼(未经复议)-维持', val: value('litigationDirect.maintain') },
+        { label: '行政诉讼(未经复议)-撤销/变更/确认违法', val: value('litigationDirect.correct', 'litigationDirect.corrected') },
+        { label: '行政诉讼(未经复议)-其他', val: value('litigationDirect.other') },
+        { label: '行政诉讼(未经复议)-尚未审结', val: value('litigationDirect.unfinished') },
+
+        { label: '行政诉讼(未经复议)-总计', val: value('litigationDirect.total') },
+
+        { label: '行政诉讼(经复议)-维持', val: value('litigationPostReview.maintain', 'litigationAfterReview.maintain') },
+
+        { label: '行政诉讼(经复议)-撤销/变更/确认违法', val: value('litigationPostReview.correct', 'litigationPostReview.corrected', 'litigationAfterReview.correct', 'litigationAfterReview.corrected') },
+
+        { label: '行政诉讼(经复议)-其他', val: value('litigationPostReview.other', 'litigationAfterReview.other') },
+
+        { label: '行政诉讼(经复议)-尚未审结', val: value('litigationPostReview.unfinished', 'litigationAfterReview.unfinished') },
+
+        { label: '行政诉讼(经复议)-总计', val: value('litigationPostReview.total', 'litigationAfterReview.total') },
     ].filter(row => row.val !== undefined && row.val !== null);
 };
 
@@ -96,29 +170,79 @@ const getTable4Rows = (data) => {
 const getTable2Rows = (data) => {
     if (!data) return [];
     return [
-        { label: '规章-制发', val: data.regulations?.made },
-        { label: '规章-废止', val: data.regulations?.repealed },
-        { label: '规章-现行有效', val: data.regulations?.valid },
-        { label: '规范性文件-制发', val: data.normativeDocuments?.made },
-        { label: '规范性文件-废止', val: data.normativeDocuments?.repealed },
-        { label: '规范性文件-现行有效', val: data.normativeDocuments?.valid },
-        { label: '行政许可-处理', val: data.adminPermit?.processed },
-        { label: '行政处罚', val: data.adminPunishment },
-        { label: '行政强制', val: data.adminForce },
-        { label: '行政事业性收费(万元)', val: data.adminFee },
+        { label: '规章-制发', val: firstDefined(readPath(data, 'regulations.made')) },
+        { label: '规章-废止', val: firstDefined(readPath(data, 'regulations.repealed')) },
+        { label: '规章-现行有效', val: firstDefined(readPath(data, 'regulations.valid')) },
+        { label: '规范性文件-制发', val: firstDefined(readPath(data, 'normativeDocuments.made')) },
+        { label: '规范性文件-废止', val: firstDefined(readPath(data, 'normativeDocuments.repealed')) },
+        { label: '规范性文件-现行有效', val: firstDefined(readPath(data, 'normativeDocuments.valid')) },
+        { label: '行政许可-处理', val: firstDefined(readPath(data, 'licensing.processed'), readPath(data, 'adminPermit.processed')) },
+        { label: '行政处罚', val: firstDefined(readPath(data, 'punishment.processed'), readPath(data, 'adminPunishment')) },
+        { label: '行政强制', val: firstDefined(readPath(data, 'coercion.processed'), readPath(data, 'adminForce')) },
+        { label: '行政事业性收费(万元)', val: firstDefined(readPath(data, 'fees.amount'), readPath(data, 'adminFee')) },
     ].filter(row => row.val !== undefined && row.val !== null);
 };
 
 function ComparisonPrintView({ comparisonId }) {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
+    const [error, setError] = useState('');
+
+    const [checksReady, setChecksReady] = useState(false);
+
+    const [authToken, setAuthToken] = useState('');
+
+    const [leftIssueHighlightCells, setLeftIssueHighlightCells] = useState([]);
+
+    const hasTriggeredPrint = useRef(false);
 
     // Read highlight settings from URL search params
     // Default: show identical parts highlight (yellow), hide diff highlight (red)
     const searchParams = useMemo(() => new URLSearchParams(window.location.search), []);
     const highlightIdentical = searchParams.get('highlightIdentical') !== 'false'; // default true
     const highlightDiff = searchParams.get('highlightDiff') === 'true'; // default false
+
+    const autoPrint = searchParams.get('autoPrint') === 'true';
+
+    const handleLeftIssuesChange = useCallback((issues) => {
+        setLeftIssueHighlightCells(buildIssueHighlightCells(issues));
+    }, []);
+
+    const buildSummaryItems = useCallback((sections) => {
+        const items = [];
+
+        sections.forEach((section) => {
+            const title = section.title || '';
+            if (title === '标题' || title.includes('年度报告')) return;
+
+            if (section.type === 'text' && section.left && section.right) {
+                const sim = calculateTextSimilarity(section.left.content || '', section.right.content || '');
+                if (sim < 60) {
+                    items.push(`${title.split('、')[1] || title}章节的文字变化较大，重复率约 ${Math.round(sim)}% （低于 60% 阈值）`);
+                }
+                return;
+            }
+
+            if (section.type === 'table_2') {
+                const identical = JSON.stringify(section.left?.activeDisclosureData || null) === JSON.stringify(section.right?.activeDisclosureData || null);
+                if (!identical) items.push(`${title.split('、')[1] || title}的表格重复率约 0%，存在明显数据差异`);
+                return;
+            }
+
+            if (section.type === 'table_3') {
+                const identical = JSON.stringify(section.left?.tableData || null) === JSON.stringify(section.right?.tableData || null);
+                if (!identical) items.push(`${title.split('、')[1] || title}的表格重复率约 0%，存在明显数据差异`);
+                return;
+            }
+
+            if (section.type === 'table_4') {
+                const identical = JSON.stringify(section.left?.reviewLitigationData || null) === JSON.stringify(section.right?.reviewLitigationData || null);
+                if (!identical) items.push(`${title.split('、')[1] || title}的表格重复率约 0%，存在明显数据差异`);
+            }
+        });
+
+        return items;
+    }, []);
 
     useEffect(() => {
         const url = new URL(window.location.href);
@@ -134,7 +258,9 @@ function ComparisonPrintView({ comparisonId }) {
             try {
                 const serviceToken = searchParams.get('service_token');
                 const token = serviceToken || localStorage.getItem('admin_token');
-                const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
+                setAuthToken(token || '');
+
+                const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
                 // Use configured API base or current origin to reach backend.
                 const apiBase = process.env.REACT_APP_API_BASE_URL || '/api';
                 const normalizedBase = apiBase.replace(/\/+$/, '');
@@ -183,7 +309,43 @@ function ComparisonPrintView({ comparisonId }) {
         fetchData();
     }, [comparisonId, searchParams]);
 
-    // Aligned Sections and Summary calculation
+    const markPrintReady = useCallback(() => {
+        window.__COMPARISON_PRINT_READY__ = true;
+        document.body.dataset.comparisonPrintReady = 'true';
+
+        const content = document.getElementById('comparison-content');
+        if (content) {
+            content.setAttribute('data-print-ready', 'true');
+        }
+    }, []);
+
+    useEffect(() => {
+        window.__COMPARISON_PRINT_READY__ = false;
+        document.body.dataset.comparisonPrintReady = 'false';
+
+        return () => {
+            delete window.__COMPARISON_PRINT_READY__;
+            delete document.body.dataset.comparisonPrintReady;
+        };
+    }, [comparisonId]);
+
+    useEffect(() => {
+        if (!data || loading || error || !checksReady) return;
+
+        const timer = window.setTimeout(() => {
+            markPrintReady();
+
+            if (autoPrint && !hasTriggeredPrint.current) {
+                hasTriggeredPrint.current = true;
+                window.print();
+            }
+        }, 300);
+
+        return () => window.clearTimeout(timer);
+    }, [autoPrint, checksReady, data, error, loading, markPrintReady]);
+
+
+    // Aligned Sections and Summary calculation
     const { alignedSections, summary } = useMemo(() => {
         if (!data) return { alignedSections: [], summary: {} };
 
@@ -250,9 +412,11 @@ function ComparisonPrintView({ comparisonId }) {
 
         return {
             alignedSections: sections,
-            summary: { textRepetition: avgText, tableRepetition: avgTable, overallRepetition: overall, items: [] }
+            summary: (data.diff_json?.summary && data.diff_json.summary.items && data.diff_json.summary.items.length > 0)
+                ? data.diff_json.summary
+                : { textRepetition: avgText, tableRepetition: avgTable, overallRepetition: overall, items: buildSummaryItems(sections) }
         };
-    }, [data]);
+    }, [buildSummaryItems, data]);
 
     // Render Table Diff
     const renderSectionDiff = (section) => {
@@ -365,14 +529,14 @@ function ComparisonPrintView({ comparisonId }) {
                     }
                 `}
             </style>
-            <div className="comparison-container bg-white min-h-screen p-6 print-mode">
-                <div id="comparison-content" className="max-w-[1400px] mx-auto">
+            <div className="comparison-container comparison-print-page print-mode">
+                <div id="comparison-content" className="comparison-print-content" data-print-ready="false">
                     {/* Summary Card */}
-                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 mb-8 shadow-sm">
-                        <h2 className="text-2xl font-bold text-gray-900 mb-4 font-serif-sc">
+                    <div className="comparison-print-summary break-inside-avoid">
+                        <h2 className="comparison-print-title font-serif-sc">
                             {data.region_name} 政务公开年报比对
                         </h2>
-                        <div className="flex space-x-8 text-sm text-gray-700 mb-4 font-mono">
+                        <div className="comparison-print-meta font-mono">
                             <div>
                                 <span className="text-gray-500">年份:</span> <span className="font-bold">{data.year_a} vs {data.year_b}</span>
                             </div>
@@ -383,10 +547,21 @@ function ComparisonPrintView({ comparisonId }) {
                         </div>
                     </div>
 
-                    {/* Header Row */}
-                    <div className="comparison-grid grid grid-cols-2 gap-4 bg-gray-100 pt-4 pb-2 px-4 border-b border-gray-300 mb-0 rounded-t-lg">
-                        <h3 className="text-lg font-bold text-gray-800">{data.year_a} 年报告</h3>
-                        <h3 className="text-lg font-bold text-gray-800">{data.year_b} 年报告</h3>
+                    <div className="comparison-print-findings break-inside-avoid">
+                        <h3>发现问题</h3>
+                        <ul>
+                            {summary.items && summary.items.length > 0 ? (
+                                summary.items.map((item, idx) => <li key={idx}>{item}</li>)
+                            ) : (
+                                <li>未检测到显著差异。</li>
+                            )}
+                        </ul>
+                    </div>
+
+                    {/* Header Row */}
+                    <div className="comparison-grid comparison-print-year-row">
+                        <h3>{data.year_a} 年报告</h3>
+                        <h3>{data.year_b} 年报告</h3>
                     </div>
 
                     {/* Content Sections */}
@@ -394,8 +569,8 @@ function ComparisonPrintView({ comparisonId }) {
                         // Force page break for Sections 2, 4, 5, 6
                         const isNewPageSection = (section.title && ['二、', '四、', '五、', '六、'].some(prefix => section.title.startsWith(prefix))) || section.type === 'table_4';
 
-                        // Don't use break-inside-avoid for Table 4 div, to allow clean page break before it
-                        const useBreakInsideAvoid = section.type.startsWith('table_') && section.type !== 'table_4';
+                        // Let wide tables paginate naturally in the landscape print view.
+                        const useBreakInsideAvoid = section.type.startsWith('table_') && !['table_2', 'table_3', 'table_4'].includes(section.type);
 
                         // DEBUG: Log section info for Puppeteer console capture
                         console.log(`[PDF Section ${idx}] type: ${section.type}, title: ${section.title}, isNewPageSection: ${isNewPageSection}`);
@@ -415,15 +590,15 @@ function ComparisonPrintView({ comparisonId }) {
                                         &nbsp;
                                     </div>
                                 )}
-                                <div className={`mb-6 ${useBreakInsideAvoid ? 'break-inside-avoid' : ''}`}>
-                                    <h3 className="text-lg font-bold text-gray-900 mb-1 border-l-4 border-blue-500 pl-3 py-1 bg-blue-50 rounded-r break-after-avoid" style={{ pageBreakAfter: 'avoid' }}>
+                                <div className={`comparison-print-section ${useBreakInsideAvoid ? 'break-inside-avoid' : ''}`}>
+                                    <h3 className="comparison-print-section-title break-after-avoid" style={{ pageBreakAfter: 'avoid' }}>
                                         {section.title}
                                     </h3>
 
                                     {/* Text Section - no height limits for PDF */}
                                     {section.type === 'text' && (
-                                        <div className="comparison-grid grid grid-cols-2 gap-4">
-                                            <div className="bg-white p-4 rounded border border-gray-200 shadow-sm text-sm leading-relaxed">
+                                        <div className="comparison-grid comparison-print-two-col">
+                                            <div className="comparison-print-pane">
                                                 <DiffText
                                                     oldText={section.right?.content || ''}
                                                     newText={section.left?.content || ''}
@@ -431,7 +606,7 @@ function ComparisonPrintView({ comparisonId }) {
                                                     highlightDiff={highlightDiff}
                                                 />
                                             </div>
-                                            <div className="bg-white p-4 rounded border border-gray-200 shadow-sm text-sm leading-relaxed">
+                                            <div className="comparison-print-pane">
                                                 <DiffText
                                                     oldText={section.left?.content || ''}
                                                     newText={section.right?.content || ''}
@@ -445,31 +620,31 @@ function ComparisonPrintView({ comparisonId }) {
                                     {/* Table Sections - scaled to fit within container */}
                                     {/* Table Sections */}
                                     {section.type.startsWith('table_') && (
-                                        <div className="space-y-4">
+                                        <div className={`comparison-print-stack comparison-print-table-block comparison-print-table-block--${section.type}`}>
                                             {/* Table Rendering Logic - Different for Table 4 */}
                                             {section.type === 'table_4' ? (
                                                 /* Table 4: Vertical Layout (Stacked) with zoom 0.65 */
-                                                <div className="flex flex-col space-y-6">
-                                                    <div className="bg-white p-2 rounded border border-gray-200 shadow-sm origin-top-left" style={{ overflow: 'visible', zoom: '0.65', width: '100%' }}>
-                                                        <div className="mb-2 font-bold text-gray-700 text-center">{data.year_a} 年报告</div>
-                                                        {section.left && <Table4View data={section.left.reviewLitigationData} />}
+                                                <div className="comparison-print-table-stack">
+                                                    <div className="comparison-print-table-shell comparison-print-table-shell--scaled" style={{ overflow: 'visible', zoom: '0.65', width: '100%' }}>
+                                                        <div className="comparison-print-table-label">{data.year_a} 年报告</div>
+                                                        {section.left && <Table4View data={section.left.reviewLitigationData} highlightCells={leftIssueHighlightCells} />}
                                                         {!section.left && <div className="text-gray-400 text-center p-4">无数据</div>}
                                                     </div>
-                                                    <div className="bg-white p-2 rounded border border-gray-200 shadow-sm origin-top-left" style={{ overflow: 'visible', zoom: '0.65', width: '100%' }}>
-                                                        <div className="mb-2 font-bold text-gray-700 text-center">{data.year_b} 年报告</div>
+                                                    <div className="comparison-print-table-shell comparison-print-table-shell--scaled" style={{ overflow: 'visible', zoom: '0.65', width: '100%' }}>
+                                                        <div className="comparison-print-table-label">{data.year_b} 年报告</div>
                                                         {section.right && <Table4View data={section.right.reviewLitigationData} />}
                                                         {!section.right && <div className="text-gray-400 text-center p-4">无数据</div>}
                                                     </div>
                                                 </div>
                                             ) : (
                                                 /* Table 2 & 3: Side-by-Side Layout with Scaling (Increased neg margin to remove whitespace) */
-                                                <div className="comparison-grid grid grid-cols-2 gap-4 relative z-0">
-                                                    <div className="bg-white p-2 rounded border border-gray-200 shadow-sm origin-top-left" style={{ zoom: '0.65', width: '100%' }}>
-                                                        {section.type === 'table_2' && section.left && <Table2View data={section.left.activeDisclosureData} />}
-                                                        {section.type === 'table_3' && section.left && <Table3View data={section.left.tableData} compact={true} />}
+                                                <div className="comparison-grid comparison-print-two-col comparison-print-table-grid">
+                                                    <div className="comparison-print-table-shell comparison-print-table-shell--scaled" style={{ zoom: '0.65', width: '100%' }}>
+                                                        {section.type === 'table_2' && section.left && <Table2View data={section.left.activeDisclosureData} highlightCells={leftIssueHighlightCells} />}
+                                                        {section.type === 'table_3' && section.left && <Table3View data={section.left.tableData} compact={true} highlightCells={leftIssueHighlightCells} />}
                                                         {!section.left && <div className="text-gray-400 text-center p-4">无数据</div>}
                                                     </div>
-                                                    <div className="bg-white p-2 rounded border border-gray-200 shadow-sm origin-top-left" style={{ zoom: '0.65', width: '100%' }}>
+                                                    <div className="comparison-print-table-shell comparison-print-table-shell--scaled" style={{ zoom: '0.65', width: '100%' }}>
                                                         {section.type === 'table_2' && section.right && <Table2View data={section.right.activeDisclosureData} />}
                                                         {section.type === 'table_3' && section.right && <Table3View data={section.right.tableData} compact={true} />}
                                                         {!section.right && <div className="text-gray-400 text-center p-4">无数据</div>}
@@ -478,7 +653,7 @@ function ComparisonPrintView({ comparisonId }) {
                                             )}
 
                                             {/* Diff Analysis Table - Start on a new page as requested */}
-                                            <div className="relative z-10 pt-4 break-before-page" style={{ pageBreakBefore: 'always' }}>
+                                            <div className="comparison-print-diff-table break-before-page">
                                                 {renderSectionDiff(section)}
                                             </div>
                                         </div>
@@ -495,8 +670,11 @@ function ComparisonPrintView({ comparisonId }) {
                         leftContent={data.left_content}
                         rightContent={data.right_content}
                         yearA={data.year_a}
-                        yearB={data.year_b}
-                    />
+                        yearB={data.year_b}
+                        authToken={authToken}
+                        onLeftIssuesChange={handleLeftIssuesChange}
+                        onReadyChange={setChecksReady}
+                    />
 
                     {/* Footer */}
                     <div className="mt-8 pt-4 border-t border-gray-200 text-center text-gray-500 text-sm">

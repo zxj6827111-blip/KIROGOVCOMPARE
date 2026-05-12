@@ -5,6 +5,7 @@ import ReportFactoryService from '../services/report-factory/ReportFactoryServic
 import DerivedMetricsService from '../services/DerivedMetricsService';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 import { checkStoragePathExists } from '../services/SourceFileGuardService';
+import { getReportContentQuality } from '../utils/reportMaintenance';
 
 const router = express.Router();
 
@@ -27,6 +28,16 @@ type EvidenceItem = {
 
 function getTableName(tableName: string): string | null {
   return TABLE_MAP[tableName] ?? null;
+}
+
+function parseDbJson(value: any): any {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 
 function buildValueSnippet(value: any): string {
@@ -520,6 +531,36 @@ router.get('/v2/reports/:reportId/facts/:tableName', async (req, res) => {
       }
     }
 
+    const versionQualityRes = await pool.query(
+      `SELECT id, report_id, parsed_json, raw_text
+       FROM report_versions
+       WHERE id = $1 AND report_id = $2
+       LIMIT 1`,
+      [targetVersionId, reportId]
+    );
+    const versionQualityRow = versionQualityRes.rows[0];
+    if (!versionQualityRow) {
+      return res.status(404).json({ error: 'Target version not found' });
+    }
+
+    const contentQuality = getReportContentQuality({
+      report_id: versionQualityRow.report_id,
+      region_id: '',
+      year: '',
+      effective_version_id: versionQualityRow.id,
+      parsed_json: parseDbJson(versionQualityRow.parsed_json),
+      raw_text: typeof versionQualityRow.raw_text === 'string' ? versionQualityRow.raw_text : null,
+    });
+
+    if (contentQuality.suppress_display_tables) {
+      return res.json({
+        data: [],
+        version_id: targetVersionId,
+        table: req.params.tableName,
+        content_quality: contentQuality,
+      });
+    }
+
     // tableName is safe because of getTableName whitelist check
     const factsRes = await pool.query(`
       SELECT *
@@ -536,6 +577,7 @@ router.get('/v2/reports/:reportId/facts/:tableName', async (req, res) => {
       })),
       version_id: targetVersionId,
       table: req.params.tableName,
+      content_quality: contentQuality,
     });
   } catch (error) {
     console.error('[DataCenter] Failed to fetch facts:', error);

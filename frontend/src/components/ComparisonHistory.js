@@ -497,70 +497,73 @@ function ComparisonHistory() {
   return (
     <div className="comparison-history">
       <div className="history-header">
-        <div className="filter-bar" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <div className="input-with-icon">
-            <MapPin size={16} className="input-icon" />
-            <input
-              type="text"
-              placeholder="按地区筛选"
-              value={regionFilter}
-              onChange={e => setRegionFilter(e.target.value)}
-              className="filter-input"
-            />
+        <div className="comparison-filter-bar">
+          <div className="comparison-filter-left">
+            <div className="input-with-icon">
+              <MapPin size={16} className="input-icon" />
+              <input
+                type="text"
+                placeholder="按地区筛选"
+                value={regionFilter}
+                onChange={e => setRegionFilter(e.target.value)}
+                className="filter-input region-filter-input"
+              />
+            </div>
+            <div className="input-with-icon">
+              <Calendar size={16} className="input-icon" />
+              <input
+                type="text"
+                placeholder="按年份筛选"
+                value={yearFilter}
+                onChange={e => setYearFilter(e.target.value)}
+                className="filter-input year-filter-input"
+              />
+            </div>
           </div>
-          <div className="input-with-icon">
-            <Calendar size={16} className="input-icon" />
-            <input
-              type="text"
-              placeholder="按年份筛选"
-              value={yearFilter}
-              onChange={e => setYearFilter(e.target.value)}
-              className="filter-input"
-              style={{ width: '120px' }}
-            />
+          <div className="comparison-filter-actions">
+            <button
+              onClick={handleSearch}
+              className="search-btn"
+            >
+              <Search size={16} /> 查询
+            </button>
+            <button
+              onClick={() => setShowIssuesOnly(!showIssuesOnly)}
+              className={`filter-toggle-btn ${showIssuesOnly ? 'active' : ''}`}
+              title={showIssuesOnly ? '显示全部' : '只看问题'}
+            >
+              <AlertCircle size={16} />
+              {showIssuesOnly ? '显示全部' : '只看问题'}
+            </button>
+            <button
+              onClick={handleBatchCreate}
+              disabled={batchCreating || loading}
+              className="batch-create-btn iconic-btn"
+              title="为所有有连续两年年报但未比对的区域批量创建比对任务"
+            >
+              <Zap size={16} className={batchCreating ? 'spin' : ''} />
+              {batchCreating ? '创建中...' : '一键比对'}
+            </button>
+            <button
+              onClick={fetchTree}
+              disabled={loading}
+              className="refresh-btn iconic-btn"
+              title="刷新列表"
+            >
+              <RefreshCw size={16} className={loading ? 'spin' : ''} />
+              {loading ? '刷新中...' : '刷新'}
+            </button>
+            {selectedIds.length > 0 && (
+              <>
+                <button onClick={handleBatchDownload} className="batch-btn download-btn">
+                  <Download size={16} /> 批量导出 ({selectedIds.length})
+                </button>
+                <button onClick={handleBatchDelete} className="batch-btn delete-btn">
+                  <Trash2 size={16} /> 批量删除 ({selectedIds.length})
+                </button>
+              </>
+            )}
           </div>
-          <button
-            onClick={handleSearch}
-            className="search-btn"
-          >
-            <Search size={16} /> 查询
-          </button>
-          <button
-            onClick={() => setShowIssuesOnly(!showIssuesOnly)}
-            className={`filter-toggle-btn ${showIssuesOnly ? 'active' : ''}`}
-            title={showIssuesOnly ? '显示全部' : '只看问题'}
-          >
-            <AlertCircle size={16} />
-            {showIssuesOnly ? '显示全部' : '只看问题'}
-          </button>
-          <button
-            onClick={handleBatchCreate}
-            disabled={batchCreating || loading}
-            className="batch-create-btn iconic-btn"
-            title="为所有有连续两年年报但未比对的区域批量创建比对任务"
-          >
-            <Zap size={16} className={batchCreating ? 'spin' : ''} />
-            {batchCreating ? '创建中...' : '一键比对'}
-          </button>
-          <button
-            onClick={fetchTree}
-            disabled={loading}
-            className="refresh-btn iconic-btn"
-            title="刷新列表"
-          >
-            <RefreshCw size={16} className={loading ? 'spin' : ''} />
-            {loading ? '刷新中...' : '刷新'}
-          </button>
-          {selectedIds.length > 0 && (
-            <>
-              <button onClick={handleBatchDownload} className="batch-btn download-btn">
-                <Download size={16} /> 批量导出 ({selectedIds.length})
-              </button>
-              <button onClick={handleBatchDelete} className="batch-btn delete-btn">
-                <Trash2 size={16} /> 批量删除 ({selectedIds.length})
-              </button>
-            </>
-          )}
         </div>
       </div>
 
