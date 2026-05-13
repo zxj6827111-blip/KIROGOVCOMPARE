@@ -3,6 +3,15 @@ export interface RuntimeModelOption {
   label: string;
 }
 
+export const DEFAULT_LLM_PROVIDER = 'openai';
+export const DEFAULT_LLM_MODEL = 'gpt-5.5';
+
+export interface UnifiedLlmConfig {
+  provider: string;
+  model: string;
+  modelValue: string;
+}
+
 export function resolveFirstNonEmpty(...values: Array<string | null | undefined>): string {
   for (const value of values) {
     const text = String(value || '').trim();
@@ -13,23 +22,71 @@ export function resolveFirstNonEmpty(...values: Array<string | null | undefined>
   return '';
 }
 
+export function normalizeLlmProviderName(providerName: string | undefined, fallback: string = ''): string {
+  const normalized = String(providerName || '').trim().toLowerCase();
+  if (normalized === 'gemini-openai') {
+    return 'gemini_openai';
+  }
+  return normalized || fallback;
+}
+
 export function buildPrefixedModelValue(providerName: string, modelName: string): string {
-  const provider = String(providerName || '').trim().toLowerCase();
+  const provider = normalizeLlmProviderName(providerName);
   const model = String(modelName || '').trim();
 
   if (!provider || !model) {
     return model;
   }
 
-  if (provider === 'deepseek' || provider === 'kimi') {
-    return `nvidia/${model}`;
-  }
-
-  if (provider === 'gemini-openai') {
-    return `gemini_openai/${model}`;
-  }
-
   return `${provider}/${model}`;
+}
+
+export function parsePrefixedModelValue(input: string | undefined): { provider?: string; model?: string } {
+  const value = String(input || '').trim();
+  const slashIndex = value.indexOf('/');
+  if (slashIndex <= 0 || slashIndex === value.length - 1) {
+    return { model: value || undefined };
+  }
+
+  return {
+    provider: normalizeLlmProviderName(value.slice(0, slashIndex)),
+    model: value.slice(slashIndex + 1).trim() || undefined,
+  };
+}
+
+function normalizeRuntimeModelName(modelName: string | undefined): string {
+  return DEFAULT_LLM_MODEL;
+}
+
+export function resolveUnifiedLlmConfig(options: {
+  env?: Record<string, string | undefined>;
+  provider?: string;
+  model?: string;
+  providerEnvKeys?: string[];
+  modelEnvKeys?: string[];
+} = {}): UnifiedLlmConfig {
+  const env = options.env || process.env;
+  const providerEnvKeys = options.providerEnvKeys || ['LLM_PROVIDER'];
+  const modelEnvKeys = options.modelEnvKeys || ['OPENAI_MODEL', 'LLM_MODEL'];
+
+  const explicit = parsePrefixedModelValue(options.model);
+  const explicitModelAllowed = String(explicit.model || '').trim().toLowerCase() === DEFAULT_LLM_MODEL;
+  const providerFromEnv = resolveFirstNonEmpty(...providerEnvKeys.map((key) => env[key]));
+  const modelFromEnv = resolveFirstNonEmpty(...modelEnvKeys.map((key) => env[key]));
+
+  const provider = normalizeLlmProviderName(
+    options.provider || (explicitModelAllowed ? explicit.provider : undefined) || providerFromEnv,
+    DEFAULT_LLM_PROVIDER
+  );
+  const model = normalizeRuntimeModelName(
+    explicitModelAllowed ? explicit.model : resolveFirstNonEmpty(modelFromEnv, DEFAULT_LLM_MODEL)
+  );
+
+  return {
+    provider,
+    model,
+    modelValue: buildPrefixedModelValue(provider, model),
+  };
 }
 
 function normalizeRuntimeModelOption(input: unknown): RuntimeModelOption | null {
@@ -78,9 +135,10 @@ export function parseRuntimeModelOptions(raw: string | undefined): RuntimeModelO
 }
 
 export function resolveParseDefaultModelValue(): string {
-  const provider = resolveFirstNonEmpty(process.env.LLM_PARSE_PROVIDER, process.env.LLM_PROVIDER);
-  const model = resolveFirstNonEmpty(process.env.LLM_PARSE_MODEL, process.env.LLM_MODEL);
-  return buildPrefixedModelValue(provider, model);
+  return resolveUnifiedLlmConfig({
+    providerEnvKeys: ['LLM_PARSE_PROVIDER', 'LLM_PROVIDER'],
+    modelEnvKeys: ['LLM_PARSE_MODEL', 'OPENAI_MODEL', 'LLM_MODEL'],
+  }).modelValue;
 }
 
 export function resolveParseUploadModelOptions(): {
@@ -88,12 +146,8 @@ export function resolveParseUploadModelOptions(): {
   options: RuntimeModelOption[];
 } {
   const defaultModel = resolveParseDefaultModelValue();
-  const configuredOptions = parseRuntimeModelOptions(process.env.LLM_PARSE_MODEL_OPTIONS_JSON);
-
-  let options = configuredOptions;
-  if (defaultModel && !configuredOptions.some((item) => item.value === defaultModel)) {
-    options = [{ value: defaultModel, label: defaultModel }, ...configuredOptions];
-  }
+  const label = defaultModel.endsWith(`/${DEFAULT_LLM_MODEL}`) ? 'GPT-5.5' : defaultModel;
+  const options = defaultModel ? [{ value: defaultModel, label }] : [];
 
   return {
     defaultModel: defaultModel || options[0]?.value || '',

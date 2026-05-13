@@ -1,5 +1,5 @@
 import express, { Response, Router } from 'express';
-import puppeteer, { Browser, ConsoleMessage } from 'puppeteer';
+import puppeteer, { Browser, ConsoleMessage, type PDFOptions } from 'puppeteer';
 import http from 'http';
 import https from 'https';
 import fs from 'fs';
@@ -10,6 +10,82 @@ import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 const router: Router = express.Router();
 const PDF_EXPORT_DEBUG = process.env.PDF_EXPORT_DEBUG === '1';
 const PDF_EXPORT_HYDRATE_WAIT_MS = Number(process.env.PDF_EXPORT_HYDRATE_WAIT_MS || 1500);
+
+const escapeHtml = (value: string): string =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+type PdfJsModule = {
+  getDocument: (options: Record<string, unknown>) => { promise: Promise<any> };
+};
+
+type TocChapter = {
+  id: string;
+  title: string;
+};
+
+let pdfjsPromise: Promise<PdfJsModule> | null = null;
+
+function loadPdfjs(): Promise<PdfJsModule> {
+  if (!pdfjsPromise) {
+    pdfjsPromise = import('pdfjs-dist/legacy/build/pdf.mjs').then((mod: any) => mod.default || mod);
+  }
+  return pdfjsPromise;
+}
+
+const normalizeTocText = (value: string): string => String(value || '').replace(/\s+/g, '');
+
+async function extractPdfTextPages(pdfBuffer: Uint8Array): Promise<string[]> {
+  const pdfjs = await loadPdfjs();
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(pdfBuffer),
+    useWorkerFetch: false,
+    isEvalSupported: false,
+    disableFontFace: true,
+  });
+  const pdfDocument = await loadingTask.promise;
+  const pages: string[] = [];
+
+  try {
+    for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
+      const pdfPage = await pdfDocument.getPage(pageNumber);
+      const textContent = await pdfPage.getTextContent();
+      pages.push(
+        textContent.items
+          .map((item: any) => String(item?.str || ''))
+          .filter(Boolean)
+          .join(' ')
+      );
+    }
+  } finally {
+    await pdfDocument.destroy?.();
+  }
+
+  return pages;
+}
+
+function resolveTocPagesFromPdfText(pages: string[], chapters: TocChapter[]): Record<string, number> {
+  const normalizedPages = pages.map(normalizeTocText);
+  const result: Record<string, number> = {};
+
+  chapters.forEach((chapter) => {
+    const token = normalizeTocText(chapter.title);
+    if (!chapter.id || token.length < 2) return;
+
+    for (let pageIndex = 3; pageIndex < normalizedPages.length; pageIndex += 1) {
+      if (normalizedPages[pageIndex].includes(token)) {
+        result[chapter.id] = pageIndex + 1;
+        return;
+      }
+    }
+  });
+
+  return result;
+}
 
 const parseRegionId = (orgId: unknown): number | null => {
   if (typeof orgId === 'number' && Number.isFinite(orgId)) {
@@ -52,6 +128,14 @@ async function isUrlAccessible(url: string): Promise<boolean> {
 }
 
 async function findFrontendUrl(): Promise<string | null> {
+  if (process.env.FRONTEND_URL) {
+    const configuredUrl = process.env.FRONTEND_URL.trim();
+    const isPlaceholder = configuredUrl.includes('your-domain.com');
+    if (!isPlaceholder && (await isUrlAccessible(configuredUrl))) {
+      return configuredUrl;
+    }
+  }
+
   const portsToCheck = [3000, 3001, 3002, 3003];
   const hostsToCheck = ['127.0.0.1', 'localhost'];
 
@@ -62,14 +146,6 @@ async function findFrontendUrl(): Promise<string | null> {
       if (accessible) {
         return url;
       }
-    }
-  }
-
-  if (process.env.FRONTEND_URL) {
-    const configuredUrl = process.env.FRONTEND_URL.trim();
-    const isPlaceholder = configuredUrl.includes('your-domain.com');
-    if (!isPlaceholder && (await isUrlAccessible(configuredUrl))) {
-      return configuredUrl;
     }
   }
 
@@ -164,17 +240,22 @@ router.get('/report-pdf', authMiddleware, async (req: AuthRequest, res: Response
       deviceScaleFactor: 2,
     });
 
-    await page.goto(frontendEntryUrl, {
+    const bearerToken = req.headers.authorization?.startsWith('Bearer ')
+      ? req.headers.authorization.substring(7)
+      : '';
+
+    if (bearerToken) {
+      await page.evaluateOnNewDocument((token: string) => {
+        const win = globalThis as any;
+        win.localStorage?.setItem('admin_token', token);
+      }, bearerToken);
+    }
+
+    const printUrl = new URL(printPath, frontendEntryUrl).toString();
+    await page.goto(printUrl, {
       waitUntil: 'networkidle0',
       timeout: 60000,
     });
-
-    await page.evaluate((path: string) => {
-      const win = globalThis as any;
-      if (win.location.pathname === path) return;
-      win.history.pushState({}, '', path);
-      win.dispatchEvent(new win.PopStateEvent('popstate'));
-    }, printPath);
 
     await page.waitForFunction(
       (path: string) => {
@@ -185,14 +266,54 @@ router.get('/report-pdf', authMiddleware, async (req: AuthRequest, res: Response
       printPath
     );
 
-    await page.waitForSelector('#govinsight-report-print', { timeout: 15000 });
+    try {
+      await page.waitForSelector('#govinsight-report-print', { timeout: 30000 });
+    } catch (waitError) {
+      const pageState = await page.evaluate(() => {
+        const win = globalThis as any;
+        return {
+          title: win.document.title,
+          path: win.location.pathname,
+          text: String(win.document.body?.innerText || '').slice(0, 800),
+        };
+      });
+      console.error('[GovInsight PDF] Print page did not become ready:', pageState);
+      throw waitError;
+    }
     await page.evaluate('document.fonts ? document.fonts.ready : Promise.resolve()');
+    await page.waitForFunction(
+      () => {
+        const win = globalThis as any;
+        return win.document.documentElement.getAttribute('data-govinsight-pdf-ready') === 'true';
+      },
+      { timeout: 15000 }
+    );
 
     if (PDF_EXPORT_HYDRATE_WAIT_MS > 0) {
       await new Promise((resolve) => setTimeout(resolve, PDF_EXPORT_HYDRATE_WAIT_MS));
     }
 
     await page.emulateMediaType('print');
+    await page.addStyleTag({
+      content: `
+        @page {
+          size: A4;
+          margin: 20mm 0 17mm 0;
+        }
+        @media print {
+          @page {
+            size: A4;
+            margin: 20mm 0 17mm 0;
+          }
+        }
+      `,
+    });
+    await page.evaluate(() => {
+      const win = globalThis as any;
+      if (typeof win.__govinsightComputePdfToc === 'function') {
+        win.__govinsightComputePdfToc();
+      }
+    });
     await page.evaluate(async () => {
       const win = globalThis as any;
       const doc = win.document as any;
@@ -231,22 +352,79 @@ router.get('/report-pdf', authMiddleware, async (req: AuthRequest, res: Response
       await new Promise((resolve) => win.setTimeout(resolve, 120));
       stabilizeCharts();
     });
+    await page.evaluate(() => {
+      const win = globalThis as any;
+      if (typeof win.__govinsightComputePdfToc === 'function') {
+        win.__govinsightComputePdfToc();
+      }
+    });
 
     const pageTitle = (await page.title()) || `${orgId}_${yearNum}_智能辅策报告`;
+    const escapedHeaderTitle = escapeHtml(pageTitle.replace(/_/g, ' '));
+    const tocChapters = await page.evaluate(() => {
+      const win = globalThis as any;
+      const doc = win.document as any;
+      return Array.from(doc.querySelectorAll('[data-chapter-id]'))
+        .map((node: any) => ({
+          id: String(node.getAttribute('data-chapter-id') || ''),
+          title: String(node.querySelector('.pdf-chapter-heading h2')?.textContent || '')
+            .replace(/\s+/g, ' ')
+            .trim(),
+        }))
+        .filter((chapter: TocChapter) => chapter.id && chapter.title);
+    });
 
-    const pdfBuffer = await page.pdf({
+    const headerTemplate = `
+      <div style="width:100%; padding:0 17mm; box-sizing:border-box; font-family:'Microsoft YaHei','SimHei',sans-serif; color:#b6beca; font-size:7.2pt;">
+        <div style="display:flex; justify-content:space-between; gap:8mm; padding-bottom:1.5mm; border-bottom:0.18pt solid #eef2f7;">
+          <span>${escapedHeaderTitle}</span>
+          <span>内部审阅材料</span>
+        </div>
+      </div>
+    `;
+    const footerTemplate = `
+      <div style="width:100%; padding:0 17mm; box-sizing:border-box; font-family:'Microsoft YaHei','SimHei',sans-serif; color:#b6beca; font-size:7.2pt;">
+        <div style="display:flex; justify-content:space-between; gap:8mm; padding-top:2.2mm; border-top:0.18pt solid #eef2f7;">
+          <span>供内部研判参考，不作为正式考核结论</span>
+          <span>第 <span class="pageNumber"></span> 页 / 共 <span class="totalPages"></span> 页</span>
+        </div>
+      </div>
+    `;
+
+    const pdfOptions: PDFOptions = {
       format: 'A4',
       landscape: false,
       printBackground: true,
       margin: {
-        top: '10mm',
-        bottom: '12mm',
-        left: '8mm',
-        right: '8mm',
+        top: '20mm',
+        bottom: '17mm',
+        left: '17mm',
+        right: '17mm',
       },
-      displayHeaderFooter: false,
-      preferCSSPageSize: true,
-    });
+      displayHeaderFooter: true,
+      headerTemplate,
+      footerTemplate,
+      preferCSSPageSize: false,
+    };
+
+    const draftPdfBuffer = await page.pdf(pdfOptions);
+    const draftPages = await extractPdfTextPages(draftPdfBuffer);
+    const resolvedTocPages = resolveTocPagesFromPdfText(draftPages, tocChapters);
+
+    if (Object.keys(resolvedTocPages).length > 0) {
+      await page.evaluate((tocPages: Record<string, number>) => {
+        const win = globalThis as any;
+        const doc = win.document as any;
+        Object.entries(tocPages).forEach(([chapterId, pageNumber]) => {
+          const pageNode = doc.querySelector(`[data-toc-page-for="${chapterId}"]`);
+          if (pageNode) {
+            pageNode.textContent = String(pageNumber);
+          }
+        });
+      }, resolvedTocPages);
+    }
+
+    const pdfBuffer = await page.pdf(pdfOptions);
 
     const fileName = encodeURIComponent(pageTitle) + '.pdf';
     res.setHeader(

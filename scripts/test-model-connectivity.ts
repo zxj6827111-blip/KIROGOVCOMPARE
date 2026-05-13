@@ -6,7 +6,7 @@ dotenv.config({ path: path.join(__dirname, '../.env') });
 
 async function runTest() {
   const apiKey = process.env.OPENAI_API_KEY;
-  const modelName = process.env.OPENAI_MODEL || process.env.LLM_MODEL || 'gpt-5.4';
+  const modelName = 'gpt-5.5';
   const baseUrl = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
 
   console.log('=========================================');

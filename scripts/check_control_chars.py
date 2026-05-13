@@ -25,7 +25,8 @@ def main():
     # Expanded exclude list for better compatibility
     exclude_dirs = {
         "node_modules", "dist", "data", ".git", "build", "out", "frontend",
-        ".next", ".venv", "venv", "__pycache__", ".pytest_cache", "coverage"
+        ".next", ".venv", "venv", "__pycache__", ".pytest_cache", "coverage",
+        "tmp", "backups"
     }
     exclude_files = {".DS_Store", "package-lock.json", "yarn.lock", "pnpm-lock.yaml"}
 
@@ -66,19 +67,19 @@ def main():
                 content = f.read()
                 if has_hidden_chars(content):
                     rel_path = filepath.relative_to(repo_root)
-                    print(f"❌ Found hidden control character in: {rel_path}")
+                    print(f"[ERROR] Found hidden control character in: {rel_path}")
                     found_any = True
         except Exception as e:
             # Silently skip files that can't be read
             pass
 
-    print(f"✅ Scanned {file_count} files")
+    print(f"[OK] Scanned {file_count} files")
     
     if found_any:
-        print("❌ Error: Hidden control characters detected", file=sys.stderr)
+        print("[ERROR] Hidden control characters detected", file=sys.stderr)
         sys.exit(1)
     else:
-        print("✅ No hidden control characters detected.")
+        print("[OK] No hidden control characters detected.")
         sys.exit(0)
 
 if __name__ == "__main__":

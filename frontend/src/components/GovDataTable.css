@@ -280,6 +280,11 @@ table.gov-data-table {
   border-bottom: 1px solid #f8d987;
 }
 
+.gov-table-card .table-diagnostic-title--reconciliation {
+  margin-top: 8px;
+  color: #92400e;
+}
+
 .gov-data-table .cell-suspicious-fragment {
   position: relative;
 }
@@ -290,6 +295,54 @@ table.gov-data-table {
 .gov-data-table .cell-focus-both {
   position: relative;
   z-index: 1;
+}
+
+.gov-data-table .cell-ocr-corrected {
+  position: relative;
+  background: #fff7ed !important;
+  color: #9a3412 !important;
+  box-shadow: inset 0 0 0 2px #fb923c;
+}
+
+.gov-data-table .cell-ocr-confirmed {
+  background: #f0fdf4 !important;
+  color: #166534 !important;
+  box-shadow: inset 0 0 0 1px #22c55e;
+}
+
+.ocr-correction-cell-content {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  line-height: 1.15;
+}
+
+.ocr-correction-value {
+  font-weight: 800;
+}
+
+.ocr-correction-original,
+.ocr-correction-badge {
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.ocr-correction-original {
+  color: #9a3412;
+}
+
+.ocr-correction-badge {
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.ocr-correction-badge--confirmed {
+  background: #dcfce7;
+  color: #166534;
 }
 
 @media (max-width: 768px) {

@@ -134,19 +134,7 @@ function parseProviderConfigs(value: string | undefined): ProviderConfig[] {
   if (entries.length === 0) {
     const primaryProvider = String(process.env.LLM_PARSE_PROVIDER || process.env.LLM_PROVIDER || 'stub').trim().toLowerCase();
     const primaryModel = String(process.env.LLM_PARSE_MODEL || process.env.LLM_MODEL || '').trim();
-    const fallbackProvider = String(
-      process.env.LLM_PARSE_FALLBACK_PROVIDER || process.env.LLM_FALLBACK_PROVIDER || primaryProvider
-    ).trim().toLowerCase();
-    const fallbackModel = String(
-      process.env.LLM_PARSE_FALLBACK_MODEL || process.env.LLM_FALLBACK_MODEL || primaryModel
-    ).trim();
-
-    return [
-      { provider: primaryProvider, model: primaryModel || undefined },
-      ...(fallbackProvider && fallbackModel && (fallbackProvider !== primaryProvider || fallbackModel !== primaryModel)
-        ? [{ provider: fallbackProvider, model: fallbackModel }]
-        : []),
-    ];
+    return [{ provider: primaryProvider, model: primaryModel || undefined }];
   }
 
   return entries.map((entry) => {

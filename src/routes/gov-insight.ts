@@ -8,7 +8,7 @@ import {
   loadTextFromStoragePath,
   normalizePlainText,
 } from '../utils/annualReportSummary';
-import { buildPrefixedModelValue, resolveFirstNonEmpty } from '../utils/aiEnv';
+import { resolveUnifiedLlmConfig } from '../utils/aiEnv';
 import { govInsightReportPayloadService } from '../services/GovInsightReportPayloadService';
 import {
   buildGovInsightNarrativeResponseSchema,
@@ -28,41 +28,10 @@ import { govInsightLeaderCockpitService } from '../services/GovInsightLeaderCock
 const router = express.Router();
 
 function resolveGovInsightReportModel(): string {
-  const provider = String(
-    process.env.GOV_INSIGHT_REPORT_PROVIDER ||
-    process.env.LLM_REPORT_PROVIDER ||
-    process.env.LLM_PROVIDER
-  )
-    .trim()
-    .toLowerCase();
-
-  const model = resolveFirstNonEmpty(
-    process.env.GOV_INSIGHT_REPORT_MODEL,
-    process.env.LLM_REPORT_MODEL,
-    process.env.OPENAI_MODEL,
-    process.env.LLM_MODEL
-  );
-
-  return buildPrefixedModelValue(provider, model);
-}
-
-function resolveGovInsightReportFallbackModel(currentModel: string): string {
-  const provider = String(
-    process.env.GOV_INSIGHT_REPORT_FALLBACK_PROVIDER ||
-    process.env.LLM_REPORT_FALLBACK_PROVIDER ||
-    process.env.LLM_FALLBACK_PROVIDER ||
-    ''
-  )
-    .trim()
-    .toLowerCase();
-
-  const model = resolveFirstNonEmpty(
-    process.env.GOV_INSIGHT_REPORT_FALLBACK_MODEL,
-    process.env.LLM_REPORT_FALLBACK_MODEL,
-    process.env.LLM_FALLBACK_MODEL
-  );
-  const fallbackModel = buildPrefixedModelValue(provider, model);
-  return fallbackModel && fallbackModel !== currentModel ? fallbackModel : '';
+  return resolveUnifiedLlmConfig({
+    providerEnvKeys: ['GOV_INSIGHT_REPORT_PROVIDER', 'LLM_REPORT_PROVIDER', 'LLM_PROVIDER'],
+    modelEnvKeys: ['GOV_INSIGHT_REPORT_MODEL', 'LLM_REPORT_MODEL', 'OPENAI_MODEL', 'LLM_MODEL'],
+  }).modelValue;
 }
 
 function toFiniteNumber(value: string | undefined, fallback: number): number {
@@ -77,8 +46,8 @@ function resolveGovInsightRequestConfig(rawConfig: unknown): Record<string, unkn
     responseMimeType: (process.env.GOV_INSIGHT_REPORT_RESPONSE_MIME_TYPE || 'application/json').trim(),
     maxOutputTokens: toFiniteNumber(process.env.GOV_INSIGHT_REPORT_MAX_OUTPUT_TOKENS, 4096),
     timeoutMs: toFiniteNumber(process.env.GOV_INSIGHT_REPORT_TIMEOUT_MS, 600000),
-    apiMode: (process.env.GOV_INSIGHT_REPORT_OPENAI_API_MODE || 'chat_completions').trim().toLowerCase(),
-    reasoningEffort: (process.env.GOV_INSIGHT_REPORT_OPENAI_REASONING_EFFORT || 'low').trim().toLowerCase(),
+    apiMode: (process.env.GOV_INSIGHT_REPORT_OPENAI_API_MODE || process.env.OPENAI_API_MODE || 'responses').trim().toLowerCase(),
+    reasoningEffort: (process.env.GOV_INSIGHT_REPORT_OPENAI_REASONING_EFFORT || process.env.OPENAI_REASONING_EFFORT || 'xhigh').trim().toLowerCase(),
     responseSchema: buildGovInsightNarrativeResponseSchema(),
     responseSchemaName: 'govinsight_formal_report_v2',
     responseSchemaDescription: 'Structured formal GovInsight decision report JSON.',
@@ -869,7 +838,6 @@ router.post('/ai-report/jobs', optionalAuthMiddleware, async (req: AuthRequest, 
       org_name,
       year,
       prompt,
-      model,
       systemInstruction,
       config,
       use_backend_payload,
@@ -877,8 +845,8 @@ router.post('/ai-report/jobs', optionalAuthMiddleware, async (req: AuthRequest, 
 
     const regionId = parseRegionId(org_id);
     const yearNum = Number(year);
-    const resolvedModel = String(model || resolveGovInsightReportModel()).trim();
-    const resolvedMaxRetries = resolveGovInsightReportFallbackModel(resolvedModel) ? 1 : 0;
+    const resolvedModel = resolveGovInsightReportModel();
+    const resolvedMaxRetries = 0;
     const resolvedConfig = resolveGovInsightRequestConfig(config);
     const useBackendPayload = use_backend_payload !== false;
 
@@ -1155,8 +1123,8 @@ router.get('/ai-report/payload', authMiddleware, async (req: AuthRequest, res) =
  */
 router.post('/ai-report/save', authMiddleware, async (req: AuthRequest, res) => {
   try {
-    const { org_id, org_name, year, content, model } = req.body;
-    const resolvedModel = String(model || resolveGovInsightReportModel()).trim();
+    const { org_id, org_name, year, content } = req.body;
+    const resolvedModel = resolveGovInsightReportModel();
 
     // Validate inputs
     if (!org_id || !year || !content) {

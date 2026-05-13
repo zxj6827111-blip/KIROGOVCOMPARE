@@ -7,6 +7,7 @@ import { ingestionBatchService } from './data-center/IngestionBatchService';
 import { govInsightStatsService } from './GovInsightStatsService';
 import { stabilizeParsedOutput } from './ParsedOutputStabilityService';
 import { parseConsensusService } from './ParseConsensusService';
+import { visionReviewService } from './VisionReviewService';
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
@@ -15,7 +16,7 @@ import { calculateReportMetrics } from '../utils/reportAnalysis';
 import { hasParsedContent } from '../utils/parsedContent';
 import { PROJECT_ROOT } from '../config/constants';
 import { normalizeAnnualReportOutputFromSource } from './SegmentedAnnualReportParse';
-import { resolveParseFallbackConfig, resolveParsePrimaryConfig } from '../utils/llmProviderConfig';
+import { resolveParsePrimaryConfig } from '../utils/llmProviderConfig';
 import { buildParseConfigSnapshot, parseRunService } from './ParseRunService';
 import { buildSourceGateConfig, sourceGateService } from './SourceGateService';
 
@@ -49,9 +50,9 @@ const POST_JOB_COOLDOWN_MS = Number(process.env.LLM_POST_JOB_COOLDOWN_MS || 1000
 const COMPARE_CONCURRENCY = 5; // compare task concurrency
 
 const WORKER_MODE = (process.env.LLM_WORKER_MODE || 'all').toLowerCase().trim();
-const PARSE_CONSENSUS_ENABLED = toBooleanEnv(process.env.LLM_PARSE_CONSENSUS_ENABLED, true);
+const PARSE_CONSENSUS_ENABLED = toBooleanEnv(process.env.LLM_PARSE_CONSENSUS_ENABLED, false);
 const PARSE_RULE_GATE_ENABLED = toBooleanEnv(process.env.LLM_PARSE_RULE_GATE_ENABLED, false);
-const PARSE_CONSENSUS_ALLOW_SAME_MODEL = toBooleanEnv(process.env.LLM_PARSE_CONSENSUS_ALLOW_SAME_MODEL, false);
+const PARSE_CONSENSUS_ALLOW_SAME_MODEL = toBooleanEnv(process.env.LLM_PARSE_CONSENSUS_ALLOW_SAME_MODEL, true);
 const PARSE_STABILIZE_MODE = (process.env.LLM_PARSE_STABILIZE_MODE || 'none').toLowerCase().trim();
 const SOURCE_GATE_ENABLED = toBooleanEnv(process.env.SOURCE_GATE_ENABLED, false);
 const AUTO_PUBLISH_CLEAN_UPLOADS = toBooleanEnv(process.env.AUTO_PUBLISH_CLEAN_UPLOADS, true);
@@ -62,6 +63,7 @@ function getFailureStep(jobKind: string): { code: string; name: string; progress
       return { code: STEPS.PARSING.code, name: 'AI 解析失败', progress: STEPS.PARSING.progress };
     case 'materialize':
     case 'checks':
+    case 'vision_review':
       return { code: STEPS.POSTPROCESS.code, name: '结果校验与入库失败', progress: STEPS.POSTPROCESS.progress };
     default:
       return { code: STEPS.QUEUED.code, name: '处理失败', progress: 100 };
@@ -91,15 +93,15 @@ const PARSE_STABILIZE_OPTIONS = resolveStabilizeOptions(PARSE_STABILIZE_MODE);
 
 function resolveAllowedKinds(mode: string): Set<string> {
   if (!mode || mode === 'all') {
-    return new Set(['parse', 'materialize', 'checks', 'compare']);
+    return new Set(['parse', 'materialize', 'checks', 'vision_review', 'compare']);
   }
   if (mode.includes(',')) {
     return new Set(mode.split(',').map((k) => k.trim()).filter(Boolean));
   }
   if (mode === 'materialize' || mode === 'materialize-checks' || mode === 'checks-materialize') {
-    return new Set(['materialize', 'checks']);
+    return new Set(['materialize', 'checks', 'vision_review']);
   }
-  if (mode === 'parse' || mode === 'checks' || mode === 'compare') {
+  if (mode === 'parse' || mode === 'checks' || mode === 'vision_review' || mode === 'compare') {
     return new Set([mode]);
   }
   // Fallback: treat as single kind
@@ -113,8 +115,6 @@ const NON_COMPARE_ALLOWED_KIND_LIST = ALLOWED_KIND_LIST.filter((kind) => kind !=
 export class LlmJobRunner {
   private running = false;
   private processing = false;
-  private primaryProvider: LlmProvider | null = null;
-  private fallbackProvider: LlmProvider | null = null;
   private parsedJsonColumnExists: boolean | null = null;
   private rawTextColumnExists: boolean | null = null;
   private currentAbortController: AbortController | null = null;
@@ -155,6 +155,8 @@ export class LlmJobRunner {
         await this.processMaterializeJob(job);
       } else if (job.kind === 'checks') {
         await this.processChecksJob(job);
+      } else if (job.kind === 'vision_review') {
+        await this.processVisionReviewJob(job);
       } else {
         await this.processParseJob(job);
       }
@@ -201,6 +203,9 @@ export class LlmJobRunner {
       'MATERIALIZE_EMPTY_FACTS',
       'PARSED_JSON_EMPTY',
       'PARSE_NOT_READY',
+      'vision_channel_unavailable',
+      'vision_provider_unsupported',
+      'source_capture_failed',
     ]);
 
     // Check for Cancellation
@@ -238,52 +243,31 @@ export class LlmJobRunner {
 
     console.error(`[Job ${job.id}] Attempt ${attempt} failed:`, error);
 
-    // Check if we can retry
-    if (job.retry_count < job.max_retries) {
-      // Retry: increment retry_count, reset to queued
-      console.log(`[Job ${job.id}] Retrying with attempt ${attempt + 1} (fallback model)...`);
+    const previousErrorRes = await pool.query(
+      `SELECT error_message FROM jobs WHERE id = $1 LIMIT 1`,
+      [job.id]
+    );
+    const previousErrorMessage = String(previousErrorRes.rows[0]?.error_message || '').trim();
+    const finalMessage = previousErrorMessage
+      ? `${previousErrorMessage}\nAttempt ${attempt} failed: ${message}`
+      : `Attempt ${attempt} failed: ${message}`;
 
-      const errorMsg = `Attempt ${attempt} failed: ${message}`;
-      await pool.query(`
-        UPDATE jobs 
-        SET status = 'queued',
-            retry_count = retry_count + 1,
-            attempt = retry_count + 2,
-            progress = $1,
-            step_code = $2,
-            step_name = $3,
-            error_code = $4,
-            error_message = $5
-        WHERE id = $6`,
-        [STEPS.QUEUED.progress, STEPS.QUEUED.code, STEPS.QUEUED.name, code, errorMsg, job.id]);
-    } else {
-      // Final failure: mark as failed
-      const previousErrorRes = await pool.query(
-        `SELECT error_message FROM jobs WHERE id = $1 LIMIT 1`,
-        [job.id]
-      );
-      const previousErrorMessage = String(previousErrorRes.rows[0]?.error_message || '').trim();
-      const firstAttemptMessage = previousErrorMessage || `Attempt ${Math.max(1, attempt - 1)} failed: ${code}`;
-      const finalMessage = `Fallback retry also failed.\n${firstAttemptMessage}\nAttempt ${attempt} failed: ${message}`;
+    await pool.query(`
+      UPDATE jobs
+      SET status = 'failed',
+          error_code = $1,
+          error_message = $2,
+          finished_at = NOW(),
+          progress = $3,
+          step_code = $4,
+          step_name = $5
+      WHERE id = $6`,
+      [code, finalMessage, failureStep.progress, failureStep.code, failureStep.name, job.id]);
 
-      await pool.query(`
-        UPDATE jobs 
-        SET status = 'failed',
-            error_code = $1,
-            error_message = $2,
-            finished_at = NOW(),
-            progress = $3,
-            step_code = $4,
-            step_name = $5
-        WHERE id = $6`,
-        [code, finalMessage, failureStep.progress, failureStep.code, failureStep.name, job.id]);
+    console.error(`[Job ${job.id}] Final failure after ${attempt} attempt(s)`);
 
-      console.error(`[Job ${job.id}] Final failure after ${attempt} attempts`);
-
-      // Generate notification for final failure
-      if (job.version_id) {
-        await this.generateNotificationIfNeeded(job.version_id);
-      }
+    if (job.version_id) {
+      await this.generateNotificationIfNeeded(job.version_id);
     }
   }
 
@@ -295,7 +279,6 @@ export class LlmJobRunner {
     this.currentAbortController = new AbortController();
     const signal = this.currentAbortController.signal;
 
-    // Determine which provider to use based on retry count
     const attempt = job.retry_count + 1;
     let provider: LlmProvider;
     let selectedProviderName: string | undefined;
@@ -307,69 +290,11 @@ export class LlmJobRunner {
     let draftConsensusResult: any = null;
     let draftSourceSnapshots: any[] = [];
 
-    if (attempt === 1) {
-      // CRITICAL FIX: Prioritize provider/model from the JOBS table (user's actual selection)
-      // Only fallback to report_versions if jobs.provider/model are NULL
-      const result = await pool.query('SELECT provider, model FROM jobs WHERE id = $1 LIMIT 1', [job.id]);
-      const jobConfig: { provider?: string; model?: string } | undefined = result.rows[0];
-
-      let pName = jobConfig?.provider;
-      let mName = jobConfig?.model;
-
-      // If job doesn't have provider/model, fallback to version config
-      if (!pName && !mName) {
-        const result = await pool.query('SELECT provider, model FROM report_versions WHERE id = $1 LIMIT 1', [job.version_id]);
-        const versionConfig: { provider?: string; model?: string } | undefined = result.rows[0];
-
-        // If provider is 'upload' (legacy/default) or 'pending', ignore it and use env default.
-        pName =
-          versionConfig?.provider && versionConfig.provider !== 'upload' && versionConfig.provider !== 'pending'
-            ? versionConfig.provider
-            : undefined;
-
-        mName =
-          versionConfig?.model && versionConfig.model !== 'pending'
-            ? versionConfig.model
-            : undefined;
-      }
-
-      if (!pName && !mName) {
-        const parsePrimary = resolveParsePrimaryConfig();
-        pName = parsePrimary.provider;
-        mName = parsePrimary.model;
-      }
-
-      selectedProviderName = pName;
-      selectedModelName = mName;
-
-      if (pName || mName) {
-        console.log(`[Job ${job.id}] Using config: Provider=${pName}, Model=${mName}`);
-      }
-
-      // Create a fresh provider instance for this job if customized, or default
-      provider = createLlmProvider(pName, mName);
-    } else if (attempt === 2) {
-      // Retry Strategy: parse fallback is independent from report-generation fallback
-      const fallbackConfig = resolveParseFallbackConfig();
-      for (const skipped of fallbackConfig.skipped) {
-        console.warn(
-          `[Job ${job.id}] Skipping ${skipped.source} fallback provider '${skipped.provider}' (model='${skipped.model}'): ${skipped.reason}`
-        );
-      }
-      console.log(
-        `[Job ${job.id}] Retry Attempt 2: Switching to ${fallbackConfig.source} fallback '${fallbackConfig.provider}' / '${fallbackConfig.model}'`
-      );
-      const { provider: fallbackProvider, model: fallbackModel } = fallbackConfig;
-      selectedProviderName = fallbackProvider;
-      selectedModelName = fallbackModel;
-      provider = createLlmProvider(fallbackProvider, fallbackModel);
-    } else {
-      // Fallback for subsequent retries (if any)
-      const parsePrimary = resolveParsePrimaryConfig();
-      selectedProviderName = parsePrimary.provider;
-      selectedModelName = parsePrimary.model;
-      provider = this.getProvider(attempt);
-    }
+    const parsePrimary = resolveParsePrimaryConfig();
+    selectedProviderName = parsePrimary.provider;
+    selectedModelName = parsePrimary.model;
+    provider = createLlmProvider(parsePrimary.provider, parsePrimary.model);
+    console.log(`[Job ${job.id}] Using config: Provider=${parsePrimary.provider}, Model=${parsePrimary.model}`);
 
     console.log(`[Job ${job.id}] Processing parse job (attempt ${attempt})...`);
 
@@ -440,7 +365,7 @@ export class LlmJobRunner {
 
         if (sameModel && !PARSE_CONSENSUS_ALLOW_SAME_MODEL) {
           throw new LlmProviderError(
-            'Consensus verifier model equals primary model. Set LLM_PARSE_CONSENSUS_PROVIDER/LLM_PARSE_CONSENSUS_MODEL (or fallback model) to a different model.',
+            'Consensus verifier model equals primary model. Disable LLM_PARSE_CONSENSUS_ENABLED or set LLM_PARSE_CONSENSUS_ALLOW_SAME_MODEL=true.',
             'PARSE_CONSENSUS_CONFIG_INVALID'
           );
         }
@@ -778,7 +703,7 @@ export class LlmJobRunner {
       version_id: null,
       comparison_id: row.comparison_id,
       retry_count: 0,
-      max_retries: 1,
+      max_retries: 0,
     }));
   }
 
@@ -794,7 +719,7 @@ export class LlmJobRunner {
         FROM jobs
         WHERE status = 'queued' AND kind != 'pdf_export'
           AND kind = ANY($4::text[])
-        ORDER BY (CASE kind WHEN 'materialize' THEN 0 WHEN 'checks' THEN 1 WHEN 'parse' THEN 2 WHEN 'compare' THEN 3 ELSE 9 END) ASC, created_at ASC
+        ORDER BY (CASE kind WHEN 'materialize' THEN 0 WHEN 'checks' THEN 1 WHEN 'vision_review' THEN 2 WHEN 'parse' THEN 3 WHEN 'compare' THEN 4 ELSE 9 END) ASC, created_at ASC
         LIMIT 1
         FOR UPDATE SKIP LOCKED
       )
@@ -846,7 +771,7 @@ export class LlmJobRunner {
       storage_path: storagePath,
       file_hash: fileHash,
       comparison_id: jobRow.comparison_id ?? null,
-      max_retries: 1, // FORCE FIX: Ensure max_retries is always 1
+      max_retries: Number(jobRow.max_retries ?? 0),
     } as QueuedJob;
   }
 
@@ -951,7 +876,7 @@ export class LlmJobRunner {
 
       await pool.query(
         `INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, max_retries, ingestion_batch_id)
-           VALUES ($1, $2, 'checks', 'queued', 60, $3, $4, 1, $5)`,
+           VALUES ($1, $2, 'checks', 'queued', 60, $3, $4, 0, $5)`,
         [job.report_id, job.version_id, STEPS.POSTPROCESS.code, '等待校验', ingestionBatchId]
       );
     }
@@ -973,12 +898,29 @@ export class LlmJobRunner {
     }
 
     // Run consistency checks
+    let consistencyItems: any[] = [];
     try {
       const { runId, items } = await consistencyCheckService.runAndPersist(job.version_id, currentResult.parsedJson);
+      consistencyItems = items;
       console.log(`[Job ${job.id}] Consistency checks completed: runId=${runId}, items=${items.length}`);
     } catch (error) {
       console.error(`[Job ${job.id}] Consistency check failed:`, error);
       throw error;
+    }
+
+    if (job.report_id) {
+      try {
+        const queuedCount = await visionReviewService.enqueueForConsistencyItems(
+          job.report_id,
+          job.version_id,
+          consistencyItems
+        );
+        if (queuedCount > 0) {
+          console.log(`[Job ${job.id}] Queued ${queuedCount} table visual review item(s).`);
+        }
+      } catch (error) {
+        console.warn(`[Job ${job.id}] Failed to enqueue visual review:`, error);
+      }
     }
 
     // Check if we need to generate notification (after all jobs complete)
@@ -1012,6 +954,27 @@ export class LlmJobRunner {
             error_code = NULL,
             error_message = NULL,
             finished_at = NOW() 
+        WHERE id = $4`,
+      [STEPS.DONE.progress, STEPS.DONE.code, STEPS.DONE.name, job.id]);
+  }
+
+  private async processVisionReviewJob(job: QueuedJob): Promise<void> {
+    if (!job.version_id) {
+      throw new Error('Vision review job missing version_id');
+    }
+
+    const results = await visionReviewService.processQueuedReviewsForVersion(job.version_id);
+    console.log(`[Job ${job.id}] Vision review completed: items=${results.length}`);
+
+    await pool.query(`
+        UPDATE jobs
+        SET status = 'succeeded',
+            progress = $1,
+            step_code = $2,
+            step_name = $3,
+            error_code = NULL,
+            error_message = NULL,
+            finished_at = NOW()
         WHERE id = $4`,
       [STEPS.DONE.progress, STEPS.DONE.code, STEPS.DONE.name, job.id]);
   }
@@ -1147,19 +1110,8 @@ export class LlmJobRunner {
   }
 
   private resolveConsensusVerifierConfig(primaryProvider: string, primaryModel: string): { provider: string; model: string } {
-    const provider = (
-      process.env.LLM_PARSE_CONSENSUS_PROVIDER ||
-      process.env.LLM_PARSE_FALLBACK_PROVIDER ||
-      process.env.LLM_FALLBACK_PROVIDER ||
-      primaryProvider
-    ).trim().toLowerCase();
-
-    const model = (
-      process.env.LLM_PARSE_CONSENSUS_MODEL ||
-      process.env.LLM_PARSE_FALLBACK_MODEL ||
-      process.env.LLM_FALLBACK_MODEL ||
-      primaryModel
-    ).trim();
+    const provider = (process.env.LLM_PARSE_CONSENSUS_PROVIDER || primaryProvider).trim().toLowerCase();
+    const model = (process.env.LLM_PARSE_CONSENSUS_MODEL || primaryModel).trim();
 
     if (!provider) {
       throw new LlmProviderError('LLM parse consensus verifier provider is empty', 'PARSE_CONSENSUS_CONFIG_INVALID');
@@ -1177,14 +1129,6 @@ export class LlmJobRunner {
       return result.output;
     }
     return JSON.stringify(result.output, null, 2);
-  }
-
-  private getProvider(attempt: number): LlmProvider {
-    if (!this.primaryProvider) {
-      const parsePrimary = resolveParsePrimaryConfig();
-      this.primaryProvider = createLlmProvider(parsePrimary.provider, parsePrimary.model);
-    }
-    return this.primaryProvider;
   }
 
   private normalizeError(error: any): { code: string; message: string } {
@@ -1234,6 +1178,13 @@ export class LlmJobRunner {
 
     // If materialize job exists but not succeeded, wait.
     if (matJobRes.rows.length > 0 && matJobRes.rows[0].status !== 'succeeded') {
+      return;
+    }
+    const visionJobRes = await pool.query(
+      `SELECT status FROM jobs WHERE version_id = $1 AND kind = 'vision_review' ORDER BY created_at DESC LIMIT 1`,
+      [versionId]
+    );
+    if (visionJobRes.rows.length > 0 && !['succeeded', 'failed', 'cancelled'].includes(String(visionJobRes.rows[0].status))) {
       return;
     }
     // If no materialize job (e.g. legacy), we might proceed, but typically we want it.

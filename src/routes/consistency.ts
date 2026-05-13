@@ -2,6 +2,8 @@ import express from 'express';
 import pool from '../config/database-llm';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { consistencyCheckService } from '../services/ConsistencyCheckService';
+import { visionReviewService } from '../services/VisionReviewService';
+import { ocrCorrectionService } from '../services/OcrCorrectionService';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 
 const router = express.Router();
@@ -344,12 +346,125 @@ router.post('/reports/:id/checks/run', async (req: AuthRequest, res) => {
     }
 
     const result = await consistencyCheckService.runAndPersist(versionId, parsed);
+    let visualReviewQueued = 0;
+    try {
+      visualReviewQueued = await visionReviewService.enqueueForConsistencyItems(reportId, versionId, result.items);
+    } catch (visionError) {
+      console.warn('[Consistency] Failed to enqueue visual review:', visionError);
+    }
 
-    res.json({ success: true, version_id: versionId, runId: result.runId, count: result.items.length });
+    res.json({ success: true, version_id: versionId, runId: result.runId, count: result.items.length, visual_review_queued: visualReviewQueued });
 
   } catch (err: any) {
     console.error('Error running checks:', err);
     res.status(500).json({ error: 'Failed to run checks: ' + err.message });
+  }
+});
+
+/**
+ * GET /reports/:id/vision-review - Get table visual review results
+ */
+router.get('/reports/:id/vision-review', async (req: AuthRequest, res) => {
+  const reportId = Number(req.params.id);
+  try {
+    const access = await checkReportAccess(reportId, req.user);
+    if (!access.ok) {
+      res.status(access.status).json({ error: access.error });
+      return;
+    }
+
+    const versionId = await resolveReportVersionId(reportId, req.query.version_id);
+    if (!versionId) {
+      res.json({ data: { version_id: null, reviews: [] } });
+      return;
+    }
+
+    const [reviews, corrections] = await Promise.all([
+      visionReviewService.listReviews(reportId, versionId),
+      visionReviewService.listCorrections(reportId, versionId),
+    ]);
+    res.json({ data: { version_id: versionId, reviews, corrections } });
+  } catch (err: any) {
+    console.error('Error fetching visual reviews:', err);
+    res.status(500).json({ error: 'Failed to fetch visual reviews: ' + err.message });
+  }
+});
+
+/**
+ * POST /reports/:id/vision-review/run - Manually run visual review
+ */
+router.post('/reports/:id/vision-review/run', async (req: AuthRequest, res) => {
+  const reportId = Number(req.params.id);
+  try {
+    const access = await checkReportAccess(reportId, req.user);
+    if (!access.ok) {
+      res.status(access.status).json({ error: access.error });
+      return;
+    }
+
+    const versionId = await resolveReportVersionId(reportId, req.body?.version_id ?? req.query.version_id);
+    if (!versionId) {
+      res.status(404).json({ error: 'Report or target version not found' });
+      return;
+    }
+
+    const tableIds = visionReviewService.normalizeTableIds(req.body?.table_ids ?? req.query.table_ids);
+    const results = await visionReviewService.runNow(reportId, versionId, tableIds, true);
+    res.json({ success: true, version_id: versionId, table_ids: tableIds, results });
+  } catch (err: any) {
+    console.error('Error running visual review:', err);
+    res.status(500).json({ error: 'Failed to run visual review: ' + err.message });
+  }
+});
+
+/**
+ * POST /reports/:id/vision-review/corrections/resolve - Confirm or reject pending OCR corrections
+ */
+router.post('/reports/:id/vision-review/corrections/resolve', async (req: AuthRequest, res) => {
+  const reportId = Number(req.params.id);
+  try {
+    const access = await checkReportAccess(reportId, req.user);
+    if (!access.ok) {
+      res.status(access.status).json({ error: access.error });
+      return;
+    }
+
+    const versionId = await resolveReportVersionId(reportId, req.body?.version_id ?? req.query.version_id);
+    if (!versionId) {
+      res.status(404).json({ error: 'Report or target version not found' });
+      return;
+    }
+
+    const action = String(req.body?.action || '').trim().toLowerCase();
+    if (action !== 'confirm' && action !== 'reject') {
+      res.status(400).json({ error: 'action must be confirm or reject' });
+      return;
+    }
+
+    const rawIds = Array.isArray(req.body?.correction_ids)
+      ? req.body.correction_ids
+      : req.body?.correction_id
+        ? [req.body.correction_id]
+        : [];
+    const correctionIds = rawIds
+      .map((item: unknown) => Number(item))
+      .filter((item: number) => Number.isInteger(item) && item > 0);
+    if (!correctionIds.length) {
+      res.status(400).json({ error: 'correction_ids is required' });
+      return;
+    }
+
+    const result = await ocrCorrectionService.resolveCorrections(
+      reportId,
+      versionId,
+      correctionIds,
+      action,
+      req.user?.id ?? null
+    );
+    res.json({ success: true, version_id: versionId, action, ...result });
+  } catch (err: any) {
+    console.error('Error resolving OCR corrections:', err);
+    res.status(500).json({ error: 'Failed to resolve OCR corrections: ' + err.message });
   }
 });
 

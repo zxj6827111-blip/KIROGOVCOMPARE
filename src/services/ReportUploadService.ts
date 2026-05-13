@@ -7,6 +7,7 @@ import pool from '../config/database-llm';
 import { uuidv5, validateUuid } from '../utils/uuid';
 import { checkStoragePathExists } from './SourceFileGuardService';
 import { hasParsedContent } from '../utils/parsedContent';
+import { resolveUnifiedLlmConfig } from '../utils/aiEnv';
 
 const NAMESPACE_uuid = '6ba7b810-9dad-11d1-80b4-00c04fd430c8'; // Standard namespace
 
@@ -50,98 +51,12 @@ function ensureStorageDir(dir: string = storageDir): void {
 }
 
 function resolveProviderAndModel(modelInput?: string): { provider: string; model: string } {
-  // Parse defaults should be independent from report-generation defaults.
-  const defaultProvider = process.env.LLM_PARSE_PROVIDER || process.env.LLM_PROVIDER || 'stub';
-  const defaultModel = process.env.LLM_PARSE_MODEL || process.env.LLM_MODEL || 'default';
-
-  if (!modelInput) {
-    return { provider: defaultProvider, model: defaultModel };
-  }
-
-  const input = modelInput.toLowerCase().trim();
-
-  // 0. Explicit Nvidia prefix
-  if (input.startsWith('nvidia/')) {
-    return { provider: 'nvidia', model: input.replace('nvidia/', '') };
-  }
-
-  // 0. Explicit OpenAI prefix
-  if (input.startsWith('openai/')) {
-    return { provider: 'openai', model: input.replace('openai/', '') };
-  }
-
-  // 1. Explicit ModelScope prefix (Priority)
-  if (input.startsWith('modelscope/')) {
-    return { provider: 'modelscope', model: input.replace('modelscope/', '') };
-  }
-
-  // 1.1 Explicit MiMo prefix
-  if (input.startsWith('mimo/')) {
-    return { provider: 'mimo', model: input.replace('mimo/', '') };
-  }
-
-  // 1. Explicit Gemini prefix
-  if (input.startsWith('gemini/')) {
-    return { provider: 'gemini', model: input.replace('gemini/', '') };
-  }
-
-  // 2. Explicit Zhipu Official prefix (智谱官方 API)
-  if (input.startsWith('zhipu/')) {
-    return { provider: 'zhipu', model: input.replace('zhipu/', '') };
-  }
-
-  // 2.1 GLM-5 / GLM5 -> prefer Zhipu official API
-  if (input.includes('glm-5') || input.includes('glm5')) {
-    return { provider: 'zhipu', model: modelInput };
-  }
-
-  // 3. Qwen / DeepSeek / Kimi -> ModelScope
-  if (
-    input.includes('qwen') ||
-    input.includes('deepseek') ||
-    input.includes('kimi') ||
-    input.includes('moonshot')
-  ) {
-    // If it's explicitly DeepSeek but not nvidia prefix, it might be modelscope or fallback.
-    // Given user wants DeepSeek V3.2 via Nvidia, UploadReport sends 'nvidia/deepseek...', so it hits case 0.
-    // If just 'deepseek', keep as modelscope for legacy? Or switch to nvidia?
-    // Let's keep it modelscope for now as per original code logic, unless nvidia specific.
-    return { provider: 'modelscope', model: modelInput };
-  }
-
-  // 4. Legacy GLM models without zhipu/ prefix:
-  // prefer parse default provider when it is already set to zhipu,
-  // otherwise keep historical ModelScope fallback behavior.
-  if (input.includes('glm')) {
-    if (defaultProvider === 'zhipu') {
-      return { provider: 'zhipu', model: modelInput };
-    }
-    return { provider: 'modelscope', model: modelInput };
-  }
-
-  // 5. GPT family -> OpenAI
-  if (input.startsWith('gpt-') || input.includes('gpt-5')) {
-    return { provider: 'openai', model: modelInput };
-  }
-
-  // 5. Fallback to default provider
-  if ((process.env.LLM_PARSE_PROVIDER || process.env.LLM_PROVIDER) === 'openai') {
-    return { provider: 'openai', model: modelInput };
-  }
-
-  if ((process.env.LLM_PARSE_PROVIDER || process.env.LLM_PROVIDER) === 'modelscope') {
-    return { provider: 'modelscope', model: modelInput };
-  }
-
-  if ((process.env.LLM_PARSE_PROVIDER || process.env.LLM_PROVIDER) === 'zhipu') {
-    return { provider: 'zhipu', model: modelInput };
-  }
-
-  if ((process.env.LLM_PARSE_PROVIDER || process.env.LLM_PROVIDER) === 'mimo') {
-    return { provider: 'mimo', model: modelInput };
-  }
-
-  return { provider: defaultProvider, model: modelInput };
+  const config = resolveUnifiedLlmConfig({
+    model: modelInput,
+    providerEnvKeys: ['LLM_PARSE_PROVIDER', 'LLM_PROVIDER'],
+    modelEnvKeys: ['LLM_PARSE_MODEL', 'OPENAI_MODEL', 'LLM_MODEL'],
+  });
+  return { provider: config.provider, model: config.model };
 }
 
 async function resolveIngestionBatchId(batchUuid?: string, createdBy?: number | null): Promise<number | null> {
@@ -261,8 +176,8 @@ async function ensureParseJob(
   }
 
   const newJobResult = await pool.query(
-    `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model, ingestion_batch_id)
-     VALUES ($1, $2, 'parse', 'queued', 0, $3, $4, $5)
+    `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model, max_retries, ingestion_batch_id)
+     VALUES ($1, $2, 'parse', 'queued', 0, $3, $4, 0, $5)
      RETURNING id`,
     [reportId, versionId, provider, model, ingestionBatchId]
   );

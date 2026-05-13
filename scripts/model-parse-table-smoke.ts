@@ -8,7 +8,7 @@ import { calculateFileHash } from '../src/utils/fileHash';
 
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
-type ProviderName = 'openai' | 'mimo';
+type ProviderName = 'openai';
 type SampleFormat = 'html' | 'txt' | 'pdf';
 
 interface ModelTarget {
@@ -175,25 +175,14 @@ function assertEnv(name: string): string {
 }
 
 function buildModelTargets(): ModelTarget[] {
-  const openaiModel = process.env.LLM_PARSE_MODEL || process.env.LLM_MODEL || process.env.OPENAI_MODEL || '';
-  const mimoModel = process.env.MIMO_MODEL || process.env.LLM_PARSE_FALLBACK_MODEL || process.env.LLM_FALLBACK_MODEL || '';
-
   assertEnv('OPENAI_API_KEY');
   assertEnv('OPENAI_BASE_URL');
-  assertEnv('MIMO_API_KEY');
-  assertEnv('MIMO_BASE_URL');
 
-  if (!openaiModel) throw new Error('LLM_PARSE_MODEL, LLM_MODEL, or OPENAI_MODEL is not configured');
-  if (!mimoModel) throw new Error('MIMO_MODEL, LLM_PARSE_FALLBACK_MODEL, or LLM_FALLBACK_MODEL is not configured');
-
-  return [
-    { label: 'GPT-5.5', provider: 'openai', model: openaiModel },
-    { label: 'MiMo-V2.5-Pro', provider: 'mimo', model: mimoModel },
-  ];
+  return [{ label: 'GPT-5.5', provider: 'openai', model: 'gpt-5.5' }];
 }
 
 function providerBaseUrl(provider: ProviderName): string {
-  return provider === 'mimo' ? process.env.MIMO_BASE_URL || '' : process.env.OPENAI_BASE_URL || '';
+  return process.env.OPENAI_BASE_URL || '';
 }
 
 function relativeStoragePath(storagePath: string): string {
@@ -575,7 +564,7 @@ async function main(): Promise<void> {
   const skipConnectivity = hasFlag('skip-connectivity');
   const autoSamplesPerFormat = intArg('auto-samples', 0);
   const seed = intArg('seed', 20260507);
-  const providerFilter = csvSet<ProviderName>('providers', ['openai', 'mimo']);
+  const providerFilter = csvSet<ProviderName>('providers', ['openai']);
   const formatFilter = csvSet<SampleFormat>('formats', ['html', 'txt', 'pdf']);
   const models = buildModelTargets().filter((model) => providerFilter.has(model.provider));
   const samples =

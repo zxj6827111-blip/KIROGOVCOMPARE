@@ -5,22 +5,43 @@ import './GovDataTable.css';
 
 const cx = (...classes) => classes.filter(Boolean).join(' ');
 
+const getOcrCorrectionMeta = (fullPath, ocrCorrections = []) => {
+  if (!fullPath || !Array.isArray(ocrCorrections)) return null;
+  return ocrCorrections.find((item) => item?.fieldPath === fullPath && item.status !== 'rejected') || null;
+};
+
+const renderCellContent = (value, correction) => {
+  if (!correction) return value;
+  const confirmed = correction.status === 'confirmed';
+  return (
+    <span className="ocr-correction-cell-content">
+      <span className="ocr-correction-value">{correction.ocrValue}</span>
+      {!confirmed && <span className="ocr-correction-original">原 {correction.parsedValue ?? '-'}</span>}
+      <span className={`ocr-correction-badge ${confirmed ? 'ocr-correction-badge--confirmed' : ''}`}>
+        {confirmed ? 'OCR已确认' : 'OCR待确认'}
+      </span>
+    </span>
+  );
+};
+
 // Table 2: Active Disclosure - Matched to PDF format
-const Table2View = ({ data, highlightCells = [] }) => {
+const Table2View = ({ data, highlightCells = [], ocrCorrections = [] }) => {
   if (!data) return null;
 
   const renderCell = (value, path, colSpan = 1) => {
     const fullPath = path ? `activeDisclosureData.${path}` : null;
     const meta = fullPath ? getHighlightMeta(fullPath, highlightCells) : { className: '', sideLabel: '' };
+    const correction = fullPath ? getOcrCorrectionMeta(fullPath, ocrCorrections) : null;
 
     return (
       <td
         colSpan={colSpan}
-        className={cx('gov-table-number-cell', meta.className)}
+        className={cx('gov-table-number-cell', meta.className, correction && 'cell-ocr-corrected', correction?.status === 'confirmed' && 'cell-ocr-confirmed')}
         data-cell-path={fullPath || undefined}
         data-hl-side={meta.sideLabel || undefined}
+        title={correction ? `OCR修正：原解析值 ${correction.parsedValue ?? '-'}，OCR值 ${correction.ocrValue ?? '-'}` : undefined}
       >
-        {value}
+        {renderCellContent(value, correction)}
       </td>
     );
   };
@@ -149,10 +170,11 @@ const getHighlightMeta = (fullPath, highlightCells) => {
 };
 
 // Table 3 View
-const Table3View = ({ data, compact = false, highlightCells = [] }) => {
+const Table3View = ({ data, compact = false, highlightCells = [], ocrCorrections = [] }) => {
   if (!data) return null;
   const diagnostics = analyzeTable3Diagnostics(data);
-  const diagnosticMessages = [...diagnostics.suspiciousRows, ...(diagnostics.identityRows || [])];
+  const splitWarnings = diagnostics.suspiciousRows || [];
+  const reconciliationWarnings = diagnostics.identityRows || [];
 
   const getData = (key) => {
     if (key === 'naturalPerson') return data.naturalPerson;
@@ -192,6 +214,7 @@ const Table3View = ({ data, compact = false, highlightCells = [] }) => {
     const fullPath = category && fieldPath ? `tableData.${category}.${fieldPath}` : null;
     const meta = fullPath ? getHighlightMeta(fullPath, highlightCells) : { className: '', sideLabel: '' };
     const suspicious = fullPath ? getTable3SuspiciousCell(diagnostics, fullPath) : null;
+    const correction = fullPath ? getOcrCorrectionMeta(fullPath, ocrCorrections) : null;
 
     return (
       <td
@@ -199,24 +222,34 @@ const Table3View = ({ data, compact = false, highlightCells = [] }) => {
           'text-center table3-number-cell gov-table-number-cell',
           category === 'total' && 'gov-table-total-cell',
           meta.className,
-          suspicious && 'cell-suspicious-fragment'
+          suspicious && 'cell-suspicious-fragment',
+          correction && 'cell-ocr-corrected',
+          correction?.status === 'confirmed' && 'cell-ocr-confirmed'
         )}
         data-cell-path={fullPath || undefined}
         data-hl-side={meta.sideLabel || undefined}
         data-suspicious-label={suspicious?.marker || undefined}
-        title={suspicious?.title || undefined}
+        title={correction ? `OCR修正：原解析值 ${correction.parsedValue ?? '-'}，OCR值 ${correction.ocrValue ?? '-'}` : suspicious?.title || undefined}
       >
-        {v}
+        {renderCellContent(v, correction)}
       </td>
     );
   };
 
   return (
     <div className={cx('comparison-table-container gov-table-card gov-table-card--table3', compact && 'shadow-none gov-table-card--compact')}>
-      {diagnosticMessages.length > 0 && (
+      {(splitWarnings.length > 0 || reconciliationWarnings.length > 0) && (
         <div className="table-diagnostic-banner">
-          <div className="table-diagnostic-title">疑似拆格告警</div>
-          {diagnosticMessages.map((item) => (
+          {splitWarnings.length > 0 && <div className="table-diagnostic-title">疑似拆格告警</div>}
+          {splitWarnings.map((item) => (
+            <div key={item.key} className="table-diagnostic-item">
+              {item.message}
+            </div>
+          ))}
+          {reconciliationWarnings.length > 0 && (
+            <div className="table-diagnostic-title table-diagnostic-title--reconciliation">表格数据勾稽异常</div>
+          )}
+          {reconciliationWarnings.map((item) => (
             <div key={item.key} className="table-diagnostic-item">
               {item.message}
             </div>
@@ -415,20 +448,22 @@ const Table3View = ({ data, compact = false, highlightCells = [] }) => {
 };
 
 // Table 4 View
-const Table4View = ({ data, highlightCells = [] }) => {
+const Table4View = ({ data, highlightCells = [], ocrCorrections = [] }) => {
   if (!data) return null;
 
   const renderCell = (value, category, field, extraClass = '') => {
     const fullPath = `reviewLitigationData.${category}.${field}`;
     const meta = getHighlightMeta(fullPath, highlightCells);
+    const correction = getOcrCorrectionMeta(fullPath, ocrCorrections);
 
     return (
       <td
-        className={cx('gov-table-number-cell', extraClass, meta.className)}
+        className={cx('gov-table-number-cell', extraClass, meta.className, correction && 'cell-ocr-corrected', correction?.status === 'confirmed' && 'cell-ocr-confirmed')}
         data-cell-path={fullPath}
         data-hl-side={meta.sideLabel || undefined}
+        title={correction ? `OCR修正：原解析值 ${correction.parsedValue ?? '-'}，OCR值 ${correction.ocrValue ?? '-'}` : undefined}
       >
-        {value}
+        {renderCellContent(value, correction)}
       </td>
     );
   };
