@@ -95,6 +95,8 @@ const extractRegionFromFilename = (filename) => {
   return '';
 };
 
+const DEFAULT_UPLOAD_MODEL_OPTION = { value: 'openai/gpt-5.5', label: 'GPT-5.5' };
+
 function BatchUpload({
   onClose,
   isEmbedded = false,
@@ -581,8 +583,8 @@ function BatchUpload({
                 </option>
               ))
             ) : (
-              <option value="">
-                {modelConfigLoading ? 'AI 模型配置加载中...' : '使用后端默认解析模型'}
+              <option value={DEFAULT_UPLOAD_MODEL_OPTION.value}>
+                {modelConfigLoading ? 'AI 模型配置加载中...' : DEFAULT_UPLOAD_MODEL_OPTION.label}
               </option>
             )}
           </select>
