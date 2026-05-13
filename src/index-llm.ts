@@ -10,7 +10,8 @@ import { redactSensitive } from "./utils/logRedactor";
 dotenv.config();
 
 const app = createLlmApp();
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT || 3000);
+const HOST = process.env.HOST || '127.0.0.1';
 const WORKER_ONLY = process.env.LLM_WORKER_ONLY === '1';
 const ENABLE_JOB_RUNNER = process.env.LLM_ENABLE_JOB_RUNNER !== '0';
 const RUN_MIGRATIONS = process.env.LLM_RUN_MIGRATIONS !== '0';
@@ -35,10 +36,10 @@ async function start(): Promise<void> {
     startPdfExportWorker();
 
     if (!WORKER_ONLY) {
-      app.listen(PORT, () => {
-        console.log(`LLM API server running on port ${PORT}`);
+      app.listen(PORT, HOST, () => {
+        console.log(`LLM API server running on http://${HOST}:${PORT}`);
         console.log(`Database type: ${dbType}`);
-        console.log(`Health check: http://localhost:${PORT}/api/health`);
+        console.log(`Health check: http://${HOST}:${PORT}/api/health`);
       });
     } else {
       console.log('LLM worker-only mode: HTTP server disabled.');
