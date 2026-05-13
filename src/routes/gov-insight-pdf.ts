@@ -1,4 +1,4 @@
-﻿import express, { Response, Router } from 'express';
+import express, { Response, Router } from 'express';
 import puppeteer, { Browser, ConsoleMessage, type PDFOptions } from 'puppeteer';
 import http from 'http';
 import https from 'https';
