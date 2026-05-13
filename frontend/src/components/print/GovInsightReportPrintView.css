@@ -26,12 +26,18 @@
   margin: 20mm 0 17mm 0;
 }
 
-* {
+.pdf-document-shell,
+.pdf-document-shell *,
+.pdf-document-shell *::before,
+.pdf-document-shell *::after,
+.pdf-loading,
+.pdf-loading *,
+.pdf-loading *::before,
+.pdf-loading *::after {
   box-sizing: border-box;
 }
 
-html,
-body {
+.pdf-document-shell {
   margin: 0;
   padding: 0;
   background: #fff;
@@ -2126,7 +2132,7 @@ body {
 }
 
 @media screen {
-  body {
+  .pdf-document-shell {
     background: #e5e7eb;
   }
 

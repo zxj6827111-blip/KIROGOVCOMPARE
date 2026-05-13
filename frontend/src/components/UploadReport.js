@@ -21,6 +21,8 @@ const normalizeUploadModelOptions = (rawOptions) => {
     .filter(Boolean);
 };
 
+const DEFAULT_UPLOAD_MODEL_OPTION = { value: 'openai/gpt-5.5', label: 'GPT-5.5' };
+
 function UploadReport() {
   const [regions, setRegions] = useState([]);
   const [regionId, setRegionId] = useState('');
@@ -110,7 +112,8 @@ function UploadReport() {
         });
       } catch (err) {
         console.error('Failed to load upload model config:', err);
-        setModelOptions([]);
+        setModelOptions([DEFAULT_UPLOAD_MODEL_OPTION]);
+        setModel(DEFAULT_UPLOAD_MODEL_OPTION.value);
       } finally {
         setModelConfigLoading(false);
       }
@@ -558,8 +561,8 @@ function UploadReport() {
                     </option>
                   ))
                 ) : (
-                  <option value="">
-                    {modelConfigLoading ? 'AI 模型配置加载中...' : '使用后端默认解析模型'}
+                  <option value={DEFAULT_UPLOAD_MODEL_OPTION.value}>
+                    {modelConfigLoading ? 'AI 模型配置加载中...' : DEFAULT_UPLOAD_MODEL_OPTION.label}
                   </option>
                 )}
               </select>
