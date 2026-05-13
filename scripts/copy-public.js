@@ -1,7 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const srcDir = path.join(__dirname, '..', 'src', 'public');
+const legacySrcDir = path.join(__dirname, '..', 'src', 'public');
+const frontendBuildDir = path.join(__dirname, '..', 'frontend', 'build');
 const destDir = path.join(__dirname, '..', 'dist', 'public');
 const retryableCodes = new Set(['EPERM', 'EBUSY', 'EACCES', 'EMFILE', 'ENFILE']);
 
@@ -73,10 +74,22 @@ async function copyFileWithRetry(srcFile, destFile, maxRetries = 6) {
 
 async function main() {
   await fs.promises.mkdir(path.join(__dirname, '..', 'dist'), { recursive: true });
-  const files = await listFiles(srcDir);
+
+  const hasFrontendBuild = fs.existsSync(path.join(frontendBuildDir, 'index.html'));
+  const primarySrcDir = hasFrontendBuild ? frontendBuildDir : legacySrcDir;
+  const files = await listFiles(primarySrcDir);
   for (const file of files) {
     const destFile = path.join(destDir, file.relative);
     await copyFileWithRetry(file.src, destFile);
+  }
+
+  if (hasFrontendBuild && fs.existsSync(legacySrcDir)) {
+    const legacyFiles = await listFiles(legacySrcDir);
+    for (const file of legacyFiles) {
+      if (file.relative.toLowerCase() === 'index.html') continue;
+      const destFile = path.join(destDir, file.relative);
+      await copyFileWithRetry(file.src, destFile);
+    }
   }
 }
 

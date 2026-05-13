@@ -3,6 +3,7 @@ import { fetchAIReport, fetchAIReportPayload, fetchAnnualData, fetchAnnualReport
 import { transformYearData } from '../../govinsight/data';
 import type { AnnualDataRecord, EntityProfile } from '../../govinsight/types';
 import {
+  buildAuxiliaryRiskLevelExplanation,
   buildReportContextPayload,
   buildRuleBasedEnhancedReport,
   formatChangePct,
@@ -11,63 +12,36 @@ import {
   normalizeReportData,
   type EnhancedAIReportResponse,
   type GovInsightBackendReportPayload,
+  type ReconciliationCheck,
+  type ReportRating,
   type ScorecardItem,
 } from '../../govinsight/utils/aiReport';
-import { AuxiliaryRiskGuide } from '../../govinsight/components/AuxiliaryRiskGuide';
-import { HierarchySupportSummary } from '../../govinsight/components/HierarchySupportSummary';
-import { ReconciliationCheckCards } from '../../govinsight/components/ReconciliationCheckCards';
+import { MIN_N_FOR_RANKING, RISK_THRESHOLDS } from '../../govinsight/leader-cockpit/riskPolicy';
+import './GovInsightReportPrintView.css';
 
-const renderParagraphs = (text: string, className = 'text-[14px] leading-[1.95] text-slate-700') =>
-  text
-    .split(/\n+/)
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .map((part, index) => (
-      <p key={`${part}-${index}`} className={className}>
-        {part}
-      </p>
-    ));
-
-const scorecardValue = (item: ScorecardItem) =>
-  item.unit === '%' ? formatPercent(item.current) : `${formatInteger(item.current)}${item.unit}`;
-
-const previousScorecardValue = (item: ScorecardItem) =>
-  item.unit === '%' ? formatPercent(item.previous) : `${formatInteger(item.previous)}${item.unit}`;
-
-const ChapterPage = ({
-  index,
-  title,
-  children,
-}: {
+type Chapter = {
+  id: string;
   index: string;
   title: string;
-  children: React.ReactNode;
-}) => (
-  <section className="report-page report-page-break border border-slate-300 bg-white px-9 py-9">
-    <div className="border-b border-slate-300 pb-4">
-      <h2 className="text-[26px] font-bold tracking-tight text-slate-900">
-        {index}、{title}
-      </h2>
-    </div>
-    <div className="mt-5 space-y-4">{children}</div>
-  </section>
-);
+  appendix?: boolean;
+};
 
-const DirectoryItem = ({ index, title }: { index: string; title: string }) => (
-  <div className="flex items-end gap-3 border-b border-dotted border-slate-300 pb-2.5">
-    <span className="text-[17px] font-bold text-slate-900">{index}</span>
-    <span className="text-[17px] font-bold text-slate-900">{title}</span>
-    <span className="mb-[7px] h-px flex-1 border-b border-dotted border-slate-200"></span>
-  </div>
-);
+type PageMarker = Chapter & {
+  page: number;
+};
+
+type RiskTone = 'primary' | 'secondary' | 'tracking';
+type HierarchyAnalysis = NonNullable<GovInsightBackendReportPayload['hierarchyAnalysis']>;
+type HierarchyFocusItem = NonNullable<HierarchyAnalysis['districtFocus']>[number];
+type HierarchyCoverage = NonNullable<HierarchyAnalysis['districtCoverage']>;
 
 const SERIAL_MARKERS = ['一', '二', '三', '四', '五', '六', '七', '八'];
-
-const formatSerialMarker = (index: number) => `（${SERIAL_MARKERS[index] || String(index + 1)}）`;
-
 const PRIMARY_PRIORITY_LEVELS = ['首要关注事项'];
 const SECONDARY_PRIORITY_LEVELS = ['重点关注事项'];
 const TRACKING_PRIORITY_LEVELS = ['持续跟踪事项'];
+const REQUIRED_SCORECARD_KEYS = ['substantiveRate', 'unableRate', 'noInfoShareInUnable', 'overallCorrectionRate'];
+
+const formatSerialMarker = (index: number) => `（${SERIAL_MARKERS[index] || String(index + 1)}）`;
 
 const hasPriorityLevel = (value: unknown, accepted: string[]) => accepted.includes(String(value ?? ''));
 
@@ -77,10 +51,603 @@ const splitRiskItems = (items: EnhancedAIReportResponse['riskItems']) => ({
   tracking: items.filter((item) => hasPriorityLevel(item.priorityLevel, TRACKING_PRIORITY_LEVELS)),
 });
 
+const scorecardValue = (item: ScorecardItem) =>
+  item.unit === '%' ? formatPercent(item.current) : `${formatInteger(item.current)}${item.unit}`;
+
+const previousScorecardValue = (item: ScorecardItem) =>
+  item.unit === '%' ? formatPercent(item.previous) : `${formatInteger(item.previous)}${item.unit}`;
+
+const changeText = (item: ScorecardItem) => formatChangePct(item.changePct);
+
+const normalizeParagraphs = (text: string): string[] =>
+  String(text || '')
+    .split(/\n+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+const renderParagraphs = (text: string, options?: { noIndent?: boolean }) =>
+  normalizeParagraphs(text).map((part, index) => (
+    <p key={`${part}-${index}`} className={options?.noIndent ? 'pdf-paragraph pdf-paragraph--plain' : 'pdf-paragraph'}>
+      {part}
+    </p>
+  ));
+
+const getRiskRatingClass = (rating?: ReportRating | null) => {
+  if (rating === 'A') return 'pdf-risk-rating--a';
+  if (rating === 'C') return 'pdf-risk-rating--c';
+  return 'pdf-risk-rating--b';
+};
+
+const getScorecardToneClass = (status: ScorecardItem['status']) => {
+  if (status === 'good') return 'pdf-metric-card--good';
+  if (status === 'risk') return 'pdf-metric-card--risk';
+  return 'pdf-metric-card--watch';
+};
+
+const getHierarchyRiskClass = (riskLevel?: string | null) => {
+  if (riskLevel === 'red') return 'pdf-tag--red';
+  if (riskLevel === 'yellow') return 'pdf-tag--amber';
+  if (riskLevel === 'green') return 'pdf-tag--green';
+  return 'pdf-tag--muted';
+};
+
+const hierarchyRiskLabel = (riskLevel?: string | null): string => {
+  if (riskLevel === 'red') return '红牌关注';
+  if (riskLevel === 'yellow') return '黄牌关注';
+  if (riskLevel === 'green') return '绿色观察';
+  return '待补充';
+};
+
+const formatNullableCount = (value?: number | null): string => {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
+  return Number(value).toLocaleString('zh-CN');
+};
+
+const formatNullablePercent = (value?: number | null): string => {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return 'N/A';
+  return `${Number(value).toFixed(1)}%`;
+};
+
+const formatCoverage = (value?: string | null): string => {
+  const normalized = String(value || '').trim();
+  return normalized || '0/0';
+};
+
+const buildCoverageSummary = (coverage?: HierarchyCoverage): string => {
+  if (!coverage) {
+    return '覆盖单位 0 个，纳入底座 0/0，可直接分析 0/0，正式口径 0/0。';
+  }
+
+  return `覆盖单位 ${formatNullableCount(coverage.total)} 个，纳入底座 ${formatCoverage(
+    coverage.statsCoverage || coverage.reportCoverage
+  )}，可直接分析 ${formatCoverage(
+    coverage.analyzableCoverage || coverage.parseSuccessRate
+  )}，正式口径 ${formatCoverage(coverage.officialCoverage)}。`;
+};
+
+const buildMethodNotes = (): string[] => [
+  '区县层和部门层覆盖情况，分别反映当前纳入监测范围的区县、部门单位总量及其可用情况。',
+  '“纳入底座”指已纳入当期监测底账；“可直接分析”指已有可比数据、可以开展当期研判；“正式口径”指达到当前年度正式使用条件的单位。',
+  `红牌样本主要指受理总量达到${MIN_N_FOR_RANKING}件，且实质公开率低于${RISK_THRESHOLDS.disclosureRate.red}%或纠正占比高于${RISK_THRESHOLDS.correctionRate.red}%的单位；黄牌样本主要指受理总量达到${MIN_N_FOR_RANKING}件，且实质公开率低于${RISK_THRESHOLDS.disclosureRate.yellow}%或纠正占比高于${RISK_THRESHOLDS.correctionRate.yellow}%的单位；绿色观察为未触发前述阈值的样本；受理总量低于${MIN_N_FOR_RANKING}件的，标注为“样本偏小”，仅作观察提示。`,
+  '以上内容属于基于当前底座和样本门槛形成的内部重点样本提示，不形成全量正式排名，不作为正式考核结论。',
+];
+
+const reportRootStyle = {
+  '--pdf-total-pages': 'counter(pages)',
+} as React.CSSProperties;
+
+const buildCoverReportTitle = (reportTitle: string, entityName: string): string => {
+  const normalizedTitle = String(reportTitle || '').trim();
+  const normalizedEntityName = String(entityName || '').trim();
+  if (!normalizedEntityName) return normalizedTitle;
+
+  return normalizedTitle.replace(normalizedEntityName, '').replace(/\s{2,}/g, ' ').trim();
+};
+
+const ChapterPage = ({
+  id,
+  index,
+  title,
+  reportTitle,
+  children,
+}: {
+  id: string;
+  index: string;
+  title: string;
+  reportTitle: string;
+  children: React.ReactNode;
+}) => (
+  <section className="pdf-page pdf-page--chapter pdf-page-break" data-chapter-id={id}>
+    <PageChrome reportTitle={reportTitle} />
+    <div className="pdf-page-content">
+      <div className="pdf-chapter-heading">
+        <p className="pdf-chapter-kicker">章节 {index}</p>
+        <h2>
+          {index}、{title}
+        </h2>
+      </div>
+      <div className="pdf-section-stack">{children}</div>
+    </div>
+  </section>
+);
+
+const PageChrome = (_props: { reportTitle: string }) => null;
+
+const DirectoryItem = ({ chapter }: { chapter: PageMarker }) => (
+  <div className={`pdf-toc-row${chapter.appendix ? ' pdf-toc-row--appendix' : ''}`}>
+    <span className="pdf-toc-index">{chapter.index}</span>
+    <span className="pdf-toc-title">{chapter.title}</span>
+    <span className="pdf-toc-leader" aria-hidden="true"></span>
+    <span className="pdf-toc-page" data-toc-page-for={chapter.id}>{chapter.page || '-'}</span>
+  </div>
+);
+
+const CoverPage = ({
+  entity,
+  year,
+  reportData,
+  reportContext,
+  resolvedPayload,
+}: {
+  entity: EntityProfile;
+  year: number;
+  reportData: EnhancedAIReportResponse;
+  reportContext: ReturnType<typeof buildReportContextPayload>;
+  resolvedPayload: GovInsightBackendReportPayload | null;
+}) => {
+  const guide = buildAuxiliaryRiskLevelExplanation(reportContext.current, reportContext.previous, reportData.dataQuality || reportContext.dataQuality, {
+    rating: resolvedPayload?.riskAssessment?.rating || reportContext.rating,
+    riskLabel: resolvedPayload?.riskAssessment?.riskLabel || reportContext.riskLabel,
+    reason: resolvedPayload?.riskAssessment?.reason,
+  });
+
+  return (
+    <section className="pdf-page pdf-page--cover">
+      <div className="pdf-cover-mark">内部审阅材料</div>
+      <div className="pdf-cover-main">
+        <h1>{entity.name}</h1>
+        <h2>{buildCoverReportTitle(reportData.metadata.reportTitle, entity.name)}</h2>
+        <p className="pdf-cover-summary">{reportData.metadata.summaryLine}</p>
+      </div>
+
+      <div className="pdf-cover-notes">
+        <div>
+          <span>适用范围</span>
+          <p>{reportData.metadata.positioning}</p>
+        </div>
+        <div>
+          <span>数据来源</span>
+          <p>{reportData.metadata.evidenceBasis}</p>
+        </div>
+        <div>
+          <span>审阅提示</span>
+          <p>{reportData.metadata.cautionNote}</p>
+        </div>
+      </div>
+
+      <section className="pdf-cover-risk">
+        <div className="pdf-cover-risk-head">
+          <span className={`pdf-risk-rating ${getRiskRatingClass(guide.rating)}`}>{guide.currentLevelText}</span>
+          <div>
+            <h3>辅助风险等级说明</h3>
+            <p>{guide.reason}</p>
+          </div>
+        </div>
+        <div className="pdf-cover-risk-grid">
+          {guide.levels.map((level) => (
+            <div key={level.rating} className={`pdf-risk-level-card${level.rating === guide.rating ? ' is-active' : ''}`}>
+              <div className="pdf-risk-level-title">
+                <strong>{level.rating}级</strong>
+                {level.rating === guide.rating ? <span>当前</span> : null}
+              </div>
+              <p className="pdf-risk-level-name">{level.title}</p>
+              <p>{level.summary}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <div className="pdf-cover-footer">
+        <span>编制年度：{year} 年</span>
+        <span>{reportData.metadata.auxiliaryRiskLevelNote || reportContext.auxiliaryRiskLevelNote}</span>
+      </div>
+    </section>
+  );
+};
+
+const OverviewPage = ({
+  reportData,
+  reportContext,
+  scorecards,
+  riskGroups,
+  year,
+}: {
+  reportData: EnhancedAIReportResponse;
+  reportContext: ReturnType<typeof buildReportContextPayload>;
+  scorecards: ScorecardItem[];
+  riskGroups: ReturnType<typeof splitRiskItems>;
+  year: number;
+}) => {
+  const focusSummaries = [
+    ...riskGroups.primary,
+    ...riskGroups.secondary,
+    ...riskGroups.tracking,
+  ].slice(0, 3);
+
+  return (
+    <section className="pdf-page pdf-page-break pdf-page--overview">
+      <div className="pdf-page-content pdf-page-content--plain">
+        <div className="pdf-overview-head">
+          <p>核心指标总览</p>
+          <h2>{year} 年度政务公开运行摘要</h2>
+        </div>
+
+        <div className="pdf-metric-grid pdf-metric-grid--overview">
+          {scorecards.map((item) => (
+            <article key={item.key} className={`pdf-metric-card ${getScorecardToneClass(item.status)}`}>
+              <span className="pdf-metric-label">{item.label}</span>
+              <p className="pdf-metric-value">{scorecardValue(item)}</p>
+              <div className="pdf-metric-meta">
+                <span>上期值 {previousScorecardValue(item)}</span>
+                <span>变化情况 {changeText(item)}</span>
+              </div>
+              <p className="pdf-metric-tip">{item.interpretation}</p>
+            </article>
+          ))}
+        </div>
+
+        <div className="pdf-overview-lower">
+          <section className="pdf-overview-risk-card">
+            <p className="pdf-overview-label">当前风险等级摘要</p>
+            <div className="pdf-overview-risk-line">
+              <span className={`pdf-risk-rating ${getRiskRatingClass(reportContext.rating)}`}>{reportContext.rating}级</span>
+              <strong>{reportContext.riskLabel}</strong>
+            </div>
+            <ul className="pdf-compact-list">
+              {reportContext.topSignals.slice(0, 4).map((item, index) => (
+                <li key={`signal-${index}`}>{item}</li>
+              ))}
+            </ul>
+          </section>
+
+          <section className="pdf-overview-focus-card">
+            <p className="pdf-overview-label">重点关注事项摘要</p>
+            {focusSummaries.length ? (
+              <ol className="pdf-focus-summary-list">
+                {focusSummaries.map((item, index) => (
+                  <li key={`focus-summary-${index}`}>
+                    <strong>{item.riskName}</strong>
+                    <span>{item.focus}</span>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="pdf-muted-text">当前未生成重点关注事项。</p>
+            )}
+          </section>
+        </div>
+
+        <section className="pdf-overview-notes">
+          <p>
+            <strong>编制年度：</strong>
+            {year} 年
+          </p>
+          <p>
+            <strong>口径说明：</strong>
+            {reportData.metadata.auxiliaryRiskLevelNote || reportContext.auxiliaryRiskLevelNote}
+          </p>
+        </section>
+      </div>
+    </section>
+  );
+};
+
+const DirectoryPage = ({ chapters, reportTitle }: { chapters: PageMarker[]; reportTitle: string }) => (
+  <section className="pdf-page pdf-page-break pdf-page--toc">
+    <PageChrome reportTitle={reportTitle} />
+    <div className="pdf-page-content">
+      <div className="pdf-toc-heading">
+        <h2>目录</h2>
+      </div>
+      <div className="pdf-toc-list">
+        {chapters.map((chapter) => (
+          <DirectoryItem key={chapter.id} chapter={chapter} />
+        ))}
+      </div>
+    </div>
+  </section>
+);
+
+const RiskGroup = ({
+  title,
+  tone,
+  children,
+}: {
+  title: string;
+  tone: RiskTone;
+  children: React.ReactNode;
+}) => (
+  <section className={`pdf-risk-group pdf-risk-group--${tone}`}>
+    <h3>{title}</h3>
+    <div className="pdf-risk-group-body">{children}</div>
+  </section>
+);
+
+const RiskItemBlock = ({ item }: { item: EnhancedAIReportResponse['riskItems'][number] }) => (
+  <article className="pdf-risk-item">
+    <h4>{item.riskName}</h4>
+    <dl>
+      <div>
+        <dt>依据</dt>
+        <dd>{item.basis}</dd>
+      </div>
+      <div>
+        <dt>表现</dt>
+        <dd>{item.manifestation}</dd>
+      </div>
+      <div>
+        <dt>影响</dt>
+        <dd>{item.impact}</dd>
+      </div>
+      <div>
+        <dt>关注点</dt>
+        <dd>{item.focus}</dd>
+      </div>
+    </dl>
+  </article>
+);
+
+const FactListBlock = ({
+  title,
+  items,
+}: {
+  title: string;
+  items: string[];
+}) => (
+  <article className="pdf-content-block">
+    <h3>{title}</h3>
+    <ul className="pdf-dash-list">
+      {items.map((item, index) => (
+        <li key={`${title}-${index}`}>{item}</li>
+      ))}
+    </ul>
+  </article>
+);
+
+const AnalysisBlock = ({
+  title,
+  rows,
+}: {
+  title: string;
+  rows: Array<{ label: string; value: string }>;
+}) => (
+  <article className="pdf-content-block">
+    <h3>{title}</h3>
+    <dl className="pdf-field-list">
+      {rows.map((row) => (
+        <div key={row.label}>
+          <dt>{row.label}</dt>
+          <dd>{row.value}</dd>
+        </div>
+      ))}
+    </dl>
+  </article>
+);
+
+const HierarchyFocusTable = ({
+  title,
+  items,
+  emptyText,
+  limit,
+}: {
+  title: string;
+  items: HierarchyFocusItem[];
+  emptyText: string;
+  limit: number;
+}) => {
+  const visibleItems = items.slice(0, limit);
+
+  return (
+    <section className="pdf-hierarchy-table-section">
+      <h3>{title}</h3>
+      {visibleItems.length ? (
+        <table className="pdf-table pdf-table--hierarchy">
+          <thead>
+            <tr>
+              <th>单位名称</th>
+              <th>风险等级</th>
+              <th>触发原因</th>
+              <th>新收申请</th>
+              <th>受理总量</th>
+              <th>公开率</th>
+              <th>纠正占比</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleItems.map((item, index) => (
+              <tr key={`${item.orgId || item.regionId || index}`}>
+                <td>{item.orgName || '未命名单位'}</td>
+                <td>
+                  <span className={`pdf-tag ${getHierarchyRiskClass(item.riskLevel)}`}>{hierarchyRiskLabel(item.riskLevel)}</span>
+                  {item.isSampleSufficient === false ? <span className="pdf-tag pdf-tag--muted">样本偏小</span> : null}
+                </td>
+                <td>{item.riskReason || '未返回触发原因'}</td>
+                <td>{formatNullableCount(item.newApplications)}</td>
+                <td>{formatNullableCount(item.acceptedTotal)}</td>
+                <td>{formatNullablePercent(item.disclosureRate)}</td>
+                <td>{formatNullablePercent(item.correctionRate)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p className="pdf-empty-text">{emptyText}</p>
+      )}
+    </section>
+  );
+};
+
+const HierarchyPrintSummary = ({
+  payload,
+}: {
+  payload?: GovInsightBackendReportPayload | null;
+}) => {
+  const hierarchyAnalysis = payload?.hierarchyAnalysis;
+  if (!hierarchyAnalysis) return null;
+
+  const districtCoverage = hierarchyAnalysis.districtCoverage;
+  const departmentCoverage = hierarchyAnalysis.departmentCoverage;
+  const districtFocus = Array.isArray(hierarchyAnalysis.districtFocus) ? hierarchyAnalysis.districtFocus : [];
+  const departmentFocus = Array.isArray(hierarchyAnalysis.departmentFocus) ? hierarchyAnalysis.departmentFocus : [];
+
+  if (
+    !districtCoverage?.available &&
+    !departmentCoverage?.available &&
+    districtFocus.length === 0 &&
+    departmentFocus.length === 0
+  ) {
+    return null;
+  }
+
+  return (
+    <section className="pdf-hierarchy-summary">
+      <div className="pdf-note-box">
+        <p className="pdf-note-title">方法说明</p>
+        {buildMethodNotes().map((note, index) => (
+          <p key={`method-note-${index}`}>{note}</p>
+        ))}
+      </div>
+
+      <div className="pdf-two-col">
+        <article className="pdf-summary-card">
+          <p className="pdf-summary-card-label">区县层覆盖情况</p>
+          <p>{buildCoverageSummary(districtCoverage)}</p>
+        </article>
+        <article className="pdf-summary-card">
+          <p className="pdf-summary-card-label">部门层覆盖情况</p>
+          <p>{buildCoverageSummary(departmentCoverage)}</p>
+        </article>
+      </div>
+
+      <HierarchyFocusTable
+        title="区县层重点提示样本"
+        items={districtFocus}
+        emptyText="当前未返回可展示的区县层重点样本。"
+        limit={8}
+      />
+      <HierarchyFocusTable
+        title="部门层重点提示样本"
+        items={departmentFocus}
+        emptyText="当前未返回可展示的部门层重点样本。"
+        limit={8}
+      />
+    </section>
+  );
+};
+
+const RectificationTaskCard = ({
+  item,
+  className = '',
+}: {
+  item: EnhancedAIReportResponse['rectificationTasks'][number];
+  className?: string;
+}) => (
+  <article className={`pdf-task-card${className ? ` ${className}` : ''}`}>
+    <div className="pdf-task-head">
+      <div>
+        <p>任务 {item.sequence}</p>
+        <h3>{item.taskName}</h3>
+      </div>
+      <div className="pdf-task-tags">
+        <span>{item.taskType}</span>
+        <span>{item.priority}</span>
+        <span>{item.responsibilityLevel}</span>
+      </div>
+    </div>
+    <dl className="pdf-task-grid">
+      <div className="pdf-task-field pdf-task-field--wide">
+        <dt>问题指向</dt>
+        <dd>{item.problem}</dd>
+      </div>
+      <div className="pdf-task-field pdf-task-field--wide">
+        <dt>工作措施</dt>
+        <dd>{item.measure}</dd>
+      </div>
+      <div className="pdf-task-field">
+        <dt>牵头单位</dt>
+        <dd>{item.leadUnit}</dd>
+      </div>
+      <div className="pdf-task-field">
+        <dt>配合单位</dt>
+        <dd>{item.supportUnits}</dd>
+      </div>
+      <div className="pdf-task-field">
+        <dt>完成时限</dt>
+        <dd>{item.deadline}</dd>
+      </div>
+      <div className="pdf-task-field pdf-task-field--wide">
+        <dt>阶段里程碑</dt>
+        <dd>{item.milestones.join('；')}</dd>
+      </div>
+      <div className="pdf-task-field">
+        <dt>跟踪指标</dt>
+        <dd>{item.trackingIndicator}</dd>
+      </div>
+      <div className="pdf-task-field pdf-task-field--wide">
+        <dt>督办方式</dt>
+        <dd>{item.supervisionMethod}</dd>
+      </div>
+    </dl>
+  </article>
+);
+
+const ReconciliationTable = ({ checks }: { checks: ReconciliationCheck[] }) => {
+  if (!checks.length) return null;
+
+  return (
+    <section className="pdf-audit-section">
+      <h3>勾稽校验</h3>
+      <div className="pdf-check-grid">
+        {checks.map((check) => (
+          <article key={check.key} className="pdf-check-card">
+            <div className="pdf-check-card-head">
+              <h4>{check.label}</h4>
+              <span className={`pdf-tag ${check.passed ? 'pdf-tag--green' : 'pdf-tag--amber'}`}>
+                {check.passed ? '校验通过' : '建议复核'}
+              </span>
+            </div>
+            <dl>
+              <div>
+                <dt>期望值</dt>
+                <dd>{formatInteger(check.expected)}</dd>
+              </div>
+              <div>
+                <dt>实际值</dt>
+                <dd>{formatInteger(check.actual)}</dd>
+              </div>
+              <div className="pdf-check-card-note">
+                <dt>校验说明</dt>
+                <dd>{check.note}</dd>
+              </div>
+            </dl>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+};
+
+const getCoreScorecards = (scorecards: ScorecardItem[]): ScorecardItem[] => {
+  const byKey = new Map(scorecards.map((item) => [item.key, item]));
+  const selected = REQUIRED_SCORECARD_KEYS.map((key) => byKey.get(key)).filter(Boolean) as ScorecardItem[];
+  return selected.length === REQUIRED_SCORECARD_KEYS.length ? selected : scorecards.slice(0, 4);
+};
+
 export const GovInsightReportPrintView: React.FC<{ orgId: string; year: number }> = ({ orgId, year }) => {
   const [entity, setEntity] = useState<EntityProfile | null>(null);
   const [reportData, setReportData] = useState<EnhancedAIReportResponse | null>(null);
   const [resolvedPayload, setResolvedPayload] = useState<GovInsightBackendReportPayload | null>(null);
+  const [tocPages, setTocPages] = useState<Record<string, number>>({});
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
@@ -129,7 +696,7 @@ export const GovInsightReportPrintView: React.FC<{ orgId: string; year: number }
         setEntity(nextEntity);
         setReportData(normalized);
         setResolvedPayload((cloudReport?.reportPayload || backendReportPayload || null) as GovInsightBackendReportPayload | null);
-        document.title = `${nextEntity.name}_${year}_智能辅策报告`;
+        document.title = `${nextEntity.name}_${year}_政务公开智能辅策报告`;
       } catch (loadError: any) {
         if (isMounted) {
           setError(loadError?.message || '报告加载失败。');
@@ -145,26 +712,28 @@ export const GovInsightReportPrintView: React.FC<{ orgId: string; year: number }
     };
   }, [orgId, year]);
 
-  const chapters = useMemo(() => {
+  const hasHierarchySummary = Boolean(resolvedPayload?.hierarchyAnalysis);
+
+  const chapters = useMemo<Chapter[]>(() => {
     const baseChapters = [
-      { index: '一', title: '总体判断' },
-      { index: '二', title: '重点风险事项' },
-      { index: '三', title: '确认事实' },
-      { index: '四', title: '审慎分析' },
-      ...(resolvedPayload?.hierarchyAnalysis ? [{ index: '五', title: '三级监测重点摘要' }] : []),
-      { index: resolvedPayload?.hierarchyAnalysis ? '六' : '五', title: '待补充问题' },
-      { index: resolvedPayload?.hierarchyAnalysis ? '七' : '六', title: '整改任务清单' },
-      { index: resolvedPayload?.hierarchyAnalysis ? '八' : '七', title: '结语' },
+      { id: 'overall', index: '一', title: '总体判断' },
+      { id: 'risks', index: '二', title: '重点风险事项' },
+      { id: 'facts', index: '三', title: '确认事实' },
+      { id: 'analysis', index: '四', title: '审慎分析' },
+      ...(hasHierarchySummary ? [{ id: 'hierarchy', index: '五', title: '三级监测重点摘要' }] : []),
+      { id: 'questions', index: hasHierarchySummary ? '六' : '五', title: '待补充问题' },
+      { id: 'tasks', index: hasHierarchySummary ? '七' : '六', title: '整改任务清单' },
+      { id: 'closing', index: hasHierarchySummary ? '八' : '七', title: '结语' },
     ];
 
     const appendixChapters = [
-      { index: '附件一', title: '指标审计与勾稽校验' },
-      { index: '附件二', title: '使用边界与口径说明' },
-      { index: '附件三', title: '建议补充数据' },
+      { id: 'appendix-audit', index: '附件一', title: '指标审计与勾稽校验', appendix: true },
+      { id: 'appendix-boundary', index: '附件二', title: '使用边界与口径说明', appendix: true },
+      { id: 'appendix-supplement', index: '附件三', title: '建议补充数据', appendix: true },
     ];
 
     return [...baseChapters, ...appendixChapters];
-  }, [resolvedPayload]);
+  }, [hasHierarchySummary]);
 
   const reportContext = useMemo(() => {
     if (!entity) return null;
@@ -174,424 +743,257 @@ export const GovInsightReportPrintView: React.FC<{ orgId: string; year: number }
     return buildReportContextPayload(entity.name, current, previous);
   }, [entity, year]);
 
-  const coverMetrics = useMemo(() => (reportData?.scorecards || []).slice(0, 4), [reportData]);
   const riskGroups = useMemo(() => splitRiskItems(reportData?.riskItems || []), [reportData]);
-  const hasHierarchySummary = Boolean(resolvedPayload?.hierarchyAnalysis);
+  const coreScorecards = useMemo(() => getCoreScorecards(reportData?.scorecards || []), [reportData]);
+
+  const chaptersWithPages = useMemo<PageMarker[]>(
+    () =>
+      chapters.map((chapter) => ({
+        ...chapter,
+        page: tocPages[chapter.id] || 0,
+      })),
+    [chapters, tocPages]
+  );
+
+  useEffect(() => {
+    if (loading || error || !reportData) return;
+
+    const computeToc = () => {
+      const pages = Array.from(document.querySelectorAll<HTMLElement>('.pdf-page'));
+      const nextPages: Record<string, number> = {};
+      const pxPerMm = 96 / 25.4;
+      const pageHeightPx = 260 * pxPerMm;
+      let currentPage = 1;
+
+      pages.forEach((pageElement) => {
+        const chapterId = pageElement.dataset.chapterId;
+        if (chapterId) {
+          nextPages[chapterId] = currentPage;
+        }
+        currentPage += Math.max(1, Math.ceil(pageElement.offsetHeight / pageHeightPx));
+      });
+
+      setTocPages(nextPages);
+      Object.entries(nextPages).forEach(([chapterId, page]) => {
+        const pageNode = document.querySelector<HTMLElement>(`[data-toc-page-for="${chapterId}"]`);
+        if (pageNode) pageNode.textContent = String(page);
+      });
+      document.documentElement.setAttribute('data-govinsight-pdf-ready', 'true');
+    };
+
+    (window as any).__govinsightComputePdfToc = computeToc;
+
+    const raf = window.requestAnimationFrame(() => {
+      computeToc();
+      window.setTimeout(computeToc, 250);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(raf);
+      delete (window as any).__govinsightComputePdfToc;
+    };
+  }, [loading, error, reportData, chapters]);
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-white text-slate-500">
-        正在准备导出报告…
+      <div className="pdf-loading">
+        正在准备导出报告...
       </div>
     );
   }
 
   if (error || !entity || !reportData || !reportContext) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-white px-8 text-center text-slate-600">
+      <div className="pdf-loading pdf-loading--error">
         {error || '报告加载失败。'}
       </div>
     );
   }
 
+  const reportTitle = `${entity.name} ${year} 年度政务公开智能辅策报告`;
+
   return (
-    <>
-      <style>
-        {`
-          @page {
-            size: A4;
-            margin: 10mm 8mm 12mm;
-          }
+    <div className="pdf-document-shell" style={reportRootStyle}>
+      <div id="govinsight-report-print" className="pdf-document">
+        <CoverPage
+          entity={entity}
+          year={year}
+          reportData={reportData}
+          reportContext={reportContext}
+          resolvedPayload={resolvedPayload}
+        />
 
-          html, body {
-            margin: 0;
-            padding: 0;
-            background: #ffffff;
-          }
+        <OverviewPage
+          reportData={reportData}
+          reportContext={reportContext}
+          scorecards={coreScorecards}
+          riskGroups={riskGroups}
+          year={year}
+        />
 
-          .report-document-shell {
-            font-family: "FangSong", "仿宋", "SimSun", serif;
-          }
+        <DirectoryPage chapters={chaptersWithPages} reportTitle={reportTitle} />
 
-          .report-document-shell h1,
-          .report-document-shell h2,
-          .report-document-shell h3,
-          .report-document-shell h4,
-          .report-document-shell th {
-            font-family: "SimHei", "Microsoft YaHei", "黑体", sans-serif;
-          }
+        <ChapterPage id="overall" index="一" title="总体判断" reportTitle={reportTitle}>
+          {renderParagraphs(reportData.metadata.overallOverview)}
+          {reportData.overallJudgments.map((item, index) => (
+            <article key={`judgment-${index}`} className="pdf-content-block">
+              <h3>
+                {formatSerialMarker(index)}
+                {item.heading}
+              </h3>
+              {renderParagraphs([item.factBasis, item.riskJudgment, item.managementImplication].join('\n'))}
+            </article>
+          ))}
+        </ChapterPage>
 
-          .report-page,
-          .report-cover-page,
-          .report-directory-page {
-            min-height: calc(297mm - 18mm);
-            box-sizing: border-box;
-          }
-
-          .report-page-break {
-            page-break-before: always;
-            break-before: page;
-          }
-
-          .report-avoid-break {
-            page-break-inside: avoid;
-            break-inside: avoid;
-          }
-
-          .report-document-shell table {
-            width: 100%;
-            border-collapse: collapse;
-          }
-
-          .report-document-shell .report-page h3 {
-            font-size: 18px;
-            line-height: 1.55;
-            letter-spacing: 0.01em;
-          }
-
-          .report-document-shell .report-page p,
-          .report-document-shell .report-page li {
-            line-height: 1.9;
-          }
-
-          .report-document-shell .report-page th {
-            font-size: 12px;
-            letter-spacing: 0.04em;
-          }
-
-          .report-document-shell .report-page td {
-            font-size: 13.5px;
-            line-height: 1.75;
-          }
-
-          .report-document-shell #govinsight-report-print > * + * {
-            margin-top: 0;
-          }
-        `}
-      </style>
-
-      <div className="report-document-shell min-h-screen bg-white text-slate-900">
-        <div id="govinsight-report-print" className="mx-auto w-full">
-          <section className="report-cover-page border border-slate-300 bg-white px-11 py-11">
-            <div className="flex h-full min-h-full flex-col justify-between">
-              <div className="space-y-7">
-                <div className="inline-flex border border-slate-300 bg-slate-50/30 px-4 py-1 text-[10px] font-semibold tracking-[0.18em] text-slate-700">
-                  内部审阅材料
-                </div>
-                <div>
-                  <h1 className="text-[50px] font-bold tracking-[0.06em] text-slate-900">{entity.name}</h1>
-                  <h2 className="mt-5 max-w-4xl text-[31px] font-bold leading-[1.58] text-slate-900">
-                    {reportData.metadata.reportTitle}
-                  </h2>
-                  <p className="mt-5 max-w-4xl border-l-4 border-slate-700 pl-5 text-[19px] font-semibold leading-[1.78] text-slate-900">
-                    {reportData.metadata.summaryLine}
-                  </p>
-                  <div className="mt-7 h-[2px] w-32 bg-slate-900"></div>
-                </div>
-                <div className="max-w-4xl space-y-2.5 border-l-4 border-slate-700 pl-5">
-                  {renderParagraphs(reportData.metadata.positioning)}
-                  {renderParagraphs(reportData.metadata.evidenceBasis)}
-                </div>
-                <div className="border-l-4 border-slate-500 bg-slate-50/30 px-5 py-4 text-[14px] leading-[1.9] text-slate-700">
-                  <p>{reportData.metadata.cautionNote}</p>
-                </div>
-                <AuxiliaryRiskGuide
-                  current={reportContext.current}
-                  previous={reportContext.previous}
-                  dataQuality={reportData.dataQuality || reportContext.dataQuality}
-                  rating={resolvedPayload?.riskAssessment?.rating || reportContext.rating}
-                  riskLabel={resolvedPayload?.riskAssessment?.riskLabel || reportContext.riskLabel}
-                  reason={resolvedPayload?.riskAssessment?.reason}
-                  note={reportData.metadata.auxiliaryRiskLevelNote || reportContext.auxiliaryRiskLevelNote}
-                  variant="print"
-                />
-                <div className="grid gap-2.5 border-t border-slate-300 pt-4 md:grid-cols-2 xl:grid-cols-4">
-                  {coverMetrics.map((item) => (
-                    <div key={item.key} className="border border-slate-300 bg-white px-4 py-4">
-                      <p className="text-[11px] font-semibold tracking-[0.12em] text-slate-500">{item.label}</p>
-                      <p className="mt-2 text-[23px] font-bold leading-none text-slate-900">{scorecardValue(item)}</p>
-                      <p className="mt-2 text-[12px] leading-6 text-slate-500">
-                        较上年 {previousScorecardValue(item)}，变化 {formatChangePct(item.changePct)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="border-t border-slate-300 pt-4 text-[12px] leading-6 text-slate-600">
-                <p>编制年度：{year} 年</p>
-                <p>辅助说明：{reportData.metadata.auxiliaryRiskLevel}，详细判定见本页“辅助风险等级说明”。</p>
-              </div>
-            </div>
-          </section>
-
-          <section className="report-directory-page report-page-break border border-slate-300 bg-white px-10 py-10">
-            <div className="border-b border-slate-300 pb-4">
-              <p className="text-center text-[32px] font-bold tracking-[0.28em] text-slate-900">目录</p>
-            </div>
-            <div className="mt-7 space-y-3.5">
-              {chapters.map((item) => (
-                <DirectoryItem key={item.index} index={item.index} title={item.title} />
+        <ChapterPage id="risks" index="二" title="重点风险事项" reportTitle={reportTitle}>
+          {riskGroups.primary.length ? (
+            <RiskGroup title="（一）首要关注事项" tone="primary">
+              {riskGroups.primary.map((item, index) => (
+                <RiskItemBlock key={`priority-risk-${index}`} item={item} />
               ))}
-            </div>
-          </section>
-
-          <ChapterPage index="一" title="总体判断">
-            {renderParagraphs(reportData.metadata.overallOverview)}
-            {reportData.overallJudgments.map((item, index) => (
-              <div key={`judgment-${index}`} className="report-avoid-break border border-slate-300 bg-white p-5">
-                <h3 className="text-[18px] font-bold tracking-[0.01em] text-slate-900">
-                  {formatSerialMarker(index)}
-                  {item.heading}
-                </h3>
-                <div className="mt-3 space-y-2">
-                  {renderParagraphs([item.factBasis, item.riskJudgment, item.managementImplication].join('\n'))}
-                </div>
-              </div>
-            ))}
-          </ChapterPage>
-
-          <ChapterPage index="二" title="重点风险事项">
-            {riskGroups.primary.length ? (
-              <div className="space-y-3">
-                <div className="report-avoid-break border border-slate-300 border-l-[5px] border-l-rose-700 bg-white p-4">
-                  <p className="text-[16px] font-bold text-rose-800">（一）首要关注事项</p>
-                </div>
-                {riskGroups.primary.map((item, index) => (
-                  <div key={`priority-risk-${index}`} className="report-avoid-break border border-slate-300 bg-white p-5">
-                    <h3 className="text-[18px] font-bold tracking-[0.01em] text-slate-900">{item.riskName}</h3>
-                    <div className="mt-3 space-y-1.5 text-[14px] leading-[1.9] text-slate-700">
-                      <p><span className="font-semibold text-slate-900">依据：</span>{item.basis}</p>
-                      <p><span className="font-semibold text-slate-900">表现：</span>{item.manifestation}</p>
-                      <p><span className="font-semibold text-slate-900">影响：</span>{item.impact}</p>
-                      <p><span className="font-semibold text-slate-900">关注点：</span>{item.focus}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-
-            {riskGroups.secondary.length ? (
-              <div className="space-y-3">
-                <div className="report-avoid-break border border-slate-300 border-l-[5px] border-l-amber-700 bg-white p-4">
-                  <p className="text-[16px] font-bold text-amber-800">（二）重点关注事项</p>
-                </div>
-                {riskGroups.secondary.map((item, index) => (
-                  <div key={`secondary-risk-${index}`} className="report-avoid-break border border-slate-300 bg-white p-5">
-                    <h3 className="text-[18px] font-bold tracking-[0.01em] text-slate-900">{item.riskName}</h3>
-                    <div className="mt-3 space-y-1.5 text-[14px] leading-[1.9] text-slate-700">
-                      <p><span className="font-semibold text-slate-900">依据：</span>{item.basis}</p>
-                      <p><span className="font-semibold text-slate-900">表现：</span>{item.manifestation}</p>
-                      <p><span className="font-semibold text-slate-900">影响：</span>{item.impact}</p>
-                      <p><span className="font-semibold text-slate-900">关注点：</span>{item.focus}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-
-            {riskGroups.tracking.length ? (
-              <div className="space-y-3">
-                <div className="report-avoid-break border border-slate-300 border-l-[5px] border-l-slate-700 bg-white p-4">
-                  <p className="text-[16px] font-bold text-slate-800">（三）持续跟踪事项</p>
-                </div>
-                {riskGroups.tracking.map((item, index) => (
-                  <div key={`tracking-risk-${index}`} className="report-avoid-break border border-slate-300 bg-white p-5">
-                    <h3 className="text-[18px] font-bold tracking-[0.01em] text-slate-900">{item.riskName}</h3>
-                    <div className="mt-3 space-y-1.5 text-[14px] leading-[1.9] text-slate-700">
-                      <p><span className="font-semibold text-slate-900">依据：</span>{item.basis}</p>
-                      <p><span className="font-semibold text-slate-900">表现：</span>{item.manifestation}</p>
-                      <p><span className="font-semibold text-slate-900">影响：</span>{item.impact}</p>
-                      <p><span className="font-semibold text-slate-900">关注点：</span>{item.focus}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-          </ChapterPage>
-
-          <ChapterPage index="三" title="确认事实">
-            {reportData.confirmedFacts.map((group, index) => (
-              <div key={`fact-${index}`} className="report-avoid-break border border-slate-300 bg-white p-5">
-                <h3 className="text-[18px] font-bold tracking-[0.01em] text-slate-900">{group.category}</h3>
-                <ul className="mt-4 space-y-2">
-                  {group.points.map((point, pointIndex) => (
-                    <li key={`fact-${index}-${pointIndex}`} className="flex items-start gap-3">
-                      <span className="mt-[13px] h-px w-3 flex-shrink-0 bg-slate-900"></span>
-                      <span className="text-[14px] leading-[1.9] text-slate-700">{point}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </ChapterPage>
-
-          <ChapterPage index="四" title="审慎分析">
-            {reportData.prudentAnalyses.map((item, index) => (
-              <div key={`analysis-${index}`} className="report-avoid-break border border-slate-300 bg-white p-5">
-                <h3 className="text-[18px] font-bold tracking-[0.01em] text-slate-900">{item.topic}</h3>
-                <p className="mt-3 text-[15px] leading-8 text-slate-700"><span className="font-semibold text-slate-900">分析：</span>{item.analysis}</p>
-                <p className="mt-2 text-[15px] leading-8 text-slate-700"><span className="font-semibold text-slate-900">支撑：</span>{item.support}</p>
-                <p className="mt-2 text-[15px] leading-8 text-slate-700"><span className="font-semibold text-slate-900">提示：</span>{item.caution}</p>
-              </div>
-            ))}
-          </ChapterPage>
-
-          {hasHierarchySummary ? (
-            <ChapterPage index="五" title="三级监测重点摘要">
-              <HierarchySupportSummary
-                payload={resolvedPayload}
-                title="三级监测重点摘要"
-                subtitle="本节依据既有三级监测结果，对已纳入监测范围且具备分析条件的区县、部门样本作内部提示，不形成全量正式排名，不作为正式考核结论。"
-                limit={8}
-                showHeader={false}
-              />
-            </ChapterPage>
+            </RiskGroup>
           ) : null}
 
-          <ChapterPage index={hasHierarchySummary ? '六' : '五'} title="待补充问题">
-            {reportData.unansweredQuestions.map((item, index) => (
-              <div key={`unanswered-${index}`} className="report-avoid-break border border-slate-300 bg-white p-5">
-                <h3 className="text-[18px] font-bold tracking-[0.01em] text-slate-900">{item.question}</h3>
-                <p className="mt-3 text-[15px] leading-8 text-slate-700"><span className="font-semibold text-slate-900">当前限制：</span>{item.currentLimit}</p>
-                <p className="mt-2 text-[15px] leading-8 text-slate-700"><span className="font-semibold text-slate-900">下一步所需数据：</span>{item.nextDataNeeded}</p>
-              </div>
-            ))}
-          </ChapterPage>
-
-          <ChapterPage index={hasHierarchySummary ? '七' : '六'} title="整改任务清单">
-            <div className="space-y-3">
-              {reportData.rectificationTasks.map((item, index) => (
-                <div key={`task-${index}`} className="report-avoid-break border border-slate-300 bg-white p-5">
-                  <div className="border-b border-slate-100 pb-4">
-                    <p className="text-[12px] font-semibold tracking-[0.08em] text-slate-500">序号 {item.sequence}</p>
-                    <div className="mt-2 flex items-start justify-between gap-4">
-                      <div className="space-y-2">
-                        <h3 className="text-[18px] font-bold tracking-[0.01em] text-slate-900">{item.taskName}</h3>
-                        <div className="flex flex-wrap gap-2">
-                          <span className="border border-slate-300 bg-slate-50/20 px-3 py-1 text-[12px] font-semibold text-slate-600">{item.taskType}</span>
-                          <span className="border border-slate-300 bg-slate-50/20 px-3 py-1 text-[12px] font-semibold text-slate-700">{item.priority}</span>
-                        </div>
-                      </div>
-                      <span className="border border-slate-300 bg-white px-3 py-1 text-[12px] font-semibold text-slate-600">
-                        {item.responsibilityLevel}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="mt-4 grid gap-3 md:grid-cols-2">
-                    <div className="border border-slate-300 bg-white px-4 py-3">
-                      <p className="text-[12px] font-semibold tracking-[0.08em] text-slate-500">问题指向</p>
-                      <p className="mt-2 text-[15px] leading-8 text-slate-700">{item.problem}</p>
-                    </div>
-                    <div className="border border-slate-300 bg-white px-4 py-3">
-                      <p className="text-[12px] font-semibold tracking-[0.08em] text-slate-500">工作措施</p>
-                      <p className="mt-2 text-[15px] leading-8 text-slate-700">{item.measure}</p>
-                    </div>
-                    <div className="border border-slate-300 bg-white px-4 py-3">
-                      <p className="text-[12px] font-semibold tracking-[0.08em] text-slate-500">牵头单位</p>
-                      <p className="mt-2 text-[15px] leading-8 text-slate-700">{item.leadUnit}</p>
-                    </div>
-                    <div className="border border-slate-300 bg-white px-4 py-3">
-                      <p className="text-[12px] font-semibold tracking-[0.08em] text-slate-500">配合单位</p>
-                      <p className="mt-2 text-[15px] leading-8 text-slate-700">{item.supportUnits}</p>
-                    </div>
-                    <div className="border border-slate-300 bg-white px-4 py-3">
-                      <p className="text-[12px] font-semibold tracking-[0.08em] text-slate-500">完成时限</p>
-                      <p className="mt-2 text-[15px] leading-8 text-slate-700">{item.deadline}</p>
-                    </div>
-                    <div className="border border-slate-300 bg-white px-4 py-3">
-                      <p className="text-[12px] font-semibold tracking-[0.08em] text-slate-500">阶段里程碑</p>
-                      <ul className="mt-2 space-y-1 text-[15px] leading-8 text-slate-700">
-                        {item.milestones.map((milestone, milestoneIndex) => (
-                          <li key={`milestone-${index}-${milestoneIndex}`}>{milestone}</li>
-                        ))}
-                      </ul>
-                    </div>
-                    <div className="border border-slate-300 bg-white px-4 py-3">
-                      <p className="text-[12px] font-semibold tracking-[0.08em] text-slate-500">跟踪指标</p>
-                      <p className="mt-2 text-[15px] leading-8 text-slate-700">{item.trackingIndicator}</p>
-                    </div>
-                    <div className="border border-slate-300 bg-white px-4 py-3 md:col-span-2">
-                      <p className="text-[12px] font-semibold tracking-[0.08em] text-slate-500">督办方式</p>
-                      <p className="mt-2 text-[15px] leading-8 text-slate-700">{item.supervisionMethod}</p>
-                    </div>
-                  </div>
-                </div>
+          {riskGroups.secondary.length ? (
+            <RiskGroup title="（二）重点关注事项" tone="secondary">
+              {riskGroups.secondary.map((item, index) => (
+                <RiskItemBlock key={`secondary-risk-${index}`} item={item} />
               ))}
-            </div>
-          </ChapterPage>
+            </RiskGroup>
+          ) : null}
 
-          <ChapterPage index={hasHierarchySummary ? '八' : '七'} title="结语">
-            {renderParagraphs(reportData.closing)}
-            {reportData.notes.length ? (
-              <div className="mt-6 border border-slate-300 bg-white px-5 py-4">
-                <h3 className="text-[18px] font-bold text-slate-900">口径提示</h3>
-                <ul className="mt-3 space-y-2">
-                  {reportData.notes.map((item, index) => (
-                    <li key={`note-${index}`} className="flex items-start gap-3">
-                      <span className="mt-[13px] h-px w-3 flex-shrink-0 bg-slate-500"></span>
-                      <span className="text-[15px] leading-8 text-slate-700">{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-          </ChapterPage>
+          {riskGroups.tracking.length ? (
+            <RiskGroup title="（三）持续跟踪事项" tone="tracking">
+              {riskGroups.tracking.map((item, index) => (
+                <RiskItemBlock key={`tracking-risk-${index}`} item={item} />
+              ))}
+            </RiskGroup>
+          ) : null}
+        </ChapterPage>
 
-          <ChapterPage index="附件一" title="指标审计与勾稽校验">
-            <div className="overflow-hidden border border-slate-300">
-              <table>
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="px-3 py-3 text-left text-[13px]">指标</th>
-                    <th className="px-3 py-3 text-left text-[13px]">计算公式</th>
-                    <th className="px-3 py-3 text-left text-[13px]">本期值</th>
-                    <th className="px-3 py-3 text-left text-[13px]">上期值</th>
-                    <th className="px-3 py-3 text-left text-[13px]">校验说明</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reportData.appendices.metricAuditRows.map((row, index) => (
-                    <tr key={`appendix-metric-${index}`} className="border-t border-slate-200 align-top">
-                      <td className="px-3 py-3 text-[14px] font-bold text-slate-900">{row.indicator}</td>
-                      <td className="px-3 py-3 text-[14px] leading-7 text-slate-700">{row.formula}</td>
-                      <td className="px-3 py-3 text-[14px] leading-7 text-slate-700">{row.currentValue}</td>
-                      <td className="px-3 py-3 text-[14px] leading-7 text-slate-700">{row.previousValue}</td>
-                      <td className="px-3 py-3 text-[14px] leading-7 text-slate-700">{row.reconciliationNote}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <ReconciliationCheckCards
-              checks={reportData.appendices.reconciliationChecks}
-              variant="print"
-              className="mt-4"
+        <ChapterPage id="facts" index="三" title="确认事实" reportTitle={reportTitle}>
+          {reportData.confirmedFacts.map((group, index) => (
+            <FactListBlock key={`fact-${index}`} title={group.category} items={group.points} />
+          ))}
+        </ChapterPage>
+
+        <ChapterPage id="analysis" index="四" title="审慎分析" reportTitle={reportTitle}>
+          {reportData.prudentAnalyses.map((item, index) => (
+            <AnalysisBlock
+              key={`analysis-${index}`}
+              title={item.topic}
+              rows={[
+                { label: '分析', value: item.analysis },
+                { label: '支撑', value: item.support },
+                { label: '提示', value: item.caution },
+              ]}
             />
-          </ChapterPage>
+          ))}
+        </ChapterPage>
 
-          <ChapterPage index="附件二" title="使用边界与口径说明">
-            {reportData.appendices.usageBoundaries.map((item, index) => (
-              <div key={`boundary-${index}`} className="report-avoid-break border border-slate-300 bg-white p-5">
-                <h3 className="text-[18px] font-bold tracking-[0.01em] text-slate-900">{item.title}</h3>
-                <p className="mt-3 text-[15px] leading-8 text-slate-700">{item.description}</p>
-              </div>
-            ))}
+        {hasHierarchySummary ? (
+          <ChapterPage id="hierarchy" index="五" title="三级监测重点摘要" reportTitle={reportTitle}>
+            <HierarchyPrintSummary payload={resolvedPayload} />
           </ChapterPage>
+        ) : null}
 
-          <ChapterPage index="附件三" title="建议补充数据">
-            {reportData.appendices.supplementDataItems.map((item, index) => (
-              <div key={`supplement-${index}`} className="report-avoid-break border border-slate-300 bg-white p-5">
-                <h3 className="text-[18px] font-bold tracking-[0.01em] text-slate-900">{item.item}</h3>
-                <p className="mt-3 text-[15px] leading-8 text-slate-700"><span className="font-semibold text-slate-900">用途：</span>{item.purpose}</p>
-                <p className="mt-2 text-[15px] leading-8 text-slate-700"><span className="font-semibold text-slate-900">建议来源：</span>{item.suggestedSource}</p>
-                <p className="mt-2 text-[15px] leading-8 text-slate-700"><span className="font-semibold text-slate-900">备注：</span>{item.note}</p>
-              </div>
+        <ChapterPage id="questions" index={hasHierarchySummary ? '六' : '五'} title="待补充问题" reportTitle={reportTitle}>
+          {reportData.unansweredQuestions.map((item, index) => (
+            <AnalysisBlock
+              key={`unanswered-${index}`}
+              title={item.question}
+              rows={[
+                { label: '当前限制', value: item.currentLimit },
+                { label: '下一步所需数据', value: item.nextDataNeeded },
+              ]}
+            />
+          ))}
+        </ChapterPage>
+
+        <ChapterPage id="tasks" index={hasHierarchySummary ? '七' : '六'} title="整改任务清单" reportTitle={reportTitle}>
+          <div className="pdf-task-stack">
+            {reportData.rectificationTasks.map((item, index) => (
+              <RectificationTaskCard
+                key={`task-${item.sequence}-${item.taskName}`}
+                item={item}
+                className={
+                  reportData.rectificationTasks.length % 2 === 1 && index === reportData.rectificationTasks.length - 1
+                    ? 'pdf-task-card--solo-tail'
+                    : ''
+                }
+              />
             ))}
-          </ChapterPage>
-        </div>
+          </div>
+        </ChapterPage>
+
+        <ChapterPage id="closing" index={hasHierarchySummary ? '八' : '七'} title="结语" reportTitle={reportTitle}>
+          {renderParagraphs(reportData.closing)}
+          {reportData.notes.length ? (
+            <article className="pdf-content-block">
+              <h3>口径提示</h3>
+              <ul className="pdf-dash-list">
+                {reportData.notes.map((item, index) => (
+                  <li key={`note-${index}`}>{item}</li>
+                ))}
+              </ul>
+            </article>
+          ) : null}
+        </ChapterPage>
+
+        <ChapterPage id="appendix-audit" index="附件一" title="指标审计与勾稽校验" reportTitle={reportTitle}>
+          <section className="pdf-audit-section">
+            <h3>指标审计</h3>
+            <table className="pdf-table pdf-table--audit">
+              <thead>
+                <tr>
+                  <th>指标</th>
+                  <th>计算公式</th>
+                  <th>本期值</th>
+                  <th>上期值</th>
+                  <th>校验说明</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reportData.appendices.metricAuditRows.map((row, index) => (
+                  <tr key={`appendix-metric-${index}`}>
+                    <td>{row.indicator}</td>
+                    <td>{row.formula}</td>
+                    <td>{row.currentValue}</td>
+                    <td>{row.previousValue}</td>
+                    <td>{row.reconciliationNote}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+          <ReconciliationTable checks={reportData.appendices.reconciliationChecks} />
+        </ChapterPage>
+
+        <ChapterPage id="appendix-boundary" index="附件二" title="使用边界与口径说明" reportTitle={reportTitle}>
+          {reportData.appendices.usageBoundaries.map((item, index) => (
+            <article key={`boundary-${index}`} className="pdf-content-block">
+              <h3>{item.title}</h3>
+              {renderParagraphs(item.description)}
+            </article>
+          ))}
+        </ChapterPage>
+
+        <ChapterPage id="appendix-supplement" index="附件三" title="建议补充数据" reportTitle={reportTitle}>
+          {reportData.appendices.supplementDataItems.map((item, index) => (
+            <AnalysisBlock
+              key={`supplement-${index}`}
+              title={item.item}
+              rows={[
+                { label: '用途', value: item.purpose },
+                { label: '建议来源', value: item.suggestedSource },
+                { label: '备注', value: item.note },
+              ]}
+            />
+          ))}
+        </ChapterPage>
       </div>
-    </>
+    </div>
   );
 };
 

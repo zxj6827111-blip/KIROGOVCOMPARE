@@ -2,7 +2,7 @@ import express from 'express';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { LlmProviderError } from '../services/LlmProvider';
 import { createLlmProvider } from '../services/LlmProviderFactory';
-import { resolveFirstNonEmpty, resolveParseUploadModelOptions } from '../utils/aiEnv';
+import { resolveParseUploadModelOptions, resolveUnifiedLlmConfig } from '../utils/aiEnv';
 
 const router = express.Router();
 
@@ -16,7 +16,7 @@ interface GenerateConfig {
 }
 
 interface GenerateRequest {
-  model: string;
+  model?: string;
   prompt: string;
   systemInstruction?: string;
   config?: GenerateConfig;
@@ -26,72 +26,13 @@ function stripJsonFences(text: string): string {
   return text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
 }
 
-function normalizeModelSelection(modelInput: string): { providerName: string; modelName: string } {
-  const model = String(modelInput || '').trim();
-  const lower = model.toLowerCase();
-
-  if (lower.startsWith('openai/')) {
-    return { providerName: 'openai', modelName: model.slice('openai/'.length) };
-  }
-
-  if (lower.startsWith('mimo/')) {
-    return { providerName: 'mimo', modelName: model.slice('mimo/'.length) };
-  }
-
-  if (lower.includes('mimo')) {
-    return { providerName: 'mimo', modelName: model };
-  }
-
-  if (lower.startsWith('gpt-')) {
-    return { providerName: 'openai', modelName: model };
-  }
-
-  if (lower === 'deepseek-v3' || lower === 'deepseek-v3.2') {
-    return {
-      providerName: 'nvidia',
-      modelName: resolveFirstNonEmpty(process.env.NVIDIA_MODEL, model),
-    };
-  }
-
-  if (lower === 'kimi2.5' || lower === 'kimi-k2.5') {
-    return {
-      providerName: 'nvidia',
-      modelName: resolveFirstNonEmpty(process.env.KIMI_MODEL, model),
-    };
-  }
-
-  if (lower.startsWith('nvidia/')) {
-    return { providerName: 'nvidia', modelName: model.slice('nvidia/'.length) };
-  }
-
-  if (lower.startsWith('deepseek/')) {
-    return { providerName: 'nvidia', modelName: model.slice('deepseek/'.length) };
-  }
-
-  if (lower.startsWith('kimi/')) {
-    return { providerName: 'nvidia', modelName: model.slice('kimi/'.length) };
-  }
-
-  if (lower.startsWith('gemini/')) {
-    return { providerName: 'gemini', modelName: model.slice('gemini/'.length) };
-  }
-
-  if (lower.includes('gemini')) {
-    return { providerName: 'gemini', modelName: model };
-  }
-
-  if (lower.startsWith('zhipu/')) {
-    return { providerName: 'zhipu', modelName: model.slice('zhipu/'.length) };
-  }
-
-  if (lower.includes('glm')) {
-    return { providerName: 'zhipu', modelName: model };
-  }
-
-  return {
-    providerName: resolveFirstNonEmpty(process.env.LLM_PROVIDER, process.env.GOV_INSIGHT_REPORT_PROVIDER, 'stub').toLowerCase(),
-    modelName: model || resolveFirstNonEmpty(process.env.LLM_MODEL, process.env.GOV_INSIGHT_REPORT_MODEL),
-  };
+function normalizeModelSelection(modelInput?: string): { providerName: string; modelName: string } {
+  const config = resolveUnifiedLlmConfig({
+    model: modelInput,
+    providerEnvKeys: ['GOV_INSIGHT_REPORT_PROVIDER', 'LLM_REPORT_PROVIDER', 'LLM_PROVIDER'],
+    modelEnvKeys: ['GOV_INSIGHT_REPORT_MODEL', 'LLM_REPORT_MODEL', 'OPENAI_MODEL', 'LLM_MODEL'],
+  });
+  return { providerName: config.provider, modelName: config.model };
 }
 
 function withThinkingInstruction(systemInstruction: string | undefined, config?: GenerateConfig): string | undefined {
@@ -117,10 +58,6 @@ router.get('/config', authMiddleware, async (_req: AuthRequest, res) => {
 router.post('/generate-report', authMiddleware, async (req: AuthRequest, res) => {
   try {
     const { model, prompt, systemInstruction, config } = req.body as GenerateRequest;
-
-    if (!model || typeof model !== 'string') {
-      return res.status(400).json({ error: 'Model is required' });
-    }
 
     if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
       return res.status(400).json({ error: 'Prompt is required' });

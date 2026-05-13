@@ -6,6 +6,7 @@ import { normalizeTablePath } from '../utils/tableRowColMapping';
 import { buildTable3TraceModel } from '../utils/reportTrace';
 import ParsedDataEditor from './ParsedDataEditor';
 import ConsistencyCheckView from './ConsistencyCheckView';
+import VisionReviewPanel from './VisionReviewPanel';
 
 const tryParseJsonText = (value) => {
   if (typeof value !== 'string') return { ok: false, value: null };
@@ -1020,6 +1021,37 @@ const buildDisplayParsedJson = (factsPayload, parsedPayload) => {
   };
 };
 
+const applyPendingOcrCorrections = (parsed, corrections = []) => {
+  const pending = (corrections || []).filter((item) => item?.status === 'pending');
+  if (!parsed || pending.length === 0) return parsed;
+
+  const next = JSON.parse(JSON.stringify(parsed));
+  const findSection = (payloadKey) => {
+    if (Array.isArray(next.sections)) {
+      const section = next.sections.find((item) => item && typeof item === 'object' && item[payloadKey]);
+      if (section) return section;
+    }
+    return next;
+  };
+
+  pending.forEach((correction) => {
+    const parts = String(correction.fieldPath || '').split('.').filter(Boolean);
+    const payloadKey = parts.shift();
+    if (!payloadKey) return;
+    const section = findSection(payloadKey);
+    if (!section[payloadKey] || typeof section[payloadKey] !== 'object') section[payloadKey] = {};
+    let target = section[payloadKey];
+    for (let index = 0; index < parts.length - 1; index += 1) {
+      const key = parts[index];
+      if (!target[key] || typeof target[key] !== 'object') target[key] = {};
+      target = target[key];
+    }
+    target[parts[parts.length - 1]] = correction.ocrValue;
+  });
+
+  return next;
+};
+
 function ReportDetail({ reportId: propReportId, onBack }) {
   const reportId = propReportId || window.location.pathname.split('/').pop();
   const currentUser = getCurrentUser();
@@ -1038,6 +1070,8 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const [editingData, setEditingData] = useState(null); // 编辑模式
   const [activeTab, setActiveTab] = useState('content'); // 'content' | 'checks'
   const [highlightCells, setHighlightCells] = useState([]); // 勾稽问题单元格路径
+  const [visionReviews, setVisionReviews] = useState([]);
+  const [ocrCorrections, setOcrCorrections] = useState([]);
   const [highlightTexts, setHighlightTexts] = useState([]); // 勾稽问题文本
   const [focusedCheck, setFocusedCheck] = useState(null); // 当前定位的勾稽问题
   const [focusedCells, setFocusedCells] = useState([]); // 定位模式下的单元格路径
@@ -1301,6 +1335,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   useEffect(() => {
     if (reportId && workingVersionId) {
       fetchHighlights(workingVersionId);
+      fetchOcrCorrections(workingVersionId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportId, activeTab, workingVersionId]); // activeTab 变化时也刷新
@@ -1367,6 +1402,20 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     }
     if (technicalModeEnabled && showTracePanel && workingVersionId) {
       await loadTraceData(reportId, workingVersionId);
+    }
+  };
+
+  const fetchOcrCorrections = async (targetVersionId = workingVersionId) => {
+    if (!reportId || !targetVersionId) return;
+    try {
+      const response = await apiClient.get(`/reports/${reportId}/vision-review`, {
+        params: { version_id: targetVersionId },
+      });
+      const data = response.data?.data || {};
+      setVisionReviews(data.reviews || []);
+      setOcrCorrections(data.corrections || []);
+    } catch (err) {
+      console.warn('Failed to fetch OCR corrections:', err);
     }
   };
 
@@ -1574,7 +1623,11 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const isFocusMode = focusedCells.length > 0 && focusedCheck;
   const activeHighlightCells = isFocusMode ? focusedCells : highlightCells;
   const mergedDisplay = buildDisplayParsedJson(factsPayload, workingVersion?.parsed_json);
-  const displayParsedJson = mergedDisplay.parsed;
+  const visibleOcrCorrections = ocrCorrections.filter((item) => item.status === 'pending');
+  const pendingOcrCorrections = ocrCorrections.filter((item) => item.status === 'pending');
+  const confirmedOcrCorrections = ocrCorrections.filter((item) => item.status === 'confirmed');
+  const sourceTableAnomalyReviews = visionReviews.filter((item) => item.conclusion === 'source_table_anomaly');
+  const displayParsedJson = applyPendingOcrCorrections(mergedDisplay.parsed, pendingOcrCorrections);
   const usingFactsSource = mergedDisplay.usingFactsSource;
   const traceView = traceData
     ? buildTable3TraceModel({
@@ -1800,6 +1853,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                     <Table2View
                       data={section.activeDisclosureData}
                       highlightCells={activeHighlightCells}
+                      ocrCorrections={visibleOcrCorrections}
                     />
                   )}
                   {section.type === 'table_3' && section.tableData && (
@@ -1807,12 +1861,14 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                       data={section.tableData}
                       compact={true}
                       highlightCells={activeHighlightCells}
+                      ocrCorrections={visibleOcrCorrections}
                     />
                   )}
                   {section.type === 'table_4' && section.reviewLitigationData && (
                     <Table4View
                       data={section.reviewLitigationData}
                       highlightCells={activeHighlightCells}
+                      ocrCorrections={visibleOcrCorrections}
                     />
                   )}
                   {!['text', 'table_2', 'table_3', 'table_4'].includes(section.type) && (
@@ -2532,6 +2588,12 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                 >
                   数据质量审计
                 </button>
+                <button
+                  className={`tab ${activeTab === 'visionReview' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('visionReview')}
+                >
+                  视觉复核
+                </button>
               </div>
             </div>
 
@@ -2555,6 +2617,29 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                 )}
                 {technicalModeEnabled && !usingFactsSource && !factsLoadError && (
                   <p className="meta">facts 数据尚未就绪，暂不展示表格。</p>
+                )}
+                {pendingOcrCorrections.length > 0 && (
+                  <div className="ocr-correction-banner">
+                    <strong>OCR已修正，待人工确认</strong>
+                    <span>共 {pendingOcrCorrections.length} 个单元格使用 OCR 值临时展示，确认后将取消标识。</span>
+                    <button className="secondary-btn" onClick={() => setActiveTab('visionReview')}>
+                      去核对
+                    </button>
+                  </div>
+                )}
+                {pendingOcrCorrections.length === 0 && confirmedOcrCorrections.length > 0 && (
+                  <div className="ocr-correction-banner ocr-correction-banner--confirmed">
+                    <strong>OCR修正已确认</strong>
+                    <span>已确认 {confirmedOcrCorrections.length} 个 OCR 修正单元格，醒目标识已收起。</span>
+                  </div>
+                )}
+                {pendingOcrCorrections.length === 0 && sourceTableAnomalyReviews.length > 0 && (
+                  <div className="ocr-correction-banner ocr-correction-banner--source">
+                    <strong>源表原始数据异常</strong>
+                    <span>
+                      视觉 OCR 与当前解析一致，但相关勾稽校验仍失败，建议核对原始年报表格填报口径。
+                    </span>
+                  </div>
                 )}
                 {renderTracePanel()}
                 {renderParsedContent(displayParsedJson)}
@@ -2594,6 +2679,20 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                       highlightPaths: paths || [],
                     };
                     setEditingData(editData);
+                  }}
+                />
+              </section>
+            )}
+
+            {activeTab === 'visionReview' && (
+              <section className="section">
+                <VisionReviewPanel
+                  reportId={reportId}
+                  versionId={workingVersionId}
+                  onCorrectionsChange={(items) => {
+                    setOcrCorrections(items || []);
+                    refresh();
+                    fetchOcrCorrections();
                   }}
                 />
               </section>

@@ -1,8 +1,10 @@
-import axios from 'axios';
 import { DiffSummary, SuspiciousPoint } from '../types/models';
 import { AISuggestion } from '../models/AISuggestion';
 import { uuidv4 } from '../utils/uuid';
 import pool from '../config/database';
+import { resolveUnifiedLlmConfig } from '../utils/aiEnv';
+import { createLlmProvider } from './LlmProviderFactory';
+import { parseStructuredJsonFromText } from './LlmCommon';
 
 export interface AISuggestionOptions {
   topSectionsCount?: number;
@@ -11,23 +13,16 @@ export interface AISuggestionOptions {
 }
 
 export class AISuggestionService {
-  private openaiApiKey = process.env.AI_SUGGESTION_API_KEY || process.env.OPENAI_API_KEY;
-  private openaiBaseUrl = String(process.env.AI_SUGGESTION_BASE_URL || process.env.OPENAI_BASE_URL || '').trim().replace(/\/+$/, '');
-  private openaiModel = String(process.env.AI_SUGGESTION_MODEL || process.env.OPENAI_MODEL || process.env.LLM_MODEL || '').trim();
-  private openaiTemperature = Number(process.env.AI_SUGGESTION_TEMPERATURE || 0.7);
-  private openaiMaxTokens = Number(process.env.AI_SUGGESTION_MAX_TOKENS || 1000);
-  private aiConfigVersion = parseInt(process.env.AI_CONFIG_VERSION || '1');
+  private aiConfigVersion = parseInt(process.env.AI_CONFIG_VERSION || '1', 10);
+  private temperature = Number(process.env.AI_SUGGESTION_TEMPERATURE || 0.7);
+  private maxOutputTokens = Number(process.env.AI_SUGGESTION_MAX_TOKENS || 1000);
 
-  /**
-   * 生成AI建议
-   */
   async generateSuggestion(
     compareTaskId: string,
     diffSummary: DiffSummary,
     options: AISuggestionOptions = {}
   ): Promise<AISuggestion | null> {
     try {
-      // 检查缓存
       if (!options.forceRegenerate) {
         const cached = await this.getCachedSuggestion(compareTaskId);
         if (cached) {
@@ -35,7 +30,6 @@ export class AISuggestionService {
         }
       }
 
-      // 创建建议记录
       const suggestionId = `sugg_${uuidv4()}`;
       const suggestion = new AISuggestion({
         suggestionId,
@@ -46,13 +40,10 @@ export class AISuggestionService {
         updatedAt: new Date(),
       });
 
-      // 保存到数据库
       await this.saveSuggestionToDatabase(suggestion);
 
-      // 生成建议内容
       const content = await this.generateSuggestionContent(diffSummary, options);
 
-      // 更新建议
       suggestion.status = 'succeeded';
       suggestion.interpretation = content.interpretation;
       suggestion.suspiciousPoints = content.suspiciousPoints;
@@ -60,19 +51,15 @@ export class AISuggestionService {
       suggestion.completedAt = new Date();
       suggestion.updatedAt = new Date();
 
-      // 更新数据库
       await this.updateSuggestionInDatabase(suggestion);
 
       return suggestion;
     } catch (error) {
-      console.error('生成AI建议失败:', error);
+      console.error('[AISuggestionService] Failed to generate suggestion:', error);
       return null;
     }
   }
 
-  /**
-   * 获取缓存的建议
-   */
   private async getCachedSuggestion(compareTaskId: string): Promise<AISuggestion | null> {
     try {
       const result = await pool.query(
@@ -88,14 +75,11 @@ export class AISuggestionService {
         return this.rowToSuggestion(result.rows[0]);
       }
     } catch (error) {
-      console.error('查询缓存建议失败:', error);
+      console.error('[AISuggestionService] Failed to read cached suggestion:', error);
     }
     return null;
   }
 
-  /**
-   * 生成建议内容
-   */
   private async generateSuggestionContent(
     diffSummary: DiffSummary,
     options: AISuggestionOptions
@@ -104,68 +88,80 @@ export class AISuggestionService {
     suspiciousPoints: SuspiciousPoint[];
     improvementSuggestions: string[];
   }> {
-    // 如果没有配置OpenAI API，返回默认建议
-    if (!this.openaiApiKey || !this.openaiBaseUrl || !this.openaiModel) {
-      return this.generateDefaultSuggestion(diffSummary);
-    }
-
     try {
-      // 准备输入
       const input = this.prepareSuggestionInput(diffSummary, options);
+      const llmConfig = resolveUnifiedLlmConfig({
+        model: process.env.AI_SUGGESTION_MODEL,
+        providerEnvKeys: ['AI_SUGGESTION_PROVIDER', 'LLM_PROVIDER'],
+        modelEnvKeys: ['AI_SUGGESTION_MODEL', 'OPENAI_MODEL', 'LLM_MODEL'],
+      });
+      const llm = createLlmProvider(llmConfig.provider, llmConfig.model);
+      if (!llm.generate) {
+        return this.generateDefaultSuggestion(diffSummary);
+      }
 
-      // 调用OpenAI API
-      const response = await axios.post(
-        `${this.openaiBaseUrl}/chat/completions`,
-        {
-          model: this.openaiModel,
-          messages: [
-            {
-              role: 'system',
-              content: `你是一个政府文件审查专家。分析以下差异摘要，提供：
-1. 差异点解读（简洁说明主要变化）
-2. 可疑点（需要人工复核的地方，使用保守措辞）
-3. 规范性改进建议
+      const result = await llm.generate(input, this.buildSuggestionSystemInstruction(), {
+        temperature: Number.isFinite(this.temperature) ? this.temperature : 0.7,
+        maxOutputTokens: Number.isFinite(this.maxOutputTokens) ? this.maxOutputTokens : 1000,
+        responseMimeType: 'application/json',
+        apiMode: process.env.AI_SUGGESTION_OPENAI_API_MODE || process.env.OPENAI_API_MODE,
+        responseSchemaName: 'ai_suggestion',
+        responseSchemaDescription: 'Structured AI suggestions for report comparison differences.',
+        responseSchema: this.buildSuggestionResponseSchema(),
+        responseStrict: false,
+      });
 
-请以JSON格式返回，包含以下字段：
-{
-  "interpretation": "...",
-  "suspiciousPoints": [{"location": "...", "description": "...", "riskLevel": "low|medium|high", "recommendation": "..."}],
-  "improvementSuggestions": ["...", "..."]
-}`,
-            },
-            {
-              role: 'user',
-              content: input,
-            },
-          ],
-          temperature: Number.isFinite(this.openaiTemperature) ? this.openaiTemperature : 0.7,
-          max_tokens: Number.isFinite(this.openaiMaxTokens) ? this.openaiMaxTokens : 1000,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${this.openaiApiKey}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      const content = response.data.choices[0].message.content;
-      const parsed = JSON.parse(content);
-
+      const parsed = parseStructuredJsonFromText<any>(String(result?.text || ''));
       return {
-        interpretation: parsed.interpretation || '',
-        suspiciousPoints: parsed.suspiciousPoints || [],
-        improvementSuggestions: parsed.improvementSuggestions || [],
+        interpretation: String(parsed.interpretation || ''),
+        suspiciousPoints: Array.isArray(parsed.suspiciousPoints) ? parsed.suspiciousPoints : [],
+        improvementSuggestions: Array.isArray(parsed.improvementSuggestions) ? parsed.improvementSuggestions : [],
       };
     } catch (error) {
-      console.error('调用OpenAI API失败:', error);
+      console.error('[AISuggestionService] Model suggestion failed:', error);
       return this.generateDefaultSuggestion(diffSummary);
     }
   }
 
-  /**
-   * 生成默认建议
-   */
+  private buildSuggestionSystemInstruction(): string {
+    return [
+      '你是政府信息公开年度报告差异审查专家。',
+      '请基于差异摘要，输出 JSON，不要输出 Markdown 或额外解释。',
+      '字段包括 interpretation、suspiciousPoints、improvementSuggestions。',
+      'suspiciousPoints 每项包含 location、description、riskLevel、recommendation。',
+      'riskLevel 只能使用 low、medium、high。',
+    ].join('\n');
+  }
+
+  private buildSuggestionResponseSchema(): Record<string, unknown> {
+    return {
+      type: 'object',
+      additionalProperties: false,
+      required: ['interpretation', 'suspiciousPoints', 'improvementSuggestions'],
+      properties: {
+        interpretation: { type: 'string' },
+        suspiciousPoints: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['location', 'description', 'riskLevel', 'recommendation'],
+            properties: {
+              location: { type: 'string' },
+              description: { type: 'string' },
+              riskLevel: { type: 'string' },
+              recommendation: { type: 'string' },
+            },
+          },
+        },
+        improvementSuggestions: {
+          type: 'array',
+          items: { type: 'string' },
+        },
+      },
+    };
+  }
+
   private generateDefaultSuggestion(diffSummary: DiffSummary): {
     interpretation: string;
     suspiciousPoints: SuspiciousPoint[];
@@ -180,51 +176,53 @@ export class AISuggestionService {
       stats.deletedTables +
       stats.modifiedTables;
 
-    const interpretation = `本次对比发现共${totalChanges}处变化，其中新增${stats.addedParagraphs}段落、删除${stats.deletedParagraphs}段落、修改${stats.modifiedParagraphs}段落。表格方面新增${stats.addedTables}个、删除${stats.deletedTables}个、修改${stats.modifiedTables}个。`;
+    const interpretation = `本次对比发现共 ${totalChanges} 处变化，其中新增 ${stats.addedParagraphs} 个段落，删除 ${stats.deletedParagraphs} 个段落，修改 ${stats.modifiedParagraphs} 个段落；表格新增 ${stats.addedTables} 个，删除 ${stats.deletedTables} 个，修改 ${stats.modifiedTables} 个。`;
 
     const suspiciousPoints: SuspiciousPoint[] = [];
 
     if (stats.modifiedParagraphs > 10) {
       suspiciousPoints.push({
         location: '正文内容',
-        description: '修改段落数量较多，建议逐一审查',
+        description: '修改段落数量较多，建议逐项复核。',
         riskLevel: 'medium',
-        recommendation: '建议人工逐段审查修改内容，确保准确性',
+        recommendation: '人工逐段审查修改内容，确认表述、口径和数据来源一致。',
       });
     }
 
     if (stats.modifiedTables > 5) {
       suspiciousPoints.push({
         location: '表格数据',
-        description: '表格修改较多，可能涉及数据变化',
+        description: '表格修改较多，可能涉及关键统计口径变化。',
         riskLevel: 'medium',
-        recommendation: '建议重点审查表格数据的准确性和一致性',
+        recommendation: '重点审查表格数据准确性，并与原始年报数据交叉核验。',
       });
     }
 
     if (diffSummary.keyNumberChanges.length > 0) {
-      const largeChanges = diffSummary.keyNumberChanges.filter((c) => {
-        const oldVal = parseFloat(c.oldValue);
-        const newVal = parseFloat(c.newValue);
-        const changePercent = Math.abs((newVal - oldVal) / oldVal) * 100;
-        return changePercent > 20;
+      const largeChanges = diffSummary.keyNumberChanges.filter((change) => {
+        const oldValue = parseFloat(change.oldValue);
+        const newValue = parseFloat(change.newValue);
+        if (!Number.isFinite(oldValue) || oldValue === 0 || !Number.isFinite(newValue)) {
+          return false;
+        }
+        return Math.abs((newValue - oldValue) / oldValue) * 100 > 20;
       });
 
       if (largeChanges.length > 0) {
         suspiciousPoints.push({
           location: '关键数字',
-          description: `发现${largeChanges.length}处数字变化超过20%`,
+          description: `发现 ${largeChanges.length} 处数字变化超过 20%。`,
           riskLevel: 'high',
-          recommendation: '建议重点审查这些数字变化的合理性',
+          recommendation: '重点审查这些数字变化的来源、统计口径和合理性。',
         });
       }
     }
 
     const improvementSuggestions = [
-      '建议按照统一的格式规范编写报告',
-      '确保所有数据来源清晰可追溯',
-      '建议对重要数据进行交叉验证',
-      '建议保持报告结构的一致性',
+      '建议按照统一格式规范编写报告。',
+      '确保所有数据来源清晰可追溯。',
+      '对重要数据进行交叉验证。',
+      '保持报告结构和统计口径一致。',
     ];
 
     return {
@@ -234,47 +232,37 @@ export class AISuggestionService {
     };
   }
 
-  /**
-   * 准备建议输入
-   */
-  private prepareSuggestionInput(
-    diffSummary: DiffSummary,
-    options: AISuggestionOptions
-  ): string {
+  private prepareSuggestionInput(diffSummary: DiffSummary, options: AISuggestionOptions): string {
     const topSectionsCount = options.topSectionsCount || 5;
     const maxCharacters = options.maxCharacters || 2000;
 
     let input = '差异摘要：\n';
     input += `总体评估：${diffSummary.overallAssessment}\n\n`;
 
-    input += '统计数据：\n';
     const stats = diffSummary.statistics;
+    input += '统计数据：\n';
     input += `新增段落: ${stats.addedParagraphs}, 删除段落: ${stats.deletedParagraphs}, 修改段落: ${stats.modifiedParagraphs}\n`;
     input += `新增表格: ${stats.addedTables}, 删除表格: ${stats.deletedTables}, 修改表格: ${stats.modifiedTables}\n\n`;
 
     input += '变化最多的章节：\n';
     for (const section of diffSummary.topChangedSections.slice(0, topSectionsCount)) {
-      input += `- ${section.sectionName}: ${section.totalChangeCount}处变化\n`;
+      input += `- ${section.sectionName}: ${section.totalChangeCount} 处变化\n`;
     }
 
     if (diffSummary.keyNumberChanges.length > 0) {
       input += '\n关键数字变化：\n';
       for (const change of diffSummary.keyNumberChanges.slice(0, 5)) {
-        input += `- ${change.location}: ${change.oldValue} → ${change.newValue}\n`;
+        input += `- ${change.location}: ${change.oldValue} -> ${change.newValue}\n`;
       }
     }
 
-    // 截断到最大字符数
     if (input.length > maxCharacters) {
-      input = input.substring(0, maxCharacters) + '...';
+      input = `${input.substring(0, maxCharacters)}...`;
     }
 
     return input;
   }
 
-  /**
-   * 保存建议到数据库
-   */
   private async saveSuggestionToDatabase(suggestion: AISuggestion): Promise<void> {
     const query = `
       INSERT INTO ai_suggestions (
@@ -297,9 +285,6 @@ export class AISuggestionService {
     ]);
   }
 
-  /**
-   * 更新建议到数据库
-   */
   private async updateSuggestionInDatabase(suggestion: AISuggestion): Promise<void> {
     const query = `
       UPDATE ai_suggestions

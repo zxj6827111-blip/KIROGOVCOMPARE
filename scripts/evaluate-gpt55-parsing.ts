@@ -3,7 +3,6 @@ import * as dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 import { createLlmProvider } from '../src/services/LlmProviderFactory';
-import { activeProviderName } from '../src/services/LlmProviderFactory';
 
 // Load environment variables
 dotenv.config({ path: path.join(__dirname, '../.env') });
@@ -52,22 +51,22 @@ const SAMPLE_REPORT_TEXT = `
 无。
 `;
 
-async function evaluateKimiParsing() {
+async function evaluateGptParsing() {
     console.log('=========================================');
-    console.log('   Kimi-k2.5 Parsing Evaluation Script');
+    console.log('   GPT-5.5 Parsing Evaluation Script');
     console.log('=========================================');
 
     // Create a temporary file with the sample content
-    const tempFile = path.join(__dirname, 'temp_kimi_eval_report.md');
+    const tempFile = path.join(__dirname, 'temp_gpt55_eval_report.md');
     fs.writeFileSync(tempFile, SAMPLE_REPORT_TEXT);
 
     try {
-        console.log(`Using Provider: modelscope`);
-        console.log(`Using Model: kimi-k2.5`);
+        const providerName = 'openai';
+        const modelName = 'gpt-5.5';
+        console.log(`Using Provider: ${providerName}`);
+        console.log(`Using Model: ${modelName}`);
         
-        // Directly instantiate or use factory with specific override
-        // We use the string literal 'kimi-k2.5' which corresponds to our new mapping
-        const provider = createLlmProvider('modelscope', 'kimi-k2.5');
+        const provider = createLlmProvider(providerName, modelName);
         
         console.log('Starting parse request...');
         const start = Date.now();
@@ -159,4 +158,4 @@ async function evaluateKimiParsing() {
     }
 }
 
-evaluateKimiParsing();
+evaluateGptParsing();

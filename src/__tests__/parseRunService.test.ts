@@ -8,7 +8,7 @@ describe('ParseRunService foundation helpers', () => {
   it('builds a stable fingerprint independent of object key order', () => {
     const first = buildParseConfigSnapshot({
       provider: 'openai',
-      model: 'gpt-5.1',
+      model: 'gpt-5.5',
       promptVersion: 'rules-v1',
       sourceGate: {
         strategy: 'standard',
@@ -41,8 +41,8 @@ describe('ParseRunService foundation helpers', () => {
 
   it('includes source gate warning threshold in fingerprint', () => {
     const base = buildParseConfigSnapshot({
-      provider: 'zhipu',
-      model: 'glm-5',
+      provider: 'openai',
+      model: 'gpt-5.5',
       sourceGate: {
         strategy: 'standard',
         uncertainThreshold: 10,

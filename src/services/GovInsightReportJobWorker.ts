@@ -1,7 +1,7 @@
 import pool from '../config/database-llm';
 import { createLlmProvider } from './LlmProviderFactory';
 import { LlmProviderError } from './LlmProvider';
-import { buildPrefixedModelValue, resolveFirstNonEmpty } from '../utils/aiEnv';
+import { resolveUnifiedLlmConfig } from '../utils/aiEnv';
 import { parseStructuredJsonFromText } from './LlmCommon';
 import { govInsightReportPayloadService } from './GovInsightReportPayloadService';
 import {
@@ -119,106 +119,12 @@ function parseRequestConfig(raw: unknown): Record<string, unknown> {
   return defaults;
 }
 
-function normalizeModelSelection(modelInput: string): { providerName: string; modelName: string } {
-  const model = String(modelInput || '').trim();
-  const lower = model.toLowerCase();
-
-  if (lower.startsWith('gemini_openai/')) {
-    return { providerName: 'gemini_openai', modelName: model.slice('gemini_openai/'.length) };
-  }
-
-  if (lower.startsWith('gemini-openai/')) {
-    return { providerName: 'gemini_openai', modelName: model.slice('gemini-openai/'.length) };
-  }
-
-  if (lower.startsWith('openai/')) {
-    return { providerName: 'openai', modelName: model.slice('openai/'.length) };
-  }
-
-  if (lower.startsWith('mimo/')) {
-    return { providerName: 'mimo', modelName: model.slice('mimo/'.length) };
-  }
-
-  if (lower.includes('mimo')) {
-    return { providerName: 'mimo', modelName: model };
-  }
-
-  if (lower.startsWith('gpt-')) {
-    return { providerName: 'openai', modelName: model };
-  }
-
-  if (lower === 'deepseek-v3' || lower === 'deepseek-v3.2') {
-    return {
-      providerName: 'nvidia',
-      modelName: resolveFirstNonEmpty(process.env.NVIDIA_MODEL, model),
-    };
-  }
-
-  if (lower === 'kimi2.5' || lower === 'kimi-k2.5') {
-    return {
-      providerName: 'nvidia',
-      modelName: resolveFirstNonEmpty(process.env.KIMI_MODEL, model),
-    };
-  }
-
-  if (lower.startsWith('nvidia/')) {
-    return { providerName: 'nvidia', modelName: model.slice('nvidia/'.length) };
-  }
-
-  if (lower.startsWith('deepseek/')) {
-    return { providerName: 'nvidia', modelName: model.slice('deepseek/'.length) };
-  }
-
-  if (lower.startsWith('kimi/')) {
-    return { providerName: 'nvidia', modelName: model.slice('kimi/'.length) };
-  }
-
-  if (lower.startsWith('gemini/')) {
-    return { providerName: 'gemini', modelName: model.slice('gemini/'.length) };
-  }
-
-  if (lower.includes('gemini')) {
-    return { providerName: 'gemini', modelName: model };
-  }
-
-  if (lower.startsWith('zhipu/')) {
-    return { providerName: 'zhipu', modelName: model.slice('zhipu/'.length) };
-  }
-
-  if (lower.includes('glm')) {
-    return { providerName: 'zhipu', modelName: model };
-  }
-
-  return {
-    providerName: resolveFirstNonEmpty(
-      process.env.GOV_INSIGHT_REPORT_PROVIDER,
-      process.env.LLM_REPORT_PROVIDER,
-      process.env.LLM_PROVIDER,
-      'stub'
-    ).toLowerCase(),
-    modelName: model || resolveFirstNonEmpty(
-      process.env.GOV_INSIGHT_REPORT_MODEL,
-      process.env.LLM_REPORT_MODEL,
-      process.env.LLM_MODEL
-    ),
-  };
-}
-
-function resolveFallbackModel(currentModel: string): string {
-  const provider = resolveFirstNonEmpty(
-    process.env.GOV_INSIGHT_REPORT_FALLBACK_PROVIDER,
-    process.env.LLM_REPORT_FALLBACK_PROVIDER,
-    process.env.LLM_FALLBACK_PROVIDER
-  ).toLowerCase();
-
-  const model = resolveFirstNonEmpty(
-    process.env.GOV_INSIGHT_REPORT_FALLBACK_MODEL,
-    process.env.LLM_REPORT_FALLBACK_MODEL,
-    process.env.LLM_FALLBACK_MODEL
-  );
-
-  const fallbackModel = buildPrefixedModelValue(provider, model);
-  return fallbackModel && fallbackModel !== currentModel ? fallbackModel : '';
+function normalizeModelSelection(): { providerName: string; modelName: string } {
+  const config = resolveUnifiedLlmConfig({
+    providerEnvKeys: ['GOV_INSIGHT_REPORT_PROVIDER', 'LLM_REPORT_PROVIDER', 'LLM_PROVIDER'],
+    modelEnvKeys: ['GOV_INSIGHT_REPORT_MODEL', 'LLM_REPORT_MODEL', 'OPENAI_MODEL', 'LLM_MODEL'],
+  });
+  return { providerName: config.provider, modelName: config.model };
 }
 
 function normalizeError(error: unknown): { code: string; message: string } {
@@ -364,7 +270,7 @@ class GovInsightReportJobWorker {
         [STEPS.GENERATING.progress, STEPS.GENERATING.code, STEPS.GENERATING.name, job.id]
       );
 
-      const { providerName, modelName } = normalizeModelSelection(job.model);
+      const { providerName, modelName } = normalizeModelSelection();
       const llm = createLlmProvider(providerName, modelName);
       if (!llm.generate) {
         throw new Error(`Provider ${providerName} does not support generation`);
@@ -535,27 +441,6 @@ class GovInsightReportJobWorker {
 
   private async handleFailure(job: GovInsightReportJobRow, error: unknown): Promise<void> {
     const { code, message } = normalizeError(error);
-    const fallbackModel = resolveFallbackModel(job.model);
-
-    if (job.retry_count < job.max_retries && fallbackModel) {
-      await pool.query(
-        `
-        UPDATE gov_insight_report_jobs
-        SET status = 'queued',
-            progress = $1,
-            step_code = $2,
-            step_name = $3,
-            retry_count = retry_count + 1,
-            error_code = $4,
-            error_message = $5,
-            started_at = NULL,
-            model = $6
-        WHERE id = $7
-        `,
-        [STEPS.QUEUED.progress, STEPS.QUEUED.code, STEPS.QUEUED.name, code, message, fallbackModel, job.id]
-      );
-      return;
-    }
 
     await pool.query(
       `

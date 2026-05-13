@@ -145,6 +145,41 @@
   border: 1px solid rgba(242, 139, 130, 0.2);
 }
 
+.ocr-correction-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0 16px;
+  padding: 12px 14px;
+  border: 1px solid #fdba74;
+  border-radius: var(--radius-sm);
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.ocr-correction-banner strong {
+  flex: 0 0 auto;
+  font-size: 14px;
+}
+
+.ocr-correction-banner span {
+  flex: 1;
+  font-size: 13px;
+}
+
+.ocr-correction-banner--confirmed {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.ocr-correction-banner--source {
+  border-color: #fb923c;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
 .secondary-btn {
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
