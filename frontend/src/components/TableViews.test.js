@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import { Table2View } from './TableViews';
+import { Table2View, Table3View } from './TableViews';
 
 const baseData = {
   regulations: { made: 0, repealed: 0, valid: -1 },
@@ -76,5 +76,202 @@ describe('Table2View', () => {
     expect(regulationsCell).not.toBeNull();
     expect(regulationsCell.className).toContain('cell-issue-confirmed');
     expect(regulationsCell.querySelector('.issue-badge')).not.toBeNull();
+  });
+});
+
+describe('Table3View', () => {
+  test('highlights carried-over cells as primary for identity issues', () => {
+    const table3Data = {
+      naturalPerson: {
+        newReceived: 100,
+        carriedOver: 5,
+        results: {
+          granted: 0,
+          partialGrant: 0,
+          denied: {
+            stateSecret: 0,
+            lawForbidden: 0,
+            safetyStability: 0,
+            thirdPartyRights: 0,
+            internalAffairs: 0,
+            processInfo: 0,
+            enforcementCase: 0,
+            adminQuery: 0,
+          },
+          unableToProvide: { noInfo: 0, needCreation: 0, unclear: 0 },
+          notProcessed: { complaint: 0, repeat: 0, publication: 0, massiveRequests: 0, confirmInfo: 0 },
+          other: { overdueCorrection: 0, overdueFee: 0, otherReasons: 0 },
+          totalProcessed: 97,
+          carriedForward: 2,
+        },
+      },
+      legalPerson: {
+        commercial: {
+          newReceived: 0,
+          carriedOver: 0,
+          results: {
+            granted: 0,
+            partialGrant: 0,
+            denied: {
+              stateSecret: 0,
+              lawForbidden: 0,
+              safetyStability: 0,
+              thirdPartyRights: 0,
+              internalAffairs: 0,
+              processInfo: 0,
+              enforcementCase: 0,
+              adminQuery: 0,
+            },
+            unableToProvide: { noInfo: 0, needCreation: 0, unclear: 0 },
+            notProcessed: { complaint: 0, repeat: 0, publication: 0, massiveRequests: 0, confirmInfo: 0 },
+            other: { overdueCorrection: 0, overdueFee: 0, otherReasons: 0 },
+            totalProcessed: 0,
+            carriedForward: 0,
+          },
+        },
+        research: {
+          newReceived: 0,
+          carriedOver: 0,
+          results: {
+            granted: 0,
+            partialGrant: 0,
+            denied: {
+              stateSecret: 0,
+              lawForbidden: 0,
+              safetyStability: 0,
+              thirdPartyRights: 0,
+              internalAffairs: 0,
+              processInfo: 0,
+              enforcementCase: 0,
+              adminQuery: 0,
+            },
+            unableToProvide: { noInfo: 0, needCreation: 0, unclear: 0 },
+            notProcessed: { complaint: 0, repeat: 0, publication: 0, massiveRequests: 0, confirmInfo: 0 },
+            other: { overdueCorrection: 0, overdueFee: 0, otherReasons: 0 },
+            totalProcessed: 0,
+            carriedForward: 0,
+          },
+        },
+        social: {
+          newReceived: 0,
+          carriedOver: 0,
+          results: {
+            granted: 0,
+            partialGrant: 0,
+            denied: {
+              stateSecret: 0,
+              lawForbidden: 0,
+              safetyStability: 0,
+              thirdPartyRights: 0,
+              internalAffairs: 0,
+              processInfo: 0,
+              enforcementCase: 0,
+              adminQuery: 0,
+            },
+            unableToProvide: { noInfo: 0, needCreation: 0, unclear: 0 },
+            notProcessed: { complaint: 0, repeat: 0, publication: 0, massiveRequests: 0, confirmInfo: 0 },
+            other: { overdueCorrection: 0, overdueFee: 0, otherReasons: 0 },
+            totalProcessed: 0,
+            carriedForward: 0,
+          },
+        },
+        legal: {
+          newReceived: 0,
+          carriedOver: 0,
+          results: {
+            granted: 0,
+            partialGrant: 0,
+            denied: {
+              stateSecret: 0,
+              lawForbidden: 0,
+              safetyStability: 0,
+              thirdPartyRights: 0,
+              internalAffairs: 0,
+              processInfo: 0,
+              enforcementCase: 0,
+              adminQuery: 0,
+            },
+            unableToProvide: { noInfo: 0, needCreation: 0, unclear: 0 },
+            notProcessed: { complaint: 0, repeat: 0, publication: 0, massiveRequests: 0, confirmInfo: 0 },
+            other: { overdueCorrection: 0, overdueFee: 0, otherReasons: 0 },
+            totalProcessed: 0,
+            carriedForward: 0,
+          },
+        },
+        other: {
+          newReceived: 0,
+          carriedOver: 0,
+          results: {
+            granted: 0,
+            partialGrant: 0,
+            denied: {
+              stateSecret: 0,
+              lawForbidden: 0,
+              safetyStability: 0,
+              thirdPartyRights: 0,
+              internalAffairs: 0,
+              processInfo: 0,
+              enforcementCase: 0,
+              adminQuery: 0,
+            },
+            unableToProvide: { noInfo: 0, needCreation: 0, unclear: 0 },
+            notProcessed: { complaint: 0, repeat: 0, publication: 0, massiveRequests: 0, confirmInfo: 0 },
+            other: { overdueCorrection: 0, overdueFee: 0, otherReasons: 0 },
+            totalProcessed: 0,
+            carriedForward: 0,
+          },
+        },
+      },
+      total: {
+        newReceived: 100,
+        carriedOver: 5,
+        results: {
+          granted: 0,
+          partialGrant: 0,
+          denied: {
+            stateSecret: 0,
+            lawForbidden: 0,
+            safetyStability: 0,
+            thirdPartyRights: 0,
+            internalAffairs: 0,
+            processInfo: 0,
+            enforcementCase: 0,
+            adminQuery: 0,
+          },
+          unableToProvide: { noInfo: 0, needCreation: 0, unclear: 0 },
+          notProcessed: { complaint: 0, repeat: 0, publication: 0, massiveRequests: 0, confirmInfo: 0 },
+          other: { overdueCorrection: 0, overdueFee: 0, otherReasons: 0 },
+          totalProcessed: 97,
+          carriedForward: 2,
+        },
+      },
+    };
+
+    const identityIssue = {
+      id: 101,
+      stableIssueId: 'id:101',
+      displayNo: 1,
+      title: '收办平衡（自然人列）',
+      check_key: 't3_identity_naturalPerson',
+      auto_status: 'FAIL',
+      human_status: 'pending',
+      evidence: {
+        leftPaths: ['tableData.naturalPerson.newReceived', 'tableData.naturalPerson.carriedOver'],
+        rightPaths: ['tableData.naturalPerson.results.totalProcessed', 'tableData.naturalPerson.results.carriedForward'],
+      },
+    };
+
+    const { container } = render(
+      <Table3View
+        data={table3Data}
+        tableIssues={[identityIssue]}
+      />
+    );
+
+    const carriedOverCell = container.querySelector('[data-cell-path="tableData.naturalPerson.carriedOver"]');
+    expect(carriedOverCell).not.toBeNull();
+    expect(carriedOverCell.className).toContain('cell-issue-primary');
+    expect(carriedOverCell.className).toContain('cell-issue-tone--identity');
+    expect(carriedOverCell.querySelector('.issue-badge')).not.toBeNull();
   });
 });

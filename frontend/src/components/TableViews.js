@@ -31,13 +31,11 @@ const getDefaultIssueEmphasis = (item, fullPath, role = '') => {
     case 'identity':
       if (
         pathEndsWith(fullPath, 'newReceived') ||
+        pathEndsWith(fullPath, 'carriedOver') ||
         pathEndsWith(fullPath, 'results.totalProcessed') ||
         pathEndsWith(fullPath, 'results.carriedForward')
       ) {
         return 'primary';
-      }
-      if (pathEndsWith(fullPath, 'carriedOver')) {
-        return 'related';
       }
       return 'none';
     case 'result_total':
