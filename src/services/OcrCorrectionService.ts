@@ -1,5 +1,7 @@
 import pool from '../config/database-llm';
+import { consistencyCheckService } from './ConsistencyCheckService';
 import { materializeService } from './data-center/MaterializeService';
+import { visionReviewService } from './VisionReviewService';
 
 type ParsedJson = Record<string, any>;
 type CorrectionAction = 'confirm' | 'reject';
@@ -78,7 +80,7 @@ export class OcrCorrectionService {
     correctionIds: number[],
     action: CorrectionAction,
     userId?: number | null
-  ): Promise<{ corrections: any[]; materialized?: boolean; factsCreated?: number; cellsCreated?: number }> {
+  ): Promise<{ corrections: any[]; materialized?: boolean; factsCreated?: number; cellsCreated?: number; checksRunId?: number; checksSummary?: Record<string, number>; visionReviewsQueued?: number }> {
     if (!Number.isInteger(reportId) || reportId <= 0) throw new Error('invalid_report_id');
     if (!Number.isInteger(versionId) || versionId <= 0) throw new Error('invalid_version_id');
     if (!Array.isArray(correctionIds) || correctionIds.some((id) => !Number.isInteger(id) || id <= 0)) {
@@ -182,6 +184,9 @@ export class OcrCorrectionService {
     let materialized = false;
     let factsCreated = 0;
     let cellsCreated = 0;
+    let checksRunId: number | undefined;
+    let checksSummary: Record<string, number> | undefined;
+    let visionReviewsQueued: number | undefined;
     if (action === 'confirm' && appliedParsedJson) {
       const materializeResult = await materializeService.materializeVersion(versionId);
       if (!materializeResult.success) {
@@ -190,6 +195,22 @@ export class OcrCorrectionService {
       materialized = true;
       factsCreated = materializeResult.factsCreated;
       cellsCreated = materializeResult.cellsCreated;
+
+      const consistencyResult = await consistencyCheckService.runAndPersist(versionId, appliedParsedJson);
+      checksRunId = consistencyResult.runId;
+      checksSummary = {
+        fail: consistencyResult.items.filter((item) => item.autoStatus === 'FAIL').length,
+        uncertain: consistencyResult.items.filter((item) => item.autoStatus === 'UNCERTAIN').length,
+        pass: consistencyResult.items.filter((item) => item.autoStatus === 'PASS').length,
+        notAssessable: consistencyResult.items.filter((item) => item.autoStatus === 'NOT_ASSESSABLE').length,
+        total: consistencyResult.items.length,
+      };
+      visionReviewsQueued = await visionReviewService.enqueueForConsistencyItems(
+        reportId,
+        versionId,
+        consistencyResult.items,
+        true
+      );
     }
 
     const updated = await pool.query(
@@ -222,6 +243,9 @@ export class OcrCorrectionService {
       materialized,
       factsCreated,
       cellsCreated,
+      checksRunId,
+      checksSummary,
+      visionReviewsQueued,
     };
   }
 }

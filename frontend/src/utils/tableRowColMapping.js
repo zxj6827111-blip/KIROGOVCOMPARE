@@ -199,9 +199,19 @@ const TABLE2_COL_LABELS = {
 
 export const normalizeTablePath = (rawPath) => {
     if (!rawPath) return null;
+    
+    // 兼容旧格式
     if (rawPath.startsWith('sections[table_2].')) {
         return `activeDisclosureData.${rawPath.replace('sections[table_2].', '')}`;
     }
+    
+    // 兼容 sections[type=table_X]. 格式
+    const match = rawPath.match(/^sections\[type=table_[234]\]\.(.*)/);
+    if (match) {
+        return match[1];
+    }
+    
+    // activeDisclosureData.*, tableData.*, reviewLitigationData.* 等直接路径会原样返回
     return rawPath;
 };
 

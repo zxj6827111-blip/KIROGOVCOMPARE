@@ -4,6 +4,8 @@ import { apiClient, getCurrentUser } from '../apiClient';
 import { Table2View, Table3View, Table4View } from './TableViews';
 import { normalizeTablePath } from '../utils/tableRowColMapping';
 import { buildTable3TraceModel } from '../utils/reportTrace';
+import { normalizeConsistencyGroups } from '../utils/consistencyDisplay';
+import { aggregateIssuesFromChecks } from '../utils/issueAggregation';
 import ParsedDataEditor from './ParsedDataEditor';
 import ConsistencyCheckView from './ConsistencyCheckView';
 import VisionReviewPanel from './VisionReviewPanel';
@@ -1076,6 +1078,8 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const [focusedCheck, setFocusedCheck] = useState(null); // 当前定位的勾稽问题
   const [focusedCells, setFocusedCells] = useState([]); // 定位模式下的单元格路径
   const [qualityIssues, setQualityIssues] = useState({}); // 质量审计问题 { sec5: [...], sec6: [...] }
+  const [table3Issues, setTable3Issues] = useState([]); // 表三勾稽异常（来自后端 /checks）
+  const [table4Issues, setTable4Issues] = useState([]); // 表四勾稽异常（来自后端 /checks）
   const [showVersionHistory, setShowVersionHistory] = useState(false); // 版本历史折叠
   const [versionHistory, setVersionHistory] = useState(null); // 历史版本列表数据
   const [versionsLoading, setVersionsLoading] = useState(false);
@@ -1088,6 +1092,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const [traceLoading, setTraceLoading] = useState(false);
   const [traceError, setTraceError] = useState('');
   const [traceData, setTraceData] = useState(null);
+  const [table2Issues, setTable2Issues] = useState([]);
   const isTablePath = (p) =>
     p &&
     (p.includes('tableData') ||
@@ -1193,7 +1198,15 @@ function ReportDetail({ reportId: propReportId, onBack }) {
         params: { version_id: targetVersionId },
       });
       const data = response.data?.data || response.data;
-      const groups = data?.groups || [];
+      const groups = normalizeConsistencyGroups(data?.groups || []);
+      const aggregation = aggregateIssuesFromChecks(groups, {
+        domain: 'consistency',
+        displayMode: 'content',
+        includeUncertain: true,
+        includeConfirmed: true,
+        includeDismissed: true,
+        displayNoScope: 'group',
+      });
 
       console.log('[DEBUG ReportDetail] Fetched checks data:', data);
 
@@ -1202,17 +1215,31 @@ function ReportDetail({ reportId: propReportId, onBack }) {
       const textInfos = [];
       const sec5Issues = [];
       const sec6Issues = [];
+      const t2Issues = (aggregation.issuesByGroupKey.table2 || []).filter(
+        (item) =>
+          (item.autoStatus === 'FAIL' || item.autoStatus === 'UNCERTAIN') &&
+          item.humanStatus !== 'dismissed'
+      ); // 表二勾稽问题与待复核提示
+      const t3Issues = (aggregation.issuesByGroupKey.table3 || []).filter(
+        (item) => item.autoStatus === 'FAIL' && item.humanStatus !== 'dismissed'
+      ); // 表三勾稽问题
+      const t4Issues = (aggregation.issuesByGroupKey.table4 || []).filter(
+        (item) => item.autoStatus === 'FAIL' && item.humanStatus !== 'dismissed'
+      ); // 表四勾稽问题
 
       groups.forEach((group) => {
         (group.items || []).forEach((item) => {
-          // 只高亮未确认、未忽略的问题
+          // dismissed 直接跳过；confirmed 保留用于视觉降噪展示
+          if (item.human_status === 'dismissed') return;
           if (
-            item.human_status !== 'confirmed' &&
-            item.human_status !== 'dismissed' &&
-            (item.auto_status === 'FAIL' || item.auto_status === 'UNCERTAIN')
+            item.auto_status === 'FAIL' ||
+            item.auto_status === 'UNCERTAIN' ||
+            item.human_status === 'confirmed'
           ) {
-            // 提取质量审计问题（Section 5/6）
             const groupKey = group.groupKey || group.group_key;
+            const isConfirmedItem = item.human_status === 'confirmed';
+
+            // 提取质量审计问题（Section 5/6）
             if (groupKey === 'quality') {
               if (item.check_key === 'narrative_sec5_gap') {
                 sec5Issues.push({ title: item.title, status: item.auto_status });
@@ -1229,19 +1256,22 @@ function ReportDetail({ reportId: propReportId, onBack }) {
             if (leftPaths.length > 0 || rightPaths.length > 0) {
               leftPaths.forEach((p) => {
                 const normalized = normalizeTablePath(p);
-                if (isTablePath(normalized)) cellPaths.push({ path: normalized, type: 'left' });
+                if (isTablePath(normalized)) {
+                  cellPaths.push({ path: normalized, type: 'left', confirmed: isConfirmedItem, humanStatus: item.human_status });
+                }
               });
               rightPaths.forEach((p) => {
                 const normalized = normalizeTablePath(p);
-                if (isTablePath(normalized)) cellPaths.push({ path: normalized, type: 'right' });
+                if (isTablePath(normalized)) {
+                  cellPaths.push({ path: normalized, type: 'right', confirmed: isConfirmedItem, humanStatus: item.human_status });
+                }
               });
             } else {
               // Fallback for logic without split paths
               allPaths.forEach((p) => {
                 const normalized = normalizeTablePath(p);
                 if (isTablePath(normalized)) {
-                  // Default to 'diff' or generic highlight if we don't know
-                  cellPaths.push({ path: normalized, type: 'diff' });
+                  cellPaths.push({ path: normalized, type: 'diff', confirmed: isConfirmedItem, humanStatus: item.human_status });
                 }
               });
             }
@@ -1249,7 +1279,6 @@ function ReportDetail({ reportId: propReportId, onBack }) {
             // Text Info extraction
             allPaths.forEach((p) => {
               if (p.includes('text') || p.includes('content')) {
-                // 提取文本问题信息
                 const textValue = item.evidence?.values?.textValue;
                 if (textValue) {
                   textInfos.push({
@@ -1271,19 +1300,26 @@ function ReportDetail({ reportId: propReportId, onBack }) {
       setHighlightCells(cellPaths);
       setHighlightTexts(textInfos);
       setQualityIssues({ sec5: sec5Issues, sec6: sec6Issues });
+      setTable2Issues(t2Issues);
+      setTable3Issues(t3Issues);
+      setTable4Issues(t4Issues);
     } catch (err) {
       console.error('Failed to fetch highlights:', err);
     }
   };
 
-  const buildFocusCells = (leftPaths = [], rightPaths = []) => {
+  const buildFocusCells = (leftPaths = [], rightPaths = [], fallbackPaths = []) => {
     const toCells = (paths, type) =>
       (paths || [])
         .map((p) => normalizeTablePath(p))
         .filter((p) => p && isTablePath(p))
         .map((path) => ({ path, type, scope: 'focus' }));
 
-    return [...toCells(leftPaths, 'left'), ...toCells(rightPaths, 'right')];
+    return [
+      ...toCells(leftPaths, 'left'),
+      ...toCells(rightPaths, 'right'),
+      ...toCells(fallbackPaths, 'diff'),
+    ];
   };
 
   const scrollToFirstCell = (paths = []) => {
@@ -1304,15 +1340,24 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     }, 160);
   };
 
-  const handleLocateIssue = ({ title, leftPaths = [], rightPaths = [] }) => {
-    const focusCells = buildFocusCells(leftPaths, rightPaths);
-    if (focusCells.length === 0) return;
+  const handleLocateIssue = ({ title, leftPaths = [], rightPaths = [], fallbackPaths = [] }) => {
+    const fallbackTargets = (fallbackPaths || [])
+      .map((p) => normalizeTablePath(p))
+      .filter((p) => p && isTablePath(p));
+    const focusCells = buildFocusCells(leftPaths, rightPaths, fallbackTargets);
 
-    setFocusedCheck({ title: title || '勾稽关系定位' });
-    setFocusedCells(focusCells);
+    if (focusCells.length === 0 && fallbackTargets.length === 0) return;
+
+    if (focusCells.length > 0) {
+      setFocusedCheck({ title: title || '勾稽关系定位' });
+      setFocusedCells(focusCells);
+    } else {
+      setFocusedCheck(null);
+      setFocusedCells([]);
+    }
     setActiveTab('content');
     setShowParsed(true);
-    scrollToFirstCell(leftPaths.length > 0 ? leftPaths : rightPaths);
+    scrollToFirstCell(leftPaths.length > 0 ? leftPaths : rightPaths.length > 0 ? rightPaths : fallbackTargets);
   };
 
   const clearFocus = () => {
@@ -1335,7 +1380,9 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   useEffect(() => {
     if (reportId && workingVersionId) {
       fetchHighlights(workingVersionId);
-      fetchOcrCorrections(workingVersionId);
+      if (activeTab !== 'visionReview') {
+        fetchOcrCorrections(workingVersionId);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportId, activeTab, workingVersionId]); // activeTab 变化时也刷新
@@ -1627,6 +1674,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const pendingOcrCorrections = ocrCorrections.filter((item) => item.status === 'pending');
   const confirmedOcrCorrections = ocrCorrections.filter((item) => item.status === 'confirmed');
   const sourceTableAnomalyReviews = visionReviews.filter((item) => item.conclusion === 'source_table_anomaly');
+  const inconclusiveVisionReviews = visionReviews.filter((item) => item.conclusion === 'inconclusive');
   const displayParsedJson = applyPendingOcrCorrections(mergedDisplay.parsed, pendingOcrCorrections);
   const usingFactsSource = mergedDisplay.usingFactsSource;
   const traceView = traceData
@@ -1854,6 +1902,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                       data={section.activeDisclosureData}
                       highlightCells={activeHighlightCells}
                       ocrCorrections={visibleOcrCorrections}
+                      tableIssues={table2Issues}
                     />
                   )}
                   {section.type === 'table_3' && section.tableData && (
@@ -1862,6 +1911,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                       compact={true}
                       highlightCells={activeHighlightCells}
                       ocrCorrections={visibleOcrCorrections}
+                      tableIssues={table3Issues}
                     />
                   )}
                   {section.type === 'table_4' && section.reviewLitigationData && (
@@ -1869,6 +1919,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                       data={section.reviewLitigationData}
                       highlightCells={activeHighlightCells}
                       ocrCorrections={visibleOcrCorrections}
+                      tableIssues={table4Issues}
                     />
                   )}
                   {!['text', 'table_2', 'table_3', 'table_4'].includes(section.type) && (
@@ -2620,27 +2671,39 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                 )}
                 {pendingOcrCorrections.length > 0 && (
                   <div className="ocr-correction-banner">
-                    <strong>OCR已修正，待人工确认</strong>
-                    <span>共 {pendingOcrCorrections.length} 个单元格使用 OCR 值临时展示，确认后将取消标识。</span>
+                    <strong>OCR / 视觉复核待确认</strong>
+                    <span>共 {pendingOcrCorrections.length} 个单元格存在待确认修正，当前仅作源表复核提示，不计入勾稽问题或数据质量风险。</span>
                     <button className="secondary-btn" onClick={() => setActiveTab('visionReview')}>
-                      去核对
+                      去复核页
                     </button>
                   </div>
                 )}
                 {pendingOcrCorrections.length === 0 && confirmedOcrCorrections.length > 0 && (
                   <div className="ocr-correction-banner ocr-correction-banner--confirmed">
-                    <strong>OCR修正已确认</strong>
-                    <span>已确认 {confirmedOcrCorrections.length} 个 OCR 修正单元格，醒目标识已收起。</span>
+                    <strong>已确认修正</strong>
+                    <span>已采用 {confirmedOcrCorrections.length} 个 OCR 修正值。该成功态仅用于源表复核说明，不改变勾稽高亮和编号。</span>
                   </div>
                 )}
                 {pendingOcrCorrections.length === 0 && sourceTableAnomalyReviews.length > 0 && (
                   <div className="ocr-correction-banner ocr-correction-banner--source">
-                    <strong>源表原始数据异常</strong>
+                    <strong>源表复核提示</strong>
                     <span>
-                      视觉 OCR 与当前解析一致，但相关勾稽校验仍失败，建议核对原始年报表格填报口径。
+                      OCR 与当前解析一致，但相关勾稽仍失败，更像是源表原始结构或填报异常。该提示不计入勾稽问题数，也不计入数据质量风险数。
                     </span>
                   </div>
                 )}
+                {pendingOcrCorrections.length === 0 &&
+                  confirmedOcrCorrections.length === 0 &&
+                  sourceTableAnomalyReviews.length === 0 &&
+                  inconclusiveVisionReviews.length > 0 && (
+                    <div className="ocr-correction-banner ocr-correction-banner--review">
+                      <strong>待人工复核</strong>
+                      <span>当前存在 OCR / 视觉复核不可判定项，建议在复核页查看源表截图、不可读单元格和复核状态说明。</span>
+                      <button className="secondary-btn" onClick={() => setActiveTab('visionReview')}>
+                        去复核页
+                      </button>
+                    </div>
+                  )}
                 {renderTracePanel()}
                 {renderParsedContent(displayParsedJson)}
               </section>
@@ -2654,6 +2717,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                   versionId={workingVersionId}
                   filterGroups={['table2', 'table3', 'table4', 'text']}
                   onLocate={handleLocateIssue}
+                  onChecksUpdated={() => fetchHighlights(workingVersionId)}
                   onEdit={(paths) => {
                     if (!displayParsedJson) return;
                     const editData = {
@@ -2672,6 +2736,8 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                   reportId={reportId}
                   versionId={workingVersionId}
                   filterGroups={['visual', 'structure', 'quality']}
+                  onLocate={handleLocateIssue}
+                  onChecksUpdated={() => fetchHighlights(workingVersionId)}
                   onEdit={(paths) => {
                     if (!displayParsedJson) return;
                     const editData = {
@@ -2689,10 +2755,16 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                 <VisionReviewPanel
                   reportId={reportId}
                   versionId={workingVersionId}
-                  onCorrectionsChange={(items) => {
-                    setOcrCorrections(items || []);
-                    refresh();
-                    fetchOcrCorrections();
+                  onDataChange={({ reviews = [], corrections = [] }) => {
+                    setVisionReviews(reviews);
+                    setOcrCorrections(corrections);
+                  }}
+                  onCorrectionsResolved={async ({ action } = {}) => {
+                    if (action === 'confirm') {
+                      await refresh();
+                    } else {
+                      await fetchHighlights(workingVersionId);
+                    }
                   }}
                 />
               </section>

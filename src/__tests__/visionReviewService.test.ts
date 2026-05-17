@@ -254,6 +254,106 @@ describe('compareVisionOcrWithParsed', () => {
     expect(result.comparedCellCount).toBe(0);
   });
 
+  it('does not treat empty OCR values as correction candidates', () => {
+    const parsedJson = {
+      sections: [
+        {
+          type: 'table_2',
+          activeDisclosureData: {
+            decisions: { made: 25970 },
+            fees: { amount: 240 },
+          },
+        },
+      ],
+    };
+
+    const ocrJson = {
+      table_id: 'table_2',
+      confidence: 0.7,
+      unreadableCells: [],
+      activeDisclosureData: {
+        decisions: { made: null },
+        fees: { amount: null },
+      },
+    };
+
+    const result = compareVisionOcrWithParsed('table_2', parsedJson, ocrJson, [makeTrigger('table2', 'FAIL')]);
+
+    expect(result.conclusion).toBe('inconclusive');
+    expect(result.differences).toHaveLength(0);
+    expect(result.unreadableCells).toEqual([
+      'activeDisclosureData.decisions.made',
+      'activeDisclosureData.fees.amount',
+    ]);
+  });
+
+  it('normalizes table 2 OCR payloads with Chinese grouped labels before comparing', () => {
+    const parsedJson = {
+      sections: [
+        {
+          type: 'table_2',
+          activeDisclosureData: {
+            fees: { amount: 240 },
+            coercion: { processed: 25970 },
+            licensing: { processed: 474339 },
+            punishment: { processed: 3286513 },
+            regulations: { made: 1, repealed: 0, valid: 3 },
+            normativeDocuments: { made: 117, repealed: 0, valid: 841 },
+          },
+        },
+      ],
+    };
+
+    const ocrJson = {
+      table_id: 'table_2',
+      confidence: 0.99,
+      unreadableCells: [],
+      activeDisclosureData: {
+        '第二十条第（一）项': {
+          规章: {
+            对外公开总数量: 3,
+            本年新公开数量: 1,
+            本年新制作数量: 1,
+          },
+          规范性文件: {
+            对外公开总数量: 841,
+            本年新公开数量: 117,
+            本年新制作数量: 117,
+          },
+        },
+        '第二十条第（五）项': {
+          行政许可: {
+            '本年增/减': '+1036',
+            处理决定数量: 474339,
+          },
+        },
+        '第二十条第（六）项': {
+          行政处罚: {
+            '本年增/减': '+461',
+            处理决定数量: 3286513,
+          },
+          行政强制: {
+            '本年增/减': '+14',
+            处理决定数量: 25970,
+          },
+        },
+        '第二十条第（八）项': {
+          行政事业性收费: {
+            '本年增/减': '+4',
+            上一年项目数量: 240,
+          },
+        },
+      },
+    };
+
+    const result = compareVisionOcrWithParsed('table_2', parsedJson, ocrJson, [makeTrigger('table2', 'FAIL')]);
+
+    expect(result.conclusion).toBe('source_table_anomaly');
+    expect(result.differences).toHaveLength(0);
+    expect(result.unreadableCells).toHaveLength(0);
+    expect(result.comparedCellCount).toBe(10);
+  });
+
   it('normalizes table 3 OCR matrix rows before comparing', () => {
     const tableData = {
       naturalPerson: {

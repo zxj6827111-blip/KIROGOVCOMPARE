@@ -1,4 +1,14 @@
 .vision-review-panel {
+  --vision-orange-strong: #c2410c;
+  --vision-orange: #ea580c;
+  --vision-orange-soft: #fb923c;
+  --vision-orange-bg: #fff7ed;
+  --vision-orange-bg-strong: #ffedd5;
+  --vision-orange-border: #fdba74;
+  --vision-green: #15803d;
+  --vision-green-bg: #f0fdf4;
+  --vision-green-border: #86efac;
+
   padding: 24px;
   background: var(--bg-app);
   border-radius: var(--radius-md);
@@ -9,59 +19,148 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
   padding: 22px 24px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-color);
+  background: linear-gradient(135deg, #fff8ef 0%, #fff2df 50%, #ffffff 100%);
+  border: 1px solid var(--vision-orange-border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
 }
 
+.vision-review-header-copy {
+  display: grid;
+  gap: 6px;
+}
+
 .vision-review-header h3 {
-  margin: 0 0 6px;
-  color: var(--text-main);
-  font-size: 20px;
+  margin: 0;
+  color: var(--vision-orange-strong);
+  font-size: 22px;
 }
 
 .vision-review-header p {
   margin: 0;
-  color: var(--text-muted);
+  color: #7c2d12;
   font-size: 14px;
+  line-height: 1.55;
 }
 
 .vision-review-refresh,
 .vision-review-run {
   border: none;
   border-radius: var(--radius-sm);
-  background: var(--primary);
-  color: #000;
+  background: var(--vision-orange);
+  color: #fff;
   cursor: pointer;
-  font-weight: 600;
+  font-weight: 700;
   transition: all 0.2s ease;
 }
 
 .vision-review-refresh {
   padding: 10px 18px;
+  box-shadow: 0 10px 20px rgba(234, 88, 12, 0.16);
 }
 
 .vision-review-run {
   width: 100%;
-  margin-top: 16px;
-  padding: 10px 14px;
+  margin-top: auto;
+  padding: 11px 14px;
+}
+
+.vision-review-refresh:hover:not(:disabled),
+.vision-review-run:hover:not(:disabled) {
+  background: var(--vision-orange-strong);
 }
 
 .vision-review-refresh:disabled,
-.vision-review-run:disabled {
+.vision-review-run:disabled,
+.vision-review-confirm:disabled,
+.vision-review-reject:disabled {
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+.vision-review-scope-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px dashed var(--vision-orange-border);
+  border-radius: var(--radius-sm);
+  background: #fffdfa;
+}
+
+.vision-review-scope-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--vision-orange-bg);
+  color: var(--vision-orange-strong);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.vision-review-scope-text {
+  color: #7c2d12;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.vision-review-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.vision-review-summary-card {
+  display: grid;
+  gap: 4px;
+  min-height: 108px;
+  padding: 16px 18px;
+  border: 1px solid var(--vision-orange-border);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #fff8ef 100%);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
+}
+
+.vision-review-summary-card--success {
+  border-color: var(--vision-green-border);
+  background: linear-gradient(180deg, #ffffff 0%, var(--vision-green-bg) 100%);
+}
+
+.vision-review-summary-label {
+  color: #9a3412;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.vision-review-summary-card strong {
+  color: var(--vision-orange-strong);
+  font-size: 30px;
+  line-height: 1.1;
+}
+
+.vision-review-summary-card--success strong {
+  color: var(--vision-green);
+}
+
+.vision-review-summary-card small {
+  color: #7c2d12;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .vision-review-error {
   margin-bottom: 16px;
   padding: 12px 14px;
-  border: 1px solid rgba(239, 68, 68, 0.35);
+  border: 1px solid rgba(220, 38, 38, 0.28);
   border-radius: var(--radius-sm);
-  background: rgba(239, 68, 68, 0.1);
+  background: rgba(254, 242, 242, 0.96);
   color: #b91c1c;
   font-size: 14px;
 }
@@ -75,29 +174,24 @@
 .vision-review-card {
   display: flex;
   flex-direction: column;
-  min-height: 280px;
+  gap: 12px;
+  min-height: 420px;
   padding: 18px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-color);
-  border-top: 4px solid #94a3b8;
+  background: #ffffff;
+  border: 1px solid var(--vision-orange-border);
+  border-top: 5px solid var(--vision-orange-soft);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
 }
 
-.vision-review-card--ok {
-  border-top-color: #16a34a;
+.vision-review-card--review {
+  background: linear-gradient(180deg, #ffffff 0%, #fffaf4 100%);
 }
 
-.vision-review-card--source {
-  border-top-color: #f97316;
-}
-
-.vision-review-card--parse {
-  border-top-color: #dc2626;
-}
-
-.vision-review-card--blocked {
-  border-top-color: #64748b;
+.vision-review-card--success {
+  border-color: var(--vision-green-border);
+  border-top-color: #22c55e;
+  background: linear-gradient(180deg, #ffffff 0%, #f7fff8 100%);
 }
 
 .vision-review-card-head {
@@ -109,8 +203,8 @@
 
 .vision-review-card h4 {
   margin: 0 0 4px;
-  color: var(--text-main);
-  font-size: 17px;
+  color: #7c2d12;
+  font-size: 18px;
 }
 
 .vision-review-card p {
@@ -121,87 +215,129 @@
 
 .vision-review-status {
   flex: 0 0 auto;
-  padding: 5px 9px;
+  padding: 6px 10px;
   border-radius: 999px;
-  background: var(--bg-surface-hover);
-  color: var(--text-main);
+  background: var(--vision-orange-bg);
+  color: var(--vision-orange-strong);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 800;
 }
 
 .vision-review-conclusion {
-  margin: 16px 0 10px;
   color: var(--text-main);
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.25;
 }
 
 .vision-review-meta {
   display: grid;
-  gap: 5px;
+  gap: 4px;
   color: var(--text-muted);
   font-size: 12px;
 }
 
 .vision-review-note {
-  margin-top: 12px;
   padding: 10px 12px;
   border-radius: var(--radius-sm);
-  background: var(--bg-surface-hover);
-  color: var(--text-muted);
+  background: var(--vision-orange-bg);
+  color: #7c2d12;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.vision-review-note--error {
+  background: rgba(254, 242, 242, 0.95);
+  color: #991b1b;
+}
+
+.vision-review-section {
+  display: grid;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(251, 146, 60, 0.24);
+}
+
+.vision-review-section--success {
+  border-top-color: rgba(34, 197, 94, 0.24);
+}
+
+.vision-review-section-title {
+  color: #9a3412;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.vision-review-section--success .vision-review-section-title {
+  color: var(--vision-green);
+}
+
+.vision-review-list {
+  display: grid;
+  gap: 8px;
+}
+
+.vision-review-list-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #fffaf5;
+  color: var(--text-main);
   font-size: 13px;
   line-height: 1.5;
 }
 
-.vision-review-diffs,
-.vision-review-unreadable,
-.vision-review-corrections {
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-color);
-}
-
-.vision-review-section-title {
-  margin-bottom: 8px;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.vision-review-diff-row {
+.vision-review-list-item--two-column {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  padding: 6px 0;
-  color: var(--text-main);
-  font-size: 13px;
 }
 
-.vision-review-correction-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  padding: 6px 0;
-  color: var(--text-main);
-  font-size: 13px;
+.vision-review-list-item--success {
+  background: #f6fff7;
 }
 
-.vision-review-correction-row span {
+.vision-review-list-item span {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.vision-review-correction-row strong {
-  color: #c2410c;
+.vision-review-list-item strong {
+  color: var(--vision-orange-strong);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.vision-review-list-item--success strong {
+  color: var(--vision-green);
+}
+
+.vision-review-list-tag {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--vision-orange-bg-strong);
+  color: var(--vision-orange-strong);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.vision-review-list-tag--success {
+  background: #dcfce7;
+  color: var(--vision-green);
 }
 
 .vision-review-correction-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 4px;
 }
 
 .vision-review-confirm,
@@ -209,44 +345,43 @@
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font-weight: 700;
-  padding: 9px 12px;
+  font-weight: 800;
+  padding: 10px 12px;
 }
 
 .vision-review-confirm {
-  background: #fed7aa;
-  color: #7c2d12;
+  background: var(--vision-green-bg);
+  color: var(--vision-green);
 }
 
 .vision-review-reject {
-  background: var(--bg-surface-hover);
-  color: var(--text-muted);
+  background: #f8fafc;
+  color: #475569;
 }
 
-.vision-review-confirm:disabled,
-.vision-review-reject:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
+.vision-review-confirm:hover:not(:disabled) {
+  background: #dcfce7;
 }
 
-.vision-review-diff-row span {
-  min-width: 0;
-  overflow-wrap: anywhere;
+.vision-review-reject:hover:not(:disabled) {
+  background: #f1f5f9;
 }
 
-.vision-review-diff-row strong {
-  color: #b91c1c;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.vision-review-more,
-.vision-review-unreadable {
-  color: var(--text-muted);
+.vision-review-empty {
+  margin-top: 2px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #fffdfa;
+  color: #7c2d12;
   font-size: 13px;
+  line-height: 1.55;
 }
 
 @media (max-width: 1100px) {
+  .vision-review-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .vision-review-grid {
     grid-template-columns: 1fr;
   }
@@ -256,5 +391,17 @@
   .vision-review-header {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .vision-review-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .vision-review-correction-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .vision-review-list-item--two-column {
+    grid-template-columns: 1fr;
   }
 }

@@ -92,6 +92,46 @@ export interface ConsistencyItem {
     };
 }
 
+export interface ConsistencySummaryCounts {
+    fail: number;
+    uncertain: number;
+    pass: number;
+    notAssessable: number;
+}
+
+export interface ConsistencyHumanSummaryCounts {
+    pending: number;
+    confirmed: number;
+    dismissed: number;
+}
+
+export interface ConsistencyActiveSummaryCounts {
+    rawFailCount: number;
+    activeProblemCount: number;
+    reviewCount: number;
+}
+
+export interface ConsistencySummaryBucket extends ConsistencySummaryCounts, ConsistencyHumanSummaryCounts, ConsistencyActiveSummaryCounts {
+    total: number;
+}
+
+export interface ConsistencyRunSummary extends ConsistencySummaryCounts {
+    total: number;
+    auto: ConsistencySummaryCounts;
+    human: ConsistencyHumanSummaryCounts;
+    active: ConsistencyActiveSummaryCounts;
+    byGroupKey: Record<string, ConsistencySummaryBucket>;
+}
+
+type ConsistencySummarySourceItem = {
+    groupKey?: string | null;
+    group_key?: string | null;
+    autoStatus?: string | null;
+    auto_status?: string | null;
+    humanStatus?: string | null;
+    human_status?: string | null;
+};
+
 const ENGINE_VERSION = 'v2';
 
 interface TextPattern {
@@ -104,7 +144,164 @@ interface TextPattern {
     extract?: (content: string) => RegExpMatchArray | null;
 }
 
+interface Table2ThreeCountRow {
+    made?: number | string | null;
+    repealed?: number | string | null;
+    valid?: number | string | null;
+}
+
+interface Table2ProcessedRow {
+    processed?: number | string | null;
+}
+
+interface Table2FeeRow {
+    amount?: number | string | null;
+}
+
+interface Table2Data {
+    regulations?: Table2ThreeCountRow | null;
+    normativeDocuments?: Table2ThreeCountRow | null;
+    licensing?: Table2ProcessedRow | null;
+    punishment?: Table2ProcessedRow | null;
+    coercion?: Table2ProcessedRow | null;
+    fees?: Table2FeeRow | null;
+}
+
+type Table2ValueSemantic = 'EMPTY' | 'ZERO' | 'NA' | 'TEXT' | 'NUMERIC';
+
+interface Table2FieldAnalysis {
+    raw: number | string | null;
+    normalized: number | null;
+    semantic: Table2ValueSemantic;
+}
+
+interface Table2FieldConfig {
+    rowKey: 'regulations' | 'normativeDocuments' | 'licensing' | 'punishment' | 'coercion' | 'fees';
+    columnKey: 'made' | 'repealed' | 'valid' | 'processed' | 'amount';
+    fieldPath: string;
+    fieldLabel: string;
+    checkKeySuffix: string;
+    kind: 'count' | 'amount';
+}
+
+function createEmptySummaryBucket(): ConsistencySummaryBucket {
+    return {
+        total: 0,
+        fail: 0,
+        uncertain: 0,
+        pass: 0,
+        notAssessable: 0,
+        pending: 0,
+        confirmed: 0,
+        dismissed: 0,
+        rawFailCount: 0,
+        activeProblemCount: 0,
+        reviewCount: 0,
+    };
+}
+
+function getSummaryItemGroupKey(item: ConsistencySummarySourceItem): string {
+    return String(item.groupKey || item.group_key || 'unknown');
+}
+
+function getSummaryItemAutoStatus(item: ConsistencySummarySourceItem): AutoStatus | null {
+    const status = item.autoStatus || item.auto_status;
+    return status === 'FAIL' || status === 'UNCERTAIN' || status === 'PASS' || status === 'NOT_ASSESSABLE'
+        ? status
+        : null;
+}
+
+function getSummaryItemHumanStatus(item: ConsistencySummarySourceItem): HumanStatus {
+    const status = item.humanStatus || item.human_status;
+    return status === 'confirmed' || status === 'dismissed' ? status : 'pending';
+}
+
+function applySummaryItem(bucket: ConsistencySummaryBucket, item: ConsistencySummarySourceItem): void {
+    const autoStatus = getSummaryItemAutoStatus(item);
+    const humanStatus = getSummaryItemHumanStatus(item);
+
+    bucket.total += 1;
+
+    if (autoStatus === 'FAIL') {
+        bucket.fail += 1;
+        bucket.rawFailCount += 1;
+        if (humanStatus !== 'dismissed') {
+            bucket.activeProblemCount += 1;
+        }
+    } else if (autoStatus === 'UNCERTAIN') {
+        bucket.uncertain += 1;
+    } else if (autoStatus === 'PASS') {
+        bucket.pass += 1;
+    } else if (autoStatus === 'NOT_ASSESSABLE') {
+        bucket.notAssessable += 1;
+    }
+
+    if (humanStatus === 'confirmed') {
+        bucket.confirmed += 1;
+    } else if (humanStatus === 'dismissed') {
+        bucket.dismissed += 1;
+    } else {
+        bucket.pending += 1;
+    }
+
+    if (humanStatus === 'pending' && autoStatus !== 'NOT_ASSESSABLE') {
+        bucket.reviewCount += 1;
+    }
+}
+
+export function buildConsistencyRunSummary(items: ConsistencySummarySourceItem[]): ConsistencyRunSummary {
+    const overall = createEmptySummaryBucket();
+    const byGroupKey: Record<string, ConsistencySummaryBucket> = {};
+
+    items.forEach((item) => {
+        applySummaryItem(overall, item);
+
+        const groupKey = getSummaryItemGroupKey(item);
+        if (!byGroupKey[groupKey]) {
+            byGroupKey[groupKey] = createEmptySummaryBucket();
+        }
+        applySummaryItem(byGroupKey[groupKey], item);
+    });
+
+    return {
+        fail: overall.fail,
+        uncertain: overall.uncertain,
+        pass: overall.pass,
+        notAssessable: overall.notAssessable,
+        total: overall.total,
+        auto: {
+            fail: overall.fail,
+            uncertain: overall.uncertain,
+            pass: overall.pass,
+            notAssessable: overall.notAssessable,
+        },
+        human: {
+            pending: overall.pending,
+            confirmed: overall.confirmed,
+            dismissed: overall.dismissed,
+        },
+        active: {
+            rawFailCount: overall.rawFailCount,
+            activeProblemCount: overall.activeProblemCount,
+            reviewCount: overall.reviewCount,
+        },
+        byGroupKey,
+    };
+}
+
 export class ConsistencyCheckService {
+    private readonly table2FieldConfigs: Table2FieldConfig[] = [
+        { rowKey: 'regulations', columnKey: 'made', fieldPath: 'activeDisclosureData.regulations.made', fieldLabel: '规章-本年制发件数', checkKeySuffix: 'regulations_made', kind: 'count' },
+        { rowKey: 'regulations', columnKey: 'repealed', fieldPath: 'activeDisclosureData.regulations.repealed', fieldLabel: '规章-本年废止件数', checkKeySuffix: 'regulations_repealed', kind: 'count' },
+        { rowKey: 'regulations', columnKey: 'valid', fieldPath: 'activeDisclosureData.regulations.valid', fieldLabel: '规章-现行有效件数', checkKeySuffix: 'regulations_valid', kind: 'count' },
+        { rowKey: 'normativeDocuments', columnKey: 'made', fieldPath: 'activeDisclosureData.normativeDocuments.made', fieldLabel: '行政规范性文件-本年制发件数', checkKeySuffix: 'normativeDocuments_made', kind: 'count' },
+        { rowKey: 'normativeDocuments', columnKey: 'repealed', fieldPath: 'activeDisclosureData.normativeDocuments.repealed', fieldLabel: '行政规范性文件-本年废止件数', checkKeySuffix: 'normativeDocuments_repealed', kind: 'count' },
+        { rowKey: 'normativeDocuments', columnKey: 'valid', fieldPath: 'activeDisclosureData.normativeDocuments.valid', fieldLabel: '行政规范性文件-现行有效件数', checkKeySuffix: 'normativeDocuments_valid', kind: 'count' },
+        { rowKey: 'licensing', columnKey: 'processed', fieldPath: 'activeDisclosureData.licensing.processed', fieldLabel: '行政许可-处理决定数量', checkKeySuffix: 'licensing_processed', kind: 'count' },
+        { rowKey: 'punishment', columnKey: 'processed', fieldPath: 'activeDisclosureData.punishment.processed', fieldLabel: '行政处罚-处理决定数量', checkKeySuffix: 'punishment_processed', kind: 'count' },
+        { rowKey: 'coercion', columnKey: 'processed', fieldPath: 'activeDisclosureData.coercion.processed', fieldLabel: '行政强制-处理决定数量', checkKeySuffix: 'coercion_processed', kind: 'count' },
+        { rowKey: 'fees', columnKey: 'amount', fieldPath: 'activeDisclosureData.fees.amount', fieldLabel: '行政事业性收费-收费金额', checkKeySuffix: 'fees_amount', kind: 'amount' },
+    ];
     /**
      * Parse a number from various formats: number, string, "-", "—", "", null
      */
@@ -120,6 +317,185 @@ export class ConsistencyCheckService {
             return isNaN(parsed) ? null : parsed;
         }
         return null;
+    }
+
+    private getTable2CellRef(config: Table2FieldConfig): string {
+        const rowMap: Record<Table2FieldConfig['rowKey'], string> = {
+            regulations: 'regulations',
+            normativeDocuments: 'normative_documents',
+            licensing: 'licensing',
+            punishment: 'punishment',
+            coercion: 'coercion',
+            fees: 'fees',
+        };
+        return `active_disclosure:${rowMap[config.rowKey]}:${config.columnKey}`;
+    }
+
+    private analyzeTable2Value(rawValue: any): Table2FieldAnalysis {
+        if (rawValue === null || rawValue === undefined) {
+            return { raw: null, normalized: null, semantic: 'EMPTY' };
+        }
+
+        if (typeof rawValue === 'number') {
+            if (!Number.isFinite(rawValue)) return { raw: rawValue, normalized: null, semantic: 'TEXT' };
+            if (rawValue === 0) return { raw: rawValue, normalized: 0, semantic: 'ZERO' };
+            return { raw: rawValue, normalized: rawValue, semantic: 'NUMERIC' };
+        }
+
+        if (typeof rawValue === 'string') {
+            const trimmed = rawValue.trim();
+            if (trimmed === '') return { raw: rawValue, normalized: null, semantic: 'EMPTY' };
+
+            const normalizedPlaceholder = trimmed.toUpperCase();
+            if (
+                trimmed === '/' ||
+                trimmed === '-' ||
+                trimmed === '—' ||
+                trimmed === '--' ||
+                trimmed === '不适用' ||
+                normalizedPlaceholder === 'N/A' ||
+                normalizedPlaceholder === 'NA'
+            ) {
+                return { raw: rawValue, normalized: null, semantic: 'NA' };
+            }
+
+            const compact = trimmed.replace(/,/g, '');
+            if (/^[+-]?\d+(?:\.\d+)?$/.test(compact)) {
+                const parsed = Number(compact);
+                if (!Number.isFinite(parsed)) return { raw: rawValue, normalized: null, semantic: 'TEXT' };
+                if (parsed === 0) return { raw: rawValue, normalized: 0, semantic: 'ZERO' };
+                return { raw: rawValue, normalized: parsed, semantic: 'NUMERIC' };
+            }
+
+            return { raw: rawValue, normalized: null, semantic: 'TEXT' };
+        }
+
+        return { raw: String(rawValue), normalized: null, semantic: 'TEXT' };
+    }
+
+    private createTable2RuleItem(
+        checkKey: string,
+        title: string,
+        expr: string,
+        autoStatus: AutoStatus,
+        config: Table2FieldConfig,
+        analysis: Table2FieldAnalysis,
+        reason: string,
+        compareTarget: number | null = null
+    ): ConsistencyItem {
+        const leftValue = analysis.normalized;
+        const rightValue = compareTarget;
+        const delta = leftValue !== null && rightValue !== null ? leftValue - rightValue : null;
+
+        return {
+            groupKey: 'table2',
+            checkKey,
+            fingerprint: this.generateFingerprint('table2', checkKey, expr),
+            title,
+            expr,
+            leftValue,
+            rightValue,
+            delta,
+            tolerance: 0,
+            autoStatus,
+            evidenceJson: {
+                paths: [config.fieldPath],
+                rightPaths: [config.fieldPath],
+                values: {
+                    tableId: 'table_2',
+                    fieldPath: config.fieldPath,
+                    cell_ref: this.getTable2CellRef(config),
+                    raw: analysis.raw,
+                    normalized: analysis.normalized,
+                    semantic: analysis.semantic,
+                    auto_status: autoStatus,
+                    reason,
+                },
+            },
+        };
+    }
+
+    private hasTable2ApplicableFields(table2Data: Table2Data | undefined): boolean {
+        if (!table2Data || typeof table2Data !== 'object') return false;
+        return this.table2FieldConfigs.some((config) => {
+            const row = (table2Data as any)?.[config.rowKey];
+            return Boolean(row && Object.prototype.hasOwnProperty.call(row, config.columnKey));
+        });
+    }
+
+    private generateTable2Items(table2Data: Table2Data | undefined): { items: ConsistencyItem[]; hasApplicableFields: boolean } {
+        const items: ConsistencyItem[] = [];
+        const hasApplicableFields = this.hasTable2ApplicableFields(table2Data);
+
+        if (!table2Data || typeof table2Data !== 'object') {
+            return { items, hasApplicableFields };
+        }
+
+        for (const config of this.table2FieldConfigs) {
+            const row = (table2Data as any)?.[config.rowKey];
+            if (!row || !Object.prototype.hasOwnProperty.call(row, config.columnKey)) continue;
+
+            const analysis = this.analyzeTable2Value(row[config.columnKey]);
+
+            if (analysis.semantic === 'EMPTY' || analysis.semantic === 'NA') {
+                items.push(this.createTable2RuleItem(
+                    `t2_empty_semantics_hint_${config.checkKeySuffix}`,
+                    `表二：${config.fieldLabel}为空或为特殊占位`,
+                    `${config.fieldPath} is meaningful numeric value or explicit zero`,
+                    'UNCERTAIN',
+                    config,
+                    analysis,
+                    'empty_or_placeholder_value'
+                ));
+                continue;
+            }
+
+            if (analysis.semantic === 'TEXT') {
+                items.push(this.createTable2RuleItem(
+                    config.kind === 'count'
+                        ? `t2_numeric_parseable_counts_${config.checkKeySuffix}`
+                        : `t2_numeric_parseable_fee_amount_${config.checkKeySuffix}`,
+                    `表二：${config.fieldLabel}应可解析为数字`,
+                    `${config.fieldPath} parseable as numeric`,
+                    'UNCERTAIN',
+                    config,
+                    analysis,
+                    config.kind === 'count' ? 'count_field_not_numeric' : 'fee_amount_not_numeric'
+                ));
+                continue;
+            }
+
+            if (analysis.normalized === null) continue;
+
+            if (analysis.normalized < 0) {
+                items.push(this.createTable2RuleItem(
+                    config.kind === 'count'
+                        ? `t2_non_negative_counts_${config.checkKeySuffix}`
+                        : `t2_non_negative_fee_amount_${config.checkKeySuffix}`,
+                    `表二：${config.fieldLabel}应为非负数`,
+                    `${config.fieldPath} >= 0`,
+                    'FAIL',
+                    config,
+                    analysis,
+                    config.kind === 'count' ? 'count_field_negative' : 'fee_amount_negative',
+                    0
+                ));
+            }
+
+            if (config.kind === 'count' && !Number.isInteger(analysis.normalized)) {
+                items.push(this.createTable2RuleItem(
+                    `t2_integer_counts_${config.checkKeySuffix}`,
+                    `表二：${config.fieldLabel}应为整数`,
+                    `${config.fieldPath} is integer`,
+                    'UNCERTAIN',
+                    config,
+                    analysis,
+                    'count_field_not_integer'
+                ));
+            }
+        }
+
+        return { items, hasApplicableFields };
     }
 
     /**
@@ -751,6 +1127,51 @@ export class ConsistencyCheckService {
     /**
      * Generate Structure Audit items (Missing Tables, Empty Cells)
      */
+    private generateParseRuleGateItems(ruleGate: any): ConsistencyItem[] {
+        if (!ruleGate || ruleGate.passed !== false || !Array.isArray(ruleGate.issues)) {
+            return [];
+        }
+
+        return ruleGate.issues.slice(0, 30).map((issue: unknown, index: number) => {
+            const issueText = String(issue || 'parse_rule_gate_failed');
+            const groupKey: GroupKey = issueText.startsWith('table_4.') || issueText.startsWith('table_4 ')
+                ? 'table4'
+                : 'table3';
+            const checkKey = `parse_rule_gate_${index + 1}`;
+            return {
+                groupKey,
+                checkKey,
+                fingerprint: this.generateFingerprint(groupKey, checkKey, issueText),
+                title: `解析规则复核：${issueText}`,
+                expr: 'parse_rule_gate',
+                leftValue: null,
+                rightValue: null,
+                delta: null,
+                tolerance: 0,
+                autoStatus: 'FAIL',
+                evidenceJson: {
+                    paths: this.extractPathsFromParseRuleIssue(issueText),
+                    values: {
+                        issue: issueText,
+                        source: 'parse_rule_gate',
+                        action: 'show_result_and_require_review',
+                    },
+                },
+            } as ConsistencyItem;
+        });
+    }
+
+    private extractPathsFromParseRuleIssue(issue: string): string[] {
+        const match = issue.match(/^(table_[34])\.([^\s]+)\s/);
+        if (!match) {
+            return ['parsed_json'];
+        }
+        const tableId = match[1];
+        const relativePath = match[2];
+        const payloadKey = tableId === 'table_4' ? 'reviewLitigationData' : 'tableData';
+        return [`sections[type=${tableId}].${payloadKey}.${relativePath}`];
+    }
+
     private generateStructureAuditItems(sections: any[]): ConsistencyItem[] {
         const items: ConsistencyItem[] = [];
 
@@ -1158,13 +1579,20 @@ export class ConsistencyCheckService {
         const table4Section = sections.find((s: any) => s.type === 'table_4');
         const table4Data: Table4Data | undefined = table4Section?.reviewLitigationData;
 
+        // Find Table 2 section
+        const table2Section = sections.find((s: any) => s.type === 'table_2');
+        const table2Data: Table2Data | undefined = table2Section?.activeDisclosureData;
+
         // Generate items for each group
+        const table2Result = this.generateTable2Items(table2Data);
+        items.push(...table2Result.items);
         items.push(...this.generateTable3Items(tableData));
         items.push(...this.generateTable4Items(table4Data));
         items.push(...this.generateTextItems(sections, tableData, table4Data)); // Keeping original text checks
 
         // NEW Premium Checks
         items.push(...this.generateVisualAuditItems(visualAudit));
+        items.push(...this.generateParseRuleGateItems(parsed?.parse_rule_gate || visualAudit?.parse_rule_gate));
         items.push(...this.generateStructureAuditItems(sections));
         items.push(...this.generateSection5GapItems(sections));
         items.push(...this.generateSection6LogicItems(sections));
@@ -1177,8 +1605,7 @@ export class ConsistencyCheckService {
 
         // Table2 placeholder (no rules yet, but group must exist)
         // We add an info item if table2 section exists but has no checks
-        const table2Section = sections.find((s: any) => s.type === 'table_2');
-        if (table2Section) {
+        if (!table2Section || !table2Result.hasApplicableFields) {
             items.push({
                 groupKey: 'table2',
                 checkKey: 't2_no_rules',
@@ -1190,7 +1617,7 @@ export class ConsistencyCheckService {
                 delta: null,
                 tolerance: 0,
                 autoStatus: 'NOT_ASSESSABLE',
-                evidenceJson: { paths: ['sections[type=table_2]'], values: { hasTable2: true } },
+                evidenceJson: { paths: ['sections[type=table_2]'], values: { hasTable2: Boolean(table2Section) } },
             });
         }
 
@@ -1231,7 +1658,7 @@ export class ConsistencyCheckService {
 
         const items = this.runChecks(parsedJson, reportYear);
 
-        // Upsert each item, preserving human_status and human_comment
+        // Upsert each item, resetting human_status to pending on re-run
         for (const item of items) {
             const evidenceStr = JSON.stringify(item.evidenceJson);
 
@@ -1275,13 +1702,7 @@ export class ConsistencyCheckService {
         `, [reportVersionId, runId]);
 
         // Update run with summary
-        const summary = {
-            fail: items.filter(i => i.autoStatus === 'FAIL').length,
-            uncertain: items.filter(i => i.autoStatus === 'UNCERTAIN').length,
-            pass: items.filter(i => i.autoStatus === 'PASS').length,
-            notAssessable: items.filter(i => i.autoStatus === 'NOT_ASSESSABLE').length,
-            total: items.length,
-        };
+        const summary = buildConsistencyRunSummary(items);
 
         await pool.query(`
       UPDATE report_consistency_runs
