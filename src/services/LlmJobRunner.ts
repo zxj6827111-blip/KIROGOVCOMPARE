@@ -52,6 +52,7 @@ const COMPARE_CONCURRENCY = 5; // compare task concurrency
 const WORKER_MODE = (process.env.LLM_WORKER_MODE || 'all').toLowerCase().trim();
 const PARSE_CONSENSUS_ENABLED = toBooleanEnv(process.env.LLM_PARSE_CONSENSUS_ENABLED, false);
 const PARSE_RULE_GATE_ENABLED = toBooleanEnv(process.env.LLM_PARSE_RULE_GATE_ENABLED, false);
+const PARSE_RULE_GATE_BLOCKING = toBooleanEnv(process.env.LLM_PARSE_RULE_GATE_BLOCKING, false);
 const PARSE_CONSENSUS_ALLOW_SAME_MODEL = toBooleanEnv(process.env.LLM_PARSE_CONSENSUS_ALLOW_SAME_MODEL, true);
 const PARSE_STABILIZE_MODE = (process.env.LLM_PARSE_STABILIZE_MODE || 'none').toLowerCase().trim();
 const SOURCE_GATE_ENABLED = toBooleanEnv(process.env.SOURCE_GATE_ENABLED, false);
@@ -132,7 +133,7 @@ export class LlmJobRunner {
     this.running = true;
     console.log(`[JobRunner] Worker mode: ${WORKER_MODE} (kinds: ${ALLOWED_KIND_LIST.join(', ') || 'none'})`);
     console.log(
-      `[JobRunner] Parse stabilize mode: ${PARSE_STABILIZE_MODE || 'none'} (table3=${PARSE_STABILIZE_OPTIONS.table3}, table4=${PARSE_STABILIZE_OPTIONS.table4}), parse_rule_gate=${PARSE_RULE_GATE_ENABLED}`
+      `[JobRunner] Parse stabilize mode: ${PARSE_STABILIZE_MODE || 'none'} (table3=${PARSE_STABILIZE_OPTIONS.table3}, table4=${PARSE_STABILIZE_OPTIONS.table4}), parse_rule_gate=${PARSE_RULE_GATE_ENABLED}, parse_rule_gate_blocking=${PARSE_RULE_GATE_BLOCKING}`
     );
     console.log(`[JobRunner] Source gate enabled=${SOURCE_GATE_ENABLED}`);
     this.scheduleNextTick();
@@ -451,6 +452,16 @@ export class LlmJobRunner {
         ruleGate: ruleGateResult,
         sourceGate: sourceGateResult,
       };
+      if (ruleGateResult) {
+        parseResult.output = {
+          ...(parseResult.output || {}),
+          parse_rule_gate: ruleGateResult,
+          visual_audit: {
+            ...((parseResult.output as any)?.visual_audit || {}),
+            parse_rule_gate: ruleGateResult,
+          },
+        };
+      }
 
       // Update progress: POSTPROCESS
       await pool.query(`
@@ -485,7 +496,7 @@ export class LlmJobRunner {
         return;
       }
 
-      if (ruleGateResult && !ruleGateResult.passed) {
+      if (ruleGateResult && !ruleGateResult.passed && PARSE_RULE_GATE_BLOCKING) {
         const issueText = ruleGateResult.issues.slice(0, 8).join('; ');
         const errorMessage = `Deterministic parse rule gate failed: ${issueText}`;
         await parseRunService.finalizeParseRun({

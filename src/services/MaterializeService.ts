@@ -28,6 +28,13 @@ interface FactActiveDisclosure {
   amount: number | null;
 }
 
+type ActiveDisclosureFactColumn =
+  | 'made_count'
+  | 'repealed_count'
+  | 'valid_count'
+  | 'processed_count'
+  | 'amount';
+
 interface FactApplication {
   applicant_type: string;
   response_type: string;
@@ -213,6 +220,20 @@ function normalizeParsedPayload(input: string | Record<string, any>): any {
   return candidate;
 }
 
+function isNaLikeValue(trimmed: string): boolean {
+  const normalizedPlaceholder = trimmed.toUpperCase();
+  return (
+    trimmed === '/' ||
+    trimmed === '-' ||
+    trimmed === '—' ||
+    trimmed === '--' ||
+    trimmed === '不适用' ||
+    normalizedPlaceholder === 'N/A' ||
+    normalizedPlaceholder === 'NA' ||
+    trimmed === '鈥?'
+  );
+}
+
 function normalizeValue(value: any): { raw: string | null; num: number | null; semantic: ValueSemantic; normalized: string | null } {
   if (value === null || value === undefined || value === '') {
     return { raw: value === '' ? '' : null, num: null, semantic: 'EMPTY', normalized: null };
@@ -220,7 +241,7 @@ function normalizeValue(value: any): { raw: string | null; num: number | null; s
 
   if (typeof value === 'string') {
     const trimmed = value.trim();
-    if (trimmed === '/' || trimmed === '-' || trimmed === '—') {
+    if (isNaLikeValue(trimmed)) {
       return { raw: value, num: null, semantic: 'NA', normalized: trimmed };
     }
     const numeric = Number(trimmed);
@@ -255,13 +276,26 @@ function coerceNumber(value: any): number | null {
   }
   if (typeof value === 'string') {
     const trimmed = value.trim();
-    if (trimmed === '/' || trimmed === '-' || trimmed === '—') {
+    if (isNaLikeValue(trimmed)) {
       return null;
     }
     const numeric = Number(trimmed);
     return Number.isFinite(numeric) ? numeric : null;
   }
   return null;
+}
+
+function coerceActiveDisclosureFactValue(column: ActiveDisclosureFactColumn, value: any): number | null {
+  const numeric = coerceNumber(value);
+  if (numeric === null) {
+    return null;
+  }
+
+  if (column === 'amount') {
+    return numeric;
+  }
+
+  return Number.isInteger(numeric) ? numeric : null;
 }
 
 function getSection(parsed: any, type: string): any {
@@ -291,7 +325,11 @@ function buildActiveDisclosure(parsed: any): { facts: FactActiveDisclosure[]; ce
   const section = getSection(parsed, 'table_2');
   const data = section?.activeDisclosureData || parsed?.activeDisclosureData || {};
 
-  const mapping = [
+  const mapping: Array<{
+    key: string;
+    category: string;
+    fields: Record<string, ActiveDisclosureFactColumn>;
+  }> = [
     { key: 'regulations', category: 'regulations', fields: { made: 'made_count', repealed: 'repealed_count', valid: 'valid_count' } },
     { key: 'normativeDocuments', category: 'normative_documents', fields: { made: 'made_count', repealed: 'repealed_count', valid: 'valid_count' } },
     { key: 'licensing', category: 'licensing', fields: { processed: 'processed_count' } },
@@ -321,8 +359,7 @@ function buildActiveDisclosure(parsed: any): { facts: FactActiveDisclosure[]; ce
     Object.entries(fields).forEach(([fieldKey, column]) => {
       const value = entry[fieldKey];
       cells.push(buildCell('active_disclosure', category, fieldKey, value));
-      const numeric = coerceNumber(value);
-      (fact as any)[column] = numeric;
+      (fact as Record<ActiveDisclosureFactColumn, number | null>)[column] = coerceActiveDisclosureFactValue(column, value);
     });
 
     facts.push(fact);
@@ -510,4 +547,9 @@ export const __materializeInternals = {
   extractBalancedJsonObject,
   findFirstJsonObjectByKeys,
   extractTablePayloadsFromRawText,
+  isNaLikeValue,
+  normalizeValue,
+  coerceNumber,
+  coerceActiveDisclosureFactValue,
+  buildActiveDisclosure,
 };

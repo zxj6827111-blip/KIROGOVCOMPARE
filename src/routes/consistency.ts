@@ -5,6 +5,7 @@ import { consistencyCheckService } from '../services/ConsistencyCheckService';
 import { visionReviewService } from '../services/VisionReviewService';
 import { ocrCorrectionService } from '../services/OcrCorrectionService';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
+import { classifyConsistencyIssueType } from '../utils/consistencyIssueType';
 
 const router = express.Router();
 
@@ -249,6 +250,10 @@ router.get('/reports/:id/checks', async (req: AuthRequest, res) => {
       return {
         ...item,
         evidence,
+        issueType: classifyConsistencyIssueType({
+          ...item,
+          evidence,
+        }),
         // Ensure numeric values are numbers
         left_value: Number(item.left_value),
         right_value: Number(item.right_value),
@@ -478,6 +483,12 @@ router.patch('/reports/:id/checks/items/:itemId', async (req: AuthRequest, res) 
 
   if (!human_status) {
     res.status(400).json({ error: 'Missing human_status' });
+    return;
+  }
+
+  const ALLOWED_HUMAN_STATUSES = new Set(['pending', 'confirmed', 'dismissed']);
+  if (!ALLOWED_HUMAN_STATUSES.has(String(human_status).toLowerCase())) {
+    res.status(400).json({ error: 'Invalid human_status. Allowed: pending, confirmed, dismissed' });
     return;
   }
 

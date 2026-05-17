@@ -1,10 +1,186 @@
-import { ConsistencyCheckService } from '../services/ConsistencyCheckService';
+import { buildConsistencyRunSummary, ConsistencyCheckService } from '../services/ConsistencyCheckService';
+import { classifyConsistencyIssueType } from '../utils/consistencyIssueType';
 
 describe('ConsistencyCheckService', () => {
     let service: ConsistencyCheckService;
 
     beforeEach(() => {
         service = new ConsistencyCheckService();
+    });
+
+    describe('buildConsistencyRunSummary', () => {
+        it('preserves top-level compatibility while adding auto/human/active counts', () => {
+            const summary = buildConsistencyRunSummary([
+                { groupKey: 'text', autoStatus: 'FAIL', humanStatus: 'pending' },
+                { groupKey: 'text', autoStatus: 'UNCERTAIN', humanStatus: 'pending' },
+                { groupKey: 'table3', autoStatus: 'PASS', humanStatus: 'pending' },
+                { groupKey: 'table2', autoStatus: 'NOT_ASSESSABLE' },
+                { groupKey: 'table4', autoStatus: 'FAIL', humanStatus: 'confirmed' },
+                { groupKey: 'table4', autoStatus: 'FAIL', humanStatus: 'dismissed' },
+            ]);
+
+            expect(summary).toMatchObject({
+                fail: 3,
+                uncertain: 1,
+                pass: 1,
+                notAssessable: 1,
+                total: 6,
+                auto: {
+                    fail: 3,
+                    uncertain: 1,
+                    pass: 1,
+                    notAssessable: 1,
+                },
+                human: {
+                    pending: 4,
+                    confirmed: 1,
+                    dismissed: 1,
+                },
+                active: {
+                    rawFailCount: 3,
+                    activeProblemCount: 2,
+                    reviewCount: 3,
+                },
+            });
+        });
+
+        it('builds byGroupKey with the same counting rules', () => {
+            const summary = buildConsistencyRunSummary([
+                { groupKey: 'text', autoStatus: 'FAIL', humanStatus: 'pending' },
+                { groupKey: 'table2', autoStatus: 'NOT_ASSESSABLE', humanStatus: 'pending' },
+                { groupKey: 'table3', autoStatus: 'UNCERTAIN', humanStatus: 'pending' },
+                { groupKey: 'table3', autoStatus: 'FAIL', humanStatus: 'dismissed' },
+                { groupKey: 'table3', autoStatus: 'FAIL', humanStatus: 'confirmed' },
+            ]);
+
+            expect(summary.byGroupKey.text).toMatchObject({
+                total: 1,
+                fail: 1,
+                uncertain: 0,
+                pass: 0,
+                notAssessable: 0,
+                pending: 1,
+                confirmed: 0,
+                dismissed: 0,
+                rawFailCount: 1,
+                activeProblemCount: 1,
+                reviewCount: 1,
+            });
+            expect(summary.byGroupKey.table2).toMatchObject({
+                total: 1,
+                fail: 0,
+                uncertain: 0,
+                pass: 0,
+                notAssessable: 1,
+                pending: 1,
+                confirmed: 0,
+                dismissed: 0,
+                rawFailCount: 0,
+                activeProblemCount: 0,
+                reviewCount: 0,
+            });
+            expect(summary.byGroupKey.table3).toMatchObject({
+                total: 3,
+                fail: 2,
+                uncertain: 1,
+                pass: 0,
+                notAssessable: 0,
+                pending: 1,
+                confirmed: 1,
+                dismissed: 1,
+                rawFailCount: 2,
+                activeProblemCount: 1,
+                reviewCount: 1,
+            });
+        });
+    });
+
+    describe('classifyConsistencyIssueType', () => {
+        it('classifies text items as consistency_text', () => {
+            expect(classifyConsistencyIssueType({ group_key: 'text', check_key: 'text_vs_table3_totalProcessed' }))
+                .toBe('consistency_text');
+        });
+
+        it('classifies table2 rule items and t2_no_rules fallback correctly', () => {
+            expect(classifyConsistencyIssueType({
+                group_key: 'table2',
+                check_key: 't2_non_negative_counts_regulations_valid',
+                auto_status: 'FAIL',
+            })).toBe('consistency_table2');
+
+            expect(classifyConsistencyIssueType({
+                group_key: 'table2',
+                check_key: 't2_no_rules',
+                auto_status: 'NOT_ASSESSABLE',
+            })).toBe('unsupported_not_assessable');
+        });
+
+        it('classifies table3 identity, result_total and column_sum with correct priority', () => {
+            expect(classifyConsistencyIssueType({
+                group_key: 'table3',
+                check_key: 't3_identity_total',
+            })).toBe('consistency_table3_identity');
+
+            expect(classifyConsistencyIssueType({
+                group_key: 'table3',
+                check_key: 't3_result_total_total',
+            })).toBe('consistency_table3_result_total');
+
+            expect(classifyConsistencyIssueType({
+                group_key: 'table3',
+                check_key: 't3_column_sum_total',
+            })).toBe('consistency_table3_column_sum');
+
+            expect(classifyConsistencyIssueType({
+                group_key: 'table3',
+                check_key: 't3_result_total_total',
+                title: '各列求和=总计（办理结果总计）',
+            })).toBe('consistency_table3_column_sum');
+        });
+
+        it('classifies table4 items as consistency_table4_row_sum', () => {
+            expect(classifyConsistencyIssueType({
+                group_key: 'table4',
+                check_key: 't4_sum_review',
+            })).toBe('consistency_table4_row_sum');
+        });
+
+        it('classifies quality empty, text extraction and structure items', () => {
+            expect(classifyConsistencyIssueType({
+                group_key: 'quality',
+                check_key: 'table_empty_cells',
+            })).toBe('quality_empty');
+
+            expect(classifyConsistencyIssueType({
+                group_key: 'quality',
+                check_key: 'narrative_sec5_gap',
+            })).toBe('quality_text_extraction');
+
+            expect(classifyConsistencyIssueType({
+                group_key: 'structure',
+                check_key: 'table_missing_3',
+            })).toBe('quality_structure');
+        });
+
+        it('classifies source anomaly, not assessable fallback and unknown items', () => {
+            expect(classifyConsistencyIssueType({
+                group_key: 'visual',
+                check_key: 'some_check',
+                title: 'source_table_anomaly',
+            })).toBe('source_anomaly');
+
+            expect(classifyConsistencyIssueType({
+                group_key: 'custom',
+                check_key: 'custom_na',
+                auto_status: 'NOT_ASSESSABLE',
+            })).toBe('unsupported_not_assessable');
+
+            expect(classifyConsistencyIssueType({
+                group_key: 'custom',
+                check_key: 'custom_rule',
+                auto_status: 'FAIL',
+            })).toBe('unknown');
+        });
     });
 
     // Minimal fixture with Table 3 and Table 4 data
@@ -274,6 +450,22 @@ describe('ConsistencyCheckService', () => {
             expect(items.length).toBeGreaterThan(0);
         });
 
+        it('should surface parse rule gate failures as review items', () => {
+            const items = service.runChecks({
+                ...minimalFixture,
+                parse_rule_gate: {
+                    passed: false,
+                    issues: ['table_3.total.results.totalProcessed expected 2, got 3'],
+                },
+            });
+
+            const gateItem = items.find(item => item.checkKey === 'parse_rule_gate_1');
+            expect(gateItem).toBeTruthy();
+            expect(gateItem?.groupKey).toBe('table3');
+            expect(gateItem?.autoStatus).toBe('FAIL');
+            expect(gateItem?.evidenceJson.values.issue).toBe('table_3.total.results.totalProcessed expected 2, got 3');
+        });
+
         it('should generate text items when text content matches table values', () => {
             // Add litigation text to fixture
             const fixtureWithLitigation = {
@@ -507,6 +699,276 @@ describe('ConsistencyCheckService', () => {
 
             const sec6Item = items.find(i => i.checkKey === 'narrative_sec6_fee_conflict');
             expect(sec6Item).toBeUndefined(); // Should not generate a fail item
+        });
+    });
+    describe('Table2 low-risk rules', () => {
+        const makeTable2Fixture = (activeDisclosureData: any) => ({
+            sections: [
+                {
+                    type: 'table_2',
+                    activeDisclosureData,
+                },
+            ],
+        });
+
+        it('triggers FAIL for negative count fields and suppresses t2_no_rules when table2 rules exist', () => {
+            const items = service.runChecks(makeTable2Fixture({
+                regulations: { valid: -1 },
+            }));
+
+            const item = items.find(i => i.checkKey === 't2_non_negative_counts_regulations_valid');
+            expect(item).toBeDefined();
+            expect(item?.groupKey).toBe('table2');
+            expect(item?.autoStatus).toBe('FAIL');
+            expect(item?.leftValue).toBe(-1);
+            expect(item?.rightValue).toBe(0);
+            expect(item?.evidenceJson.paths).toEqual(['activeDisclosureData.regulations.valid']);
+            expect(item?.evidenceJson.values.cell_ref).toBe('active_disclosure:regulations:valid');
+            expect(item?.evidenceJson.values.reason).toBe('count_field_negative');
+            expect(items.find(i => i.checkKey === 't2_no_rules')).toBeUndefined();
+            expect(classifyConsistencyIssueType({
+                group_key: item?.groupKey,
+                check_key: item?.checkKey,
+                title: item?.title,
+                expr: item?.expr,
+                auto_status: item?.autoStatus,
+                evidence: item?.evidenceJson,
+            })).toBe('consistency_table2');
+        });
+
+        it('triggers UNCERTAIN for decimal count fields', () => {
+            const items = service.runChecks(makeTable2Fixture({
+                licensing: { processed: 1.5 },
+            }));
+
+            const item = items.find(i => i.checkKey === 't2_integer_counts_licensing_processed');
+            expect(item).toBeDefined();
+            expect(item?.autoStatus).toBe('UNCERTAIN');
+            expect(item?.leftValue).toBe(1.5);
+            expect(item?.evidenceJson.values.reason).toBe('count_field_not_integer');
+        });
+
+        it('triggers UNCERTAIN for non-numeric count fields', () => {
+            const items = service.runChecks(makeTable2Fixture({
+                punishment: { processed: 'abc' },
+            }));
+
+            const item = items.find(i => i.checkKey === 't2_numeric_parseable_counts_punishment_processed');
+            expect(item).toBeDefined();
+            expect(item?.autoStatus).toBe('UNCERTAIN');
+            expect(item?.leftValue).toBeNull();
+            expect(item?.evidenceJson.values.raw).toBe('abc');
+            expect(item?.evidenceJson.values.reason).toBe('count_field_not_numeric');
+        });
+
+        it('does not flag decimal fee amount as integer issue or amount error', () => {
+            const items = service.runChecks(makeTable2Fixture({
+                fees: { amount: 3415.74 },
+            }));
+
+            expect(items.find(i => i.checkKey.includes('fees_amount'))).toBeUndefined();
+            expect(items.find(i => i.checkKey === 't2_no_rules')).toBeUndefined();
+        });
+
+        it('triggers FAIL for negative fee amount', () => {
+            const items = service.runChecks(makeTable2Fixture({
+                fees: { amount: -10 },
+            }));
+
+            const item = items.find(i => i.checkKey === 't2_non_negative_fee_amount_fees_amount');
+            expect(item).toBeDefined();
+            expect(item?.autoStatus).toBe('FAIL');
+            expect(item?.leftValue).toBe(-10);
+            expect(item?.rightValue).toBe(0);
+            expect(item?.evidenceJson.values.reason).toBe('fee_amount_negative');
+        });
+
+        it('triggers only empty semantics hint for null count value', () => {
+            const items = service.runChecks(makeTable2Fixture({
+                coercion: { processed: null },
+            }));
+
+            const item = items.find(i => i.checkKey === 't2_empty_semantics_hint_coercion_processed');
+            expect(item).toBeDefined();
+            expect(item?.autoStatus).toBe('UNCERTAIN');
+            expect(item?.evidenceJson.values.semantic).toBe('EMPTY');
+            expect(items.filter(i => i.groupKey === 'table2')).toHaveLength(1);
+        });
+
+        it('triggers only empty semantics hint for slash placeholder', () => {
+            const items = service.runChecks(makeTable2Fixture({
+                regulations: { made: '/' },
+            }));
+
+            const item = items.find(i => i.checkKey === 't2_empty_semantics_hint_regulations_made');
+            expect(item).toBeDefined();
+            expect(item?.autoStatus).toBe('UNCERTAIN');
+            expect(item?.evidenceJson.values.semantic).toBe('NA');
+        });
+
+        it('triggers only empty semantics hint for em dash placeholder', () => {
+            const items = service.runChecks(makeTable2Fixture({
+                normativeDocuments: { valid: '—' },
+            }));
+
+            const item = items.find(i => i.checkKey === 't2_empty_semantics_hint_normativeDocuments_valid');
+            expect(item).toBeDefined();
+            expect(item?.autoStatus).toBe('UNCERTAIN');
+            expect(item?.evidenceJson.values.semantic).toBe('NA');
+        });
+
+        it('triggers only empty semantics hint for 不适用 placeholder', () => {
+            const items = service.runChecks(makeTable2Fixture({
+                licensing: { processed: '不适用' },
+            }));
+
+            const item = items.find(i => i.checkKey === 't2_empty_semantics_hint_licensing_processed');
+            expect(item).toBeDefined();
+            expect(item?.autoStatus).toBe('UNCERTAIN');
+            expect(item?.evidenceJson.values.semantic).toBe('NA');
+        });
+
+        it('does not flag zero as empty semantics or anomaly', () => {
+            const items = service.runChecks(makeTable2Fixture({
+                punishment: { processed: 0 },
+            }));
+
+            expect(items.filter(i => i.groupKey === 'table2')).toHaveLength(0);
+        });
+
+        it('keeps t2_no_rules as fallback when table2 is absent', () => {
+            const items = service.runChecks({ sections: [] });
+            const fallback = items.find(i => i.checkKey === 't2_no_rules');
+
+            expect(fallback).toBeDefined();
+            expect(fallback?.autoStatus).toBe('NOT_ASSESSABLE');
+            expect(fallback?.evidenceJson.values.hasTable2).toBe(false);
+        });
+
+        it('keeps t2_no_rules as fallback when table2 exists but has no supported fields', () => {
+            const items = service.runChecks(makeTable2Fixture({}));
+            const fallback = items.find(i => i.checkKey === 't2_no_rules');
+
+            expect(fallback).toBeDefined();
+            expect(fallback?.autoStatus).toBe('NOT_ASSESSABLE');
+            expect(fallback?.evidenceJson.values.hasTable2).toBe(true);
+            expect(classifyConsistencyIssueType({
+                group_key: fallback?.groupKey,
+                check_key: fallback?.checkKey,
+                title: fallback?.title,
+                expr: fallback?.expr,
+                auto_status: fallback?.autoStatus,
+                evidence: fallback?.evidenceJson,
+            })).toBe('unsupported_not_assessable');
+        });
+
+        it('summarizes table2 low-risk rules without changing top-level compatibility', () => {
+            const summary = buildConsistencyRunSummary([
+                { groupKey: 'table2', autoStatus: 'FAIL', humanStatus: 'pending' },
+                { groupKey: 'table2', autoStatus: 'FAIL', humanStatus: 'pending' },
+                { groupKey: 'table2', autoStatus: 'UNCERTAIN', humanStatus: 'pending' },
+                { groupKey: 'table2', autoStatus: 'UNCERTAIN', humanStatus: 'pending' },
+                { groupKey: 'table2', autoStatus: 'UNCERTAIN', humanStatus: 'pending' },
+            ]);
+
+            expect(summary.fail).toBe(2);
+            expect(summary.uncertain).toBe(3);
+            expect(summary.pass).toBe(0);
+            expect(summary.notAssessable).toBe(0);
+            expect(summary.total).toBe(5);
+            expect(summary.byGroupKey.table2).toMatchObject({
+                total: 5,
+                fail: 2,
+                uncertain: 3,
+                pass: 0,
+                notAssessable: 0,
+                pending: 5,
+                confirmed: 0,
+                dismissed: 0,
+                rawFailCount: 2,
+                activeProblemCount: 2,
+                reviewCount: 5,
+            });
+        });
+
+        it('produces the expected five table2 rules for mixed abnormal raw values', () => {
+            const items = service.runChecks(makeTable2Fixture({
+                regulations: { valid: -1 },
+                licensing: { processed: 1.5 },
+                punishment: { processed: 'abc' },
+                fees: { amount: -10 },
+                coercion: { processed: '/' },
+                normativeDocuments: { valid: 0 },
+            }));
+            const table2Items = items.filter(i => i.groupKey === 'table2');
+            const summary = buildConsistencyRunSummary(table2Items);
+
+            expect(table2Items.map(i => i.checkKey).sort()).toEqual([
+                't2_empty_semantics_hint_coercion_processed',
+                't2_integer_counts_licensing_processed',
+                't2_non_negative_counts_regulations_valid',
+                't2_non_negative_fee_amount_fees_amount',
+                't2_numeric_parseable_counts_punishment_processed',
+            ]);
+            expect(items.find(i => i.checkKey === 't2_no_rules')).toBeUndefined();
+            expect(summary.byGroupKey.table2).toMatchObject({
+                total: 5,
+                rawFailCount: 2,
+                activeProblemCount: 2,
+                reviewCount: 5,
+                fail: 2,
+                uncertain: 3,
+                notAssessable: 0,
+            });
+        });
+
+        it('keeps t2_no_rules fallback out of activeProblemCount and reviewCount', () => {
+            const items = service.runChecks(makeTable2Fixture({}));
+            const summary = buildConsistencyRunSummary(items);
+            const table2Items = items.filter(i => i.groupKey === 'table2');
+
+            expect(table2Items).toHaveLength(1);
+            expect(table2Items[0].checkKey).toBe('t2_no_rules');
+            expect(summary.byGroupKey.table2).toMatchObject({
+                total: 1,
+                fail: 0,
+                uncertain: 0,
+                pass: 0,
+                notAssessable: 1,
+                pending: 1,
+                confirmed: 0,
+                dismissed: 0,
+                rawFailCount: 0,
+                activeProblemCount: 0,
+                reviewCount: 0,
+            });
+        });
+    });
+
+    describe('issueType classification on generated items', () => {
+        it('classifies generated table3 items into identity, result_total and column_sum buckets', () => {
+            const items = service.runChecks(minimalFixture).filter(i => i.groupKey === 'table3');
+
+            const identityItem = items.find(i => i.checkKey.includes('identity'));
+            const resultTotalItem = items.find(i => i.checkKey.includes('result_total'));
+            const columnSumItem = items.find(i => i.checkKey.includes('column_sum') || i.checkKey.includes('col_sum'));
+
+            expect(identityItem).toBeDefined();
+            expect(resultTotalItem).toBeDefined();
+            expect(columnSumItem).toBeDefined();
+
+            expect(classifyConsistencyIssueType(identityItem!)).toBe('consistency_table3_identity');
+            expect(classifyConsistencyIssueType(resultTotalItem!)).toBe('consistency_table3_result_total');
+            expect(classifyConsistencyIssueType(columnSumItem!)).toBe('consistency_table3_column_sum');
+        });
+
+        it('classifies generated table4 items as row-sum issues', () => {
+            const items = service.runChecks(minimalFixture).filter(i => i.groupKey === 'table4');
+
+            expect(items.length).toBeGreaterThan(0);
+            items.forEach((item) => {
+                expect(classifyConsistencyIssueType(item)).toBe('consistency_table4_row_sum');
+            });
         });
     });
 });

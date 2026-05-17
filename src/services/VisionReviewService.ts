@@ -316,10 +316,142 @@ function getOcrTablePayload(ocrJson: Record<string, any>, tableId: VisionReviewT
 }
 
 function normalizeOcrTablePayload(tableId: VisionReviewTableId, payload: Record<string, any>): Record<string, any> {
+  if (tableId === 'table_2') {
+    return normalizeTable2DisclosurePayload(payload) || payload;
+  }
   if (tableId === 'table_3') {
     return normalizeTable3MatrixPayload(payload) || payload;
   }
   return payload;
+}
+
+function isRecordValue(value: unknown): value is Record<string, any> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeMatchText(value: unknown): string {
+  return String(value || '')
+    .replace(/\s+/g, '')
+    .replace(/[()（）［］\[\]【】]/g, '')
+    .replace(/[、，,。:：;；/\\|_\-—]/g, '')
+    .toLowerCase();
+}
+
+function labelMatches(value: unknown, labels: string[]): boolean {
+  const normalized = normalizeMatchText(value);
+  return labels.some((label) => {
+    const target = normalizeMatchText(label);
+    return Boolean(target) && normalized.includes(target);
+  });
+}
+
+function findNestedRecordByLabel(source: unknown, labels: string[], maxDepth = 5): Record<string, any> | null {
+  if (!isRecordValue(source) || maxDepth < 0) return null;
+
+  for (const [key, value] of Object.entries(source)) {
+    if (labelMatches(key, labels) && isRecordValue(value)) {
+      return value;
+    }
+  }
+
+  for (const value of Object.values(source)) {
+    const found = findNestedRecordByLabel(value, labels, maxDepth - 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+function pickComparableByLabel(source: unknown, labels: string[], maxDepth = 3): number | string | null {
+  if (!isRecordValue(source) || maxDepth < 0) return null;
+
+  for (const [key, value] of Object.entries(source)) {
+    if (!labelMatches(key, labels)) continue;
+    const comparable = comparableValue(value);
+    if (comparable !== null) return comparable;
+    const nested = pickComparableByLabel(value, labels, maxDepth - 1);
+    if (nested !== null) return nested;
+  }
+
+  for (const value of Object.values(source)) {
+    const nested = pickComparableByLabel(value, labels, maxDepth - 1);
+    if (nested !== null) return nested;
+  }
+  return null;
+}
+
+function setComparableIfPresent(target: Record<string, any>, pathKeys: string[], value: number | string | null): void {
+  if (value !== null) {
+    setNestedValue(target, pathKeys, value);
+  }
+}
+
+function normalizeTable2StandardRow(row: Record<string, any>, kind: 'threeCount' | 'processed' | 'fees'): Record<string, any> {
+  if (kind === 'threeCount') {
+    const made = pickComparableByLabel(row, ['本年制发件数', '本年制发', '本年新制作数量', '本年新公开数量', '制发件数', '新制作数量']);
+    const repealed = pickComparableByLabel(row, ['本年废止件数', '本年废止', '废止件数', '废止']);
+    const valid = pickComparableByLabel(row, ['现行有效件数', '现行有效', '对外公开总数量', '公开总数量', '有效件数']);
+    return { made, repealed: repealed ?? (made !== null && valid !== null ? 0 : null), valid };
+  }
+
+  if (kind === 'processed') {
+    return {
+      processed: pickComparableByLabel(row, ['本年处理决定数量', '处理决定数量', '决定数量']),
+    };
+  }
+
+  return {
+    amount: pickComparableByLabel(row, ['本年收费金额', '收费金额', '收费总金额', '金额', '上一年项目数量']),
+  };
+}
+
+function normalizeTable2DisclosurePayload(payload: Record<string, any>): Record<string, any> | null {
+  const normalized: Record<string, any> = {};
+  const sectionOne = findNestedRecordByLabel(payload, ['第二十条第（一）项', '第二十条第一项', '第（一）项', '第一项']) || payload;
+  const sectionFive = findNestedRecordByLabel(payload, ['第二十条第（五）项', '第二十条第五项', '第（五）项', '第五项']) || payload;
+  const sectionSix = findNestedRecordByLabel(payload, ['第二十条第（六）项', '第二十条第六项', '第（六）项', '第六项']) || payload;
+  const sectionEight = findNestedRecordByLabel(payload, ['第二十条第（八）项', '第二十条第八项', '第（八）项', '第八项']) || payload;
+
+  const regulations = findNestedRecordByLabel(sectionOne, ['规章']);
+  if (regulations) {
+    const row = normalizeTable2StandardRow(regulations, 'threeCount');
+    setComparableIfPresent(normalized, ['regulations', 'made'], row.made);
+    setComparableIfPresent(normalized, ['regulations', 'repealed'], row.repealed);
+    setComparableIfPresent(normalized, ['regulations', 'valid'], row.valid);
+  }
+
+  const normativeDocuments = findNestedRecordByLabel(sectionOne, ['行政规范性文件', '规范性文件']);
+  if (normativeDocuments) {
+    const row = normalizeTable2StandardRow(normativeDocuments, 'threeCount');
+    setComparableIfPresent(normalized, ['normativeDocuments', 'made'], row.made);
+    setComparableIfPresent(normalized, ['normativeDocuments', 'repealed'], row.repealed);
+    setComparableIfPresent(normalized, ['normativeDocuments', 'valid'], row.valid);
+  }
+
+  const licensing = findNestedRecordByLabel(sectionFive, ['行政许可']);
+  if (licensing) {
+    const row = normalizeTable2StandardRow(licensing, 'processed');
+    setComparableIfPresent(normalized, ['licensing', 'processed'], row.processed);
+  }
+
+  const punishment = findNestedRecordByLabel(sectionSix, ['行政处罚']);
+  if (punishment) {
+    const row = normalizeTable2StandardRow(punishment, 'processed');
+    setComparableIfPresent(normalized, ['punishment', 'processed'], row.processed);
+  }
+
+  const coercion = findNestedRecordByLabel(sectionSix, ['行政强制']);
+  if (coercion) {
+    const row = normalizeTable2StandardRow(coercion, 'processed');
+    setComparableIfPresent(normalized, ['coercion', 'processed'], row.processed);
+  }
+
+  const fees = findNestedRecordByLabel(sectionEight, ['行政事业性收费']);
+  if (fees) {
+    const row = normalizeTable2StandardRow(fees, 'fees');
+    setComparableIfPresent(normalized, ['fees', 'amount'], row.amount);
+  }
+
+  return Object.keys(flattenLeafValues(normalized)).length > 0 ? normalized : null;
 }
 
 function normalizeTable3MatrixPayload(payload: Record<string, any>): Record<string, any> | null {
@@ -729,12 +861,17 @@ export function compareVisionOcrWithParsed(
     : Array.from(new Set([...Object.keys(parsedFlat), ...Object.keys(ocrFlat)]))
   ).sort();
   const differences: VisionReviewComparison['differences'] = [];
+  const missingOcrCells: string[] = [];
   let comparedCellCount = 0;
 
   for (const relativePath of allPaths) {
     const parsedValue = parsedFlat[relativePath] ?? null;
     const ocrValue = ocrFlat[relativePath] ?? null;
     if (parsedValue === null && ocrValue === null) {
+      continue;
+    }
+    if (parsedValue !== null && ocrValue === null) {
+      missingOcrCells.push(`${TABLE_PAYLOAD_KEY[tableId]}.${relativePath}`);
       continue;
     }
     comparedCellCount += 1;
@@ -747,11 +884,12 @@ export function compareVisionOcrWithParsed(
     }
   }
 
-  if (comparedCellCount === 0) {
+  const combinedUnreadableCells = uniqueStrings([...unreadableCells, ...missingOcrCells]);
+  if (comparedCellCount === 0 || missingOcrCells.length > 0) {
     return {
       conclusion: 'inconclusive',
       differences: [],
-      unreadableCells,
+      unreadableCells: combinedUnreadableCells,
       comparedCellCount,
       triggerHadCheckFailure,
       parsedSource: 'parsed_json',
@@ -768,7 +906,7 @@ export function compareVisionOcrWithParsed(
   return {
     conclusion,
     differences,
-    unreadableCells,
+    unreadableCells: combinedUnreadableCells,
     comparedCellCount,
     triggerHadCheckFailure,
     parsedSource: 'parsed_json',
@@ -800,13 +938,18 @@ export class VisionReviewService {
     return Array.from(new Set(normalized.length ? normalized : TABLE_IDS));
   }
 
-  async enqueueForConsistencyItems(reportId: number, versionId: number, items: ConsistencyItem[]): Promise<number> {
+  async enqueueForConsistencyItems(
+    reportId: number,
+    versionId: number,
+    items: ConsistencyItem[],
+    forceRerun = false
+  ): Promise<number> {
     const config = this.resolveConfig();
     if (!config.enabled) return 0;
 
     const tableIds = TABLE_IDS.filter((tableId) => hasTableTriggerFailure(items, tableId));
     if (tableIds.length === 0) return 0;
-    return this.enqueueReviewRows(reportId, versionId, tableIds, this.buildTriggerReason(items), false);
+    return this.enqueueReviewRows(reportId, versionId, tableIds, this.buildTriggerReason(items), forceRerun);
   }
 
   async enqueueReviewRows(

@@ -1,100 +1,37 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import './ConsistencyCheckView.css';
 import { apiClient } from '../apiClient';
 import { getRowColFromPath, normalizeTablePath } from '../utils/tableRowColMapping';
+import {
+  buildQualityAuditGroups,
+  collectPendingConsistencyItemIds,
+  getConsistencyAutoStatusLabel,
+  getConsistencyHumanStatusLabel,
+  getQualityAuditAutoStatusLabel,
+  getQualityAuditHumanStatusLabel,
+  normalizeConsistencyGroups,
+  QUALITY_AUDIT_GROUP_KEYS,
+  summarizeConsistencyGroups,
+  summarizeQualityAuditGroups,
+} from '../utils/consistencyDisplay';
+import { aggregateIssuesFromChecks } from '../utils/issueAggregation';
 
-// 将 JSON 路径解析为人类可读的位置描述
-const parseLocationFromPath = (path) => {
-  if (!path) return null;
-  const v2 = parseLocationFromPathV2(path);
-  if (v2) return v2;
+const isTablePath = (path) =>
+  path &&
+  (path.includes('tableData') ||
+    path.includes('reviewLitigationData') ||
+    path.includes('activeDisclosureData'));
 
-  // 1. 获取基础表格和字段名称 (利用映射表获取准确的中文显式名称)
-  const rowCol = getRowColFromPath(path);
-  const tableName = rowCol ? rowCol.table : '表格数据';
-  const fieldName = rowCol ? rowCol.name : null;
+const normalizeTablePaths = (paths) =>
+  (paths || [])
+    .map((p) => normalizeTablePath(p))
+    .filter((p) => p && isTablePath(p));
 
-  // 2. 解析具体的列/分类 (如自然人、商业企业)
-  // 注意：不再使用 row/col 数字，而是直接解析语义，因为表格布局可能与内部逻辑行号视觉上不一致
-  let categoryName = '';
-  if (path.includes('naturalPerson')) categoryName = '自然人列';
-  else if (path.includes('legalPerson.commercial')) categoryName = '法人-商业企业列';
-  else if (path.includes('legalPerson.research')) categoryName = '法人-科研机构列';
-  else if (path.includes('legalPerson.social')) categoryName = '法人-社会公益列';
-  else if (path.includes('legalPerson.legal')) categoryName = '法人-法律服务列';
-  else if (path.includes('legalPerson.other')) categoryName = '法人-其他列';
-  else if (path.includes('total')) categoryName = '总计列';
-
-  // 3. 组合描述: 表名 · 分类 · 字段名
-  if (fieldName && categoryName) {
-    return `${tableName} · ${categoryName} · ${fieldName}`;
-  }
-
-  if (fieldName) {
-    return `${tableName} · ${fieldName}`;
-  }
-
-  // 4. 回退机制：如果没有精确映射，使用旧的字典映射
-  const pathMappings = {
-    // 表三相关路径
-    'tableData.total.results.totalProcessed': '表三 · 办理结果总计 · 总数',
-    'tableData.total.results.disclosure.activeDisclosure': '表三 · 办理结果总计 · 予以公开 · 主动公开',
-    'tableData.total.results.disclosure.dependentApplication': '表三 · 办理结果总计 · 予以公开 · 依申请公开',
-    'tableData.total.results.partialDisclosure.applyForInfo': '表三 · 办理结果总计 · 部分公开 · 申请信息',
-    'tableData.total.results.notDisclosed': '表三 · 办理结果总计 · 不予公开',
-    'tableData.total.results.notAccepted.notOwnInfo': '表三 · 办理结果总计 · 不予处理 · 非本机关信息',
-    'tableData.total.results.notAccepted.notExist': '表三 · 办理结果总计 · 不予处理 · 信息不存在',
-    'tableData.total.results.other': '表三 · 办理结果总计 · 其他处理',
-    'tableData.total.results.transferred': '表三 · 办理结果总计 · 已移送',
-    'tableData.total.channelStats': '表三 · 渠道统计',
-    'tableData.currentYear': '表三 · 本年新收申请',
-    'tableData.previousYear': '表三 · 上年结转申请',
-
-    // 表四相关路径
-    'reviewLitigationData.review.total': '表四 · 行政复议 · 总计',
-    'reviewLitigationData.review.maintain': '表四 · 行政复议 · 维持',
-    'reviewLitigationData.review.correct': '表四 · 行政复议 · 纠正',
-    'reviewLitigationData.review.other': '表四 · 行政复议 · 其他',
-    'reviewLitigationData.review.unfinished': '表四 · 行政复议 · 尚未审结',
-    'reviewLitigationData.litigationDirect.total': '表四 · 未经复议直接起诉 · 总计',
-    'reviewLitigationData.litigationDirect.maintain': '表四 · 未经复议直接起诉 · 维持',
-    'reviewLitigationData.litigationDirect.correct': '表四 · 未经复议直接起诉 · 纠正',
-    'reviewLitigationData.litigationPostReview.total': '表四 · 复议后起诉 · 总计',
-
-    // 表二相关路径
-    'activeDisclosureData.regulations': '表二 · 规章',
-    'activeDisclosureData.normativeDocuments': '表二 · 规范性文件',
-    'activeDisclosureData.licensing': '表二 · 行政许可',
-    'activeDisclosureData.punishment': '表二 · 行政处罚',
-    'activeDisclosureData.coercion': '表二 · 行政强制',
-
-    // 正文相关
-    'text.content': '正文内容',
-  };
-
-  // 直接匹配
-  if (pathMappings[path]) {
-    return pathMappings[path];
-  }
-
-  // 尝试前缀匹配
-  for (const [key, value] of Object.entries(pathMappings)) {
-    if (path.startsWith(key)) {
-      const suffix = path.replace(key, '').replace(/^\./, '');
-      return suffix ? `${value} · ${suffix}` : value;
-    }
-  }
-
-  return path; // Fallback to raw path if really nothing matches
-};
-
-// 在文本中高亮数字 - 使用 HTML 标记
-const parseLocationFromPathV2 = (rawPath) => {
+const parseLocationFromPath = (rawPath) => {
   if (!rawPath) return null;
 
   const path = normalizeTablePath(rawPath);
   const rowCol = getRowColFromPath(path);
-
   if (rowCol) {
     const parts = [rowCol.table];
     const rowLabel = rowCol.rowLabel || rowCol.name;
@@ -103,120 +40,224 @@ const parseLocationFromPathV2 = (rawPath) => {
     return parts.join(' / ');
   }
 
-  const pathMappings = {
-    'text.content': '正文内容',
-  };
-
-  if (pathMappings[path]) {
-    return pathMappings[path];
-  }
-
-  for (const [key, value] of Object.entries(pathMappings)) {
-    if (path.startsWith(key)) {
-      const suffix = path.replace(key, '').replace(/^\./, '');
-      return suffix ? `${value} / ${suffix}` : value;
-    }
-  }
-
-  return null;
+  if (path?.includes('content')) return '正文内容';
+  return path || rawPath;
 };
 
 const highlightNumber = (text, number) => {
   if (!text || number === null || number === undefined) return text;
   const numStr = String(number);
-  // 使用 <mark> 标签包裹数字，CSS 会提供高亮样式
   const escaped = numStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const regex = new RegExp(`(?<!\\d)(${escaped})(?!\\d)`, 'g');
   return text.replace(regex, '<mark class="num-highlight">$1</mark>');
 };
 
-// 从 evidence 中提取位置描述，返回结构化信息
 const getLocationInfo = (item) => {
-  if (!item.evidence) return null;
+  if (!item?.evidence) return null;
 
-  const getSourceDesc = (rawPath) => {
+  const toSource = (rawPath) => {
     const path = normalizeTablePath(rawPath);
-    const isTablePath = path && (path.includes('tableData') || path.includes('reviewLitigationData') || path.includes('activeDisclosureData'));
-
-    if (isTablePath) {
-      const desc = parseLocationFromPath(path);
-      return { type: 'table', label: `${desc}`, path, rawPath };
-    }
-    if (path && path.includes('content')) {
-      return { type: 'text', label: '正文匹配内容', path, rawPath };
-    }
-    return { type: 'unknown', label: path || rawPath, path: path || rawPath };
+    if (!path) return null;
+    if (isTablePath(path)) return { type: 'table', label: parseLocationFromPath(path), path };
+    if (path.includes('content')) return { type: 'text', label: '正文匹配内容', path };
+    return { type: 'unknown', label: path, path };
   };
 
-  const parsePaths = (paths) => {
-    if (!paths) return [];
-    return paths.map(path => getSourceDesc(path));
-  };
-
-  // 优先使用分开的 paths
-  const leftSources = parsePaths(item.evidence.leftPaths);
-  const rightSources = parsePaths(item.evidence.rightPaths);
-
-  // 如果没有分离的 paths（旧数据兼容），尝试从 values 或 paths 猜测，或者直接返回空
-  // 但我们的后端已经保证了新数据会有 left/rightPaths
+  const leftSources = (item.evidence.leftPaths || []).map(toSource).filter(Boolean);
+  const rightSources = (item.evidence.rightPaths || []).map(toSource).filter(Boolean);
+  const contextValue = item.evidence.values?.context || item.evidence.values?.matchedText;
 
   return {
     leftSources,
     rightSources,
-    values: item.evidence.values || {},
-    context: item.evidence.values?.context || item.evidence.values?.matchedText
-      ? highlightNumber(item.evidence.values.context || item.evidence.values.matchedText, item.evidence.values.textValue)
-      : null
+    context: contextValue
+      ? highlightNumber(contextValue, item.evidence.values?.textValue)
+      : null,
   };
 };
 
-const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups, onLocate }) => {
-  // ... (state and fetch methods same as before)
+const getLocatePayload = (item) => ({
+  leftPaths: normalizeTablePaths(item?.evidence?.leftPaths),
+  rightPaths: normalizeTablePaths(item?.evidence?.rightPaths),
+  fallbackPaths: normalizeTablePaths(item?.evidence?.paths),
+});
+
+const getSeverityColor = (status, isQualityMode = false) => {
+  if (isQualityMode) {
+    switch (status) {
+      case 'FAIL':
+        return 'status-quality-risk';
+      case 'UNCERTAIN':
+        return 'status-quality-review';
+      case 'PASS':
+        return 'status-pass';
+      default:
+        return 'status-other';
+    }
+  }
+
+  switch (status) {
+    case 'FAIL':
+      return 'status-fail';
+    case 'UNCERTAIN':
+      return 'status-uncertain';
+    case 'PASS':
+      return 'status-pass';
+    default:
+      return 'status-other';
+  }
+};
+
+const renderGroupSummary = (group, isQualityMode) => {
+  const { hasOnlyNotAssessable, helperText } = group;
+
+  if (hasOnlyNotAssessable) {
+    return (
+      <div className="group-summary">
+        <span className="group-summary-pill group-summary-pill--empty">
+          {isQualityMode ? '暂无可判断提示' : '暂无可评估规则'}
+        </span>
+        {helperText ? <span className="group-helper-text">{helperText}</span> : null}
+      </div>
+    );
+  }
+
+  if (isQualityMode) {
+    const stats = group.stats || {};
+    return (
+      <div className="group-summary">
+        <span className="group-summary-pill group-summary-pill--quality-risk">风险提示 {stats.riskCount || 0}</span>
+        <span className="group-summary-pill group-summary-pill--quality-review">需复核 {stats.reviewCount || 0}</span>
+        {stats.resolvedCount > 0 ? (
+          <span className="group-summary-pill group-summary-pill--confirmed">已处理 {stats.resolvedCount}</span>
+        ) : null}
+        {stats.dismissedCount > 0 ? (
+          <span className="group-summary-pill group-summary-pill--muted">已忽略 {stats.dismissedCount}</span>
+        ) : null}
+        {stats.notAssessableCount > 0 ? (
+          <span className="group-summary-pill group-summary-pill--muted">不可判断 {stats.notAssessableCount}</span>
+        ) : null}
+      </div>
+    );
+  }
+
+  const { stats, table3CategoryStats } = group;
+  return (
+    <>
+      <div className="group-summary">
+        <span className="group-summary-pill">规则 {stats.ruleCount}</span>
+        <span className="group-summary-pill group-summary-pill--problem">问题 {stats.problemCount}</span>
+        <span className="group-summary-pill group-summary-pill--pending">待复核 {stats.pendingCount}</span>
+        {stats.confirmedCount > 0 ? (
+          <span className="group-summary-pill group-summary-pill--confirmed">已确认 {stats.confirmedCount}</span>
+        ) : null}
+        {stats.notAssessableCount > 0 ? (
+          <span className="group-summary-pill group-summary-pill--muted">不可评估 {stats.notAssessableCount}</span>
+        ) : null}
+      </div>
+      {group.group_key === 'table3' && table3CategoryStats.length > 0 ? (
+        <div className="group-breakdown">
+          {table3CategoryStats.map((bucket) => (
+            <div key={bucket.key} className="group-breakdown-row">
+              <span>{bucket.label}</span>
+              <span>问题 {bucket.problemCount}</span>
+              {bucket.pendingCount > 0 ? (
+                <span className="group-breakdown-muted">其余待复核 {bucket.pendingCount}</span>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+};
+
+const buildModeMeta = (filterGroups = []) => {
+  const isQualityMode =
+    filterGroups.length > 0 && filterGroups.every((groupKey) => QUALITY_AUDIT_GROUP_KEYS.includes(groupKey));
+
+  if (isQualityMode) {
+    return {
+      isQualityMode: true,
+      title: '数据质量审计',
+      description: '展示抽取、格式、空值和结构识别相关的黄色风险提示，不计入勾稽问题统计。',
+      emptyRunText: '尚未运行数据质量审计',
+      emptyDataText: '暂无数据质量审计数据',
+      noGroupText: '当前没有可展示的数据质量提示',
+      bulkConfirmText: '一键标记为已处理',
+      runButtonText: { idle: '重新审计', initial: '运行审计', loading: '审计中...' },
+    };
+  }
+
+  return {
+    isQualityMode: false,
+    title: '勾稽关系校验',
+    description: '',
+    emptyRunText: '尚未运行校验',
+    emptyDataText: '暂无校验数据',
+    noGroupText: '当前分组下暂无校验数据',
+    bulkConfirmText: '一键确认',
+    runButtonText: { idle: '重新校验', initial: '运行校验', loading: '运行中...' },
+  };
+};
+
+const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], onLocate, onChecksUpdated }) => {
   const [checksData, setChecksData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [expandedGroups, setExpandedGroups] = useState({});
 
-  const isTablePath = (path) =>
-    path && (path.includes('tableData') || path.includes('reviewLitigationData') || path.includes('activeDisclosureData'));
+  const modeMeta = useMemo(() => buildModeMeta(filterGroups), [filterGroups]);
+  const consistencySourceGroups = useMemo(() => {
+    if (!checksData || modeMeta.isQualityMode) return [];
+    const groups = checksData.groups || [];
+    return groups.filter((group) =>
+      filterGroups?.length ? filterGroups.includes(group.group_key) : true
+    );
+  }, [checksData, filterGroups, modeMeta.isQualityMode]);
 
-  const normalizeTablePaths = (paths) =>
-    (paths || [])
-      .map((p) => normalizeTablePath(p))
-      .filter((p) => p && isTablePath(p));
-
-  const getLocatePayload = (item) => {
-    const leftPaths = normalizeTablePaths(item?.evidence?.leftPaths);
-    const rightPaths = normalizeTablePaths(item?.evidence?.rightPaths);
-    const fallbackPaths = normalizeTablePaths(item?.evidence?.paths);
-
-    return {
-      leftPaths,
-      rightPaths,
-      fallbackPaths,
-    };
-  };
+  const consistencyAggregation = useMemo(() => {
+    if (!checksData || modeMeta.isQualityMode) return null;
+    return aggregateIssuesFromChecks(consistencySourceGroups, {
+      domain: 'consistency',
+      displayMode: 'management',
+      includeUncertain: true,
+      includeConfirmed: true,
+      includeDismissed: true,
+      displayNoScope: 'group',
+    });
+  }, [checksData, consistencySourceGroups, modeMeta.isQualityMode]);
 
   const fetchChecks = async () => {
+    if (!reportId) return;
+
     setLoading(true);
     setError('');
     try {
       const response = await apiClient.get(`/reports/${reportId}/checks`, {
         params: versionId ? { version_id: versionId } : undefined,
       });
-      const data = response.data?.data || response.data;
-      setChecksData(data);
+      const data = response.data?.data || response.data || { groups: [], latest_run: null };
+      const normalizedGroups = normalizeConsistencyGroups(data.groups || []);
+      setChecksData({ ...data, groups: normalizedGroups });
 
-      if (data?.groups) {
-        const newExpandedState = {};
-        data.groups.forEach(group => {
-          const hasProblems = group.items?.some(item =>
-            item.auto_status === 'FAIL' || item.auto_status === 'UNCERTAIN'
-          );
-          newExpandedState[group.group_key] = hasProblems;
+      setExpandedGroups((prev) => {
+        const next = { ...prev };
+        const nextGroups = modeMeta.isQualityMode
+          ? buildQualityAuditGroups(normalizedGroups, filterGroups)
+          : normalizedGroups.filter((group) => (filterGroups?.length ? filterGroups.includes(group.group_key) : true));
+
+        nextGroups.forEach((group) => {
+          if (next[group.group_key] === undefined) {
+            next[group.group_key] =
+              group.hasOnlyNotAssessable ||
+              (group.items || []).some(
+                (item) => item.auto_status === 'FAIL' || item.auto_status === 'UNCERTAIN'
+              );
+          }
         });
-        setExpandedGroups(newExpandedState);
-      }
+        return next;
+      });
     } catch (err) {
       setError(err.response?.data?.error || err.message || '加载失败');
     } finally {
@@ -225,22 +266,19 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups, onLoc
   };
 
   useEffect(() => {
-    if (reportId) {
-      fetchChecks();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    fetchChecks();
   }, [reportId, versionId]);
 
   const handleRunChecks = async () => {
+    if (!reportId) return;
     setLoading(true);
     setError('');
     try {
       await apiClient.post(`/reports/${reportId}/checks/run`, {
         ...(versionId ? { version_id: versionId } : {}),
       });
-      setTimeout(() => {
-        fetchChecks();
-      }, 3000);
+      await fetchChecks();
+      onChecksUpdated?.();
     } catch (err) {
       setError(err.response?.data?.error || err.message || '触发失败');
       setLoading(false);
@@ -249,294 +287,390 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups, onLoc
 
   const handleUpdateStatus = async (itemId, humanStatus, comment = null) => {
     try {
-      await apiClient.patch(
-        `/reports/${reportId}/checks/items/${itemId}`,
-        { human_status: humanStatus, human_comment: comment }
-      );
-      fetchChecks();
+      await apiClient.patch(`/reports/${reportId}/checks/items/${itemId}`, {
+        ...(versionId ? { version_id: versionId } : {}),
+        human_status: humanStatus,
+        human_comment: comment,
+      });
+      await fetchChecks();
+      onChecksUpdated?.();
     } catch (err) {
-      alert(err.response?.data?.error || err.message || '更新失败');
+      window.alert(err.response?.data?.error || err.message || '更新失败');
     }
   };
 
+  const displayedGroups = useMemo(() => {
+    if (!checksData) return [];
+    if (modeMeta.isQualityMode) {
+      return buildQualityAuditGroups(checksData.groups || [], filterGroups);
+    }
+    if (!consistencyAggregation) {
+      return consistencySourceGroups;
+    }
+    return consistencySourceGroups.map((group) => ({
+      ...group,
+      items: consistencyAggregation.issuesByGroupKey[group.group_key] || [],
+      stats: consistencyAggregation.groupSummaries[group.group_key] || group.stats,
+      hasOnlyNotAssessable:
+        (consistencyAggregation.groupSummaries[group.group_key]?.ruleCount || 0) === 0 &&
+        (consistencyAggregation.groupSummaries[group.group_key]?.notAssessableCount || 0) > 0,
+    }));
+  }, [checksData, consistencyAggregation, consistencySourceGroups, filterGroups, modeMeta.isQualityMode]);
+
+  const summary = useMemo(() => {
+    if (!checksData?.latest_run) {
+      return modeMeta.isQualityMode
+        ? {
+            itemCount: 0,
+            riskCount: 0,
+            reviewCount: 0,
+            resolvedCount: 0,
+            dismissedCount: 0,
+            notAssessableCount: 0,
+          }
+        : {
+            ruleCount: 0,
+            problemCount: 0,
+            pendingCount: 0,
+            pendingCountRaw: 0,
+            confirmedCount: 0,
+            dismissedCount: 0,
+            notAssessableCount: 0,
+          };
+    }
+
+    return modeMeta.isQualityMode
+      ? summarizeQualityAuditGroups(displayedGroups)
+      : (consistencyAggregation?.summary || summarizeConsistencyGroups(displayedGroups));
+  }, [checksData, displayedGroups, consistencyAggregation, modeMeta.isQualityMode]);
+
   const handleBulkConfirm = async () => {
-    if (!checksData?.groups) return;
-    const pendingItems = [];
-    checksData.groups.forEach(group => {
-      group.items?.forEach(item => {
-        if (item.human_status === 'pending') {
-          pendingItems.push(item.id);
-        }
-      });
-    });
+    const pendingItems = modeMeta.isQualityMode
+      ? collectPendingConsistencyItemIds(displayedGroups)
+      : (consistencyAggregation?.pendingItemIds || collectPendingConsistencyItemIds(displayedGroups));
 
     if (pendingItems.length === 0) {
-      alert('没有待复核的项目');
+      window.alert(modeMeta.isQualityMode ? '没有可标记为已处理的数据质量提示' : '没有可确认的待处理项');
       return;
     }
 
-    if (!window.confirm(`确认要将 ${pendingItems.length} 个待复核项目全部标记为“已确认”吗？`)) {
+    const confirmText = modeMeta.isQualityMode
+      ? `确认将 ${pendingItems.length} 个数据质量提示全部标记为“已处理”吗？`
+      : `确认将 ${pendingItems.length} 个待处理项全部标记为“已确认”吗？`;
+    if (!window.confirm(confirmText)) {
       return;
     }
 
     setLoading(true);
     try {
       for (const itemId of pendingItems) {
-        await apiClient.patch(
-          `/reports/${reportId}/checks/items/${itemId}`,
-          { human_status: 'confirmed', human_comment: '批量确认' }
-        );
+        await apiClient.patch(`/reports/${reportId}/checks/items/${itemId}`, {
+          ...(versionId ? { version_id: versionId } : {}),
+          human_status: 'confirmed',
+          human_comment: modeMeta.isQualityMode ? '批量标记为已处理' : '批量确认',
+        });
       }
-      fetchChecks();
+      await fetchChecks();
+      onChecksUpdated?.();
     } catch (err) {
-      alert(err.response?.data?.error || err.message || '批量确认失败');
+      window.alert(err.response?.data?.error || err.message || '批量处理失败');
       setLoading(false);
     }
   };
 
   const toggleGroup = (groupKey) => {
-    setExpandedGroups(prev => ({
+    setExpandedGroups((prev) => ({
       ...prev,
-      [groupKey]: !prev[groupKey]
+      [groupKey]: !prev[groupKey],
     }));
   };
 
-  const getSeverityColor = (status) => {
-    switch (status) {
-      case 'FAIL': return 'status-fail';
-      case 'UNCERTAIN': return 'status-uncertain';
-      case 'PASS': return 'status-pass';
-      default: return 'status-other';
-    }
-  };
-
-  if (loading && !checksData) return <div className="loading">加载中...</div>;
-  if (error) return <div className="error-message">{error}</div>;
-  if (!checksData) return <div className="no-data">暂无校验数据</div>;
-
-  const { latest_run, groups } = checksData;
-  const displayedGroups = filterGroups
-    ? groups.filter(g => filterGroups.includes(g.group_key))
-    : groups;
-
-  let displaySummary = latest_run ? { ...latest_run.summary } : { fail: 0, pending: 0, confirmed: 0 };
-
-  if (latest_run && filterGroups) {
-    let fail = 0;
-    let pending = 0;
-    let confirmed = 0;
-    displayedGroups.forEach(g => {
-      (g.items || []).forEach(item => {
-        if (item.auto_status === 'FAIL') fail++;
-        if (item.human_status === 'pending') pending++;
-        if (item.human_status === 'confirmed') confirmed++;
-      });
-    });
-    displaySummary = { fail, pending, confirmed };
-  }
+  if (loading && !checksData) return <div className="loading">{modeMeta.runButtonText.loading}</div>;
+  if (error && !checksData) return <div className="error-message">{error}</div>;
+  if (!checksData) return <div className="no-data">{modeMeta.emptyDataText}</div>;
 
   return (
-    <div className="consistency-check-view">
-      <div className="check-header">
+    <div className={`consistency-check-view${modeMeta.isQualityMode ? ' consistency-check-view--quality' : ''}`}>
+      <div className={`check-header${modeMeta.isQualityMode ? ' check-header--quality' : ''}`}>
         <div className="check-info">
-          <h3>{filterGroups && filterGroups.includes('visual') ? '◉ 数据质量审计' : '⬡ 勾稽关系校验'}</h3>
-          {latest_run ? (
-            <div className="summary">
-              <span className="summary-item fail">问题: {displaySummary.fail}</span>
-              <span className="summary-item pending">待复核: {displaySummary.pending}</span>
-              <span className="summary-item confirmed">已确认: {displaySummary.confirmed}</span>
-            </div>
+          <h3>{modeMeta.title}</h3>
+          {checksData.latest_run ? (
+            <>
+              <div className="summary">
+                {modeMeta.isQualityMode ? (
+                  <>
+                    <span className="summary-item quality-risk">风险提示 {summary.riskCount}</span>
+                    <span className="summary-item quality-review">需复核 {summary.reviewCount}</span>
+                    <span className="summary-item confirmed">已处理 {summary.resolvedCount}</span>
+                    <span className="summary-item dismissed">不可判断 {summary.notAssessableCount}</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="summary-item fail">问题 {summary.problemCount}</span>
+                    <span className="summary-item pending">待复核 {summary.pendingCount}</span>
+                    <span className="summary-item confirmed">已确认 {summary.confirmedCount}</span>
+                    <span className="summary-item dismissed">不可评估 {summary.notAssessableCount}</span>
+                  </>
+                )}
+              </div>
+              {modeMeta.description ? <p className="check-description">{modeMeta.description}</p> : null}
+            </>
           ) : (
-            <p className="no-run">尚未运行校验</p>
+            <p className="no-run">{modeMeta.emptyRunText}</p>
           )}
+          {error ? <div className="error-message" style={{ marginTop: '12px' }}>{error}</div> : null}
         </div>
         <div className="header-actions">
-          {latest_run && displaySummary.pending > 0 && (
-            <button className="btn-bulk-confirm" onClick={handleBulkConfirm} disabled={loading}>
-              ✅ 一键确认
+          {checksData.latest_run &&
+          (modeMeta.isQualityMode ? summary.reviewCount > 0 : summary.pendingCountRaw > 0) ? (
+            <button
+              className={`btn-bulk-confirm${modeMeta.isQualityMode ? ' btn-bulk-confirm--quality' : ''}`}
+              onClick={handleBulkConfirm}
+              disabled={loading}
+            >
+              {modeMeta.bulkConfirmText}
             </button>
-          )}
-          <button className="btn-run-checks" onClick={handleRunChecks} disabled={loading}>
-            {loading ? '运行中...' : latest_run ? '重新校验' : '运行校验'}
+          ) : null}
+          <button
+            className={`btn-run-checks${modeMeta.isQualityMode ? ' btn-run-checks--quality' : ''}`}
+            onClick={handleRunChecks}
+            disabled={loading}
+          >
+            {loading
+              ? modeMeta.runButtonText.loading
+              : checksData.latest_run
+                ? modeMeta.runButtonText.idle
+                : modeMeta.runButtonText.initial}
           </button>
         </div>
       </div>
 
-      {latest_run && (
-        <div className="groups-container">
-          {displayedGroups.map(group => (
-            <div key={group.group_key} className="group-card">
-              <div className="group-header" onClick={() => toggleGroup(group.group_key)}>
-                <h4>
-                  {expandedGroups[group.group_key] ? '▼' : '▶'} {group.group_name}
-                  <span className="item-count">({group.items.length})</span>
-                </h4>
+      {modeMeta.isQualityMode ? (
+        <div className="quality-audit-note">
+          数据质量提示不计入勾稽问题，也不会改变表三/表四的问题编号与定位。
+        </div>
+      ) : null}
+
+      <div className="groups-container">
+        {displayedGroups.map((group) => {
+          const groupKey = group.group_key || 'unknown';
+          const expanded = expandedGroups[groupKey] ?? false;
+
+          return (
+            <div
+              key={groupKey}
+              className={`group-card${modeMeta.isQualityMode ? ' group-card--quality' : ''}`}
+            >
+              <div className={`group-header${modeMeta.isQualityMode ? ' group-header--quality' : ''}`} onClick={() => toggleGroup(groupKey)}>
+                <div className="group-header-main">
+                  <h4>{expanded ? '▼' : '▶'} {group.displayName}</h4>
+                  {renderGroupSummary(group, modeMeta.isQualityMode)}
+                  {group.helperText ? <div className="group-helper-text">{group.helperText}</div> : null}
+                </div>
               </div>
 
-              {expandedGroups[group.group_key] && (
+              {expanded ? (
                 <div className="group-items">
                   {group.items.length === 0 ? (
-                    <div className="no-issues">✅ 无问题项</div>
+                    <div className="no-issues">
+                      {modeMeta.isQualityMode ? '暂无数据质量提示' : '暂无规则项'}
+                    </div>
+                  ) : group.hasOnlyNotAssessable ? (
+                    <div className="group-empty-state">
+                      <div className="group-empty-title">
+                        {modeMeta.isQualityMode ? '暂无可判断提示' : '暂无可评估规则'}
+                      </div>
+                      <div className="group-empty-desc">
+                        {modeMeta.isQualityMode ? '当前仅保留提示入口，不计入风险数量。' : '当前仅保留分组入口，不计入问题。'}
+                      </div>
+                    </div>
                   ) : (
-                    group.items.map(item => {
+                    group.items.map((item, index) => {
+                      const severityClass = getSeverityColor(item.auto_status, modeMeta.isQualityMode);
                       const locatePayload = getLocatePayload(item);
-                      const canLocate = onLocate && (locatePayload.leftPaths.length > 0 || locatePayload.rightPaths.length > 0);
+                      const canLocate =
+                        onLocate &&
+                        (locatePayload.leftPaths.length > 0 || locatePayload.rightPaths.length > 0);
+                      const { leftSources, rightSources, context } =
+                        getLocationInfo(item) || { leftSources: [], rightSources: [], context: null };
+                      const itemNo = modeMeta.isQualityMode ? item.qualityDisplayNo : item.displayNo;
+                      const autoStatusLabel = modeMeta.isQualityMode
+                        ? getQualityAuditAutoStatusLabel(item.auto_status)
+                        : getConsistencyAutoStatusLabel(item.auto_status);
+                      const humanStatusLabel = modeMeta.isQualityMode
+                        ? getQualityAuditHumanStatusLabel(item.human_status)
+                        : getConsistencyHumanStatusLabel(item.human_status);
+                      const locateTitle = itemNo
+                        ? `${modeMeta.isQualityMode ? '提示' : '问题'} ${itemNo}｜${item.title}`
+                        : item.title;
 
                       return (
-                      <div key={item.id} className={`check-item ${getSeverityColor(item.auto_status)}`}>
-                        <div className="item-header">
-                          <span className={`status-badge ${getSeverityColor(item.auto_status)}`}>
-                            {item.auto_status}
-                          </span>
-                          <span className="item-title">{item.title}</span>
-                        </div>
-
-                        <div className="item-details">
-                          <div className="formula" style={{ display: 'none' }}>
-                            <strong>公式:</strong> {item.expr}
+                        <div
+                          key={item.stableIssueId || item.id || `${groupKey}-${index}`}
+                          className={`check-item ${severityClass}${modeMeta.isQualityMode ? ' check-item--quality' : ''}`}
+                        >
+                          <div className="item-header">
+                            <span className={`status-badge ${severityClass}`}>
+                              {autoStatusLabel}
+                            </span>
+                            <div className="item-title-wrap">
+                              <span className="item-title">
+                                {itemNo ? `${modeMeta.isQualityMode ? '提示' : '问题'} ${itemNo}｜` : ''}
+                                {item.title}
+                              </span>
+                              <span className="item-subtitle">
+                                人工状态：{humanStatusLabel}
+                              </span>
+                            </div>
                           </div>
 
-                          {(() => {
-                            const { leftSources, rightSources, context } = getLocationInfo(item) || { leftSources: [], rightSources: [], context: null };
-                            const leftColor = '#2563eb'; // blue-600
-                            const rightColor = '#ea580c'; // orange-600
-
-                            return (
-                              <div className="values enhanced-values" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '12px', padding: '12px', background: '#f8fafc', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                                {/* Left Component */}
-                                <div className="value-component" style={{ width: '100%' }}>
-                                  <div style={{ display: 'flex', alignItems: 'baseline', marginBottom: '4px' }}>
-                                    <span style={{ color: leftColor, fontWeight: 'bold', minWidth: '60px' }}>左值:</span>
-                                    <strong style={{ fontSize: '1.2em', color: '#1e293b' }}>{item.left_value ?? 'N/A'}</strong>
-                                  </div>
-                                  <div style={{ marginLeft: '60px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                    {leftSources.length > 0 ? leftSources.map((src, i) => (
-                                      <div key={i} style={{ fontSize: '0.85em', color: '#64748b', display: 'flex', alignItems: 'center' }}>
-                                        <span style={{ marginRight: '6px' }}>{src.type === 'table' ? '📊' : '📍'}</span>
-                                        <span>{src.label}</span>
-                                      </div>
-                                    )) : <span style={{ fontSize: '0.85em', color: '#94a3b8' }}>无详细来源信息</span>}
-                                  </div>
-                                </div>
-
-                                {/* Right Component */}
-                                <div className="value-component" style={{ width: '100%', borderTop: '1px solid #e2e8f0', paddingTop: '8px' }}>
-                                  <div style={{ display: 'flex', alignItems: 'baseline', marginBottom: '4px' }}>
-                                    <span style={{ color: rightColor, fontWeight: 'bold', minWidth: '60px' }}>右值:</span>
-                                    <strong style={{ fontSize: '1.2em', color: '#1e293b' }}>{item.right_value ?? 'N/A'}</strong>
-                                  </div>
-                                  <div style={{ marginLeft: '60px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                    {rightSources.length > 0 ? rightSources.map((src, i) => (
-                                      <div key={i} style={{ fontSize: '0.85em', color: '#64748b', display: 'flex', alignItems: 'center' }}>
-                                        <span style={{ marginRight: '6px' }}>{src.type === 'table' ? '📊' : '📍'}</span>
-                                        <span>{src.label}</span>
-                                      </div>
-                                    )) : <span style={{ fontSize: '0.85em', color: '#94a3b8' }}>无详细来源信息</span>}
-                                  </div>
-                                </div>
-
-                                <div className="value-row diff-row" style={{ display: 'flex', alignItems: 'center', width: '100%', marginTop: '4px', paddingTop: '8px', borderTop: '1px dashed #e2e8f0' }}>
-                                  <span style={{ color: '#ef4444', fontWeight: 'bold', minWidth: '60px' }}>差值:</span>
-                                  <strong className={Math.abs(item.delta || 0) > 0.001 ? 'delta-nonzero' : ''} style={{ color: '#ef4444' }}>
-                                    {item.delta ?? 'N/A'}
+                          <div className="item-details">
+                            <div className={`values enhanced-values${modeMeta.isQualityMode ? ' enhanced-values--quality' : ''}`}>
+                              <div className="value-component">
+                                <div className="value-line">
+                                  <span className={`value-label${modeMeta.isQualityMode ? ' value-label--quality-left' : ''}`}>
+                                    左值
+                                  </span>
+                                  <strong className="value-strong">
+                                    {item.left_value ?? 'N/A'}
                                   </strong>
                                 </div>
-
-                                {/* Context */}
-                                {context && (
-                                  <div className="location-panel enhanced" style={{ marginTop: '12px', borderTop: '1px solid #e2e8f0', paddingTop: '8px', width: '100%' }}>
-                                    <div className="context-highlight">
-                                      <div className="context-label" style={{ fontSize: '0.85em', fontWeight: 'bold', marginBottom: '4px', color: '#475569' }}>🔍 匹配文本上下文：</div>
-                                      <div className="context-text" dangerouslySetInnerHTML={{ __html: context }}></div>
+                                <div className="value-source-list">
+                                  {leftSources.length > 0 ? leftSources.map((src, srcIndex) => (
+                                    <div
+                                      key={`${item.stableIssueId || item.id}-left-${srcIndex}`}
+                                      className="value-source-row"
+                                    >
+                                      <span>{src.type === 'table' ? '表' : '文'}</span>
+                                      <span>{src.label}</span>
                                     </div>
-                                  </div>
-                                )}
+                                  )) : <span className="value-source-empty">无详细来源信息</span>}
+                                </div>
                               </div>
-                            );
-                          })()}
 
-                          {item.evidence && item.evidence.paths && (
-                            <details className="evidence-details" style={{ display: 'none' }}>
-                              <summary>技术详情（JSON 路径）</summary>
-                              <ul className="evidence-paths">
-                                {item.evidence.paths.map((path, idx) => (
-                                  <li key={idx}><code>{path}</code></li>
-                                ))}
-                              </ul>
-                              {item.evidence.values && (
-                                <pre className="evidence-values">
-                                  {JSON.stringify(item.evidence.values, null, 2)}
-                                </pre>
-                              )}
-                            </details>
-                          )}
-                        </div>
+                              <div className="value-component value-component--split">
+                                <div className="value-line">
+                                  <span className={`value-label${modeMeta.isQualityMode ? ' value-label--quality-right' : ' value-label--compare-right'}`}>
+                                    右值
+                                  </span>
+                                  <strong className="value-strong">
+                                    {item.right_value ?? 'N/A'}
+                                  </strong>
+                                </div>
+                                <div className="value-source-list">
+                                  {rightSources.length > 0 ? rightSources.map((src, srcIndex) => (
+                                    <div
+                                      key={`${item.stableIssueId || item.id}-right-${srcIndex}`}
+                                      className="value-source-row"
+                                    >
+                                      <span>{src.type === 'table' ? '表' : '文'}</span>
+                                      <span>{src.label}</span>
+                                    </div>
+                                  )) : <span className="value-source-empty">无详细来源信息</span>}
+                                </div>
+                              </div>
 
-                        <div className="item-actions">
-                          <div className="human-status">
-                            人工复核: <strong>{item.human_status}</strong>
-                            {item.human_comment && <span className="comment"> - {item.human_comment}</span>}
+                              <div className="value-row diff-row">
+                                <span className={`value-label${modeMeta.isQualityMode ? ' value-label--quality-right' : ' value-label--compare-diff'}`}>
+                                  差额
+                                </span>
+                                <strong
+                                  className={Math.abs(item.delta || 0) > 0.001 ? 'delta-nonzero' : ''}
+                                >
+                                  {item.delta ?? 'N/A'}
+                                </strong>
+                              </div>
+
+                              {context ? (
+                                <div className={`location-panel enhanced${modeMeta.isQualityMode ? ' location-panel--quality' : ''}`}>
+                                  <div className="context-highlight">
+                                    <div className={`context-label${modeMeta.isQualityMode ? ' context-label--quality' : ''}`}>
+                                      匹配文本上下文
+                                    </div>
+                                    <div
+                                      className={`context-text${modeMeta.isQualityMode ? ' context-text--quality' : ''}`}
+                                      dangerouslySetInnerHTML={{ __html: context }}
+                                    />
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
                           </div>
-                          <div className="action-buttons">
-                            {canLocate && (
-                              <button
-                                className="btn-locate"
-                                onClick={() => onLocate({
-                                  item,
-                                  title: item.title,
-                                  leftPaths: locatePayload.leftPaths,
-                                  rightPaths: locatePayload.rightPaths
-                                })}
-                              >
-                                定位到表格
-                              </button>
-                            )}
-                            {item.human_status !== 'confirmed' && (
-                              <button
-                                className="btn-confirm"
-                                onClick={() => handleUpdateStatus(item.id, 'confirmed', '确认为问题')}
-                              >
-                                确认问题
-                              </button>
-                            )}
-                            {item.human_status !== 'dismissed' && (
-                              <button
-                                className="btn-dismiss"
-                                onClick={() => handleUpdateStatus(item.id, 'dismissed', '非问题/已忽略')}
-                              >
-                                忽略
-                              </button>
-                            )}
-                            {item.human_status !== 'pending' && (
-                              <button
-                                className="btn-pending"
-                                onClick={() => handleUpdateStatus(item.id, 'pending', null)}
-                              >
-                                恢复待复核
-                              </button>
-                            )}
-                            {item.auto_status === 'FAIL' && onEdit && (
-                              <button
-                                className="btn-edit"
-                                onClick={() => {
-                                  console.log('修正数据 clicked, paths:', item.evidence?.paths);
-                                  onEdit(item.evidence?.paths);
-                                }}
-                              >
-                                修正数据
-                              </button>
-                            )}
+
+                          <div className="item-actions">
+                            <div className="human-status">
+                              人工复核：<strong>{humanStatusLabel}</strong>
+                              {item.human_comment ? <span className="comment"> - {item.human_comment}</span> : null}
+                            </div>
+                            <div className="action-buttons">
+                              {canLocate ? (
+                                <button
+                                  className={`btn-locate${modeMeta.isQualityMode ? ' btn-locate--quality' : ''}`}
+                                  onClick={() =>
+                                    onLocate({
+                                      item,
+                                      title: locateTitle,
+                                      leftPaths: locatePayload.leftPaths,
+                                      rightPaths: locatePayload.rightPaths,
+                                      fallbackPaths: locatePayload.fallbackPaths,
+                                    })
+                                  }
+                                >
+                                  {modeMeta.isQualityMode ? '定位到表格/原文' : '定位到表格'}
+                                </button>
+                              ) : null}
+                              {item.human_status !== 'confirmed' && item.id ? (
+                                <button
+                                  className={`btn-confirm${modeMeta.isQualityMode ? ' btn-confirm--quality' : ''}`}
+                                  onClick={() =>
+                                    handleUpdateStatus(
+                                      item.id,
+                                      'confirmed',
+                                      modeMeta.isQualityMode ? '已处理，建议人工核对原文或表格' : '确认问题'
+                                    )
+                                  }
+                                >
+                                  {modeMeta.isQualityMode ? '标记已处理' : '确认问题'}
+                                </button>
+                              ) : null}
+                              {item.human_status !== 'dismissed' && item.id ? (
+                                <button
+                                  className="btn-dismiss"
+                                  onClick={() =>
+                                    handleUpdateStatus(
+                                      item.id,
+                                      'dismissed',
+                                      modeMeta.isQualityMode ? '非有效风险，已忽略' : '非问题，已忽略'
+                                    )
+                                  }
+                                >
+                                  忽略
+                                </button>
+                              ) : null}
+                              {item.human_status !== 'pending' && item.id ? (
+                                <button className="btn-pending" onClick={() => handleUpdateStatus(item.id, 'pending', null)}>
+                                  恢复待复核
+                                </button>
+                              ) : null}
+                              {!modeMeta.isQualityMode && item.auto_status === 'FAIL' && onEdit ? (
+                                <button className="btn-edit" onClick={() => onEdit(item.evidence?.paths || [])}>
+                                  修改数据
+                                </button>
+                              ) : null}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )})
+                      );
+                    })
                   )}
                 </div>
-              )}
+              ) : null}
             </div>
-          ))}
-        </div>
-      )}
+          );
+        })}
+
+        {displayedGroups.length === 0 ? <div className="no-data">{modeMeta.noGroupText}</div> : null}
+      </div>
     </div>
   );
 };

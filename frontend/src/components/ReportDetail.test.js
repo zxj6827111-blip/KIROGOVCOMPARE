@@ -1,0 +1,104 @@
+import React from 'react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import ReportDetail from './ReportDetail';
+import { apiClient, getCurrentUser } from '../apiClient';
+
+jest.mock('../apiClient', () => ({
+  apiClient: {
+    get: jest.fn(),
+    post: jest.fn(),
+    delete: jest.fn(),
+    patch: jest.fn(),
+  },
+  getCurrentUser: jest.fn(),
+}));
+
+jest.mock('./ConsistencyCheckView', () => () => <div data-testid="checks-view" />);
+jest.mock('./ParsedDataEditor', () => () => <div data-testid="parsed-editor" />);
+jest.mock('./TableViews', () => ({
+  Table2View: () => <div data-testid="table-2-view" />,
+  Table3View: () => <div data-testid="table-3-view" />,
+  Table4View: () => <div data-testid="table-4-view" />,
+}));
+
+jest.mock('./VisionReviewPanel', () => {
+  const React = require('react');
+
+  return function MockVisionReviewPanel({ onDataChange }) {
+    React.useEffect(() => {
+      onDataChange?.({
+        reviews: [{ id: 1, tableId: 'table_2', conclusion: 'source_table_anomaly' }],
+        corrections: [{ id: 1, tableId: 'table_2', status: 'pending' }],
+      });
+    }, [onDataChange]);
+
+    return <div data-testid="vision-review-panel">mock vision review</div>;
+  };
+});
+
+const reportPayload = {
+  report_id: 123,
+  region_id: 1,
+  year: 2025,
+  region_name: '测试市',
+  latest_job: null,
+  active_version: {
+    version_id: 99,
+    parsed_json: {
+      sections: [{ type: 'text', title: '概述', content: '测试正文' }],
+    },
+    review_status: 'published',
+    is_active: true,
+  },
+};
+
+describe('ReportDetail vision review integration', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    getCurrentUser.mockReturnValue({
+      username: 'admin',
+      permissions: {
+        upload_reports: true,
+        delete_reports: true,
+        manage_jobs: true,
+      },
+    });
+
+    apiClient.get.mockImplementation((url) => {
+      switch (url) {
+        case '/reports/123':
+          return Promise.resolve({ data: { data: reportPayload } });
+        case '/v2/reports/123/facts/active_disclosure':
+        case '/v2/reports/123/facts/application':
+        case '/v2/reports/123/facts/legal_proceeding':
+          return Promise.resolve({ data: { data: [] } });
+        case '/reports/123/checks':
+          return Promise.resolve({ data: { data: { groups: [] } } });
+        case '/reports/123/vision-review':
+          return Promise.resolve({ data: { data: { reviews: [], corrections: [] } } });
+        default:
+          return Promise.reject(new Error(`Unexpected GET ${url}`));
+      }
+    });
+  });
+
+  test('switching to vision review does not refresh the whole report when child syncs data', async () => {
+    render(<ReportDetail reportId="123" />);
+
+    await screen.findByText('报告详情');
+
+    const initialDetailFetches = apiClient.get.mock.calls.filter(([url]) => url === '/reports/123');
+    expect(initialDetailFetches).toHaveLength(1);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: '视觉复核' }));
+
+    await screen.findByTestId('vision-review-panel');
+
+    await waitFor(() => {
+      const detailFetches = apiClient.get.mock.calls.filter(([url]) => url === '/reports/123');
+      expect(detailFetches).toHaveLength(1);
+    });
+  });
+});
