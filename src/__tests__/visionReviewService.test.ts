@@ -220,7 +220,45 @@ describe('compareVisionOcrWithParsed', () => {
 
     expect(result.conclusion).toBe('inconclusive');
     expect(result.unreadableCells).toEqual(['tableData.total.newReceived']);
-    expect(result.comparedCellCount).toBe(0);
+    expect(result.comparedCellCount).toBe(1);
+    expect(result.differences).toHaveLength(0);
+  });
+
+  it('still produces correction-ready differences when only part of the table is unreadable', () => {
+    const parsedJson = {
+      sections: [
+        {
+          type: 'table_3',
+          tableData: {
+            total: {
+              newReceived: 0,
+              results: { granted: 0 },
+            },
+          },
+        },
+      ],
+    };
+
+    const ocrJson = {
+      table_id: 'table_3',
+      confidence: 0.65,
+      unreadableCells: ['tableData.total.results.granted'],
+      tableData: {
+        total: {
+          newReceived: 7,
+          results: { granted: 0 },
+        },
+      },
+    };
+
+    const result = compareVisionOcrWithParsed('table_3', parsedJson, ocrJson, [makeTrigger('table3', 'FAIL')]);
+
+    expect(result.conclusion).toBe('parse_mapping_anomaly');
+    expect(result.differences).toEqual([
+      { path: 'tableData.total.newReceived', parsedValue: 0, ocrValue: 7 },
+    ]);
+    expect(result.unreadableCells).toEqual(['tableData.total.results.granted']);
+    expect(result.comparedCellCount).toBe(2);
   });
 
   it('classifies missing focused OCR fields as inconclusive', () => {

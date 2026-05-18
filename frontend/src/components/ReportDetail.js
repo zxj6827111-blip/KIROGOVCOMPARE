@@ -495,7 +495,7 @@ const setNested = (obj, path = [], value) => {
     }
     target = target[key];
   }
-  target[path[path.length - 1]] = value ?? 0;
+  target[path[path.length - 1]] = value ?? null;
 };
 
 const extractApplicantCounts = (row) => {
@@ -812,6 +812,12 @@ const toNumberValue = (value, fallback = 0) => {
   return Number.isFinite(numeric) ? numeric : fallback;
 };
 
+const toNullableNumberValue = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
 const createTable2Skeleton = () => ({
   regulations: { made: 0, repealed: 0, valid: 0 },
   normativeDocuments: { made: 0, repealed: 0, valid: 0 },
@@ -908,7 +914,7 @@ const buildTable3FromFacts = (rows) => {
     const applicantPath = applicantPathMap[row?.applicant_type];
     const responsePath = responsePathMap[row?.response_type];
     if (!applicantPath || !responsePath) return;
-    setNested(data, [...applicantPath, ...responsePath], toNumberValue(row?.count, 0));
+    setNested(data, [...applicantPath, ...responsePath], toNullableNumberValue(row?.count));
   });
 
   return data;
@@ -935,7 +941,7 @@ const buildTable4FromFacts = (rows) => {
     const caseType = caseTypeMap[row?.case_type];
     const resultType = resultTypeMap[row?.result_type];
     if (!caseType || !resultType) return;
-    data[caseType][resultType] = toNumberValue(row?.count, 0);
+    data[caseType][resultType] = toNullableNumberValue(row?.count);
   });
 
   return data;
