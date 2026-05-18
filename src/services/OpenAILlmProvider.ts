@@ -275,11 +275,11 @@ export class OpenAILlmProvider implements LlmProvider {
             page.table4TitleY !== null
         );
         const unreliablePdfTableText = visualMetadata?.visual_border_missing === true && hasVisualTableCandidate;
-        if (unreliablePdfTableText) {
-            return true;
-        }
         if (split.canUseSegmentedParse) {
             return false;
+        }
+        if (unreliablePdfTableText) {
+            return missingTableSection;
         }
         return missingTableSection && hasVisualTableCandidate;
     }
@@ -654,6 +654,10 @@ export class OpenAILlmProvider implements LlmProvider {
                     return nextImagePage.pageNumber;
                 }
                 return titlePage.pageNumber;
+            }
+            const nextImagePage = pages.find((page) => page.pageNumber > titlePage.pageNumber && page.imageCount > 0);
+            if (nextImagePage) {
+                return nextImagePage.pageNumber;
             }
             return titlePage.pageNumber;
         }
