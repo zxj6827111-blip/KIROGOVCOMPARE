@@ -842,7 +842,7 @@ export function compareVisionOcrWithParsed(
   const unreadableCells = normalizeUnreadableCells(ocrJson?.unreadableCells);
   const triggerHadCheckFailure = hasTableTriggerFailure(triggerItems, tableId);
 
-  if (!parsedPayload || !ocrPayload || unreadableCells.length > 0) {
+  if (!parsedPayload || !ocrPayload) {
     return {
       conclusion: 'inconclusive',
       differences: [],
@@ -885,7 +885,7 @@ export function compareVisionOcrWithParsed(
   }
 
   const combinedUnreadableCells = uniqueStrings([...unreadableCells, ...missingOcrCells]);
-  if (comparedCellCount === 0 || missingOcrCells.length > 0) {
+  if (comparedCellCount === 0) {
     return {
       conclusion: 'inconclusive',
       differences: [],
@@ -898,7 +898,9 @@ export function compareVisionOcrWithParsed(
 
   let conclusion: VisionReviewConclusion = 'source_table_matches_parse';
   if (differences.length > 0) {
-    conclusion = 'parse_mapping_anomaly';
+      conclusion = 'parse_mapping_anomaly';
+  } else if (combinedUnreadableCells.length > 0) {
+    conclusion = 'inconclusive';
   } else if (triggerHadCheckFailure) {
     conclusion = 'source_table_anomaly';
   }
