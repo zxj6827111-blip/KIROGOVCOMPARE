@@ -21,6 +21,20 @@ describe('OpenAILlmProvider PDF visual table parsing', () => {
     expect(provider.pickVisualTablePage(pages, 'table_4')).toBe(4);
   });
 
+  it('uses the next image page when the title page has no image objects', () => {
+    const provider = createProvider();
+    const pages = [
+      { pageNumber: 1, text: '一、总体情况', imageCount: 0, viewportHeight: 841.9, table2TitleY: null, table3TitleY: null, table4TitleY: null },
+      { pageNumber: 2, text: '二、主动公开政府信息情况', imageCount: 0, viewportHeight: 841.9, table2TitleY: 760, table3TitleY: null, table4TitleY: null },
+      { pageNumber: 3, text: '', imageCount: 1, viewportHeight: 841.9, table2TitleY: null, table3TitleY: null, table4TitleY: null },
+      { pageNumber: 4, text: '三、收到和处理政府信息公开申请情况', imageCount: 0, viewportHeight: 841.9, table2TitleY: null, table3TitleY: 760, table4TitleY: null },
+      { pageNumber: 5, text: '', imageCount: 1, viewportHeight: 841.9, table2TitleY: null, table3TitleY: null, table4TitleY: null },
+    ];
+
+    expect(provider.pickVisualTablePage(pages, 'table_2')).toBe(3);
+    expect(provider.pickVisualTablePage(pages, 'table_3')).toBe(5);
+  });
+
   it('uses the title page when the title is near the top of a page that contains the table image', () => {
     const provider = createProvider();
     const pages = [
@@ -47,7 +61,7 @@ describe('OpenAILlmProvider PDF visual table parsing', () => {
     expect(provider.pickVisualTablePage(pages, 'table_4')).toBe(5);
     expect(provider.buildVisualTableAttemptPlans(pages, 'table_4')).toEqual([[5], [5, 6]]);
   });
-  it('uses rendered text-layer pages when PDF tables have no image objects', async () => {
+  it('keeps segmented parse as the primary path when table sections are already complete', async () => {
     const provider = createProvider();
     const pages = [
       { pageNumber: 1, text: 'intro', imageCount: 0, viewportHeight: 841.9, table2TitleY: null, table3TitleY: null, table4TitleY: null },
@@ -71,10 +85,37 @@ describe('OpenAILlmProvider PDF visual table parsing', () => {
       'sample.pdf',
       split,
       { visual_border_missing: true, format: 'pdf' }
-    )).resolves.toBe(true);
+    )).resolves.toBe(false);
     expect(provider.pickVisualTablePage(pages, 'table_2')).toBe(3);
     expect(provider.pickVisualTablePages(pages, 'table_3')).toEqual([3, 4]);
     expect(provider.pickVisualTablePage(pages, 'table_4')).toBe(5);
+  });
+
+  it('uses PDF visual tables parse when segmented parse is missing table sections', async () => {
+    const provider = createProvider();
+    const pages = [
+      { pageNumber: 1, text: 'intro', imageCount: 0, viewportHeight: 841.9, table2TitleY: null, table3TitleY: null, table4TitleY: null },
+      { pageNumber: 2, text: 'table2 title only', imageCount: 0, viewportHeight: 841.9, table2TitleY: 685, table3TitleY: null, table4TitleY: null },
+      { pageNumber: 3, text: 'table2 end and table3 start', imageCount: 0, viewportHeight: 841.9, table2TitleY: 716, table3TitleY: 283, table4TitleY: null },
+      { pageNumber: 4, text: 'table3 continuation', imageCount: 0, viewportHeight: 841.9, table2TitleY: null, table3TitleY: null, table4TitleY: null },
+      { pageNumber: 5, text: 'table4 start', imageCount: 0, viewportHeight: 841.9, table2TitleY: null, table3TitleY: null, table4TitleY: 716 },
+    ];
+    const split = {
+      canUseSegmentedParse: false,
+      missingSections: ['activeDisclosure', 'applicationRequests', 'reviewLitigation'],
+      segments: {
+        overallSituation: 'body',
+        problemsAndImprovements: 'problems',
+      },
+    };
+
+    jest.spyOn(provider, 'locatePdfVisualTablePages').mockResolvedValue(pages);
+
+    await expect(provider.shouldUsePdfVisualTablesParse(
+      'sample.pdf',
+      split,
+      { visual_border_missing: true, format: 'pdf' }
+    )).resolves.toBe(true);
   });
 
   it('builds a PDF parse from local text and visual table pages without full document parsing', async () => {
@@ -182,6 +223,47 @@ describe('OpenAILlmProvider PDF visual table parsing', () => {
       { tableId: 'table_2', pageNumbers: [1], status: 'success' },
       { tableId: 'table_3', pageNumbers: [2], status: 'success' },
       { tableId: 'table_4', pageNumbers: [3], status: 'empty_payload' },
+    ]);
+  });
+
+  it('keeps visual table attempt metadata even when no tables are repaired', async () => {
+    const provider = createProvider();
+    const sourceText = [
+      '标题',
+      '一、总体情况',
+      '总体文字',
+      '二、主动公开政府信息情况',
+      '三、收到和处理政府信息公开申请情况',
+      '四、政府信息公开行政复议、行政诉讼情况',
+      '五、存在的主要问题及改进情况',
+      '问题文字',
+    ].join('\n');
+
+    jest.spyOn(provider, 'locatePdfVisualTablePages').mockResolvedValue([
+      { pageNumber: 1, text: '二、主动公开政府信息情况', imageCount: 1, viewportHeight: 841.9, table2TitleY: 200, table3TitleY: null, table4TitleY: null },
+      { pageNumber: 2, text: '三、收到和处理政府信息公开申请情况', imageCount: 1, viewportHeight: 841.9, table2TitleY: null, table3TitleY: 300, table4TitleY: null },
+      { pageNumber: 3, text: '四、政府信息公开行政复议、行政诉讼情况', imageCount: 1, viewportHeight: 841.9, table2TitleY: null, table3TitleY: null, table4TitleY: 300 },
+    ]);
+    jest.spyOn(provider, 'parseVisualTablesFromPdf').mockResolvedValue({
+      table2: null,
+      table3: null,
+      table4: null,
+      repairs: [],
+      attempts: [
+        { tableId: 'table_2', pageNumbers: [1], status: 'empty_payload' },
+        { tableId: 'table_3', pageNumbers: [2], status: 'request_failed' },
+        { tableId: 'table_4', pageNumbers: [], status: 'no_candidate' },
+      ],
+    });
+
+    const parsed = await provider.parsePdfWithLocalTextAndVisualTables('sample.pdf', sourceText);
+
+    expect(parsed.visual_audit.pdf_visual_table_parse).toBe(true);
+    expect(parsed.visual_audit.pdf_visual_table_repairs).toEqual([]);
+    expect(parsed.visual_audit.pdf_visual_table_attempts).toEqual([
+      { tableId: 'table_2', pageNumbers: [1], status: 'empty_payload' },
+      { tableId: 'table_3', pageNumbers: [2], status: 'request_failed' },
+      { tableId: 'table_4', pageNumbers: [], status: 'no_candidate' },
     ]);
   });
 });
