@@ -17,9 +17,9 @@ jest.mock('../apiClient', () => ({
 jest.mock('./ConsistencyCheckView', () => () => <div data-testid="checks-view" />);
 jest.mock('./ParsedDataEditor', () => () => <div data-testid="parsed-editor" />);
 jest.mock('./TableViews', () => ({
-  Table2View: () => <div data-testid="table-2-view" />,
-  Table3View: () => <div data-testid="table-3-view" />,
-  Table4View: () => <div data-testid="table-4-view" />,
+  Table2View: ({ data }) => <div data-testid="table-2-view">{JSON.stringify(data)}</div>,
+  Table3View: ({ data }) => <div data-testid="table-3-view">{JSON.stringify(data)}</div>,
+  Table4View: ({ data }) => <div data-testid="table-4-view">{JSON.stringify(data)}</div>,
 }));
 
 jest.mock('./VisionReviewPanel', () => {
@@ -100,5 +100,40 @@ describe('ReportDetail vision review integration', () => {
       const detailFetches = apiClient.get.mock.calls.filter(([url]) => url === '/reports/123');
       expect(detailFetches).toHaveLength(1);
     });
+  });
+
+  test('keeps null fact values out of zero-like content rendering', async () => {
+    apiClient.get.mockImplementation((url) => {
+      switch (url) {
+        case '/reports/123':
+          return Promise.resolve({ data: { data: reportPayload } });
+        case '/v2/reports/123/facts/active_disclosure':
+          return Promise.resolve({ data: { data: [] } });
+        case '/v2/reports/123/facts/application':
+          return Promise.resolve({
+            data: {
+              data: [
+                { applicant_type: 'total', response_type: 'new_received', count: 7 },
+                { applicant_type: 'total', response_type: 'unable_no_info', count: null },
+              ],
+            },
+          });
+        case '/v2/reports/123/facts/legal_proceeding':
+          return Promise.resolve({ data: { data: [] } });
+        case '/reports/123/checks':
+          return Promise.resolve({ data: { data: { groups: [] } } });
+        case '/reports/123/vision-review':
+          return Promise.resolve({ data: { data: { reviews: [], corrections: [] } } });
+        default:
+          return Promise.reject(new Error(`Unexpected GET ${url}`));
+      }
+    });
+
+    render(<ReportDetail reportId="123" />);
+
+    const table3View = await screen.findByTestId('table-3-view');
+    const parsed = JSON.parse(table3View.textContent);
+    expect(parsed.total.newReceived).toBe(7);
+    expect(parsed.total.results.unableToProvide.noInfo).toBeNull();
   });
 });
