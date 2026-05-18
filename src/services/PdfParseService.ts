@@ -356,6 +356,15 @@ function buildExtractedTextFromSections(sections: PdfSection[]): string {
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+function buildExtractedTextFromRawLines(lines: string[]): string {
+  return lines
+    .map((line) => String(line || '').trim())
+    .filter((line, index, arr) => line.length > 0 || (index > 0 && arr[index - 1].length > 0))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export class PdfParseService {
   buildMarkdownFromDocument(document: PdfDocument): string {
     if (!document) return '';
@@ -529,7 +538,8 @@ export class PdfParseService {
 
       const sections = splitIntoSections(allLines);
       const reconstructedText = buildExtractedTextFromSections(sections);
-      const extractedText = reconstructedText || allLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+      const rawLinesText = buildExtractedTextFromRawLines(allLines);
+      const extractedText = reconstructedText || rawLinesText;
 
       // Enhanced border detection: check if table regions have strokes
       let visual_border_missing = false;

@@ -184,4 +184,45 @@ describe('OpenAILlmProvider PDF visual table parsing', () => {
       { tableId: 'table_4', pageNumbers: [3], status: 'empty_payload' },
     ]);
   });
+
+  it('keeps visual table attempt metadata even when no tables are repaired', async () => {
+    const provider = createProvider();
+    const sourceText = [
+      '标题',
+      '一、总体情况',
+      '总体文字',
+      '二、主动公开政府信息情况',
+      '三、收到和处理政府信息公开申请情况',
+      '四、政府信息公开行政复议、行政诉讼情况',
+      '五、存在的主要问题及改进情况',
+      '问题文字',
+    ].join('\n');
+
+    jest.spyOn(provider, 'locatePdfVisualTablePages').mockResolvedValue([
+      { pageNumber: 1, text: '二、主动公开政府信息情况', imageCount: 1, viewportHeight: 841.9, table2TitleY: 200, table3TitleY: null, table4TitleY: null },
+      { pageNumber: 2, text: '三、收到和处理政府信息公开申请情况', imageCount: 1, viewportHeight: 841.9, table2TitleY: null, table3TitleY: 300, table4TitleY: null },
+      { pageNumber: 3, text: '四、政府信息公开行政复议、行政诉讼情况', imageCount: 1, viewportHeight: 841.9, table2TitleY: null, table3TitleY: null, table4TitleY: 300 },
+    ]);
+    jest.spyOn(provider, 'parseVisualTablesFromPdf').mockResolvedValue({
+      table2: null,
+      table3: null,
+      table4: null,
+      repairs: [],
+      attempts: [
+        { tableId: 'table_2', pageNumbers: [1], status: 'empty_payload' },
+        { tableId: 'table_3', pageNumbers: [2], status: 'request_failed' },
+        { tableId: 'table_4', pageNumbers: [], status: 'no_candidate' },
+      ],
+    });
+
+    const parsed = await provider.parsePdfWithLocalTextAndVisualTables('sample.pdf', sourceText);
+
+    expect(parsed.visual_audit.pdf_visual_table_parse).toBe(true);
+    expect(parsed.visual_audit.pdf_visual_table_repairs).toEqual([]);
+    expect(parsed.visual_audit.pdf_visual_table_attempts).toEqual([
+      { tableId: 'table_2', pageNumbers: [1], status: 'empty_payload' },
+      { tableId: 'table_3', pageNumbers: [2], status: 'request_failed' },
+      { tableId: 'table_4', pageNumbers: [], status: 'no_candidate' },
+    ]);
+  });
 });

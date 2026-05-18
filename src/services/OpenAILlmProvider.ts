@@ -62,7 +62,7 @@ type PdfRenderedImage = {
 type PdfVisualTableAttempt = {
     tableId: PdfVisualTableId;
     pageNumbers: number[];
-    status: 'render_unavailable' | 'empty_payload' | 'success';
+    status: 'render_unavailable' | 'empty_payload' | 'success' | 'request_failed' | 'no_candidate';
 };
 let pdfjsPromise: Promise<PdfJsModule> | null = null;
 
@@ -308,7 +308,9 @@ export class OpenAILlmProvider implements LlmProvider {
             pdf_visual_table_attempts: visualTables.attempts,
             segmented_missing_sections: split.missingSections,
         };
-        console.log(`[OpenAI] Applied PDF visual tables parse: ${visualTables.repairs.join(', ')}`);
+        console.log(
+            `[OpenAI] Applied PDF visual tables parse: ${visualTables.repairs.join(', ') || 'none'}; attempts=${JSON.stringify(visualTables.attempts)}`
+        );
         return parsed;
     }
 
@@ -502,17 +504,17 @@ export class OpenAILlmProvider implements LlmProvider {
             this.upsertSectionPayload(sections, 'table_4', 'reviewLitigationData', visualTables.table4);
         }
 
-        if (repaired.length > 0) {
-            parsed.sections = sections;
-            parsed.visual_audit = {
-                ...(parsed.visual_audit || {}),
-                pdf_visual_table_fallback: true,
-                pdf_visual_table_repairs: repaired,
-                pdf_visual_table_attempts: visualTables.attempts,
-                segmented_missing_sections: split.missingSections,
-            };
-            console.log(`[OpenAI] Applied PDF visual table fallback: ${repaired.join(', ')}`);
-        }
+        parsed.sections = sections;
+        parsed.visual_audit = {
+            ...(parsed.visual_audit || {}),
+            pdf_visual_table_fallback: repaired.length > 0,
+            pdf_visual_table_repairs: repaired,
+            pdf_visual_table_attempts: visualTables.attempts,
+            segmented_missing_sections: split.missingSections,
+        };
+        console.log(
+            `[OpenAI] Applied PDF visual table fallback: ${repaired.join(', ') || 'none'}; attempts=${JSON.stringify(visualTables.attempts)}`
+        );
 
         return parsed;
     }
@@ -954,13 +956,23 @@ export class OpenAILlmProvider implements LlmProvider {
 
         for (const tableId of tableIds) {
             const pagePlans = this.buildVisualTableAttemptPlans(candidates, tableId);
+            if (!pagePlans.length) {
+                result.attempts.push({ tableId, pageNumbers: [], status: 'no_candidate' });
+                continue;
+            }
             for (const pageNumbers of pagePlans) {
                 const rendered = await this.renderPdfPagesToPng(absolutePath, pageNumbers, tableId);
                 if (!rendered) {
                     result.attempts.push({ tableId, pageNumbers, status: 'render_unavailable' });
                     continue;
                 }
-                const ocr = await this.requestVisualTableParse(tableId, rendered.path, signal);
+                let ocr: Record<string, any>;
+                try {
+                    ocr = await this.requestVisualTableParse(tableId, rendered.path, signal);
+                } catch {
+                    result.attempts.push({ tableId, pageNumbers: rendered.pageNumbers, status: 'request_failed' });
+                    continue;
+                }
                 const payload = this.extractVisualPayload(ocr, tableId);
                 if (!payload || !hasMeaningfulLeaf(payload)) {
                     result.attempts.push({ tableId, pageNumbers: rendered.pageNumbers, status: 'empty_payload' });
