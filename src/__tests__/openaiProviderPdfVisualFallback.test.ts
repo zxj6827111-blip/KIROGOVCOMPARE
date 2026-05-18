@@ -47,7 +47,6 @@ describe('OpenAILlmProvider PDF visual table parsing', () => {
     expect(provider.pickVisualTablePage(pages, 'table_4')).toBe(5);
     expect(provider.buildVisualTableAttemptPlans(pages, 'table_4')).toEqual([[5], [5, 6]]);
   });
-
   it('uses rendered text-layer pages when PDF tables have no image objects', async () => {
     const provider = createProvider();
     const pages = [

@@ -64,7 +64,6 @@ type PdfVisualTableAttempt = {
     pageNumbers: number[];
     status: 'render_unavailable' | 'empty_payload' | 'success';
 };
-
 let pdfjsPromise: Promise<PdfJsModule> | null = null;
 
 function loadPdfjs(): Promise<PdfJsModule> {
@@ -775,7 +774,6 @@ export class OpenAILlmProvider implements LlmProvider {
         }
         return deduped;
     }
-
     private async renderPdfPageToPng(absolutePath: string, pageNumber: number, tableId: PdfVisualTableId): Promise<string> {
         const canvasMod = await import('@napi-rs/canvas');
         const createCanvas = (canvasMod as any).createCanvas;
