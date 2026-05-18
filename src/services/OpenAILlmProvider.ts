@@ -59,6 +59,11 @@ type PdfRenderedImage = {
     pageNumbers: number[];
 };
 
+type PdfVisualTableAttempt = {
+    tableId: PdfVisualTableId;
+    pageNumbers: number[];
+    status: 'render_unavailable' | 'empty_payload' | 'success';
+};
 let pdfjsPromise: Promise<PdfJsModule> | null = null;
 
 function loadPdfjs(): Promise<PdfJsModule> {
@@ -300,6 +305,7 @@ export class OpenAILlmProvider implements LlmProvider {
             ...(parsed.visual_audit || {}),
             pdf_visual_table_parse: true,
             pdf_visual_table_repairs: visualTables.repairs,
+            pdf_visual_table_attempts: visualTables.attempts,
             segmented_missing_sections: split.missingSections,
         };
         console.log(`[OpenAI] Applied PDF visual tables parse: ${visualTables.repairs.join(', ')}`);
@@ -502,6 +508,7 @@ export class OpenAILlmProvider implements LlmProvider {
                 ...(parsed.visual_audit || {}),
                 pdf_visual_table_fallback: true,
                 pdf_visual_table_repairs: repaired,
+                pdf_visual_table_attempts: visualTables.attempts,
                 segmented_missing_sections: split.missingSections,
             };
             console.log(`[OpenAI] Applied PDF visual table fallback: ${repaired.join(', ')}`);
@@ -682,6 +689,16 @@ export class OpenAILlmProvider implements LlmProvider {
             const beforeTable3 = titlePages.filter((page) => !table3TitlePage || page.pageNumber <= table3TitlePage);
             return beforeTable3[beforeTable3.length - 1] || titlePages[titlePages.length - 1] || null;
         }
+        if (tableId === 'table_3') {
+            const table2TitlePage = pages.find((page) => page.table2TitleY !== null)?.pageNumber;
+            const afterTable2 = titlePages.filter((page) => !table2TitlePage || page.pageNumber >= table2TitlePage);
+            return afterTable2[0] || titlePages[0] || null;
+        }
+        if (tableId === 'table_4') {
+            const table3TitlePage = pages.find((page) => page.table3TitleY !== null)?.pageNumber;
+            const afterTable3 = titlePages.filter((page) => !table3TitlePage || page.pageNumber >= table3TitlePage);
+            return afterTable3[0] || titlePages[titlePages.length - 1] || null;
+        }
         return titlePages[0] || null;
     }
 
@@ -704,6 +721,59 @@ export class OpenAILlmProvider implements LlmProvider {
         return [firstPage];
     }
 
+    private buildVisualTableAttemptPlans(
+        pages: PdfVisualPageCandidate[],
+        tableId: PdfVisualTableId
+    ): number[][] {
+        const primary = this.pickVisualTablePages(pages, tableId);
+        const titlePage = this.pickVisualTableTitlePage(pages, tableId)?.pageNumber ?? null;
+        const primaryFirst = primary[0] ?? null;
+        const plans: Array<Array<number | null>> = [primary];
+
+        if (tableId !== 'table_3') {
+            plans.push([titlePage]);
+            plans.push([titlePage, titlePage ? titlePage + 1 : null]);
+            plans.push([primaryFirst]);
+            plans.push([primaryFirst, primaryFirst ? primaryFirst + 1 : null]);
+        } else {
+            plans.push([primaryFirst]);
+        }
+
+        const imagePages = pages
+            .filter((page) => page.imageCount > 0)
+            .map((page) => page.pageNumber);
+        if (tableId === 'table_2') {
+            plans.push([imagePages[0] ?? null]);
+            plans.push([imagePages[0] ?? null, imagePages[1] ?? null]);
+            plans.push([imagePages[1] ?? null]);
+        } else if (tableId === 'table_4') {
+            plans.push([imagePages[imagePages.length - 1] ?? null]);
+            plans.push([
+                imagePages[Math.max(0, imagePages.length - 2)] ?? null,
+                imagePages[imagePages.length - 1] ?? null,
+            ]);
+        }
+
+        return this.dedupeVisualTablePlans(plans);
+    }
+
+    private dedupeVisualTablePlans(plans: Array<Array<number | null>>): number[][] {
+        const seen = new Set<string>();
+        const deduped: number[][] = [];
+        for (const rawPlan of plans) {
+            const normalized = [...new Set(rawPlan.filter((page): page is number => typeof page === 'number' && Number.isInteger(page) && page > 0))];
+            if (!normalized.length) {
+                continue;
+            }
+            const key = normalized.join('_');
+            if (seen.has(key)) {
+                continue;
+            }
+            seen.add(key);
+            deduped.push(normalized);
+        }
+        return deduped;
+    }
     private async renderPdfPageToPng(absolutePath: string, pageNumber: number, tableId: PdfVisualTableId): Promise<string> {
         const canvasMod = await import('@napi-rs/canvas');
         const createCanvas = (canvasMod as any).createCanvas;
@@ -872,29 +942,37 @@ export class OpenAILlmProvider implements LlmProvider {
         table3: Record<string, any> | null;
         table4: Table4ParseResponse['reviewLitigationData'];
         repairs: string[];
+        attempts: PdfVisualTableAttempt[];
     }> {
         const result = {
             table2: null as Record<string, any> | null,
             table3: null as Record<string, any> | null,
             table4: null as Table4ParseResponse['reviewLitigationData'],
             repairs: [] as string[],
+            attempts: [] as PdfVisualTableAttempt[],
         };
 
         for (const tableId of tableIds) {
-            const pageNumbers = this.pickVisualTablePages(candidates, tableId);
-            const rendered = await this.renderPdfPagesToPng(absolutePath, pageNumbers, tableId);
-            if (!rendered) {
-                continue;
+            const pagePlans = this.buildVisualTableAttemptPlans(candidates, tableId);
+            for (const pageNumbers of pagePlans) {
+                const rendered = await this.renderPdfPagesToPng(absolutePath, pageNumbers, tableId);
+                if (!rendered) {
+                    result.attempts.push({ tableId, pageNumbers, status: 'render_unavailable' });
+                    continue;
+                }
+                const ocr = await this.requestVisualTableParse(tableId, rendered.path, signal);
+                const payload = this.extractVisualPayload(ocr, tableId);
+                if (!payload || !hasMeaningfulLeaf(payload)) {
+                    result.attempts.push({ tableId, pageNumbers: rendered.pageNumbers, status: 'empty_payload' });
+                    continue;
+                }
+                if (tableId === 'table_2') result.table2 = payload;
+                if (tableId === 'table_3') result.table3 = payload;
+                if (tableId === 'table_4') result.table4 = payload as Table4ParseResponse['reviewLitigationData'];
+                result.repairs.push(`pdf_visual_${tableId}_page_${rendered.pageNumbers.join('_')}`);
+                result.attempts.push({ tableId, pageNumbers: rendered.pageNumbers, status: 'success' });
+                break;
             }
-            const ocr = await this.requestVisualTableParse(tableId, rendered.path, signal);
-            const payload = this.extractVisualPayload(ocr, tableId);
-            if (!payload || !hasMeaningfulLeaf(payload)) {
-                continue;
-            }
-            if (tableId === 'table_2') result.table2 = payload;
-            if (tableId === 'table_3') result.table3 = payload;
-            if (tableId === 'table_4') result.table4 = payload as Table4ParseResponse['reviewLitigationData'];
-            result.repairs.push(`pdf_visual_${tableId}_page_${rendered.pageNumbers.join('_')}`);
         }
 
         return result;
