@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import './App.css';
 import Login from './components/Login';
-import BatchUpload from './components/BatchUpload';
+import UploadReport from './components/UploadReport';
 
 import ReportDetail from './components/ReportDetail';
 import Logo from './components/Logo';
@@ -103,7 +103,7 @@ function App() {
       return <GovInsightModule />;
     }
     if (pathname === '/regions') return <RegionsManager />;
-    if (pathname === '/upload') return <BatchUpload />;
+    if (pathname === '/upload') return <UploadReport />;
     if (pathname === '/jobs' || pathname === '/jobs/') return <JobCenter />;
     if (pathname === '/admin/users') return <UserManagement />;
     if (pathname === '/datacenter') {
