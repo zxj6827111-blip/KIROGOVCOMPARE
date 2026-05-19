@@ -31,21 +31,20 @@
 @media print {
 
     /* 1. 隐藏所有非打印元素 */
-    .no-print,
     .gov-dashboard-root .no-print {
         display: none !important;
         visibility: hidden !important;
     }
 
     /* 2. 页面设置 - A4尺寸 */
-    @page {
+    @page govinsight-report {
         size: A4 portrait;
         margin: 0;
     }
 
-    /* 3. 重置整体布局 */
-    html,
-    body {
+    /* 3. 重置 GovInsight 打印根布局，避免污染其他打印页 */
+    .gov-dashboard-root {
+        page: govinsight-report;
         width: 210mm !important;
         min-height: 297mm !important;
         background: white !important;
@@ -59,27 +58,28 @@
     /* 4. 隐藏主导航和顶栏 */
     .gov-dashboard-root>div>div:first-child,
     /* Top nav bar */
-    nav,
-    header,
-    footer {
+    .gov-dashboard-root nav,
+    .gov-dashboard-root header,
+    .gov-dashboard-root footer {
         display: none !important;
     }
 
     /* 5. 主内容区域全宽 */
-    main {
+    .gov-dashboard-root main {
         padding: 0 !important;
         margin: 0 !important;
         overflow: visible !important;
     }
 
-    main>div {
+    .gov-dashboard-root main>div {
         max-width: none !important;
         margin: 0 !important;
         padding: 0 !important;
     }
 
     /* 6. 报告容器样式 - 关键修复 */
-    #printable-report {
+    .gov-dashboard-root #printable-report {
+        page: govinsight-report;
         width: 210mm !important;
         min-height: 297mm !important;
         margin: 0 !important;
@@ -110,65 +110,65 @@
     }
 
     /* 9. 分页控制 */
-    .break-after-page {
+    .gov-dashboard-root .break-after-page {
         page-break-after: always !important;
         break-after: page !important;
     }
 
-    .break-before-page {
+    .gov-dashboard-root .break-before-page {
         page-break-before: always !important;
         break-before: page !important;
     }
 
-    .break-inside-avoid {
+    .gov-dashboard-root .break-inside-avoid {
         page-break-inside: avoid !important;
         break-inside: avoid !important;
     }
 
     /* 10. 封面页样式优化 */
-    #printable-report>div:first-child {
+    .gov-dashboard-root #printable-report>div:first-child {
         page-break-after: always !important;
         break-after: page !important;
     }
 
     /* 11. 主要章节打印控制 - 每个大点新起一页 */
-    .print-section {
+    .gov-dashboard-root .print-section {
         page-break-inside: avoid !important;
         break-inside: avoid !important;
     }
 
     /* 12. 图表打印控制 - 避免跨页截断 */
-    .print-chart {
+    .gov-dashboard-root .print-chart {
         page-break-inside: avoid !important;
         break-inside: avoid !important;
         margin-bottom: 20px;
     }
 
     /* 13. 图表容器最大高度限制，确保不超过一页 */
-    .print-chart>div {
+    .gov-dashboard-root .print-chart>div {
         max-height: 280mm !important;
         overflow: hidden;
     }
 
     /* 14. 表格打印优化 */
-    table {
+    .gov-dashboard-root table {
         page-break-inside: avoid !important;
         break-inside: avoid !important;
     }
 
     /* 15. 隐藏下载工具栏 */
-    #printable-report .group>.absolute {
+    .gov-dashboard-root #printable-report .group>.absolute {
         display: none !important;
     }
 
     /* 16. 移除灰色背景 */
-    .bg-slate-200,
-    .bg-\[#f0f2f5\] {
+    .gov-dashboard-root .bg-slate-200,
+    .gov-dashboard-root .bg-\[#f0f2f5\] {
         background: white !important;
     }
 
     /* 17. 附录页分页 */
-    .print-section:last-of-type {
+    .gov-dashboard-root .print-section:last-of-type {
         page-break-before: always !important;
         break-before: page !important;
     }

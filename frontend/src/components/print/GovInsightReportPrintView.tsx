@@ -643,6 +643,57 @@ const getCoreScorecards = (scorecards: ScorecardItem[]): ScorecardItem[] => {
   return selected.length === REQUIRED_SCORECARD_KEYS.length ? selected : scorecards.slice(0, 4);
 };
 
+const normalizeIdToken = (value: unknown): string => String(value ?? '').trim().toLowerCase();
+
+const extractNumericId = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const token = String(value ?? '').trim();
+  const match = token.match(/\d+/);
+  return match ? Number(match[0]) : null;
+};
+
+const resolveGovInsightPrintOrgId = (
+  requestedOrgId: string,
+  records: AnnualDataRecord[]
+): string | null => {
+  const normalizedRequested = normalizeIdToken(requestedOrgId);
+  const requestedRegionId = extractNumericId(requestedOrgId);
+  const candidates = new Map<string, AnnualDataRecord>();
+
+  const addCandidate = (record: AnnualDataRecord | undefined) => {
+    if (record?.org_id && !candidates.has(record.org_id)) {
+      candidates.set(record.org_id, record);
+    }
+  };
+
+  addCandidate(records.find((record) => normalizeIdToken(record.org_id) === normalizedRequested));
+
+  if (requestedRegionId !== null) {
+    addCandidate(records.find((record) => normalizeIdToken(record.org_id) === `city_${requestedRegionId}`));
+
+    records.forEach((record) => {
+      const recordRegionIds = [
+        record.region_id,
+        extractNumericId(record.org_id),
+        extractNumericId(record.city_region_id),
+      ].filter((value): value is number => value !== null && Number.isFinite(value));
+
+      if (recordRegionIds.some((value) => value === requestedRegionId)) {
+        addCandidate(record);
+      }
+    });
+  }
+
+  if (candidates.size === 0) return null;
+
+  const ordered = Array.from(candidates.keys());
+  return (
+    ordered.find((candidate) => normalizeIdToken(candidate) === normalizedRequested) ||
+    ordered.find((candidate) => normalizeIdToken(candidate) === `city_${requestedRegionId}`) ||
+    ordered[0]
+  );
+};
+
 export const GovInsightReportPrintView: React.FC<{ orgId: string; year: number }> = ({ orgId, year }) => {
   const [entity, setEntity] = useState<EntityProfile | null>(null);
   const [reportData, setReportData] = useState<EnhancedAIReportResponse | null>(null);
@@ -657,14 +708,20 @@ export const GovInsightReportPrintView: React.FC<{ orgId: string; year: number }
     const load = async () => {
       try {
         setLoading(true);
-        const [records, cloudReport, backendReportPayload, annualSummary] = await Promise.all([
-          fetchAnnualData(undefined, orgId),
-          fetchAIReport(orgId, year),
-          fetchAIReportPayload(orgId, year),
-          fetchAnnualReportSummary(orgId, year),
+        const records = await fetchAnnualData(undefined, orgId);
+        const resolvedOrgId = resolveGovInsightPrintOrgId(orgId, records || []);
+
+        if (!resolvedOrgId) {
+          throw new Error('未找到可导出的年度数据。');
+        }
+
+        const [cloudReport, backendReportPayload, annualSummary] = await Promise.all([
+          fetchAIReport(resolvedOrgId, year),
+          fetchAIReportPayload(resolvedOrgId, year),
+          fetchAnnualReportSummary(resolvedOrgId, year),
         ]);
 
-        const selfRecords = (records || []).filter((item) => item.org_id === orgId);
+        const selfRecords = (records || []).filter((item) => item.org_id === resolvedOrgId);
         if (!selfRecords.length) {
           throw new Error('未找到可导出的年度数据。');
         }
@@ -672,9 +729,10 @@ export const GovInsightReportPrintView: React.FC<{ orgId: string; year: number }
         const sortedRecords = [...selfRecords].sort((a, b) => a.year - b.year);
         const targetRecord = sortedRecords.find((item) => item.year === year) || sortedRecords[sortedRecords.length - 1];
         const nextEntity: EntityProfile = {
-          id: orgId,
+          id: resolvedOrgId,
           name: targetRecord.org_name,
           type: 'city',
+          regionId: extractNumericId(targetRecord.region_id) ?? extractNumericId(targetRecord.org_id) ?? undefined,
           data: sortedRecords.map((item: AnnualDataRecord) => transformYearData(item)),
         };
 

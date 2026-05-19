@@ -17,6 +17,8 @@ import JobCenter from './components/JobCenter';
 import JobDetail from './components/JobDetail';
 import IssueList from './components/IssueList';
 import ReportMaintenance from './components/ReportMaintenance';
+import { ToastProvider } from './components/common/ToastProvider';
+import { ConfirmDialogProvider } from './components/common/ConfirmDialogProvider';
 
 import DataCenterReportsList from './components/datacenter/DataCenterReportsList';
 import DataCenterReportDetail from './components/datacenter/DataCenterReportDetail';
@@ -163,7 +165,9 @@ function App() {
   const isNavActive = (path) => pathname.startsWith(path);
 
   return (
-    <div className="app">
+    <ToastProvider>
+      <ConfirmDialogProvider>
+        <div className="app">
       <header className="header">
         <Logo />
         <div className="header-user">
@@ -273,7 +277,9 @@ function App() {
       <footer className="footer">
         <p>© 2025 政府信息公开年度报告差异比对系统</p>
       </footer>
-    </div>
+        </div>
+      </ConfirmDialogProvider>
+    </ToastProvider>
   );
 }
 

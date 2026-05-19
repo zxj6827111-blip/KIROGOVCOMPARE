@@ -975,6 +975,7 @@ router.delete('/:id', authMiddleware, async (req: AuthRequest, res: Response) =>
 /**
  * POST /api/comparisons/:id/export/pdf
  * Export comparison to PDF with optional watermark
+ * Legacy compatibility path. Prefer /api/pdf-jobs for user-facing comparison PDF exports.
  */
 router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
@@ -984,6 +985,7 @@ router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Res
     }
 
     const { watermark_text, watermark_opacity } = req.body;
+    console.warn(`[ComparisonHistory] Legacy EJS PDF export endpoint invoked for comparison ${comparisonId}. Prefer /api/pdf-jobs.`);
 
     const comparisonRes = await pool.query(`
       SELECT 

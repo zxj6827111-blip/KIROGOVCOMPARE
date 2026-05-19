@@ -7,6 +7,7 @@ import { Table2View, Table3View, Table4View, SimpleDiffTable } from './TableView
 import DiffText from './DiffText';
 import CrossYearCheckView from './CrossYearCheckView';
 import { normalizeTablePath } from '../utils/tableRowColMapping';
+import { useToast } from './common/ToastProvider';
 
 // ---- Tokenization & Similarity Algorithm (Ported) ----
 const tokenizeText = (text) => {
@@ -118,6 +119,7 @@ const getTable3Rows = (data) => {
 };
 
 const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
+  const toast = useToast();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
@@ -337,18 +339,16 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
         // Brief delay to show success status
         await new Promise(resolve => setTimeout(resolve, 500));
 
-        // Show success message with option to go to Job Center
-        const goToJobCenter = window.confirm(
-          `PDF 导出任务已创建！\n\n任务名称：${response.data.export_title}\n\n点击"确定"前往任务中心查看进度，或点击"取消"继续浏览。`
-        );
-        if (goToJobCenter) {
-          window.location.href = '/jobs?tab=download';
-        }
+        toast.success('PDF 导出任务已创建', `${response.data.export_title || title} 已加入任务中心。`, {
+          actionLabel: '查看任务',
+          onAction: () => { window.location.href = '/jobs?tab=download'; },
+          duration: 8000,
+        });
       }
     } catch (error) {
       console.error('Create PDF job failed:', error);
       const message = error.response?.data?.message || error.message || '创建任务失败';
-      alert('创建 PDF 导出任务失败：' + message);
+      toast.error('创建 PDF 导出任务失败', message);
     } finally {
       setDownloading(false);
       setDownloadStage('');

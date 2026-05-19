@@ -21,6 +21,7 @@ function ensureExportsDir(): void {
 
 /**
  * POST /api/pdf-jobs
+ * Recommended user-facing comparison PDF export entry.
  * 创建 PDF 导出任务
  */
 router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
@@ -37,6 +38,8 @@ router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
         if (!comparison_id) {
             return res.status(400).json({ error: 'comparison_id is required' });
         }
+
+        console.log(`[PDF Jobs] Recommended comparison PDF export job requested for comparison ${comparison_id}`);
 
         // 检查 comparison 是否存在
         const conditions: string[] = [`c.id = $1`];

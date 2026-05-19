@@ -19,6 +19,7 @@ export interface ComparisonPdfOptions {
   watermarkOpacity?: number;
 }
 
+// Legacy compatibility renderer. User-facing comparison PDF exports should use /api/pdf-jobs + PdfExportWorker.
 class PdfExportService {
   private readonly outputDir: string;
   private readonly viewsDir: string;
@@ -43,6 +44,7 @@ class PdfExportService {
 
     let browser;
     try {
+      console.warn(`[PdfExportService] Legacy EJS comparison PDF path invoked for comparison ${comparisonId}. Prefer /api/pdf-jobs for user-facing exports.`);
       console.log(`[PdfExportService] Rendering HTML for comparison ${comparisonId}...`);
 
       // 1. Render EJS to HTML String
