@@ -397,32 +397,34 @@ const Table3View = ({ data, compact = false, highlightCells = [], ocrCorrections
     return data.legalPerson?.[key];
   };
 
+  const safeNum = (v) => (v === null || v === undefined || v === '') ? null : v;
+
   const val = (cat, path) => {
     const category = getData(cat);
-    if (!category) return 0;
-    if (!path.includes('.')) return category[path] || 0;
+    if (!category) return null;
+    if (!path.includes('.')) return safeNum(category[path]);
     const [p1, p2] = path.split('.');
-    return category[p1]?.[p2] || 0;
+    return safeNum(category[p1]?.[p2]);
   };
 
   const deniedVal = (cat, key) => {
     const category = getData(cat);
-    return category?.results?.denied?.[key] || 0;
+    return safeNum(category?.results?.denied?.[key]);
   };
 
   const unableVal = (cat, key) => {
     const category = getData(cat);
-    return category?.results?.unableToProvide?.[key] || 0;
+    return safeNum(category?.results?.unableToProvide?.[key]);
   };
 
   const notProcessedVal = (cat, key) => {
     const category = getData(cat);
-    return category?.results?.notProcessed?.[key] || 0;
+    return safeNum(category?.results?.notProcessed?.[key]);
   };
 
   const otherVal = (cat, key) => {
     const category = getData(cat);
-    return category?.results?.other?.[key] || 0;
+    return safeNum(category?.results?.other?.[key]);
   };
 
   const renderCell = (v, category = null, fieldPath = null) => {
@@ -543,7 +545,7 @@ const Table3View = ({ data, compact = false, highlightCells = [], ocrCorrections
             ))}
           </span>
         )}
-        {renderCellContent(v, correction)}
+        {renderCellContent(v === null ? '-' : v, correction)}
       </td>
     );
   };

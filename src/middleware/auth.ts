@@ -26,6 +26,41 @@ export interface AuthRequest extends Request {
   };
 }
 
+export const REGION_MANAGEMENT_PERMISSION = 'manage_regions';
+
+// Default admin permissions - used by bootstrap scripts, not as a runtime bypass.
+export const ADMIN_DEFAULT_PERMISSIONS: Record<string, boolean> = {
+  upload_reports: true,
+  view_reports: true,
+  manage_users: true,
+  [REGION_MANAGEMENT_PERMISSION]: true,
+  manage_jobs: true,
+  delete_reports: true,
+  system_admin: true,
+};
+
+/**
+ * Normalize legacy permission keys before permission checks.
+ * We keep backward compatibility for stored JSON, but only expose one canonical key.
+ */
+export function normalizePermissions(permissions: Record<string, boolean> | null | undefined): Record<string, boolean> {
+  const normalized = permissions && typeof permissions === 'object' ? { ...permissions } : {};
+
+  if (normalized.manage_cities === true && normalized[REGION_MANAGEMENT_PERMISSION] !== true) {
+    normalized[REGION_MANAGEMENT_PERMISSION] = true;
+  }
+  delete normalized.manage_cities;
+
+  return normalized;
+}
+
+function timingSafeEqualString(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left, 'utf8');
+  const rightBuffer = Buffer.from(right, 'utf8');
+  if (leftBuffer.length !== rightBuffer.length) return false;
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
 /**
  * Simple JWT-like token generation using HMAC
  * Format: base64(payload).signature
@@ -76,7 +111,7 @@ export function verifyToken(token: string): { id: number; username: string } | n
       .update(payloadStr)
       .digest('base64url');
 
-    if (signature !== expectedSig) return null;
+    if (!timingSafeEqualString(signature, expectedSig)) return null;
 
     const payload = JSON.parse(Buffer.from(payloadStr, 'base64url').toString());
 
@@ -117,7 +152,7 @@ export function verifyPassword(password: string, storedHash: string): boolean {
   if (!salt || !hash) return false;
 
   const testHash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
-  return hash === testHash;
+  return timingSafeEqualString(hash, testHash);
 }
 
 /**
@@ -125,8 +160,9 @@ export function verifyPassword(password: string, storedHash: string): boolean {
  * Checks for Authorization header with Bearer token
  */
 export async function authMiddleware(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
-  // Allow CI/test mode to bypass authentication
-  if (process.env.NODE_ENV === 'test') {
+  // Allow CI/test mode to bypass authentication ONLY when explicitly enabled
+  // SECURITY: NODE_ENV=test alone is not sufficient; ALLOW_TEST_AUTH must also be set
+  if (process.env.NODE_ENV === 'test' && process.env.ALLOW_TEST_AUTH === '1') {
     req.user = {
       id: 1,
       username: 'ci-test-user',
@@ -166,9 +202,11 @@ export async function authMiddleware(req: AuthRequest, res: Response, next: Next
         if (typeof val === 'object') return val;
         try { return JSON.parse(val); } catch { return {}; }
       };
+      const rawPermissions = parseJsonField(dbUser.permissions);
       req.user = {
         ...decoded,
-        permissions: parseJsonField(dbUser.permissions),
+        displayName: dbUser.display_name,
+        permissions: normalizePermissions(rawPermissions),
         dataScope: parseJsonField(dbUser.data_scope)
       };
     }
@@ -203,9 +241,11 @@ export async function optionalAuthMiddleware(req: AuthRequest, _res: Response, n
             if (typeof val === 'object') return val;
             try { return JSON.parse(val); } catch { return {}; }
           };
+          const rawPermissions = parseJsonField(dbUser.permissions);
           req.user = {
             ...decoded,
-            permissions: parseJsonField(dbUser.permissions),
+            displayName: dbUser.display_name,
+            permissions: normalizePermissions(rawPermissions),
             dataScope: parseJsonField(dbUser.data_scope)
           };
         }
@@ -228,11 +268,10 @@ export function requirePermission(permission: string) {
       return;
     }
 
-    // Admin (id=1) usually has all permissions
-    // Also check if user has the specific permission
+    // Check if user has the specific permission
     const hasPerm = req.user.permissions?.[permission] === true;
 
-    if (req.user.id === 1 || hasPerm) {
+    if (hasPerm) {
       next();
     } else {
       res.status(403).json({ error: '权限不足', required: permission });

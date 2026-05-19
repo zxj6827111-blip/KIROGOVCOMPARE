@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import './App.css';
 import Login from './components/Login';
-import UploadReport from './components/UploadReport';
+import BatchUpload from './components/BatchUpload';
 
 import ReportDetail from './components/ReportDetail';
 import Logo from './components/Logo';
@@ -103,7 +103,7 @@ function App() {
       return <GovInsightModule />;
     }
     if (pathname === '/regions') return <RegionsManager />;
-    if (pathname === '/upload') return <UploadReport />;
+    if (pathname === '/upload') return <BatchUpload />;
     if (pathname === '/jobs' || pathname === '/jobs/') return <JobCenter />;
     if (pathname === '/admin/users') return <UserManagement />;
     if (pathname === '/datacenter') {
@@ -168,7 +168,7 @@ function App() {
         <Logo />
         <div className="header-user">
           {/* User Management moved to header, replacing NotificationCenter as requested */}
-          {(user.permissions?.manage_users || user.username === 'admin' || user.id === 1) && (
+          {user.permissions?.manage_users && (
             <button
               onClick={() => navigate('/admin/users')}
               className={`header-nav-btn ${isNavActive('/admin/users') ? 'active' : ''}`}
@@ -206,7 +206,7 @@ function App() {
       </header>
 
       <nav className="nav">
-        {(user.permissions?.manage_cities || user.username === 'admin' || user.id === 1) && (
+        {user.permissions?.manage_regions && (
           <button
             type="button"
             className={`nav-btn ${isNavActive('/regions') ? 'active' : ''}`}
@@ -216,7 +216,7 @@ function App() {
             <span>城市管理</span>
           </button>
         )}
-        {(user.permissions?.upload_reports || user.username === 'admin' || user.id === 1) && (
+        {user.permissions?.upload_reports && (
           <button
             type="button"
             className={`nav-btn ${isNavActive('/upload') ? 'active' : ''}`}

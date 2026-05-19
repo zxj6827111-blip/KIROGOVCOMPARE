@@ -10,49 +10,68 @@ const pool = new Pool({
     password: process.env.DB_PASSWORD,
 });
 
-// Implementation matching src/middleware/auth.ts
 function hashPassword(password) {
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
     return `${salt}:${hash}`;
 }
 
+function resolveInitialPassword() {
+    const password = process.env.ADMIN_INITIAL_PASSWORD;
+    if (!password || password.length < 8) {
+        throw new Error('ADMIN_INITIAL_PASSWORD must be set and at least 8 characters long');
+    }
+    return password;
+}
+
 async function main() {
-    console.log('🔍 Fixing Admin User (PBKDF2 Mode)...');
-    console.log(`- DB Connection: ${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`);
+    console.log('Ensuring bootstrap admin user...');
+    console.log(`DB Connection: ${process.env.DB_HOST}:${process.env.DB_PORT}/${process.env.DB_NAME}`);
 
     const client = await pool.connect();
     try {
-        // Generate valid PBKDF2 hash for 'admin123'
-        const newHash = hashPassword('admin123');
-        console.log('🔐 Generated new PBKDF2 hash for "admin123"');
+        const newHash = hashPassword(resolveInitialPassword());
+        console.log('Generated PBKDF2 hash from ADMIN_INITIAL_PASSWORD');
 
-        // Check user
+        const adminPermissions = JSON.stringify({
+            upload_reports: true,
+            view_reports: true,
+            manage_users: true,
+            manage_regions: true,
+            manage_jobs: true,
+            delete_reports: true,
+            system_admin: true,
+        });
+
         const res = await client.query("SELECT id FROM admin_users WHERE username = 'admin'");
-        
+
         if (res.rows.length === 0) {
-            console.log('🆕 Admin user not found. Creating...');
+            console.log('Admin user not found. Creating...');
             await client.query(`
-                INSERT INTO admin_users (username, password_hash, display_name, created_at, updated_at)
-                VALUES ('admin', $1, 'System Admin', NOW(), NOW())
-            `, [newHash]);
-            console.log('✅ Admin user created with PBKDF2 hash.');
+                INSERT INTO admin_users (username, password_hash, display_name, permissions, created_at, updated_at)
+                VALUES ('admin', $1, 'System Admin', $2, NOW(), NOW())
+            `, [newHash, adminPermissions]);
+            console.log('Admin user created with PBKDF2 hash and full permissions.');
         } else {
-            console.log('🔄 Admin user exists. Updating password...');
+            console.log('Admin user exists. Updating password and permissions...');
             await client.query(`
-                UPDATE admin_users 
-                SET password_hash = $1, updated_at = NOW() 
+                UPDATE admin_users
+                SET password_hash = $1, permissions = $2, updated_at = NOW()
                 WHERE username = 'admin'
-            `, [newHash]);
-            console.log('✅ Admin password updated to "admin123" (PBKDF2 format).');
+            `, [newHash, adminPermissions]);
+            console.log('Admin password updated from ADMIN_INITIAL_PASSWORD and permissions refreshed.');
         }
 
     } catch (err) {
-        console.error('❌ Error executing query:', err);
+        console.error('Error executing query:', err);
+        throw err;
     } finally {
         client.release();
         await pool.end();
     }
 }
 
-main();
+main().catch(err => {
+    console.error('Script failed:', err);
+    process.exit(1);
+});

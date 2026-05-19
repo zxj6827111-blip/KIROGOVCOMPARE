@@ -120,7 +120,7 @@ router.get('/template', async (_req: Request, res: Response) => {
  * POST /api/regions/import
  * Import regions from Excel/CSV file
  */
-router.post('/import', authMiddleware, requirePermission('manage_cities'), handleRegionImportUpload, async (req: AuthRequest, res: Response) => {
+router.post('/import', authMiddleware, requirePermission('manage_regions'), handleRegionImportUpload, async (req: AuthRequest, res: Response) => {
   const filePath = req.file?.path;
 
   try {
@@ -405,7 +405,7 @@ router.post('/import', authMiddleware, requirePermission('manage_cities'), handl
  * GET /api/regions/export
  * Export all regions to Excel
  */
-router.get('/export', authMiddleware, requirePermission('manage_cities'), async (_req: AuthRequest, res: Response) => {
+router.get('/export', authMiddleware, requirePermission('manage_regions'), async (_req: AuthRequest, res: Response) => {
   try {
     const result = await pool.query(`
       SELECT r.id, r.name, r.level, r.parent_id, p.name as parent_name

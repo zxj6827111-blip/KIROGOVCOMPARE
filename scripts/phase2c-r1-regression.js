@@ -7,7 +7,7 @@ const API_URL = 'http://127.0.0.1:8787/api';
 const REPORT_ID = 3670;
 const VERSION_ID = 3448;
 const USERNAME = 'admin';
-const PASSWORD = 'admin123';
+const PASSWORD = process.env.ADMIN_INITIAL_PASSWORD;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));

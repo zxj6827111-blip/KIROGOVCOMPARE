@@ -1,6 +1,12 @@
 import express, { Response } from 'express';
 import pool from '../config/database-llm';
-import { authMiddleware, requirePermission, AuthRequest, hashPassword } from '../middleware/auth';
+import {
+    authMiddleware,
+    requirePermission,
+    AuthRequest,
+    hashPassword,
+    normalizePermissions,
+} from '../middleware/auth';
 
 const router = express.Router();
 
@@ -24,7 +30,9 @@ router.get('/', requirePermission('manage_users'), async (req: AuthRequest, res:
         // Parse JSON fields if they are strings (Postgres jsonb might return objects already)
         const parsedUsers = users.map(user => ({
             ...user,
-            permissions: typeof user.permissions === 'string' ? JSON.parse(user.permissions) : (user.permissions || {}),
+            permissions: normalizePermissions(
+                typeof user.permissions === 'string' ? JSON.parse(user.permissions) : (user.permissions || {})
+            ),
             dataScope: typeof user.data_scope === 'string' ? JSON.parse(user.data_scope) : (user.data_scope || {})
         }));
 
@@ -55,7 +63,7 @@ router.post('/', requirePermission('manage_users'), async (req: AuthRequest, res
         }
 
         const hash = hashPassword(password);
-        const permJson = JSON.stringify(permissions || {});
+        const permJson = JSON.stringify(normalizePermissions(permissions || {}));
         const scopeJson = JSON.stringify(dataScope || {});
 
         await pool.query(`
@@ -80,8 +88,13 @@ router.put('/:id', requirePermission('manage_users'), async (req: AuthRequest, r
         const userId = req.params.id;
         const { password, displayName, permissions, dataScope } = req.body;
 
-        if (Number(userId) === 1 && req.user?.id !== 1) {
-            return res.status(403).json({ error: 'cannot modify super admin' });
+        const targetResult = await pool.query('SELECT username FROM admin_users WHERE id = $1', [userId]);
+        const targetUser = targetResult.rows[0];
+        if (!targetUser) {
+            return res.status(404).json({ error: 'user_not_found' });
+        }
+        if (targetUser.username === 'admin' && req.user?.username !== 'admin') {
+            return res.status(403).json({ error: 'cannot_modify_bootstrap_admin' });
         }
 
         const updates: string[] = [];
@@ -94,7 +107,7 @@ router.put('/:id', requirePermission('manage_users'), async (req: AuthRequest, r
         }
         if (permissions) {
             updates.push(`permissions = $${paramIndex++}`);
-            values.push(JSON.stringify(permissions));
+            values.push(JSON.stringify(normalizePermissions(permissions)));
         }
         if (dataScope) {
             updates.push(`data_scope = $${paramIndex++}`);
@@ -134,8 +147,14 @@ router.delete('/:id', requirePermission('manage_users'), async (req: AuthRequest
     try {
         const userId = req.params.id;
 
-        if (Number(userId) === 1) {
-            return res.status(400).json({ error: 'cannot delete super admin' });
+        const targetResult = await pool.query('SELECT username FROM admin_users WHERE id = $1', [userId]);
+        const targetUser = targetResult.rows[0];
+        if (!targetUser) {
+            return res.status(404).json({ error: 'user_not_found' });
+        }
+
+        if (targetUser.username === 'admin') {
+            return res.status(400).json({ error: 'cannot_delete_bootstrap_admin' });
         }
 
         if (Number(userId) === req.user?.id) {

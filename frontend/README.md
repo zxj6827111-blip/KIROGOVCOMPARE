@@ -40,10 +40,10 @@ npm run build
 
 ### 基础功能
 
-- **任务列表**: 查看所有比对任务
-- **创建任务**: 通过城市+年份或 URL 创建新的比对任务
-- **任务详情**: 查看任务的详细差异和摘要
-- **差异展示**: 显示段落和表格的具体变化
+- **报告上传**: 上传年度报告并等待解析入库
+- **报告目录**: 按地区和年份查看已入库报告
+- **对比历史**: 查看基于已入库报告生成的对比结果
+- **对比详情**: 查看年度差异、表格差异和打印视图
 
 ## 🏗️ 项目结构
 
@@ -53,12 +53,8 @@ frontend/
 │   └── index.html
 ├── src/
 │   ├── components/
-│   │   ├── TaskList.js
-│   │   ├── TaskList.css
-│   │   ├── CreateTask.js
-│   │   ├── CreateTask.css
-│   │   ├── TaskDetail.js
-│   │   ├── TaskDetail.css
+│   │   ├── ComparisonHistory.js
+│   │   ├── ComparisonDetailView.js
 │   │   ├── TextComparison.js          # Phase 5 新增
 │   │   ├── TextComparison.css         # Phase 5 新增
 │   │   ├── TableComparison.js         # Phase 5 新增
@@ -81,15 +77,13 @@ frontend/
 - `GET /catalog/regions/:region` - 获取城市详情
 - `POST /reports` - 上传 PDF 报告，返回 job_id/version_id/report_id（201 或 409）
 
-### 任务相关
+### Compare 相关
 
-- `GET /tasks` - 获取任务列表
-- `GET /tasks/:taskId` - 获取单个任务
-- `POST /tasks/compare/region-year` - 通过城市+年份创建任务（Phase 5 新增）
-- `POST /tasks/compare/url` - 通过 URL 创建任务
-- `GET /tasks/:taskId/diff` - 获取差异结果
-- `GET /tasks/:taskId/summary` - 获取摘要
-- `GET /tasks/:taskId/view-model` - 获取视图模型（全文对照数据，Phase 5 新增）
+- `POST /comparisons` - 基于已入库报告创建对比
+- `GET /comparisons/history` - 获取对比历史
+- `GET /comparisons/:comparisonId/result` - 获取对比详情
+
+旧版 `/api/v1/tasks/compare/*` 临时任务管线已下线，不再作为前端可用功能。
 
 ## 🎨 样式
 

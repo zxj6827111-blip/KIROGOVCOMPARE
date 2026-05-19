@@ -1,82 +1,49 @@
-import * as fs from 'fs';
-import * as path from 'path';
-import pool from '../config/database';
+import { runLLMMigrations } from './migrations-llm';
+import pool from '../config/database-llm';
 
-interface Migration {
-  name: string;
-  up: string;
-}
+export const MIGRATION_SYSTEM_NAME = 'llm_schema_idempotent';
 
-const migrationsDir = path.join(__dirname, '../../migrations');
-
-async function getMigrations(): Promise<Migration[]> {
-  const files = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql'));
-  return files.map((file) => ({
-    name: file,
-    up: fs.readFileSync(path.join(migrationsDir, file), 'utf-8'),
-  }));
-}
-
-async function initMigrationsTable(): Promise<void> {
-  const query = `
-    CREATE TABLE IF NOT EXISTS migrations (
-      id SERIAL PRIMARY KEY,
-      name VARCHAR(255) NOT NULL UNIQUE,
-      executed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-  `;
-  await pool.query(query);
-}
-
-async function getExecutedMigrations(): Promise<string[]> {
-  const result = await pool.query('SELECT name FROM migrations ORDER BY executed_at');
-  return result.rows.map((row) => row.name);
-}
-
-async function recordMigration(name: string): Promise<void> {
-  await pool.query('INSERT INTO migrations (name) VALUES ($1)', [name]);
+async function ensureMigrationLedger(): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS schema_migration_ledger (
+      id BIGSERIAL PRIMARY KEY,
+      system_name TEXT NOT NULL,
+      action TEXT NOT NULL,
+      details JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_schema_migration_ledger_system_created
+    ON schema_migration_ledger(system_name, created_at DESC);
+  `);
 }
 
 export async function runMigrations(): Promise<void> {
-  try {
-    console.log('Starting database migrations...');
-
-    await initMigrationsTable();
-    const executed = await getExecutedMigrations();
-    const migrations = await getMigrations();
-
-    for (const migration of migrations) {
-      if (!executed.includes(migration.name)) {
-        console.log(`Running migration: ${migration.name}`);
-        await pool.query(migration.up);
-        await recordMigration(migration.name);
-        console.log(`✓ Migration completed: ${migration.name}`);
-      }
-    }
-
-    console.log('All migrations completed successfully');
-  } catch (error) {
-    console.error('Migration failed:', error);
-    throw error;
-  }
+  await ensureMigrationLedger();
+  await runLLMMigrations();
+  await pool.query(
+    `INSERT INTO schema_migration_ledger (system_name, action, details)
+     VALUES ($1, $2, $3::jsonb)`,
+    [MIGRATION_SYSTEM_NAME, 'run_forward_migration', JSON.stringify({ runner: 'runLLMMigrations' })]
+  );
 }
 
 export async function rollbackMigration(steps: number = 1): Promise<void> {
-  try {
-    console.log(`Rolling back ${steps} migration(s)...`);
-    const executed = await getExecutedMigrations();
-
-    for (let i = 0; i < steps && executed.length > 0; i++) {
-      const migrationName = executed.pop();
-      if (migrationName) {
-        console.log(`Rolling back: ${migrationName}`);
-        // 在实际应用中，应该有对应的 down 脚本
-        await pool.query('DELETE FROM migrations WHERE name = $1', [migrationName]);
-        console.log(`✓ Rollback completed: ${migrationName}`);
-      }
-    }
-  } catch (error) {
-    console.error('Rollback failed:', error);
-    throw error;
-  }
+  await ensureMigrationLedger();
+  await pool.query(
+    `INSERT INTO schema_migration_ledger (system_name, action, details)
+     VALUES ($1, $2, $3::jsonb)`,
+    [
+      MIGRATION_SYSTEM_NAME,
+      'rollback_blocked',
+      JSON.stringify({
+        requestedSteps: steps,
+        reason: 'No reviewed down migrations exist for the current idempotent schema runner.',
+      }),
+    ]
+  );
+  throw new Error(
+    `rollback_not_supported_without_down_migrations: requested ${steps} step(s), but this project only supports forward migrations`
+  );
 }

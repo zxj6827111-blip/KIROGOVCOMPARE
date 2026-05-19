@@ -37,6 +37,8 @@ import {
     tryParseFlattenedTable4,
 } from './SegmentedAnnualReportParse';
 
+const OPENAI_DEBUG_LOGS = process.env.LLM_DEBUG_LOGS === '1';
+
 type PdfJsModule = {
     getDocument: (options: Record<string, unknown>) => { promise: Promise<any> };
     OPS?: Record<string, number>;
@@ -1176,7 +1178,9 @@ export class OpenAILlmProvider implements LlmProvider {
         signal?: AbortSignal
     ): Promise<T> {
         const text = await this.requestText(config, signal);
-        console.log(`[OpenAI] ${label} response preview:`, text.slice(0, 500));
+        if (OPENAI_DEBUG_LOGS) {
+            console.log(`[OpenAI] ${label} response preview:`, text.slice(0, 500));
+        }
 
         try {
             return parseStructuredJsonFromText<T>(text);

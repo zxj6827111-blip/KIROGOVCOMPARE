@@ -1,4 +1,4 @@
-import { runLLMMigrations } from '../src/db/migrations-llm';
+import { runMigrations } from '../src/db/migrations';
 import pool from '../src/config/database-llm';
 import { canonicalUnitsService } from '../src/services/CanonicalUnitsService';
 import { govInsightStatsV2Service } from '../src/services/GovInsightStatsV2Service';
@@ -24,7 +24,7 @@ async function main(): Promise<void> {
 
   if (!skipMigrate) {
     console.log('[GovInsight Phase1 Bootstrap] running migrations...');
-    await runLLMMigrations();
+    await runMigrations();
   }
 
   console.log('[GovInsight Phase1 Bootstrap] seeding phase1 frozen overrides...');

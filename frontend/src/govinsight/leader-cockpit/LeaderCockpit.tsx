@@ -57,7 +57,9 @@ export const LeaderCockpit: React.FC = () => {
     && (isLeaderCockpitEnabled() || isLeaderCockpitAdmin(user));
 
   const [currentStep, setCurrentStep] = useState(0);
-  const [year, setYear] = useState<number>(LEADER_COCKPIT_DEFAULT_YEAR);
+  const [year, setYear] = useState<number>(
+    Number.isFinite(LEADER_COCKPIT_DEFAULT_YEAR) ? LEADER_COCKPIT_DEFAULT_YEAR : new Date().getFullYear()
+  );
   const [viewLevel, setViewLevel] = useState<ViewLevel>('city');
 
   // Calibration State
@@ -95,7 +97,7 @@ export const LeaderCockpit: React.FC = () => {
   }, [entity]);
 
   useEffect(() => {
-    if (!entity || defaultCityApplied.current) return;
+    if (!entity || defaultCityApplied.current || !LEADER_COCKPIT_DEFAULT_CITY_NAME) return;
     if (entity.name === LEADER_COCKPIT_DEFAULT_CITY_NAME) {
       defaultCityApplied.current = true;
       return;
@@ -126,7 +128,7 @@ export const LeaderCockpit: React.FC = () => {
 
   useEffect(() => {
     if (!availableYears.length || defaultYearApplied.current) return;
-    if (availableYears.includes(LEADER_COCKPIT_DEFAULT_YEAR)) {
+    if (Number.isFinite(LEADER_COCKPIT_DEFAULT_YEAR) && availableYears.includes(LEADER_COCKPIT_DEFAULT_YEAR)) {
       setYear(LEADER_COCKPIT_DEFAULT_YEAR);
     } else {
       setYear(availableYears[0]);
