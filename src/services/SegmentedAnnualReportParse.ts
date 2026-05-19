@@ -517,7 +517,12 @@ function hasMeaningfulNarrativeContent(content: unknown, title: string): boolean
     return false;
   }
 
-  return normalized.length > cleanSegmentText(title).length;
+  const escapedTitle = cleanSegmentText(title).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const contentWithoutTitle = normalized
+    .replace(new RegExp(`^\\s*#{0,6}\\s*${escapedTitle}\\s*`, 'u'), '')
+    .trim();
+
+  return contentWithoutTitle.length > 0;
 }
 
 export function normalizeAnnualReportOutputFromSource<T>(

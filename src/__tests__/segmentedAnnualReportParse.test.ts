@@ -283,6 +283,49 @@ describe('SegmentedAnnualReportParse', () => {
     expect(normalized.output.sections[5].content).not.toMatch(/^六、其他需要报告的事项/);
   });
 
+  it('should accept short other matters content after stripping the section title', () => {
+    const shortOtherMattersReport = [
+      '\u4e00\u3001\u603b\u4f53\u60c5\u51b5',
+      '\u603b\u4f53\u60c5\u51b5\u6b63\u6587',
+      '',
+      '\u4e8c\u3001\u4e3b\u52a8\u516c\u5f00\u653f\u5e9c\u4fe1\u606f\u60c5\u51b5',
+      SEGMENTED_ANNUAL_REPORT_TITLES.table2,
+      '| \u4fe1\u606f\u5185\u5bb9 | \u672c\u5e74\u5236\u53d1\u4ef6\u6570 | \u672c\u5e74\u5e9f\u6b62\u4ef6\u6570 | \u73b0\u884c\u6709\u6548\u4ef6\u6570 |',
+      '|---|---|---|---|',
+      '| \u89c4\u7ae0 | 0 | 0 | 0 |',
+      '',
+      '\u4e09\u3001\u6536\u5230\u548c\u5904\u7406\u653f\u5e9c\u4fe1\u606f\u516c\u5f00\u7533\u8bf7\u60c5\u51b5',
+      SEGMENTED_ANNUAL_REPORT_TITLES.table3,
+      '| \u603b\u8ba1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |',
+      '',
+      '\u56db\u3001\u653f\u5e9c\u4fe1\u606f\u516c\u5f00\u884c\u653f\u590d\u8bae\u3001\u884c\u653f\u8bc9\u8bbc\u60c5\u51b5',
+      SEGMENTED_ANNUAL_REPORT_TITLES.table4,
+      '| 0 | 0 | 0 | 0 | 0 |',
+      '',
+      '\u4e94\u3001\u5b58\u5728\u7684\u4e3b\u8981\u95ee\u9898\u53ca\u6539\u8fdb\u60c5\u51b5',
+      '\u95ee\u9898\u4e0e\u6539\u8fdb\u6b63\u6587',
+      '',
+      '\u516d\u3001\u5176\u4ed6\u9700\u8981\u62a5\u544a\u7684\u4e8b\u9879',
+      '\u65e0\u6536\u53d6\u4fe1\u606f\u5904\u7406\u8d39\u60c5\u51b5\u3002',
+    ].join('\n');
+    const rawOutput = {
+      sections: [
+        { title: SEGMENTED_ANNUAL_REPORT_TITLES.overallSituation, type: 'text', content: null },
+        { title: SEGMENTED_ANNUAL_REPORT_TITLES.activeDisclosure, type: 'table_2', activeDisclosureData: {} },
+        { title: SEGMENTED_ANNUAL_REPORT_TITLES.applicationRequests, type: 'table_3', tableData: {} },
+        { title: SEGMENTED_ANNUAL_REPORT_TITLES.reviewLitigation, type: 'table_4', reviewLitigationData: {} },
+        { title: SEGMENTED_ANNUAL_REPORT_TITLES.problemsAndImprovements, type: 'text', content: null },
+        { title: SEGMENTED_ANNUAL_REPORT_TITLES.otherMatters, type: 'text', content: null },
+      ],
+    };
+
+    const normalized = normalizeAnnualReportOutputFromSource(rawOutput, shortOtherMattersReport);
+
+    expect(normalized.applied).toBe(true);
+    expect(normalized.validationIssues).toEqual([]);
+    expect(normalized.output.sections[5].content).toBe('\u65e0\u6536\u53d6\u4fe1\u606f\u5904\u7406\u8d39\u60c5\u51b5\u3002');
+  });
+
   it('should merge segmented results back into canonical sections order', () => {
     const merged = mergeSegmentedAnnualReportParse({
       body: {
