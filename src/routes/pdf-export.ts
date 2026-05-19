@@ -1,83 +1,36 @@
 import express, { Response, Router } from 'express';
-import puppeteer from 'puppeteer';
-import http from 'http';
-import https from 'https';
-import path from 'path';
 import pool from '../config/database-llm';
 import { authMiddleware, AuthRequest, generateExpiringToken } from '../middleware/auth';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
+import {
+    findFrontendUrl as discoverFrontendUrl,
+    renderPdfBuffer,
+} from '../services/report-export/BrowserRenderer';
+import {
+    COMPARISON_LANDSCAPE_PDF_OPTIONS,
+    createComparisonPrintPageAdapter,
+} from '../services/report-export/PrintPageAdapter';
 
 const router: Router = express.Router();
 const SERVICE_TOKEN_TTL_MS = 5 * 60 * 1000;
-const PDF_EXPORT_DEBUG = process.env.PDF_EXPORT_DEBUG === '1';
 const PDF_EXPORT_HYDRATE_WAIT_MS = Number(process.env.PDF_EXPORT_HYDRATE_WAIT_MS || 1500);
 const PDF_EXPORT_PRINT_READY_TIMEOUT_MS = Number(process.env.PDF_EXPORT_PRINT_READY_TIMEOUT_MS || 45000);
-const PRINT_READY_SELECTOR = '#comparison-content[data-print-ready="true"]';
 
-/**
- * Check if a URL is accessible
- */
-async function isUrlAccessible(url: string): Promise<boolean> {
-    return new Promise((resolve) => {
-        const urlObj = new URL(url);
-        const isHttps = urlObj.protocol === 'https:';
-        const client = isHttps ? https : http;
-        const options = {
-            hostname: urlObj.hostname,
-            port: urlObj.port || (isHttps ? 443 : 80),
-            path: `${urlObj.pathname || '/'}${urlObj.search || ''}`,
-            method: 'HEAD',
-            timeout: 2000
-        };
-
-        const req = client.request(options, (res) => {
-            resolve(res.statusCode !== undefined && res.statusCode < 500);
-        });
-
-        req.on('error', () => resolve(false));
-        req.on('timeout', () => {
-            req.destroy();
-            resolve(false);
-        });
-
-        req.end();
-    });
-}
-
-/**
- * Find available frontend URL (check multiple ports)
- */
 async function findFrontendUrl(): Promise<string | null> {
-    // Check if explicitly set in env
-    if (process.env.FRONTEND_URL) {
-        return process.env.FRONTEND_URL;
-    }
-
-    // Try common React dev server ports
-    const portsToCheck = [3000, 3001, 3002, 3003];
-
-    for (const port of portsToCheck) {
-        const url = `http://localhost:${port}`;
-        console.log(`[PDF Export] Checking frontend at ${url}...`);
-        const accessible = await isUrlAccessible(url);
-        if (accessible) {
-            console.log(`[PDF Export] Found frontend at ${url}`);
-            return url;
-        }
-    }
-
-    return null;
+    return discoverFrontendUrl({
+        logPrefix: 'PDF Export',
+        ports: [3000, 3001, 3002, 3003],
+        hosts: ['localhost'],
+        method: 'HEAD',
+    });
 }
 
 /**
  * GET /api/comparisons/:id/pdf
  * Compatibility synchronous path. Prefer POST /api/pdf-jobs for user-facing comparison PDF exports.
- * 使用 Puppeteer 生成比对报告的 PDF
  */
 router.get('/:id/pdf', authMiddleware, async (req: AuthRequest, res: Response) => {
     const comparisonId = Number(req.params.id);
-
-    let browser = null;
 
     try {
         if (!Number.isInteger(comparisonId) || comparisonId < 1) {
@@ -115,142 +68,45 @@ router.get('/:id/pdf', authMiddleware, async (req: AuthRequest, res: Response) =
 
         console.log(`[PDF Export] Compatibility synchronous export requested for comparison ${comparisonId}. Prefer /api/pdf-jobs for user-facing comparison PDFs.`);
 
-        // Find available frontend
         const frontendUrl = await findFrontendUrl();
-
         if (!frontendUrl) {
             throw new Error('无法找到可用的前端服务。请确保前端开发服务器正在运行。');
         }
 
-        // Forward highlight settings from query params to print page
         const highlightIdentical = req.query.highlightIdentical === 'true';
         const highlightDiff = req.query.highlightDiff === 'true';
         const serviceToken = generateExpiringToken(req.user.id, req.user.username, SERVICE_TOKEN_TTL_MS);
-        const printParams = new URLSearchParams({
-            highlightIdentical: highlightIdentical.toString(),
-            highlightDiff: highlightDiff.toString(),
-            service_token: serviceToken
-        });
         const logParams = new URLSearchParams({
             highlightIdentical: highlightIdentical.toString(),
-            highlightDiff: highlightDiff.toString()
+            highlightDiff: highlightDiff.toString(),
         });
-        const printUrl = `${frontendUrl}/print/comparison/${comparisonId}?${printParams}`;
         const logUrl = `${frontendUrl}/print/comparison/${comparisonId}?${logParams}`;
         console.log(`[PDF Export] Accessing print URL: ${logUrl} (service token redacted)`);
 
-        // 启动无头浏览器
-        browser = await puppeteer.launch({
-            headless: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--font-render-hinting=none'
-            ]
-        });
-
-        const page = await browser.newPage();
-
-        // Enable verbose page logging only in debug mode to reduce noise and overhead.
-        if (PDF_EXPORT_DEBUG) {
-            page.on('console', msg => console.log(`[PDF Page Console] ${msg.type()}: ${msg.text()}`));
-        }
-        page.on('pageerror', (error) => console.error(`[PDF Page Error]`, String(error)));
-
-        // 设置视口大小 (横向布局，更宽以适应表格)
-        await page.setViewport({
-            width: 1600,
-            height: 900,
-            deviceScaleFactor: 2
-        });
-
-        // 访问打印页面
-        console.log(`[PDF Export] Navigating to print page...`);
-        await page.goto(printUrl, {
-            waitUntil: 'networkidle0',
-            timeout: 60000
-        });
-
-        // Short, configurable hydration wait to avoid unnecessary fixed 5s latency.
-        if (PDF_EXPORT_HYDRATE_WAIT_MS > 0) {
-            await new Promise(resolve => setTimeout(resolve, PDF_EXPORT_HYDRATE_WAIT_MS));
-        }
-
-        if (PDF_EXPORT_DEBUG) {
-            // Capture diagnostics only in debug mode.
-            const screenshotPath = path.join(__dirname, '..', '..', 'logs', `pdf-debug-${comparisonId}-${Date.now()}.png`);
-            try {
-                await page.screenshot({ path: screenshotPath, fullPage: true });
-                console.log(`[PDF Export] Debug screenshot saved to: ${screenshotPath}`);
-            } catch (e) {
-                console.log(`[PDF Export] Could not save screenshot:`, e);
-            }
-
-            const pageContent = await page.content();
-            console.log(`[PDF Export] Page content length: ${pageContent.length}`);
-            if (pageContent.includes('comparison-content')) {
-                console.log(`[PDF Export] Found comparison-content in HTML`);
-            } else {
-                console.log(`[PDF Export] comparison-content NOT found in HTML`);
-                console.log(`[PDF Export] First 2000 chars: ${pageContent.substring(0, 2000)}`);
-            }
-        }
-
-        // Try to wait for fully hydrated print content, but with useful diagnostics.
-        try {
-            await page.waitForSelector(PRINT_READY_SELECTOR, { timeout: PDF_EXPORT_PRINT_READY_TIMEOUT_MS });
-            console.log(`[PDF Export] Print page reported ready`);
-        } catch (e) {
-            console.log(`[PDF Export] Print-ready marker not found, checking page state...`);
-            // Check if there's an error message
-            const errorElement = await page.$('.text-red-500');
-            if (errorElement) {
-                const errorText = await page.evaluate(el => el?.textContent, errorElement);
-                throw new Error(`Print page error: ${errorText}`);
-            }
-            // Check if still loading
-            const loadingElement = await page.$('.text-gray-500');
-            if (loadingElement) {
-                const loadingText = await page.evaluate(el => el?.textContent, loadingElement);
-                throw new Error(`Page still loading: ${loadingText}`);
-            }
-            const contentElement = await page.$('#comparison-content');
-            if (!contentElement) {
-                throw new Error('Content failed to load - #comparison-content not found');
-            }
-            console.warn(`[PDF Export] Print page did not become ready in time, proceeding with rendered content`);
-        }
-
-        await page.evaluate('document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()');
-        console.log(`[PDF Export] Fonts reported ready`);
-
-        await new Promise(resolve => setTimeout(resolve, 500));
-
-        // 获取页面标题用于文件名
-        const pageTitle = await page.title();
-
-        console.log(`[PDF Export] Generating PDF...`);
-
-        // 生成 PDF (横向A4布局，更适合表格展示)
-        const pdfBuffer = await page.pdf({
-            width: '297mm',
-            height: '210mm',
-            printBackground: true,
-            margin: {
-                top: '10mm',
-                bottom: '10mm',
-                left: '10mm',
-                right: '10mm'
+        const adapter = createComparisonPrintPageAdapter({
+            comparisonId,
+            highlightIdentical,
+            highlightDiff,
+            viewportDeviceScaleFactor: 2,
+            hydrateWaitMs: PDF_EXPORT_HYDRATE_WAIT_MS,
+            readyTimeoutMs: PDF_EXPORT_PRINT_READY_TIMEOUT_MS,
+            loadingSelectorFatal: true,
+            pdfOptions: {
+                ...COMPARISON_LANDSCAPE_PDF_OPTIONS,
+                preferCSSPageSize: true,
             },
-            displayHeaderFooter: false,
-            preferCSSPageSize: true
         });
 
-        console.log(`[PDF Export] PDF generated successfully, size: ${pdfBuffer.length} bytes`);
+        console.log('[PDF Export] Generating PDF...');
+        const { buffer: nodeBuffer, title: pageTitle } = await renderPdfBuffer({
+            adapter,
+            frontendUrl,
+            serviceToken,
+            logPrefix: 'PDF Export',
+        });
 
-        // 设置CORS响应头 (确保浏览器可以访问二进制响应)
+        console.log(`[PDF Export] PDF generated successfully, size: ${nodeBuffer.length} bytes`);
+
         const origin = req.headers.origin;
         if (origin) {
             res.setHeader('Access-Control-Allow-Origin', origin);
@@ -260,29 +116,17 @@ router.get('/:id/pdf', authMiddleware, async (req: AuthRequest, res: Response) =
         res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, Content-Type');
         res.setHeader('Access-Control-Allow-Credentials', 'true');
 
-        // 设置响应头
         const filename = encodeURIComponent(pageTitle || `比对报告_${comparisonId}`) + '.pdf';
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"; filename*=UTF-8''${filename}`);
-
-        // Puppeteer returns Uint8Array or Buffer - cast to any or Buffer.from to be safe
-        const nodeBuffer = Buffer.from(pdfBuffer);
         res.setHeader('Content-Length', nodeBuffer.length);
-
-        // 发送 PDF as raw binary using res.end() to avoid JSON serialization
         res.end(nodeBuffer);
-
     } catch (error: any) {
-        console.error(`[PDF Export] Error generating PDF:`, error);
+        console.error('[PDF Export] Error generating PDF:', error);
         res.status(500).json({
             error: 'PDF 生成失败',
-            message: error.message || 'Unknown error'
+            message: error.message || 'Unknown error',
         });
-    } finally {
-        if (browser) {
-            await browser.close();
-            console.log(`[PDF Export] Browser closed`);
-        }
     }
 });
 
