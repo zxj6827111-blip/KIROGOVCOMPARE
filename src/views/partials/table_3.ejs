@@ -1,7 +1,9 @@
-<% // Helper to safely get data const getData=(key)=> {
-    if (key === 'naturalPerson') return data.naturalPerson;
-    if (key === 'total') return data.total;
-    return data.legalPerson[key];
+<%
+    // Legacy EJS helper: keep table_3 renderable for the deprecated export path.
+    const getData = (key) => {
+    if (key === 'naturalPerson') return data.naturalPerson || {};
+    if (key === 'total') return data.total || {};
+    return (data.legalPerson && data.legalPerson[key]) || {};
     };
 
     const renderCell = (val) => {
