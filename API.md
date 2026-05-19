@@ -68,20 +68,20 @@ Authorization: Bearer <token>
 
 ## 已下线的旧版 Compare 任务接口
 
-以下旧接口已明确下线，不应继续作为可用 API 使用：
+以下旧接口已物理清理，不应继续作为可用 API 使用：
 
 - `POST /api/v1/tasks/compare/upload`
 - `POST /api/v1/tasks/compare/url`
 - `POST /api/v1/tasks/compare/asset`
-- `GET /api/v1/tasks/:taskId`
 
-如果这些旧路由被误挂载，当前实现会返回：
+当前仅保留 `/api/v1/tasks/compare/*` 的退役防线。如果误访问，会返回：
 
 ```json
 {
   "error": "legacy_compare_tasks_retired",
+  "message": "The legacy /api/v1/tasks/compare pipeline has been retired. Use the report-based /api/comparisons workflow instead.",
   "replacement": "/api/comparisons"
 }
 ```
 
-如未来需要“上传两个 PDF 直接临时对比”的能力，应作为新功能接入当前报告上传、解析、物化和 `/api/comparisons` 流程，不建议复活旧任务管线。
+如未来需要“上传两个 PDF 直接临时对比”的能力，应作为新功能接入当前报告上传、解析、物化和 `/api/comparisons` 流程，不允许复活旧任务管线。

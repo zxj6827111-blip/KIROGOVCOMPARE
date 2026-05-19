@@ -44,7 +44,7 @@
 - `fillFixedTableRows()` - 填充固定行列结构
 - 支持 `fixedRows` 标志区分灵活和固定结构
 
-### 3. DiffService 增强
+### 3. 历史 DiffService 增强（已退役）
 
 #### 单元格变化增加元数据
 ```typescript
@@ -112,25 +112,14 @@ npx ts-node scripts/test-compare-flow.ts
 
 ### 4. 集成到应用
 
-在 API 中使用完整流程：
+以下流程是旧 `/api/v1/tasks/compare/*` 管线的历史示例，相关服务已经退役并物理删除；当前主线 Compare 使用 `/api/comparisons/*` 与 `LlmJobRunner.processCompareJob`。
 
-```typescript
-// 1. 解析两个 PDF
-const result1 = await PdfParseService.parsePDF(pathA, assetIdA);
-const result2 = await PdfParseService.parsePDF(pathB, assetIdB);
+当前 API 入口：
 
-// 2. 结构化
-const struct1 = await StructuringService.structureDocument(result1);
-const struct2 = await StructuringService.structureDocument(result2);
-
-// 3. 比对
-const diff = await DiffService.diffDocuments(struct1.document, struct2.document);
-
-// 4. 生成摘要
-const summary = SummaryService.generateSummary(diff);
-
-// 5. 导出 DOCX（包含表格差异详情）
-const docxPath = await DocxExportService.generateDiffReport(diff, summary);
+```http
+POST /api/comparisons
+GET /api/comparisons/:id/result
+GET /api/comparisons/history
 ```
 
 ## 数据结构
@@ -205,18 +194,11 @@ const result2 = await PdfParseService.parsePDF(path, assetId);
 
 ### 批量比对
 
-管理员可以批量比对多对资产，系统会自动复用解析缓存：
+旧版 `BatchJobService.runBatchJob` 属于已删除的任务管线，不再作为可用入口。当前如果需要批量生成主线 Compare，应走报告维度的 `/api/comparisons/batch-create`，结果继续通过 `/api/comparisons/*`、`comparison_results` 和 `LlmJobRunner.processCompareJob` 处理。
 
-```typescript
-// 批量比对 10 对资产
-// 如果有重复资产，只解析一次
-const batchJob = await BatchJobService.runBatchJob({
-  pairs: [
-    { assetIdA: 'asset_1', assetIdB: 'asset_2' },
-    { assetIdA: 'asset_1', assetIdB: 'asset_3' },  // asset_1 复用缓存
-    // ...
-  ]
-});
+```http
+POST /api/comparisons/batch-create
+GET /api/comparisons/history
 ```
 
 ## 故障排查
@@ -268,7 +250,7 @@ const batchJob = await BatchJobService.runBatchJob({
 
 - [Schema 说明](src/schemas/README.md)
 - [PDF 解析服务](src/services/PdfParseService.ts)
-- [差异比对服务](src/services/DiffService.ts)
+- 旧差异比对服务（已退役，文件已删除）
 - [DOCX 导出服务](src/services/DocxExportService.ts)
 - [测试脚本](scripts/test-compare-flow.ts)
 

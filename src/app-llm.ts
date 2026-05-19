@@ -19,6 +19,7 @@ import reportMaintenanceRouter from './routes/report-maintenance';
 import dataCenterRouter from './routes/data-center';
 import govInsightRouter from './routes/gov-insight';
 import govInsightPdfRouter from './routes/gov-insight-pdf';
+import retiredCompareTasksRouter from './routes/retired-compare-tasks';
 import { createRateLimiter, createRedisStore } from './middleware/rateLimit';
 import { redactSensitive } from './utils/logRedactor';
 
@@ -100,6 +101,7 @@ export function createLlmApp(): express.Express {
 
   app.use('/api/auth', authRouter);
   app.use('/api/users', usersRouter);
+  app.use('/api/v1/tasks/compare', retiredCompareTasksRouter);
   app.use('/api/regions', regionsImportRouter);
   app.use('/api/regions', llmRegionsRouter);
   app.use('/api/jobs', llmJobsRouter);
