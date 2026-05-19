@@ -6,6 +6,12 @@ export interface PageStateSelector {
   fatal?: boolean;
 }
 
+export interface PageReadyPredicate {
+  description: string;
+  timeoutMs?: number;
+  predicate: () => boolean;
+}
+
 export interface PrintPageAdapter {
   kind: string;
   diagnosticName: string;
@@ -15,6 +21,7 @@ export interface PrintPageAdapter {
   serviceTokenQueryParam?: string;
   serviceTokenLocalStorageKey?: string;
   readySelector: string;
+  readyPredicate?: PageReadyPredicate;
   fallbackSelector?: string;
   errorSelectors?: PageStateSelector[];
   loadingSelectors?: PageStateSelector[];
@@ -41,6 +48,33 @@ export interface BuildPrintUrlOptions {
 
 export const COMPARISON_PRINT_READY_SELECTOR = '#comparison-content[data-print-ready="true"]';
 export const GOVINSIGHT_PRINT_READY_SELECTOR = '#govinsight-report-print';
+
+export const GOVINSIGHT_A4_PRINT_CSS = `
+@page {
+  size: A4;
+  margin: 20mm 0 17mm 0;
+}
+@media print {
+  @page {
+    size: A4;
+    margin: 20mm 0 17mm 0;
+  }
+}
+`;
+
+export const GOVINSIGHT_A4_PDF_OPTIONS: PDFOptions = {
+  format: 'A4',
+  landscape: false,
+  printBackground: true,
+  margin: {
+    top: '20mm',
+    bottom: '17mm',
+    left: '17mm',
+    right: '17mm',
+  },
+  displayHeaderFooter: true,
+  preferCSSPageSize: false,
+};
 
 export const COMPARISON_LANDSCAPE_PRINT_CSS = `
 @page {
@@ -189,6 +223,14 @@ export function createGovInsightPrintPageAdapter(
     path,
     serviceTokenLocalStorageKey: 'admin_token',
     readySelector: GOVINSIGHT_PRINT_READY_SELECTOR,
+    readyPredicate: {
+      description: 'GovInsight PDF ready marker reported true',
+      timeoutMs: 15000,
+      predicate: () => {
+        const win = globalThis as any;
+        return win.document?.documentElement?.getAttribute('data-govinsight-pdf-ready') === 'true';
+      },
+    },
     fallbackSelector: GOVINSIGHT_PRINT_READY_SELECTOR,
     viewport: {
       width: 1440,
@@ -200,20 +242,12 @@ export function createGovInsightPrintPageAdapter(
     readyTimeoutMs: options.readyTimeoutMs || 30000,
     hydrateWaitMs: options.hydrateWaitMs,
     emulateMediaType: 'print',
+    styleTags: [GOVINSIGHT_A4_PRINT_CSS],
     waitForPath: path,
-    pdfOptions:
-      options.pdfOptions || {
-        format: 'A4',
-        landscape: false,
-        printBackground: true,
-        margin: {
-          top: '20mm',
-          bottom: '17mm',
-          left: '17mm',
-          right: '17mm',
-        },
-        displayHeaderFooter: true,
-        preferCSSPageSize: false,
-      },
+    pdfOptions: options.pdfOptions || GOVINSIGHT_A4_PDF_OPTIONS,
+    debugHtmlProbe: {
+      requiredText: 'govinsight-report-print',
+      previewChars: 2000,
+    },
   };
 }

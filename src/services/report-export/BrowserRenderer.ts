@@ -302,12 +302,14 @@ async function waitForAdapterReady(
   adapter: PrintPageAdapter,
   logPrefix: string
 ): Promise<void> {
+  let readyOrFallbackAvailable = false;
+
   try {
     await page.waitForSelector(adapter.readySelector, {
       timeout: adapter.readyTimeoutMs || DEFAULT_READY_TIMEOUT_MS,
     });
+    readyOrFallbackAvailable = true;
     console.log(`[${logPrefix}] Print page reported ready`);
-    return;
   } catch (error) {
     console.warn(`[${logPrefix}] Print-ready marker not found, checking page state...`);
 
@@ -331,8 +333,8 @@ async function waitForAdapterReady(
     if (adapter.fallbackSelector) {
       try {
         await page.waitForSelector(adapter.fallbackSelector, { timeout: 5000 });
+        readyOrFallbackAvailable = true;
         console.warn(`[${logPrefix}] Print page did not become ready in time, proceeding with rendered content`);
-        return;
       } catch {
         const state = await getPageState(page);
         console.error(`[${logPrefix}] Print page did not become ready:`, state);
@@ -340,9 +342,18 @@ async function waitForAdapterReady(
       }
     }
 
-    const state = await getPageState(page);
-    console.error(`[${logPrefix}] Print page did not become ready:`, state);
-    throw error;
+    if (!readyOrFallbackAvailable) {
+      const state = await getPageState(page);
+      console.error(`[${logPrefix}] Print page did not become ready:`, state);
+      throw error;
+    }
+  }
+
+  if (adapter.readyPredicate) {
+    await page.waitForFunction(adapter.readyPredicate.predicate, {
+      timeout: adapter.readyPredicate.timeoutMs || adapter.readyTimeoutMs || DEFAULT_READY_TIMEOUT_MS,
+    });
+    console.log(`[${logPrefix}] ${adapter.readyPredicate.description}`);
   }
 }
 
