@@ -19,7 +19,9 @@ export interface ComparisonPdfOptions {
   watermarkOpacity?: number;
 }
 
-// Legacy compatibility renderer. User-facing comparison PDF exports should use /api/pdf-jobs + PdfExportWorker.
+// Legacy compatibility renderer. P2-1 keeps this EJS path available but does not
+// migrate or delete it; user-facing comparison PDF exports use the React print page
+// through /api/pdf-jobs + PdfExportWorker.
 class PdfExportService {
   private readonly outputDir: string;
   private readonly viewsDir: string;
