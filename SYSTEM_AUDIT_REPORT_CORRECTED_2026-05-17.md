@@ -84,15 +84,13 @@
 
 以下模块的结论基本成立：
 
-- [src/services/CompareTaskProcessor.ts](</E:/Software Development/KIROGOVCOMPARE/src/services/CompareTaskProcessor.ts>)
-- [src/services/ParsedDataStorageService.ts](</E:/Software Development/KIROGOVCOMPARE/src/services/ParsedDataStorageService.ts>)
-- [src/services/StructuringService.ts](</E:/Software Development/KIROGOVCOMPARE/src/services/StructuringService.ts>)
+- `src/services/CompareTaskProcessor.ts` (legacy task Compare, retired and deleted)
+- `src/services/ParsedDataStorageService.ts` (legacy task Compare, retired and deleted)
+- `src/services/StructuringService.ts` (legacy task Compare, retired and deleted)
 
 当前可确认状态：
 
-- `CompareTaskProcessor` 中结构化、比对、摘要、DOCX 导出等关键阶段仍有 `TODO`。
-- `ParsedDataStorageService` 直接返回 `null`。
-- `StructuringService` 返回 stub document。
+- The legacy task Compare modules listed above have been physically removed. Current supported Compare uses `/api/comparisons/*` and `LlmJobRunner.processCompareJob`.
 
 结论：
 
