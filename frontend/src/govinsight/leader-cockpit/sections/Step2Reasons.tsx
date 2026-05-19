@@ -5,6 +5,7 @@ import { ReasonTree } from '../components/ReasonTree';
 import { AttributionTopList } from '../components/AttributionTopList';
 import { formatNumber, formatPercent } from '../utils';
 import { metricDefinitions, metricEvidence } from '../definitions';
+import { StableChartFrame, stableResponsiveProps } from '../../components/StableChartFrame';
 
 interface Step2ReasonsProps {
   model: LeaderCockpitModel;
@@ -103,8 +104,8 @@ export const Step2Reasons: React.FC<Step2ReasonsProps> = ({
                 </button>
               </div>
             </div>
-            <div className="h-60">
-              <ResponsiveContainer width="100%" height="100%">
+            <StableChartFrame className="h-60" minHeight={240}>
+              <ResponsiveContainer {...stableResponsiveProps(240, 240)}>
                 <LineChart data={serviceRatioData}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                   <XAxis dataKey="year" stroke="#94a3b8" />
@@ -113,7 +114,7 @@ export const Step2Reasons: React.FC<Step2ReasonsProps> = ({
                   <Line type="monotone" dataKey="value" stroke="#0ea5e9" strokeWidth={2} dot={{ r: 4 }} />
                 </LineChart>
               </ResponsiveContainer>
-            </div>
+            </StableChartFrame>
           </div>
         </div>
 

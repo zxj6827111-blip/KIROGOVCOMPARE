@@ -39,6 +39,7 @@
     "test:unit": "jest --testPathPattern=__tests__",
     "test:integration": "jest --testPathPattern=integration",
     "test:coverage": "jest --coverage",
+    "smoke:pdf": "node scripts/pdf-smoke-baseline.js",
     "db:migrate": "ts-node src/scripts/db-migrate.ts",
     "scan:integrity": "ts-node src/scripts/scan-system-integrity.ts",
     "scan:table3-fragments": "ts-node src/scripts/scan-table3-fragmentation.ts",

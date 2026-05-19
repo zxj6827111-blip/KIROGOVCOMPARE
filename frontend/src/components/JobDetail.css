@@ -243,6 +243,29 @@
     margin-bottom: 20px;
 }
 
+.error-detail {
+    margin: -8px 0 20px;
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
+.error-detail summary {
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.error-detail pre {
+    margin: 8px 0 0;
+    padding: 10px 12px;
+    max-height: 160px;
+    overflow: auto;
+    border: 1px solid rgba(242, 139, 130, 0.18);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.55);
+    color: var(--text-main);
+    white-space: pre-wrap;
+}
+
 .btn-retry {
     padding: 10px 20px;
     background: var(--warning);

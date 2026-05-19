@@ -20,6 +20,7 @@ export function ToastProvider({ children }) {
       type: input.type || 'info',
       title: input.title || '',
       message: input.message || '',
+      detail: input.detail || '',
       actionLabel: input.actionLabel,
       onAction: input.onAction,
       duration: input.duration ?? DEFAULT_DURATION,
@@ -58,6 +59,9 @@ export function ToastProvider({ children }) {
             </button>
             {toast.title && <div className="ui-toast-title">{toast.title}</div>}
             {toast.message && <div className="ui-toast-message">{toast.message}</div>}
+            {toast.detail && toast.detail !== toast.message && (
+              <div className="ui-toast-detail" title={toast.detail}>原始错误：{toast.detail}</div>
+            )}
             {toast.actionLabel && toast.onAction && (
               <button
                 type="button"

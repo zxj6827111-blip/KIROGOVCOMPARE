@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend, ComposedChart, Area } from 'recharts';
+import { StableChartFrame, stableResponsiveProps } from '../../components/StableChartFrame';
 import type { Formatter as LegendFormatter, LegendPayload } from 'recharts/types/component/DefaultLegendContent';
 import type { Formatter as TooltipFormatter, NameType, Payload, ValueType } from 'recharts/types/component/DefaultTooltipContent';
 import type { YearSeries } from '../types';
@@ -106,9 +107,9 @@ export const TrendSwitcher: React.FC<TrendSwitcherProps> = ({ pressure, quality,
         </label>
       </div>
 
-      <div className="h-72">
+      <StableChartFrame className="h-72" minHeight={288}>
         {!overlayEnabled && (
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer {...stableResponsiveProps(240, 288)}>
             <LineChart data={dataBySeries[active]}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
               <XAxis dataKey="year" stroke="#94a3b8" />
@@ -127,7 +128,7 @@ export const TrendSwitcher: React.FC<TrendSwitcherProps> = ({ pressure, quality,
           </ResponsiveContainer>
         )}
         {overlayEnabled && (
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer {...stableResponsiveProps(240, 288)}>
             <ComposedChart data={combinedData}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
               <XAxis dataKey="year" stroke="#94a3b8" />
@@ -168,7 +169,7 @@ export const TrendSwitcher: React.FC<TrendSwitcherProps> = ({ pressure, quality,
             </ComposedChart>
           </ResponsiveContainer>
         )}
-      </div>
+      </StableChartFrame>
     </div>
   );
 };

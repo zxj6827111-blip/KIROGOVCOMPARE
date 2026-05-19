@@ -7,6 +7,7 @@ import { useConfirmDialog } from './common/ConfirmDialogProvider';
 import Button from './common/Button';
 import PageHeader from './common/PageHeader';
 import StatusBadge from './common/StatusBadge';
+import { getAxiosFriendlyError, getRawErrorDetail, translateFailureReason, translateJobError } from '../utils/errorTranslator';
 
 const UPLOAD_POLL_ACTIVE_MS = 3000;
 const UPLOAD_POLL_IDLE_MS = 10000;
@@ -72,13 +73,6 @@ function JobCenter() {
     const uploadPollInFlightRef = useRef(false);
     const downloadPollInFlightRef = useRef(false);
 
-    // Confirm Dialog State
-    const [confirmDialog, setConfirmDialog] = useState({
-        isOpen: false,
-        message: '',
-        onConfirm: null,
-    });
-
     const hasActiveUploadJobs = jobs.some((job) =>
         job.status === 'queued' || job.status === 'processing' || job.status === 'running'
     );
@@ -103,25 +97,6 @@ function JobCenter() {
             selectedReady,
         };
     }, [downloadJobs, downloadSelectedIds]);
-
-    const closeConfirm = () => {
-        setConfirmDialog({ isOpen: false, message: '', onConfirm: null });
-    };
-
-    const showConfirm = (message, onConfirm) => {
-        setConfirmDialog({
-            isOpen: true,
-            message,
-            onConfirm: () => {
-                try {
-                    onConfirm();
-                } catch (e) {
-                    console.log('Error executing onConfirm callback:', e);
-                }
-                closeConfirm();
-            }
-        });
-    };
 
     const loadJobs = useCallback(async (isBackground = false) => {
         if (isBackground && uploadPollInFlightRef.current) {
@@ -272,16 +247,25 @@ function JobCenter() {
         });
     };
 
-    const handleCancel = (versionId) => {
+    const handleCancel = async (versionId) => {
         if (!versionId) return;
-        showConfirm('确定要取消该任务吗？', async () => {
-            try {
-                await apiClient.post(`/jobs/${versionId}/cancel`);
-                loadJobs();
-            } catch (error) {
-                alert(`取消失败: ${error.response?.data?.error || error.message}`);
-            }
+        const shouldCancel = await confirmAction({
+            title: '取消任务',
+            message: '确定要取消该任务吗？',
+            confirmText: '取消任务',
+            cancelText: '暂不处理',
+            tone: 'warning',
         });
+        if (!shouldCancel) return;
+
+        try {
+            await apiClient.post(`/jobs/${versionId}/cancel`);
+            toast.success('任务已取消');
+            loadJobs();
+        } catch (error) {
+            const friendly = getAxiosFriendlyError(error, '取消任务失败，请稍后重试。');
+            toast.error('取消失败', friendly.message, { detail: friendly.detail });
+        }
     };
 
     const handleViewDetail = (versionId) => {
@@ -324,55 +308,76 @@ function JobCenter() {
         }
     };
 
-    const handleDelete = (jobId) => {
-        showConfirm('确定要删除该任务记录吗？此操作不可恢复。', async () => {
-            try {
-                // Note: Backend still uses version_id for deletion - we need to send job_id
-                // For now, we'll reload the job list after delete
-                // TODO: Add backend support for job_id based deletion
-                const job = jobs.find(j => j.job_id === jobId);
-                if (job) {
-                    await apiClient.delete(`/jobs/task/${job.job_id}`);
-                }
-                setJobs((prev) => prev.filter((j) => j.job_id !== jobId));
-                setSelectedIds((prev) => prev.filter((id) => id !== jobId));
-            } catch (error) {
-                console.error('Delete failed:', error);
-                alert(`删除失败: ${error.response?.data?.error || error.message}`);
-            }
+    const handleDelete = async (jobId) => {
+        const shouldDelete = await confirmAction({
+            title: '删除任务记录',
+            message: '确定要删除该任务记录吗？此操作不可恢复。',
+            confirmText: '删除',
+            cancelText: '取消',
+            tone: 'danger',
         });
+        if (!shouldDelete) return;
+
+        try {
+            const job = jobs.find(j => j.job_id === jobId);
+            if (job) {
+                await apiClient.delete(`/jobs/task/${job.job_id}`);
+            }
+            setJobs((prev) => prev.filter((j) => j.job_id !== jobId));
+            setSelectedIds((prev) => prev.filter((id) => id !== jobId));
+            toast.success('任务记录已删除');
+        } catch (error) {
+            console.error('Delete failed:', error);
+            const friendly = getAxiosFriendlyError(error, '删除任务失败，请稍后重试。');
+            toast.error('删除失败', friendly.message, { detail: friendly.detail });
+        }
     };
 
-    const handleBatchDelete = () => {
+    const handleBatchDelete = async () => {
         if (selectedIds.length === 0) return;
-        showConfirm(`确定要删除选中的 ${selectedIds.length} 个任务吗？`, async () => {
-            try {
-                // Map job_ids to version_ids
-                const versionIds = selectedIds
-                    .map(jobId => jobs.find(j => j.job_id === jobId)?.version_id)
-                    .filter(vid => vid !== undefined);
-
-                await apiClient.post('/jobs/batch-delete', { version_ids: versionIds });
-                loadJobs();
-                setSelectedIds([]);
-                alert('批量删除成功');
-            } catch (error) {
-                alert(`批量删除失败: ${error.response?.data?.error || error.message}`);
-            }
+        const shouldDelete = await confirmAction({
+            title: '批量删除任务',
+            message: `确定要删除选中的 ${selectedIds.length} 个任务吗？`,
+            confirmText: '批量删除',
+            cancelText: '取消',
+            tone: 'danger',
         });
+        if (!shouldDelete) return;
+
+        try {
+            const versionIds = selectedIds
+                .map(jobId => jobs.find(j => j.job_id === jobId)?.version_id)
+                .filter(vid => vid !== undefined);
+
+            await apiClient.post('/jobs/batch-delete', { version_ids: versionIds });
+            loadJobs();
+            setSelectedIds([]);
+            toast.success('批量删除成功');
+        } catch (error) {
+            const friendly = getAxiosFriendlyError(error, '批量删除失败，请稍后重试。');
+            toast.error('批量删除失败', friendly.message, { detail: friendly.detail });
+        }
     };
 
-    const handleDeleteAll = () => {
-        showConfirm('⚠️ 警告：确定要清空所有任务历史吗？此操作将永久删除所有记录，不可恢复！', async () => {
-            try {
-                await apiClient.delete('/jobs/all');
-                loadJobs();
-                setSelectedIds([]);
-                alert('所有记录已清空');
-            } catch (error) {
-                alert(`清空失败: ${error.response?.data?.error || error.message}`);
-            }
+    const handleDeleteAll = async () => {
+        const shouldDelete = await confirmAction({
+            title: '清空任务历史',
+            message: '确定要清空所有任务历史吗？此操作将永久删除所有记录，不可恢复。',
+            confirmText: '清空',
+            cancelText: '取消',
+            tone: 'danger',
         });
+        if (!shouldDelete) return;
+
+        try {
+            await apiClient.delete('/jobs/all');
+            loadJobs();
+            setSelectedIds([]);
+            toast.success('所有记录已清空');
+        } catch (error) {
+            const friendly = getAxiosFriendlyError(error, '清空任务失败，请稍后重试。');
+            toast.error('清空失败', friendly.message, { detail: friendly.detail });
+        }
     };
 
     const requestRegenerateDownloadJob = async (jobId) => {
@@ -381,7 +386,8 @@ function JobCenter() {
             toast.success('已重新加入生成队列', '请稍后在任务中心查看生成进度。');
             loadDownloadJobs();
         } catch (error) {
-            toast.error('重新生成失败', error.response?.data?.message || error.message);
+            const friendly = getAxiosFriendlyError(error, '重新生成失败，请稍后重试。');
+            toast.error('重新生成失败', friendly.message, { detail: friendly.detail });
         }
     };
 
@@ -429,7 +435,8 @@ function JobCenter() {
                     await requestRegenerateDownloadJob(job.job_id);
                 }
             } else {
-                toast.error('下载失败', error.response?.data?.message || error.message);
+                const friendly = getAxiosFriendlyError(error, '下载失败，请稍后重试。');
+                toast.error('下载失败', friendly.message, { detail: friendly.detail });
             }
         }
     };
@@ -461,7 +468,8 @@ function JobCenter() {
             toast.success('下载任务已删除');
             loadDownloadJobs();
         } catch (error) {
-            toast.error('删除失败', error.response?.data?.message || error.message);
+            const friendly = getAxiosFriendlyError(error, '删除下载任务失败，请稍后重试。');
+            toast.error('删除失败', friendly.message, { detail: friendly.detail });
         }
     };
 
@@ -562,7 +570,9 @@ function JobCenter() {
 
             setDownloadSelectedIds([]);
         } catch (error) {
-            toast.error('批量下载失败', error.message);
+            toast.error('批量下载失败', translateFailureReason(error, '批量下载失败，请稍后重试。'), {
+                detail: getRawErrorDetail(error),
+            });
         }
     };
 
@@ -597,6 +607,17 @@ function JobCenter() {
         if (bytes < 1024) return `${bytes} B`;
         if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
         return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+    };
+
+    const renderFailureReason = (job) => {
+        if (!job?.error_message && !job?.error_code) return '-';
+        const friendly = translateJobError(job);
+        const rawDetail = getRawErrorDetail(job);
+        return (
+            <span className="job-error-summary" title={rawDetail || friendly}>
+                {friendly}
+            </span>
+        );
     };
 
     return (
@@ -787,6 +808,7 @@ function JobCenter() {
                                         <th>状态</th>
                                         <th>进度</th>
                                         <th>步骤</th>
+                                        <th>失败原因</th>
                                         <th>尝试次数</th>
                                         <th>模型</th>
                                         <th>创建时间</th>
@@ -816,6 +838,7 @@ function JobCenter() {
                                                 </div>
                                             </td>
                                             <td>{job.step_name || '-'}</td>
+                                            <td>{job.status === 'failed' ? renderFailureReason(job) : '-'}</td>
                                             <td>第 {job.attempt || 1} 轮</td>
                                             <td>{job.model || '-'}</td>
                                             <td>{job.created_at ? new Date(job.created_at).toLocaleString('zh-CN') : '-'}</td>
@@ -989,6 +1012,7 @@ function JobCenter() {
                                             <th>任务名称</th>
                                             <th>状态</th>
                                             <th>进度</th>
+                                            <th>失败原因</th>
                                             <th>文件大小</th>
                                             <th>创建时间</th>
                                             <th>完成时间</th>
@@ -1015,6 +1039,7 @@ function JobCenter() {
                                                         <span className="progress-text">{job.progress}%</span>
                                                     </div>
                                                 </td>
+                                                <td>{job.status === 'failed' ? renderFailureReason(job) : '-'}</td>
                                                 <td>{formatFileSize(job.file_size)}</td>
                                                 <td>{job.created_at ? new Date(job.created_at).toLocaleString('zh-CN') : '-'}</td>
                                                 <td>{job.finished_at ? new Date(job.finished_at).toLocaleString('zh-CN') : '-'}</td>
@@ -1108,25 +1133,6 @@ function JobCenter() {
                         )}
                     </>
                 )}
-
-            {/* Custom Confirm Modal */}
-            {
-                confirmDialog.isOpen && (
-                    <div className="confirm-modal-overlay">
-                        <div className="confirm-modal">
-                            <div className="confirm-modal-icon">
-                                <AlertTriangle size={48} />
-                            </div>
-                            <h3>确认操作</h3>
-                            <p>{confirmDialog.message}</p>
-                            <div className="confirm-modal-actions">
-                                <button className="btn-cancel-modal" onClick={closeConfirm}>取消</button>
-                                <button className="btn-confirm-modal" onClick={confirmDialog.onConfirm}>确定</button>
-                            </div>
-                        </div>
-                    </div>
-                )
-            }
         </div >
     );
 }

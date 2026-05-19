@@ -24,6 +24,7 @@ import {
   LabelList,
 } from 'recharts';
 import { AnnualData, EntityProfile } from '../types';
+import { StableChartFrame, stableResponsiveProps } from './StableChartFrame';
 
 interface ChartProps {
   data: AnnualData[];
@@ -41,7 +42,7 @@ const GRID_STYLE = { stroke: '#f1f5f9', strokeDasharray: '4 4' };
 const PRINT_AXIS_STYLE = { fontSize: 9, fill: '#64748b' };
 
 const chartContainerClass = (isPrinting?: boolean, heightClass = 'h-64') =>
-  `${heightClass} w-full min-w-0 overflow-hidden border ${isPrinting ? 'border-slate-300 rounded-none shadow-none bg-white p-3' : 'border-slate-100 rounded-xl shadow-sm bg-white p-4'} break-inside-avoid`;
+  `${heightClass} w-full min-w-[240px] overflow-hidden border ${isPrinting ? 'border-slate-300 rounded-none shadow-none bg-white p-3' : 'border-slate-100 rounded-xl shadow-sm bg-white p-4'} break-inside-avoid`;
 
 const chartTitleClass = (isPrinting?: boolean, compact = false) =>
   isPrinting
@@ -79,8 +80,9 @@ export const ReportTrendChart: React.FC<ChartProps> = ({ data, isPrinting }) => 
   return (
     <div className={chartContainerClass(isPrinting)}>
       <h4 className={chartTitleClass(isPrinting)}>图 1：近五年政府信息公开申请接收量趋势</h4>
-      <ResponsiveContainer width="100%" height="85%" minWidth={0} minHeight={180}>
-        <AreaChart
+      <StableChartFrame className="h-[85%]" minHeight={180}>
+        <ResponsiveContainer {...stableResponsiveProps(240, 180)}>
+          <AreaChart
           data={chartData}
           margin={
             isPrinting
@@ -121,8 +123,9 @@ export const ReportTrendChart: React.FC<ChartProps> = ({ data, isPrinting }) => 
                   }
             }
           />
-        </AreaChart>
-      </ResponsiveContainer>
+          </AreaChart>
+        </ResponsiveContainer>
+      </StableChartFrame>
     </div>
   );
 };
@@ -144,8 +147,9 @@ export const ReportOutcomeChart: React.FC<ChartProps> = ({ data, isPrinting }) =
   return (
     <div className={chartContainerClass(isPrinting)}>
       <h4 className={chartTitleClass(isPrinting, true)}>图 2：{current.year}年度办理结果构成</h4>
-      <ResponsiveContainer width="100%" height="90%" minWidth={0} minHeight={190}>
-        <PieChart>
+      <StableChartFrame className="h-[90%]" minHeight={190}>
+        <ResponsiveContainer {...stableResponsiveProps(240, 190)}>
+          <PieChart>
           <Pie
             data={pieData}
             cx="50%"
@@ -176,8 +180,9 @@ export const ReportOutcomeChart: React.FC<ChartProps> = ({ data, isPrinting }) =
               paddingTop: isPrinting ? '10px' : 0,
             }}
           />
-        </PieChart>
-      </ResponsiveContainer>
+          </PieChart>
+        </ResponsiveContainer>
+      </StableChartFrame>
     </div>
   );
 };
@@ -197,8 +202,9 @@ export const ReportRiskChart: React.FC<ChartProps> = ({ data, isPrinting }) => {
   return (
     <div className={chartContainerClass(isPrinting)}>
       <h4 className={chartTitleClass(isPrinting)}>图 5：行政争议总量与纠错率监测</h4>
-      <ResponsiveContainer width="100%" height="85%" minWidth={0} minHeight={180}>
-        <ComposedChart
+      <StableChartFrame className="h-[85%]" minHeight={180}>
+        <ResponsiveContainer {...stableResponsiveProps(240, 180)}>
+          <ComposedChart
           data={chartData}
           margin={
             isPrinting
@@ -276,8 +282,9 @@ export const ReportRiskChart: React.FC<ChartProps> = ({ data, isPrinting }) => {
                   }
             }
           />
-        </ComposedChart>
-      </ResponsiveContainer>
+          </ComposedChart>
+        </ResponsiveContainer>
+      </StableChartFrame>
     </div>
   );
 };
@@ -296,8 +303,9 @@ export const ReportSourceChart: React.FC<ChartProps> = ({ data, isPrinting }) =>
   return (
     <div className={chartContainerClass(isPrinting)}>
       <h4 className={chartTitleClass(isPrinting)}>图 3：申请人来源结构（自然人 vs 法人）</h4>
-      <ResponsiveContainer width="100%" height="85%" minWidth={0} minHeight={180}>
-        <BarChart
+      <StableChartFrame className="h-[85%]" minHeight={180}>
+        <ResponsiveContainer {...stableResponsiveProps(240, 180)}>
+          <BarChart
           data={chartData}
           margin={
             isPrinting
@@ -367,8 +375,9 @@ export const ReportSourceChart: React.FC<ChartProps> = ({ data, isPrinting }) =>
               />
             )}
           </Bar>
-        </BarChart>
-      </ResponsiveContainer>
+          </BarChart>
+        </ResponsiveContainer>
+      </StableChartFrame>
     </div>
   );
 };
@@ -414,8 +423,9 @@ export const ReportAdminActionChart: React.FC<ChartProps> = ({ data, isPrinting 
   return (
     <div className={chartContainerClass(isPrinting, 'h-80')}>
       <h4 className={chartTitleClass(isPrinting)}>图 4：行政许可与行政处罚趋势对比</h4>
-      <ResponsiveContainer width="100%" height="85%" minWidth={0} minHeight={220}>
-        <LineChart
+      <StableChartFrame className="h-[85%]" minHeight={220}>
+        <ResponsiveContainer {...stableResponsiveProps(240, 220)}>
+          <LineChart
           data={chartData}
           margin={
             isPrinting
@@ -507,8 +517,9 @@ export const ReportAdminActionChart: React.FC<ChartProps> = ({ data, isPrinting 
             isAnimationActive={isAnimationActive}
             animationDuration={animationDuration}
           />
-        </LineChart>
-      </ResponsiveContainer>
+          </LineChart>
+        </ResponsiveContainer>
+      </StableChartFrame>
     </div>
   );
 };
@@ -558,8 +569,9 @@ export const ReportBenchmarkRadar: React.FC<BenchmarkProps> = ({ entity, avgProf
   return (
     <div className={chartContainerClass(true)}>
       <h4 className={chartTitleClass(true, true)}>图 6：{year}年度区域竞争力雷达</h4>
-      <ResponsiveContainer width="100%" height="90%" minWidth={0} minHeight={190}>
-        <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
+      <StableChartFrame className="h-[90%]" minHeight={190}>
+        <ResponsiveContainer {...stableResponsiveProps(240, 190)}>
+          <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
           <PolarGrid stroke="#e2e8f0" />
           <PolarAngleAxis dataKey="subject" tick={{ fill: '#475569', fontSize: 11 }} />
           <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
@@ -581,8 +593,9 @@ export const ReportBenchmarkRadar: React.FC<BenchmarkProps> = ({ entity, avgProf
           />
           <Legend wrapperStyle={{ fontSize: '10px' }} />
           <Tooltip />
-        </RadarChart>
-      </ResponsiveContainer>
+          </RadarChart>
+        </ResponsiveContainer>
+      </StableChartFrame>
     </div>
   );
 };

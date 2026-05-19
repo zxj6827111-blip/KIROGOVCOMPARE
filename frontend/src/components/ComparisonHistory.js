@@ -8,6 +8,8 @@ import Button from './common/Button';
 import ExportPanel from './ExportPanel';
 import PageHeader from './common/PageHeader';
 import StatusBadge from './common/StatusBadge';
+import { useConfirmDialog } from './common/ConfirmDialogProvider';
+import { getAxiosFriendlyError } from '../utils/errorTranslator';
 import {
   MapPin,
   Calendar,
@@ -39,6 +41,7 @@ async function runBatchWithConcurrency(items, worker, concurrency = BATCH_REQUES
 
 function ComparisonHistory() {
   const toast = useToast();
+  const confirmAction = useConfirmDialog();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedComparisonId, setSelectedComparisonId] = useState(null);
@@ -174,7 +177,14 @@ function ComparisonHistory() {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('确定要删除这条比对记录吗？')) return;
+    const shouldDelete = await confirmAction({
+      title: '删除比对记录',
+      message: '确定要删除这条比对记录吗？',
+      confirmText: '删除',
+      cancelText: '取消',
+      tone: 'danger',
+    });
+    if (!shouldDelete) return;
     try {
       await apiClient.delete(`/comparisons/${id}`);
 
@@ -199,7 +209,7 @@ function ComparisonHistory() {
       fetchTree(true);
     } catch (err) {
       const message = err.response?.data?.error || err.message || '删除失败';
-      alert(`删除失败：${message}`);
+      toast.error('删除失败', message);
     }
   };
 
@@ -230,8 +240,8 @@ function ComparisonHistory() {
         });
       }
     } catch (error) {
-      const message = error.response?.data?.message || error.message || '创建任务失败';
-      toast.error('创建 PDF 导出任务失败', message);
+      const friendly = getAxiosFriendlyError(error, '创建任务失败，请稍后重试。');
+      toast.error('创建 PDF 导出任务失败', friendly.message, { detail: friendly.detail });
     }
   };
 
@@ -268,11 +278,17 @@ function ComparisonHistory() {
   // Batch download
   const handleBatchDownload = async () => {
     if (selectedIds.length === 0) {
-      alert('请先选择要导出的记录');
+      toast.warning('请先选择要导出的记录');
       return;
     }
 
-    if (!window.confirm(`确定要批量导出 ${selectedIds.length} 个比对报告吗？`)) return;
+    const shouldExport = await confirmAction({
+      title: '批量导出比对报告',
+      message: `确定要批量导出 ${selectedIds.length} 个比对报告吗？`,
+      confirmText: '批量导出',
+      cancelText: '取消',
+    });
+    if (!shouldExport) return;
 
     const allComps = getAllLoadedComparisons();
     const compMap = new Map(allComps.map(comp => [comp.id, comp]));
@@ -319,11 +335,18 @@ function ComparisonHistory() {
   // Batch delete
   const handleBatchDelete = async () => {
     if (selectedIds.length === 0) {
-      alert('请先选择要删除的记录');
+      toast.warning('请先选择要删除的记录');
       return;
     }
 
-    if (!window.confirm(`确定要删除选中的 ${selectedIds.length} 条比对记录吗？此操作不可恢复。`)) return;
+    const shouldDelete = await confirmAction({
+      title: '批量删除比对记录',
+      message: `确定要删除选中的 ${selectedIds.length} 条比对记录吗？此操作不可恢复。`,
+      confirmText: '批量删除',
+      cancelText: '取消',
+      tone: 'danger',
+    });
+    if (!shouldDelete) return;
 
     const { successCount, failedCount } = await runBatchWithConcurrency(
       selectedIds,
@@ -340,12 +363,18 @@ function ComparisonHistory() {
 
     setSelectedIds([]);
     fetchTree();
-    alert(`已删除 ${successCount} 条记录，失败 ${failedCount} 条`);
+    toast.success('批量删除完成', `已删除 ${successCount} 条记录，失败 ${failedCount} 条。`);
   };
 
   // 一键比对：批量创建比对任务
   const handleBatchCreate = async () => {
-    if (!window.confirm('将为所有有连续两年年报但尚未创建比对任务的区域批量生成比对任务，确定继续？')) {
+    const shouldCreate = await confirmAction({
+      title: '批量生成比对任务',
+      message: '将为所有有连续两年年报但尚未创建比对任务的区域批量生成比对任务，确定继续？',
+      confirmText: '开始生成',
+      cancelText: '取消',
+    });
+    if (!shouldCreate) {
       return;
     }
 
@@ -356,17 +385,17 @@ function ComparisonHistory() {
 
       if (data.success) {
         if (data.created_count > 0) {
-          alert(`${data.message}`);
+          toast.success('批量创建完成', `${data.message}`);
           fetchTree();
         } else {
-          alert(data.message || '没有符合条件的待比对区域');
+          toast.info('没有新增任务', data.message || '没有符合条件的待比对区域');
         }
       } else {
-        alert('批量创建失败：' + (data.error || '未知错误'));
+        toast.error('批量创建失败', data.error || '未知错误');
       }
     } catch (err) {
       const message = err.response?.data?.error || err.message || '批量创建失败';
-      alert(`批量创建失败：${message}`);
+      toast.error('批量创建失败', message);
     } finally {
       setBatchCreating(false);
     }

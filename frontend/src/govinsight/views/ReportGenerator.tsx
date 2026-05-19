@@ -28,10 +28,15 @@ import { AuxiliaryRiskGuide } from '../components/AuxiliaryRiskGuide';
 import { AuxiliaryRiskThresholdPanel } from '../components/AuxiliaryRiskThresholdPanel';
 import { HierarchySupportSummary } from '../components/HierarchySupportSummary';
 import { ReconciliationCheckCards } from '../components/ReconciliationCheckCards';
+import { useToast } from '../../components/common/ToastProvider';
+import { getAxiosFriendlyError } from '../../utils/errorTranslator';
 
 type EngineMode = 'ai' | 'rule';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 type GovInsightReportJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+type ToastApi = {
+  error: (title: string, message?: string, options?: { detail?: string }) => void;
+};
 
 interface GovInsightReportJob {
   id: number;
@@ -239,6 +244,7 @@ const TaskField = ({ label, value, className = '' }: { label: string; value: Rea
 );
 
 export const ReportGenerator: React.FC = () => {
+  const toast = useToast() as ToastApi;
   const { entity } = useContext(EntityContext);
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
@@ -642,8 +648,9 @@ export const ReportGenerator: React.FC = () => {
     } catch (error: any) {
       setIsGenerating(false);
       setSaveStatus('error');
-      setJobMessage(error?.message || '创建后台任务失败。');
-      alert(`任务创建失败：${error?.message || '未知错误'}`);
+      const friendly = getAxiosFriendlyError(error, '任务创建失败，请稍后重试。');
+      setJobMessage(friendly.message);
+      toast.error('任务创建失败', friendly.message, { detail: friendly.detail });
     }
   };
 
@@ -698,7 +705,8 @@ export const ReportGenerator: React.FC = () => {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
     } catch (error: any) {
-      alert(`PDF 导出失败：${error?.message || '未知错误'}`);
+      const friendly = getAxiosFriendlyError(error, 'PDF 导出失败，请稍后重试。');
+      toast.error('PDF 导出失败', friendly.message, { detail: friendly.detail });
     } finally {
       setIsExportingPdf(false);
     }

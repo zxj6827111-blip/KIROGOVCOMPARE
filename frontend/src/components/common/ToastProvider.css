@@ -57,6 +57,17 @@
   color: var(--text-muted);
 }
 
+.ui-toast-detail {
+  margin-top: 6px;
+  max-height: 56px;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  opacity: 0.78;
+  word-break: break-word;
+}
+
 .ui-toast-close {
   position: absolute;
   top: 8px;

@@ -1,8 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import './JobDetail.css';
 import { apiClient } from '../apiClient';
+import { useToast } from './common/ToastProvider';
+import { useConfirmDialog } from './common/ConfirmDialogProvider';
+import { getAxiosFriendlyError, getRawErrorDetail, translateJobError } from '../utils/errorTranslator';
 
 function JobDetail({ versionId, onBack }) {
+    const toast = useToast();
+    const confirmAction = useConfirmDialog();
     const [job, setJob] = useState(null);
     const [loading, setLoading] = useState(true);
     const [retrying, setRetrying] = useState(false);
@@ -46,10 +51,11 @@ function JobDetail({ versionId, onBack }) {
         setRetrying(true);
         try {
             await apiClient.post(`/jobs/${versionId}/retry`);
-            alert('重试已触发，任务已重新加入队列');
+            toast.success('重试已触发', '任务已重新加入队列。');
             loadJobDetail();
         } catch (error) {
-            alert(`重试失败: ${error.response?.data?.error || error.message}`);
+            const friendly = getAxiosFriendlyError(error, '重试失败，请稍后再试。');
+            toast.error('重试失败', friendly.message, { detail: friendly.detail });
         } finally {
             setRetrying(false);
         }
@@ -57,15 +63,23 @@ function JobDetail({ versionId, onBack }) {
 
     const handleCancel = async () => {
         if (!versionId) return;
-        if (!window.confirm('确定要取消该任务吗？取消后需要重新提交或重试。')) return;
+        const shouldCancel = await confirmAction({
+            title: '取消任务',
+            message: '确定要取消该任务吗？取消后需要重新提交或重试。',
+            confirmText: '取消任务',
+            cancelText: '暂不处理',
+            tone: 'warning',
+        });
+        if (!shouldCancel) return;
 
         setCancelling(true);
         try {
             await apiClient.post(`/jobs/${versionId}/cancel`);
-            alert('任务已取消');
+            toast.success('任务已取消');
             loadJobDetail();
         } catch (error) {
-            alert(`取消失败: ${error.response?.data?.error || error.message}`);
+            const friendly = getAxiosFriendlyError(error, '取消任务失败，请稍后重试。');
+            toast.error('取消失败', friendly.message, { detail: friendly.detail });
         } finally {
             setCancelling(false);
         }
@@ -98,6 +112,8 @@ function JobDetail({ versionId, onBack }) {
     };
 
     const currentStepOrder = job ? getCurrentStepOrder(job.step_code) : 0;
+    const friendlyError = job ? translateJobError(job) : '';
+    const rawErrorDetail = job ? getRawErrorDetail(job) : '';
 
     if (loading) {
         return <div className="job-detail-loading">加载中...</div>;
@@ -209,7 +225,15 @@ function JobDetail({ versionId, onBack }) {
                     <div className="error-section">
                         <h3>失败原因</h3>
                         <div className="error-code">错误代码: {job.error_code || '未知'}</div>
-                        <div className="error-message">{job.error_message}</div>
+                        <div className="error-message" title={rawErrorDetail || job.error_message}>
+                            {friendlyError}
+                        </div>
+                        {rawErrorDetail && rawErrorDetail !== friendlyError && (
+                            <details className="error-detail">
+                                <summary>查看原始错误</summary>
+                                <pre>{rawErrorDetail}</pre>
+                            </details>
+                        )}
                         {job.status === 'failed' && (
                             <button className="btn-retry" onClick={handleRetry} disabled={retrying}>
                                 {retrying ? '重试中...' : '🔄 手动重试'}

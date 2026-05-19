@@ -11,6 +11,7 @@ import { useToast } from './common/ToastProvider';
 import ExportPanel from './ExportPanel';
 import PageHeader from './common/PageHeader';
 import StatusBadge from './common/StatusBadge';
+import { getAxiosFriendlyError } from '../utils/errorTranslator';
 
 // ---- Tokenization & Similarity Algorithm (Ported) ----
 const tokenizeText = (text) => {
@@ -350,8 +351,8 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
       }
     } catch (error) {
       console.error('Create PDF job failed:', error);
-      const message = error.response?.data?.message || error.message || '创建任务失败';
-      toast.error('创建 PDF 导出任务失败', message);
+      const friendly = getAxiosFriendlyError(error, '创建任务失败，请稍后重试。');
+      toast.error('创建 PDF 导出任务失败', friendly.message, { detail: friendly.detail });
     } finally {
       setDownloading(false);
       setDownloadStage('');

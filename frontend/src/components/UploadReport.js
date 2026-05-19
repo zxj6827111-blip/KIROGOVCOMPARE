@@ -12,6 +12,9 @@ import {
   normalizeDetectionText,
   stripCommonUnitSuffix,
 } from '../utils/uploadAutoDetect';
+import { useToast } from './common/ToastProvider';
+import { useConfirmDialog } from './common/ConfirmDialogProvider';
+import { getAxiosFriendlyError } from '../utils/errorTranslator';
 
 const extractField = (payload, key) =>
   payload?.[key] || payload?.[key.replace(/_./g, (m) => m[1].toUpperCase())];
@@ -66,6 +69,8 @@ const extractPdfFirstPageText = async (selectedFile) => {
 };
 
 function UploadReport() {
+  const toast = useToast();
+  const confirmAction = useConfirmDialog();
   const [regions, setRegions] = useState([]);
   const [regionId, setRegionId] = useState('');
   const [year, setYear] = useState(new Date().getFullYear());
@@ -369,7 +374,9 @@ function UploadReport() {
 
   const handleUpload = async (autoParse = false) => {
     if (!regionId || !file) {
-      setMessage('❌ 请选择文件并选择所属区域');
+      const warning = '请选择文件并选择所属区域';
+      setMessage(`❌ ${warning}`);
+      toast.warning('上传信息不完整', warning);
       return;
     }
 
@@ -377,7 +384,14 @@ function UploadReport() {
       const confirmMsg = emptyReport
         ? '该报告已存在但内容为空，是否覆盖并重新解析？'
         : '该报告已存在，是否继续上传并覆盖？';
-      if (!window.confirm(confirmMsg)) {
+      const shouldOverwrite = await confirmAction({
+        title: '覆盖已有报告',
+        message: confirmMsg,
+        confirmText: '继续覆盖',
+        cancelText: '取消',
+        tone: 'warning',
+      });
+      if (!shouldOverwrite) {
         return;
       }
     }
@@ -426,7 +440,9 @@ function UploadReport() {
           }
         }, 1000);
       } else {
-        setMessage(`❌ ${error.response?.data?.error || error.message || '上传失败'} `);
+        const friendly = getAxiosFriendlyError(error, '上传失败，请稍后重试。');
+        setMessage(`❌ ${friendly.message}`);
+        toast.error('上传失败', friendly.message, { detail: friendly.detail });
       }
     } finally {
       setLoading(false);

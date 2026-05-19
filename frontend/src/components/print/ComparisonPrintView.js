@@ -12,6 +12,7 @@ import DiffText from '../DiffText';
 import CrossYearCheckView from '../CrossYearCheckView';
 
 import { normalizeTablePath } from '../../utils/tableRowColMapping';
+import { translateFailureReason, getRawErrorDetail } from '../../utils/errorTranslator';
 
 // ---- Tokenization & Similarity Algorithm (Same as ComparisonDetailView) ----
 const tokenizeText = (text) => {
@@ -287,9 +288,15 @@ function ComparisonPrintView({ comparisonId }) {
                     }
                 }
 
-                if (!response || !response.ok) {
-                    throw lastError || new Error('Failed to fetch comparison data from backend');
-                }
+                if (!response || !response.ok) {
+                    const errorPayload = response ? await response.json().catch(() => null) : null;
+                    const error = lastError || new Error(errorPayload?.error || 'Failed to fetch comparison data from backend');
+                    error.response = {
+                        status: response?.status,
+                        data: errorPayload,
+                    };
+                    throw error;
+                }
 
                 const comparisonData = await response.json();
                 setData(comparisonData);
@@ -298,10 +305,12 @@ function ComparisonPrintView({ comparisonId }) {
                 if (comparisonData) {
                     document.title = `比对报告_${comparisonData.region_name}_${comparisonData.year_a}vs${comparisonData.year_b}`;
                 }
-            } catch (err) {
-                console.error('[PrintView] Error:', err);
-                setError(err.message || '加载失败');
-            } finally {
+            } catch (err) {
+                console.error('[PrintView] Error:', err);
+                const friendlyMessage = translateFailureReason(err, '无法读取比对内容，请确认比对是否已生成完成。');
+                const detail = getRawErrorDetail(err);
+                setError(detail && detail !== friendlyMessage ? `${friendlyMessage}\n\n原始错误：${detail}` : friendlyMessage);
+            } finally {
                 setLoading(false);
             }
         };

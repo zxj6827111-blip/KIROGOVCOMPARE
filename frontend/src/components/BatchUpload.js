@@ -16,6 +16,7 @@ import {
   Play,
   AlertTriangle,
 } from 'lucide-react';
+import { useToast } from './common/ToastProvider';
 
 const MAX_FILES = 50;
 
@@ -105,6 +106,7 @@ function BatchUpload({
   modelOptions = [],
   modelConfigLoading = false,
 }) {
+  const toast = useToast();
   const [regions, setRegions] = useState([]);
   const [files, setFiles] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -301,7 +303,7 @@ function BatchUpload({
       const newFileArray = Array.from(fileList);
 
       if (existingCount + newFileArray.length > MAX_FILES) {
-        alert(`最多支持${MAX_FILES}个文件，当前已有${existingCount}个`);
+        toast.warning('文件数量超出限制', `最多支持 ${MAX_FILES} 个文件，当前已有 ${existingCount} 个。`);
         return;
       }
 
@@ -412,13 +414,13 @@ function BatchUpload({
     // 检查是否有未分配区域的文件
     const unmatchedFiles = files.filter((f) => !f.regionId && f.status === 'pending');
     if (unmatchedFiles.length > 0) {
-      alert(`有 ${unmatchedFiles.length} 个文件未分配区域，请先完成分配`);
+      toast.warning('请先完成区域分配', `有 ${unmatchedFiles.length} 个文件未分配区域。`);
       return;
     }
 
     const pendingFiles = files.filter((f) => f.status === 'pending');
     if (pendingFiles.length === 0) {
-      alert('没有待处理的文件');
+      toast.info('没有待处理的文件');
       return;
     }
 

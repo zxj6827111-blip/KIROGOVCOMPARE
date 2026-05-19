@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { EntityContext } from '../components/Layout';
 import { KPICard } from '../components/KPICard';
 import { MetricTip } from '../components/MetricTip';
+import { StableChartFrame, stableResponsiveProps } from '../components/StableChartFrame';
 import {
   ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ScatterChart, Scatter, ZAxis, Cell, ReferenceLine, Label
 } from 'recharts';
@@ -245,8 +246,8 @@ export const DashboardHome: React.FC = () => {
               <div className="flex items-center"><span className="w-2 h-2 bg-rose-500 mr-1.5 rounded-full"></span> 法律风险</div>
             </div>
           </div>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
+          <StableChartFrame className="h-80" minHeight={320}>
+            <ResponsiveContainer {...stableResponsiveProps(240, 320)}>
               <ComposedChart data={mainTrendData}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                 <XAxis dataKey="year" stroke="#64748b" />
@@ -258,7 +259,7 @@ export const DashboardHome: React.FC = () => {
                 <Line yAxisId="right" type="monotone" dataKey="risk" name="纠错率" stroke="#f43f5e" strokeWidth={2} dot={{ r: 4 }} />
               </ComposedChart>
             </ResponsiveContainer>
-          </div>
+          </StableChartFrame>
         </div>
 
         {/* 3. Conditional Right Panel */}
@@ -364,9 +365,9 @@ export const DashboardHome: React.FC = () => {
                 </p>
               </div>
             </div>
-            <div className="h-80">
+            <StableChartFrame className="h-80" minHeight={320}>
               {quadrantData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer {...stableResponsiveProps(240, 320)}>
                   <ScatterChart margin={{ top: 20, right: 30, bottom: 20, left: 20 }}>
                     <CartesianGrid />
                     <XAxis type="number" dataKey="x" name="受理量" unit="件" stroke="#94a3b8" />
@@ -403,7 +404,7 @@ export const DashboardHome: React.FC = () => {
                   数据不足，无法生成四象限图
                 </div>
               )}
-            </div>
+            </StableChartFrame>
           </div>
 
           {/* Right: Diagnosis Panel */}

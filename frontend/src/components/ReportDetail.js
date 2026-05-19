@@ -12,6 +12,8 @@ import VisionReviewPanel from './VisionReviewPanel';
 import Button from './common/Button';
 import PageHeader from './common/PageHeader';
 import ReportFlowStatusBar from './ReportFlowStatusBar';
+import { useToast } from './common/ToastProvider';
+import { useConfirmDialog } from './common/ConfirmDialogProvider';
 
 const tryParseJsonText = (value) => {
   if (typeof value !== 'string') return { ok: false, value: null };
@@ -1064,6 +1066,8 @@ const applyPendingOcrCorrections = (parsed, corrections = []) => {
 };
 
 function ReportDetail({ reportId: propReportId, onBack }) {
+  const toast = useToast();
+  const confirmAction = useConfirmDialog();
   const reportId = propReportId || window.location.pathname.split('/').pop();
   const currentUser = getCurrentUser();
   const canMaintainReports = getUserCanMaintainReports(currentUser);
@@ -1549,7 +1553,14 @@ function ReportDetail({ reportId: propReportId, onBack }) {
 
   const handleReparse = async () => {
     if (!reportId) return;
-    if (!window.confirm('确认重新触发解析吗？将创建新的 parse 任务。')) return;
+    const shouldReparse = await confirmAction({
+      title: '重新触发解析',
+      message: '确认重新触发解析吗？将创建新的 parse 任务。',
+      confirmText: '重新解析',
+      cancelText: '取消',
+      tone: 'warning',
+    });
+    if (!shouldReparse) return;
     setError('');
     setLoading(true);
     try {
@@ -1574,7 +1585,14 @@ function ReportDetail({ reportId: propReportId, onBack }) {
 
   const handleDelete = async () => {
     if (!reportId) return;
-    if (!window.confirm(`确认删除报告 #${reportId} 吗？`)) return;
+    const shouldDelete = await confirmAction({
+      title: '删除报告',
+      message: `确认删除报告 #${reportId} 吗？`,
+      confirmText: '删除',
+      cancelText: '取消',
+      tone: 'danger',
+    });
+    if (!shouldDelete) return;
     setError('');
     setLoading(true);
     try {
@@ -1597,7 +1615,14 @@ function ReportDetail({ reportId: propReportId, onBack }) {
       retry: '重试提交',
     };
     const label = actionLabels[action] || '执行操作';
-    if (!window.confirm(`确认${label} #${run.id} 吗？`)) return;
+    const shouldRun = await confirmAction({
+      title: label,
+      message: `确认${label} #${run.id} 吗？`,
+      confirmText: '确认',
+      cancelText: '取消',
+      tone: action === 'switch' || action === 'restore' ? 'warning' : 'default',
+    });
+    if (!shouldRun) return;
 
     setParseActionId(`${action}:${run.id}`);
     setParseHistoryError('');
@@ -2476,16 +2501,23 @@ function ReportDetail({ reportId: propReportId, onBack }) {
       ? `确认将待复核版本 #${version.id} 审核通过并正式发布吗？`
       : `确认将版本 #${version.id} 发布为正式版本吗？`;
 
-    if (!window.confirm(confirmMessage)) {
+    const shouldPublish = await confirmAction({
+      title: isPendingVersion ? '审核并发布版本' : '发布版本',
+      message: confirmMessage,
+      confirmText: '发布',
+      cancelText: '取消',
+      tone: 'warning',
+    });
+    if (!shouldPublish) {
       return;
     }
 
     try {
       await apiClient.post(`/reports/${reportId}/versions/${version.id}/publish`);
-      alert(`版本 #${version.id} 已正式发布`);
+      toast.success('版本已发布', `版本 #${version.id} 已正式发布。`);
       await refresh();
     } catch (err) {
-      alert(getPublishErrorMessage(err));
+      toast.error('发布失败', getPublishErrorMessage(err));
     }
   };
 
