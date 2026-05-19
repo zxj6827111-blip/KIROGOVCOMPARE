@@ -64,6 +64,10 @@ interface LedgerRow {
   created_at?: string;
 }
 
+interface MigrationStateRow extends LedgerRow {
+  direction: MigrationDirection;
+}
+
 function checksumMigration(migration: RegisteredMigration): string {
   return createHash('sha256')
     .update(
@@ -195,17 +199,24 @@ async function withMigrationClient<T>(
 }
 
 async function readAppliedMigrationIds(pool: MigrationPool, systemName: string): Promise<Set<string>> {
-  const result = await pool.query<{ migration_id: string }>(
-    `SELECT DISTINCT migration_id
-     FROM schema_migration_ledger
-     WHERE system_name = $1
-       AND direction = 'up'
-       AND status = 'succeeded'
-       AND migration_id IS NOT NULL`,
+  const result = await pool.query<MigrationStateRow>(
+    `WITH latest_effective_migration_state AS (
+       SELECT DISTINCT ON (migration_id)
+         id, migration_id, direction, checksum, created_at
+       FROM schema_migration_ledger
+       WHERE system_name = $1
+         AND migration_id IS NOT NULL
+         AND direction IN ('up', 'down')
+         AND status = 'succeeded'
+       ORDER BY migration_id, id DESC
+     )
+     SELECT id, migration_id, direction, checksum, created_at
+     FROM latest_effective_migration_state
+     WHERE direction = 'up'`,
     [systemName]
   );
 
-  return new Set(result.rows.map((row) => row.migration_id));
+  return new Set(result.rows.map((row) => row.migration_id).filter((id): id is string => Boolean(id)));
 }
 
 export async function runRegisteredMigrations(options: MigrationRunnerOptions): Promise<MigrationRunReport> {
@@ -291,11 +302,19 @@ export async function runRegisteredMigrations(options: MigrationRunnerOptions): 
 
 async function readRollbackRows(pool: MigrationPool, systemName: string, steps: number): Promise<LedgerRow[]> {
   const result = await pool.query<LedgerRow>(
-    `SELECT id, migration_id, checksum, created_at
-     FROM schema_migration_ledger
-     WHERE system_name = $1
-       AND direction = 'up'
-       AND status = 'succeeded'
+    `WITH latest_effective_migration_state AS (
+       SELECT DISTINCT ON (migration_id)
+         id, migration_id, direction, checksum, created_at
+       FROM schema_migration_ledger
+       WHERE system_name = $1
+         AND migration_id IS NOT NULL
+         AND direction IN ('up', 'down')
+         AND status = 'succeeded'
+       ORDER BY migration_id, id DESC
+     )
+     SELECT id, migration_id, checksum, created_at
+     FROM latest_effective_migration_state
+     WHERE direction = 'up'
      ORDER BY id DESC
      LIMIT $2`,
     [systemName, steps]

@@ -83,7 +83,7 @@ describe('migration runner guardrails', () => {
 
   it('executes run-on-every-start migration without duplicating rollback candidates after first record', async () => {
     const pool = createMockPool([
-      { match: 'SELECT DISTINCT migration_id', rows: [{ migration_id: '0001_legacy' }] },
+      { match: 'latest_effective_migration_state', rows: [{ migration_id: '0001_legacy' }] },
     ]);
     const migration = createMigration({
       id: '0001_legacy',
@@ -171,6 +171,94 @@ describe('migration runner guardrails', () => {
       expect.stringContaining('INSERT INTO schema_migration_ledger'),
       expect.arrayContaining(['test_system', 'rollback_migration'])
     );
+  });
+
+  it('reruns forward migration after latest effective state is down succeeded', async () => {
+    const migration = createMigration();
+    const pool = createMockPool([
+      {
+        match: 'latest_effective_migration_state',
+        rows: [],
+      },
+    ]);
+
+    const report = await runRegisteredMigrations({
+      pool,
+      migrations: [migration],
+      systemName: 'test_system',
+    });
+
+    expect(report.steps).toEqual([
+      expect.objectContaining({
+        migrationId: '0002_reversible_test',
+        direction: 'up',
+        status: 'succeeded',
+      }),
+    ]);
+    expect(migration.up).toHaveBeenCalledTimes(1);
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.stringContaining("direction IN ('up', 'down')"),
+      expect.arrayContaining(['test_system'])
+    );
+  });
+
+  it('does not rollback a migration whose latest effective state is already down succeeded', async () => {
+    const migration = createMigration();
+    const pool = createMockPool([
+      {
+        match: 'latest_effective_migration_state',
+        rows: [],
+      },
+    ]);
+
+    const report = await rollbackRegisteredMigrations({
+      pool,
+      migrations: [migration],
+      systemName: 'test_system',
+      steps: 1,
+    });
+
+    expect(report.steps).toEqual([]);
+    expect(migration.down).not.toHaveBeenCalled();
+  });
+
+  it('rolls back only the most recent currently applied migrations in a multi-migration ledger', async () => {
+    const oldApplied = createMigration({
+      id: '0001_old_applied',
+      name: 'Old applied migration',
+    });
+    const downed = createMigration({
+      id: '0002_already_downed',
+      name: 'Already downed migration',
+    });
+    const latestApplied = createMigration({
+      id: '0003_latest_applied',
+      name: 'Latest applied migration',
+    });
+    const pool = createMockPool([
+      {
+        match: 'latest_effective_migration_state',
+        rows: [
+          { id: 30, migration_id: '0003_latest_applied', checksum: 'c' },
+          { id: 10, migration_id: '0001_old_applied', checksum: 'a' },
+        ],
+      },
+    ]);
+
+    const report = await rollbackRegisteredMigrations({
+      pool,
+      migrations: [oldApplied, downed, latestApplied],
+      systemName: 'test_system',
+      steps: 2,
+    });
+
+    expect(report.steps).toEqual([
+      expect.objectContaining({ migrationId: '0003_latest_applied', status: 'succeeded' }),
+      expect.objectContaining({ migrationId: '0001_old_applied', status: 'succeeded' }),
+    ]);
+    expect(latestApplied.down).toHaveBeenCalledTimes(1);
+    expect(oldApplied.down).toHaveBeenCalledTimes(1);
+    expect(downed.down).not.toHaveBeenCalled();
   });
 
   it('blocks production rollback without explicit confirmation variables', async () => {
