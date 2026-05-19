@@ -20,6 +20,7 @@ const PRINT_READY_TIMEOUT_MS = Number(process.env.PDF_EXPORT_PRINT_READY_TIMEOUT
 
 // Worker 杞闂撮殧锛?绉掞級
 const POLL_INTERVAL_MS = 5000;
+// Recommended comparison PDF path: /api/pdf-jobs -> PdfExportWorker -> React print page.
 const PRINT_READY_SELECTOR = '#comparison-content[data-print-ready="true"]';
 const LANDSCAPE_PRINT_CSS = `
 @page {
@@ -185,6 +186,7 @@ async function processJob(job: {
     file_name: string;
 }): Promise<void> {
     console.log(`[PdfExportWorker] Processing job ${job.id} for comparison ${job.comparison_id}`);
+    console.log(`[PdfExportWorker] Using recommended /api/pdf-jobs comparison PDF export pipeline`);
 
     let browser = null;
 
@@ -270,6 +272,9 @@ async function processJob(job: {
             }
             await page.waitForSelector('#comparison-content', { timeout: 5000 });
         }
+
+        await page.evaluate('document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()');
+        console.log('[PdfExportWorker] Fonts reported ready');
 
         await page.emulateMediaType('print');
         await page.addStyleTag({ content: LANDSCAPE_PRINT_CSS });

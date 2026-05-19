@@ -590,3 +590,80 @@
 .btn-batch-download:hover {
     background: #2563eb;
 }
+
+.btn-batch-download:disabled {
+    background: #94a3b8;
+    cursor: not-allowed;
+    opacity: 0.72;
+}
+
+.download-summary-panel {
+    margin: 0 0 16px;
+    padding: 14px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+}
+
+.download-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.download-summary-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 48px;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+}
+
+.download-summary-card span {
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.download-summary-card strong {
+    color: var(--text-main);
+    font-size: 22px;
+    line-height: 1;
+}
+
+.download-summary-card.ready strong {
+    color: var(--success);
+}
+
+.download-summary-card.running strong {
+    color: var(--primary);
+}
+
+.download-summary-card.failed strong,
+.download-summary-card.expired strong {
+    color: var(--danger);
+}
+
+.download-batch-hint {
+    margin-top: 10px;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.download-expired-note {
+    align-self: center;
+    color: var(--danger);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+    .download-summary-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}

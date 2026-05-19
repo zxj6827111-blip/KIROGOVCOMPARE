@@ -1,7 +1,9 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './JobCenter.css';
 import { apiClient, API_BASE_URL } from '../apiClient';
 import { Trash2, RefreshCw, AlertTriangle, Ban, Eye, Download, RotateCw, Upload, FileDown } from 'lucide-react';
+import { useToast } from './common/ToastProvider';
+import { useConfirmDialog } from './common/ConfirmDialogProvider';
 
 const UPLOAD_POLL_ACTIVE_MS = 3000;
 const UPLOAD_POLL_IDLE_MS = 10000;
@@ -24,6 +26,9 @@ async function runBatchWithConcurrency(items, worker, concurrency = BATCH_DELETE
 }
 
 function JobCenter() {
+    const toast = useToast();
+    const confirmAction = useConfirmDialog();
+
     // Pagination
     const PAGE_SIZE = 20;
     const [currentPage, setCurrentPage] = useState(1);
@@ -77,6 +82,24 @@ function JobCenter() {
     const hasActiveDownloadJobs = downloadJobs.some((job) =>
         job.status === 'queued' || job.status === 'processing' || job.status === 'running'
     );
+
+    const downloadSummary = useMemo(() => {
+        const isActive = (status) => status === 'queued' || status === 'processing' || status === 'running';
+        const isReady = (job) => job.status === 'done' && job.file_exists;
+        const isExpired = (job) => job.status === 'done' && !job.file_exists;
+        const selectedReady = downloadSelectedIds.filter((id) => {
+            const job = downloadJobs.find((item) => item.job_id === id);
+            return job && isReady(job);
+        }).length;
+
+        return {
+            ready: downloadJobs.filter(isReady).length,
+            running: downloadJobs.filter((job) => isActive(job.status)).length,
+            failed: downloadJobs.filter((job) => job.status === 'failed').length,
+            expired: downloadJobs.filter(isExpired).length,
+            selectedReady,
+        };
+    }, [downloadJobs, downloadSelectedIds]);
 
     const closeConfirm = () => {
         setConfirmDialog({ isOpen: false, message: '', onConfirm: null });
@@ -349,19 +372,29 @@ function JobCenter() {
         });
     };
 
+    const requestRegenerateDownloadJob = async (jobId) => {
+        try {
+            await apiClient.post(`/pdf-jobs/${jobId}/regenerate`);
+            toast.success('已重新加入生成队列', '请稍后在任务中心查看生成进度。');
+            loadDownloadJobs();
+        } catch (error) {
+            toast.error('重新生成失败', error.response?.data?.message || error.message);
+        }
+    };
+
     // Download task handlers
     const handleDownloadPdf = async (job) => {
         if (!job.file_exists) {
-            // File expired, offer to regenerate
-            showConfirm('文件已过期被清理，是否重新生成？', async () => {
-                try {
-                    await apiClient.post(`/pdf-jobs/${job.job_id}/regenerate`);
-                    alert('已重新加入生成队列，请稍后查看');
-                    loadDownloadJobs();
-                } catch (error) {
-                    alert(`重新生成失败: ${error.response?.data?.message || error.message}`);
-                }
+            const shouldRegenerate = await confirmAction({
+                title: '文件已过期',
+                message: '原 PDF 文件已被清理，需要重新生成后才能下载。',
+                confirmText: '重新生成',
+                cancelText: '暂不处理',
+                tone: 'warning',
             });
+            if (shouldRegenerate) {
+                await requestRegenerateDownloadJob(job.job_id);
+            }
             return;
         }
 
@@ -382,43 +415,51 @@ function JobCenter() {
             window.URL.revokeObjectURL(url);
         } catch (error) {
             if (error.response?.status === 410) {
-                // File expired
-                showConfirm('文件已过期被清理，是否重新生成？', async () => {
-                    try {
-                        await apiClient.post(`/pdf-jobs/${job.job_id}/regenerate`);
-                        alert('已重新加入生成队列，请稍后查看');
-                        loadDownloadJobs();
-                    } catch (err) {
-                        alert(`重新生成失败: ${err.response?.data?.message || err.message}`);
-                    }
+                const shouldRegenerate = await confirmAction({
+                    title: '文件已过期',
+                    message: '下载文件已过期，需要重新生成后才能下载。',
+                    confirmText: '重新生成',
+                    cancelText: '暂不处理',
+                    tone: 'warning',
                 });
+                if (shouldRegenerate) {
+                    await requestRegenerateDownloadJob(job.job_id);
+                }
             } else {
-                alert(`下载失败: ${error.response?.data?.message || error.message}`);
+                toast.error('下载失败', error.response?.data?.message || error.message);
             }
         }
     };
 
     const handleRegeneratePdf = async (jobId) => {
-        showConfirm('确定要重新生成此 PDF 吗？', async () => {
-            try {
-                await apiClient.post(`/pdf-jobs/${jobId}/regenerate`);
-                alert('已重新加入生成队列');
-                loadDownloadJobs();
-            } catch (error) {
-                alert(`重新生成失败: ${error.response?.data?.message || error.message}`);
-            }
+        const shouldRegenerate = await confirmAction({
+            title: '重新生成 PDF',
+            message: '将重新创建该 PDF 导出任务。',
+            confirmText: '重新生成',
+            cancelText: '取消',
         });
+        if (shouldRegenerate) {
+            await requestRegenerateDownloadJob(jobId);
+        }
     };
 
     const handleDeleteDownloadJob = async (jobId) => {
-        showConfirm('确定要删除此下载任务吗？相关文件也将被删除。', async () => {
-            try {
-                await apiClient.delete(`/pdf-jobs/${jobId}`);
-                loadDownloadJobs();
-            } catch (error) {
-                alert(`删除失败: ${error.response?.data?.message || error.message}`);
-            }
+        const shouldDelete = await confirmAction({
+            title: '删除下载任务',
+            message: '确认删除此下载任务？关联 PDF 文件也会被删除。',
+            confirmText: '删除',
+            cancelText: '取消',
+            tone: 'danger',
         });
+        if (!shouldDelete) return;
+
+        try {
+            await apiClient.delete(`/pdf-jobs/${jobId}`);
+            toast.success('下载任务已删除');
+            loadDownloadJobs();
+        } catch (error) {
+            toast.error('删除失败', error.response?.data?.message || error.message);
+        }
     };
 
     // Download selection handlers
@@ -436,31 +477,39 @@ function JobCenter() {
         }
     };
 
-    const handleBatchDeleteDownload = () => {
+    const handleBatchDeleteDownload = async () => {
         if (downloadSelectedIds.length === 0) return;
-        showConfirm(`确定要删除选中的 ${downloadSelectedIds.length} 个下载任务吗？`, async () => {
-            const { successCount, failedCount } = await runBatchWithConcurrency(
-                downloadSelectedIds,
-                async (jobId) => {
-                    try {
-                        await apiClient.delete(`/pdf-jobs/${jobId}`);
-                        return true;
-                    } catch (err) {
-                        console.error('Failed to delete download job:', jobId, err);
-                        return false;
-                    }
-                }
-            );
-            setDownloadSelectedIds([]);
-            loadDownloadJobs();
-            alert(`已删除 ${successCount} 个任务，失败 ${failedCount} 个`);
+
+        const shouldDelete = await confirmAction({
+            title: '批量删除下载任务',
+            message: `确认删除选中的 ${downloadSelectedIds.length} 个下载任务？关联 PDF 文件也会被删除。`,
+            confirmText: '批量删除',
+            cancelText: '取消',
+            tone: 'danger',
         });
+        if (!shouldDelete) return;
+
+        const { successCount, failedCount } = await runBatchWithConcurrency(
+            downloadSelectedIds,
+            async (jobId) => {
+                try {
+                    await apiClient.delete(`/pdf-jobs/${jobId}`);
+                    return true;
+                } catch (err) {
+                    console.error('Failed to delete download job:', jobId, err);
+                    return false;
+                }
+            }
+        );
+        setDownloadSelectedIds([]);
+        loadDownloadJobs();
+        toast.success('批量删除完成', `成功 ${successCount} 个，失败 ${failedCount} 个。`);
     };
 
     // Batch download as ZIP
     const handleBatchDownloadZip = async () => {
         if (downloadSelectedIds.length === 0) {
-            alert('请先选择要下载的任务');
+            toast.warning('请选择下载任务', '批量下载前需要先勾选任务。');
             return;
         }
 
@@ -471,7 +520,7 @@ function JobCenter() {
         });
 
         if (completedIds.length === 0) {
-            alert('选中的任务中没有可下载的文件（仅已完成且文件未过期的任务可下载）');
+            toast.warning('没有可下载文件', '批量下载仅包含已完成且文件未过期的任务。');
             return;
         }
 
@@ -510,7 +559,7 @@ function JobCenter() {
 
             setDownloadSelectedIds([]);
         } catch (error) {
-            alert(`批量下载失败: ${error.message}`);
+            toast.error('批量下载失败', error.message);
         }
     };
 
@@ -825,7 +874,12 @@ function JobCenter() {
                             <div className="header-actions" style={{ display: 'flex', gap: '8px' }}>
                                 {downloadSelectedIds.length > 0 && (
                                     <>
-                                        <button className="btn-batch-download" onClick={handleBatchDownloadZip}>
+                                        <button
+                                            className="btn-batch-download"
+                                            onClick={handleBatchDownloadZip}
+                                            disabled={downloadSummary.selectedReady === 0}
+                                            title={downloadSummary.selectedReady === 0 ? '仅已完成且文件未过期的任务可批量下载' : '打包下载已完成且文件未过期的任务'}
+                                        >
                                             <Download size={16} /> 批量下载 ({downloadSelectedIds.length})
                                         </button>
                                         <button className="btn-batch-delete" onClick={handleBatchDeleteDownload}>
@@ -836,6 +890,33 @@ function JobCenter() {
                                 <button className="btn-refresh" onClick={() => loadDownloadJobs(false)} disabled={downloadLoading}>
                                     <RefreshCw size={16} className={downloadLoading ? 'spin' : ''} /> 刷新
                                 </button>
+                            </div>
+                        </div>
+
+                        <div className="download-summary-panel">
+                            <div className="download-summary-grid">
+                                <div className="download-summary-card ready">
+                                    <span>可下载</span>
+                                    <strong>{downloadSummary.ready}</strong>
+                                </div>
+                                <div className="download-summary-card running">
+                                    <span>生成中</span>
+                                    <strong>{downloadSummary.running}</strong>
+                                </div>
+                                <div className="download-summary-card failed">
+                                    <span>失败</span>
+                                    <strong>{downloadSummary.failed}</strong>
+                                </div>
+                                <div className="download-summary-card expired">
+                                    <span>已过期</span>
+                                    <strong>{downloadSummary.expired}</strong>
+                                </div>
+                            </div>
+                            <div className="download-batch-hint">
+                                批量下载只会打包“已完成且文件未过期”的任务；已过期文件请先点击“重新生成”。
+                                {downloadSelectedIds.length > 0 && (
+                                    <span> 当前已选 {downloadSelectedIds.length} 个，其中 {downloadSummary.selectedReady} 个可下载。</span>
+                                )}
                             </div>
                         </div>
 
@@ -890,6 +971,9 @@ function JobCenter() {
                                                 <td>{job.finished_at ? new Date(job.finished_at).toLocaleString('zh-CN') : '-'}</td>
                                                 <td>
                                                     <div className="action-buttons" style={{ display: 'flex', gap: '8px' }}>
+                                                        {job.status === 'done' && !job.file_exists && (
+                                                            <span className="download-expired-note">文件已过期，请重新生成</span>
+                                                        )}
                                                         {job.status === 'done' && (
                                                             <button
                                                                 className="icon-btn view"

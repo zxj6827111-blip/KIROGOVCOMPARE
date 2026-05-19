@@ -3,6 +3,7 @@ import './ComparisonHistory.css';
 import { apiClient } from '../apiClient';
 import ComparisonDetailView from './ComparisonDetailView';
 import CompareFailureModal from './CompareFailureModal';
+import { useToast } from './common/ToastProvider';
 import {
   MapPin,
   Calendar,
@@ -35,6 +36,7 @@ async function runBatchWithConcurrency(items, worker, concurrency = BATCH_REQUES
 }
 
 function ComparisonHistory() {
+  const toast = useToast();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedComparisonId, setSelectedComparisonId] = useState(null);
@@ -219,16 +221,15 @@ function ComparisonHistory() {
       });
 
       if (response.data?.success) {
-        const goToJobCenter = window.confirm(
-          `PDF 导出任务已创建！\n\n任务名称：${response.data.export_title}\n\n点击"确定"前往任务中心查看进度，或点击"取消"继续浏览。`
-        );
-        if (goToJobCenter) {
-          window.location.href = '/jobs?tab=download';
-        }
+        toast.success('PDF 导出任务已创建', `${response.data.export_title || title} 已加入任务中心。`, {
+          actionLabel: '查看任务',
+          onAction: () => { window.location.href = '/jobs?tab=download'; },
+          duration: 8000,
+        });
       }
     } catch (error) {
       const message = error.response?.data?.message || error.message || '创建任务失败';
-      alert(`创建 PDF 导出任务失败：${message}`);
+      toast.error('创建 PDF 导出任务失败', message);
     }
   };
 

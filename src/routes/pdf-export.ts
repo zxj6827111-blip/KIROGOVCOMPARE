@@ -71,6 +71,7 @@ async function findFrontendUrl(): Promise<string | null> {
 
 /**
  * GET /api/comparisons/:id/pdf
+ * Compatibility synchronous path. Prefer POST /api/pdf-jobs for user-facing comparison PDF exports.
  * 使用 Puppeteer 生成比对报告的 PDF
  */
 router.get('/:id/pdf', authMiddleware, async (req: AuthRequest, res: Response) => {
@@ -112,7 +113,7 @@ router.get('/:id/pdf', authMiddleware, async (req: AuthRequest, res: Response) =
             }
         }
 
-        console.log(`[PDF Export] Starting PDF generation for comparison ${comparisonId}`);
+        console.log(`[PDF Export] Compatibility synchronous export requested for comparison ${comparisonId}. Prefer /api/pdf-jobs for user-facing comparison PDFs.`);
 
         // Find available frontend
         const frontendUrl = await findFrontendUrl();
@@ -221,6 +222,9 @@ router.get('/:id/pdf', authMiddleware, async (req: AuthRequest, res: Response) =
             }
             console.warn(`[PDF Export] Print page did not become ready in time, proceeding with rendered content`);
         }
+
+        await page.evaluate('document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()');
+        console.log(`[PDF Export] Fonts reported ready`);
 
         await new Promise(resolve => setTimeout(resolve, 500));
 
