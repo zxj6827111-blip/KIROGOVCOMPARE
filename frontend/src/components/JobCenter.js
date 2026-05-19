@@ -4,6 +4,9 @@ import { apiClient, API_BASE_URL } from '../apiClient';
 import { Trash2, RefreshCw, AlertTriangle, Ban, Eye, Download, RotateCw, Upload, FileDown } from 'lucide-react';
 import { useToast } from './common/ToastProvider';
 import { useConfirmDialog } from './common/ConfirmDialogProvider';
+import Button from './common/Button';
+import PageHeader from './common/PageHeader';
+import StatusBadge from './common/StatusBadge';
 
 const UPLOAD_POLL_ACTIVE_MS = 3000;
 const UPLOAD_POLL_IDLE_MS = 10000;
@@ -577,6 +580,18 @@ function JobCenter() {
         return <span className={`status-badge ${info.className}`}>{info.label}</span>;
     };
 
+    const renderDownloadStatusBadge = (status, fileExists) => {
+        if (status === 'done' && !fileExists) return <StatusBadge tone="warning">已过期</StatusBadge>;
+        const statusMap = {
+            queued: { label: '排队中', tone: 'info' },
+            processing: { label: '生成中', tone: 'warning' },
+            done: { label: '已完成', tone: 'success' },
+            failed: { label: '失败', tone: 'danger' },
+        };
+        const info = statusMap[status] || { label: status || '未知', tone: 'neutral' };
+        return <StatusBadge tone={info.tone}>{info.label}</StatusBadge>;
+    };
+
     const formatFileSize = (bytes) => {
         if (!bytes) return '-';
         if (bytes < 1024) return `${bytes} B`;
@@ -586,6 +601,40 @@ function JobCenter() {
 
     return (
         <div className="job-center">
+            <PageHeader
+                title="任务中心"
+                subtitle={activeTab === 'download' ? '查看 PDF 导出任务、下载文件和重新生成过期文件' : '查看上传解析任务和处理进度'}
+                badges={activeTab === 'download' ? (
+                    <>
+                        <StatusBadge tone="success">可下载 {downloadSummary.ready}</StatusBadge>
+                        <StatusBadge tone="warning">生成中 {downloadSummary.running}</StatusBadge>
+                        {downloadSummary.failed > 0 && <StatusBadge tone="danger">失败 {downloadSummary.failed}</StatusBadge>}
+                    </>
+                ) : (
+                    <StatusBadge tone="info">{totalJobs} 个上传任务</StatusBadge>
+                )}
+                actions={(
+                    <>
+                        {activeTab === 'download' && downloadSelectedIds.length > 0 && (
+                            <Button
+                                variant="primary"
+                                onClick={handleBatchDownloadZip}
+                                disabled={downloadSummary.selectedReady === 0}
+                                icon={<Download size={16} />}
+                            >
+                                批量下载 ({downloadSelectedIds.length})
+                            </Button>
+                        )}
+                        <Button
+                            onClick={() => activeTab === 'download' ? loadDownloadJobs(false) : loadJobs(false)}
+                            disabled={activeTab === 'download' ? downloadLoading : loading}
+                            icon={<RefreshCw size={16} className={(activeTab === 'download' ? downloadLoading : loading) ? 'spin' : ''} />}
+                        >
+                            刷新
+                        </Button>
+                    </>
+                )}
+            />
             {/* Tab Navigation */}
             <div className="job-center-tabs" style={{
                 display: 'flex',
@@ -957,7 +1006,7 @@ function JobCenter() {
                                                     />
                                                 </td>
                                                 <td>{job.export_title || `比对 #${job.comparison_id}`}</td>
-                                                <td>{getDownloadStatusBadge(job.status, job.file_exists)}</td>
+                                                <td>{renderDownloadStatusBadge(job.status, job.file_exists)}</td>
                                                 <td>
                                                     <div className="progress-cell">
                                                         <div className="progress-bar">

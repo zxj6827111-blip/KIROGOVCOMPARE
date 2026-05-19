@@ -21,6 +21,10 @@
   margin-bottom: 12px;
 }
 
+.report-detail__legacy-header {
+  display: none;
+}
+
 .section {
   margin-top: 16px;
   padding-top: 16px;

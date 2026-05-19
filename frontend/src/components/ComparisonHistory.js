@@ -4,15 +4,17 @@ import { apiClient } from '../apiClient';
 import ComparisonDetailView from './ComparisonDetailView';
 import CompareFailureModal from './CompareFailureModal';
 import { useToast } from './common/ToastProvider';
+import Button from './common/Button';
+import ExportPanel from './ExportPanel';
+import PageHeader from './common/PageHeader';
+import StatusBadge from './common/StatusBadge';
 import {
   MapPin,
   Calendar,
   Search,
   RefreshCw,
   Eye,
-  Printer,
   Trash2,
-  Download,
   ChevronDown,
   ChevronRight,
   AlertCircle,
@@ -222,7 +224,7 @@ function ComparisonHistory() {
 
       if (response.data?.success) {
         toast.success('PDF 导出任务已创建', `${response.data.export_title || title} 已加入任务中心。`, {
-          actionLabel: '查看任务',
+          actionLabel: '查看导出任务',
           onAction: () => { window.location.href = '/jobs?tab=download'; },
           duration: 8000,
         });
@@ -231,6 +233,10 @@ function ComparisonHistory() {
       const message = error.response?.data?.message || error.message || '创建任务失败';
       toast.error('创建 PDF 导出任务失败', message);
     }
+  };
+
+  const handlePrintPreview = (id) => {
+    window.open(`/print/comparison/${id}`, '_blank', 'noopener,noreferrer');
   };
 
   // Selection handlers - need to collect all loaded comparisons
@@ -281,6 +287,11 @@ function ComparisonHistory() {
       })
       .filter(Boolean);
 
+    if (targets.length === 0) {
+      toast.warning('没有可导出的记录', '请先展开地区并选择已加载的比对记录。');
+      return;
+    }
+
     const { successCount, failedCount } = await runBatchWithConcurrency(
       targets,
       async (target) => {
@@ -298,7 +309,11 @@ function ComparisonHistory() {
     );
 
     setSelectedIds([]);
-    alert(`已创建 ${successCount} 个导出任务，失败 ${failedCount} 个，请前往任务中心查看进度`);
+    toast.success('批量导出任务已创建', `成功 ${successCount} 个，失败 ${failedCount} 个。`, {
+      actionLabel: '查看导出任务',
+      onAction: () => { window.location.href = '/jobs?tab=download'; },
+      duration: 9000,
+    });
   };
 
   // Batch delete
@@ -458,14 +473,13 @@ function ComparisonHistory() {
                   <Eye size={16} />
                   <span>查看</span>
                 </button>
-                <button
-                  className="icon-btn print"
-                  onClick={() => handleExportPdf(c.id, `${c.regionName || node.name} ${c.yearA}-${c.yearB} 年报对比`)}
-                  title="打印导出"
-                >
-                  <Printer size={16} />
-                  <span>打印</span>
-                </button>
+                <ExportPanel
+                  compact
+                  exportLabel="生成 PDF"
+                  onCreatePdfJob={() => handleExportPdf(c.id, `${c.regionName || node.name} ${c.yearA}-${c.yearB} 年报对比`)}
+                  onPrintPreview={() => handlePrintPreview(c.id)}
+                  onOpenJobs={() => { window.location.href = '/jobs?tab=download'; }}
+                />
                 <button
                   className="icon-btn delete"
                   onClick={() => handleDelete(c.id)}
@@ -497,6 +511,43 @@ function ComparisonHistory() {
 
   return (
     <div className="comparison-history">
+      <PageHeader
+        title="比对历史"
+        subtitle="按地区查看年报比对结果，集中创建 PDF 导出任务"
+        badges={(
+          <>
+            <StatusBadge tone="info">{grandTotal} 份比对</StatusBadge>
+            {grandTotalIssues > 0 && <StatusBadge tone="warning">{grandTotalIssues} 份异常</StatusBadge>}
+            {failedJobCount > 0 && <StatusBadge tone="danger">{failedJobCount} 个失败任务</StatusBadge>}
+          </>
+        )}
+        actions={(
+          <>
+            <Button
+              onClick={handleBatchCreate}
+              disabled={batchCreating || loading}
+              variant="secondary"
+              icon={<Zap size={16} className={batchCreating ? 'spin' : ''} />}
+            >
+              {batchCreating ? '创建中...' : '一键比对'}
+            </Button>
+            <Button
+              onClick={fetchTree}
+              disabled={loading}
+              variant="secondary"
+              icon={<RefreshCw size={16} className={loading ? 'spin' : ''} />}
+            >
+              刷新
+            </Button>
+            <Button
+              onClick={() => { window.location.href = '/jobs?tab=download'; }}
+              variant="ghost"
+            >
+              查看导出任务
+            </Button>
+          </>
+        )}
+      />
       <div className="history-header">
         <div className="comparison-filter-bar">
           <div className="comparison-filter-left">
@@ -556,9 +607,12 @@ function ComparisonHistory() {
             </button>
             {selectedIds.length > 0 && (
               <>
-                <button onClick={handleBatchDownload} className="batch-btn download-btn">
-                  <Download size={16} /> 批量导出 ({selectedIds.length})
-                </button>
+                <ExportPanel
+                  compact
+                  exportLabel={`生成 PDF (${selectedIds.length})`}
+                  onCreatePdfJob={handleBatchDownload}
+                  onOpenJobs={() => { window.location.href = '/jobs?tab=download'; }}
+                />
                 <button onClick={handleBatchDelete} className="batch-btn delete-btn">
                   <Trash2 size={16} /> 批量删除 ({selectedIds.length})
                 </button>

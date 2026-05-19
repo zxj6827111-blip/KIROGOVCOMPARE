@@ -2,12 +2,15 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import './ComparisonDetailView.css';
 import { apiClient } from '../apiClient';
-import { ArrowLeft, Printer, Download, Loader2 } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { Table2View, Table3View, Table4View, SimpleDiffTable } from './TableViews';
 import DiffText from './DiffText';
 import CrossYearCheckView from './CrossYearCheckView';
 import { normalizeTablePath } from '../utils/tableRowColMapping';
 import { useToast } from './common/ToastProvider';
+import ExportPanel from './ExportPanel';
+import PageHeader from './common/PageHeader';
+import StatusBadge from './common/StatusBadge';
 
 // ---- Tokenization & Similarity Algorithm (Ported) ----
 const tokenizeText = (text) => {
@@ -340,7 +343,7 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
         await new Promise(resolve => setTimeout(resolve, 500));
 
         toast.success('PDF 导出任务已创建', `${response.data.export_title || title} 已加入任务中心。`, {
-          actionLabel: '查看任务',
+          actionLabel: '查看导出任务',
           onAction: () => { window.location.href = '/jobs?tab=download'; },
           duration: 8000,
         });
@@ -378,6 +381,30 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
       </div>
 
       <div id="comparison-content" className="max-w-[1600px] mx-auto">
+        <PageHeader
+          title={`${data.region_name || '未知地区'} 年报比对`}
+          subtitle={`${data.year_a} vs ${data.year_b}`}
+          badges={(
+            <>
+              <StatusBadge tone={data.check_status && data.check_status !== '正常' ? 'warning' : 'success'}>
+                {data.check_status || '已比对'}
+              </StatusBadge>
+              {data.similarity != null && <StatusBadge tone="info">重复率 {data.similarity}%</StatusBadge>}
+            </>
+          )}
+          actions={(
+            <ExportPanel
+              compact
+              disabled={downloading}
+              exportLabel="生成 PDF"
+              isCreating={downloading}
+              onCreatePdfJob={handleDownloadPDF}
+              onOpenJobs={() => { window.location.href = '/jobs?tab=download'; }}
+              onPrintPreview={handlePrint}
+            />
+          )}
+        />
+
         {/* Summary Card */}
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 mb-8 shadow-sm break-inside-avoid">
           <h2 className="text-2xl font-bold text-gray-900 mb-4 font-serif-sc">
@@ -433,30 +460,6 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
             </label>
           </div>
 
-          <div className="flex gap-3">
-            <button
-              onClick={handleDownloadPDF}
-              disabled={downloading}
-              className="flex items-center px-4 py-2 text-white rounded-md shadow-sm transition-colors bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed"
-            >
-              {downloading ? (
-                <>
-                  <Loader2 size={16} className="mr-2 animate-spin" />
-                  {downloadStage}
-                </>
-              ) : (
-                <>
-                  <Download size={16} className="mr-2" /> 下载PDF
-                </>
-              )}
-            </button>
-            <button
-              onClick={handlePrint}
-              className="flex items-center px-4 py-2 text-white rounded-md shadow-sm transition-colors bg-gray-600 hover:bg-gray-700"
-            >
-              <Printer size={16} className="mr-2" /> 网页打印
-            </button>
-          </div>
         </div>
 
         {/* Header Row */}

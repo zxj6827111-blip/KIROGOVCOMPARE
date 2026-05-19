@@ -9,6 +9,9 @@ import { aggregateIssuesFromChecks } from '../utils/issueAggregation';
 import ParsedDataEditor from './ParsedDataEditor';
 import ConsistencyCheckView from './ConsistencyCheckView';
 import VisionReviewPanel from './VisionReviewPanel';
+import Button from './common/Button';
+import PageHeader from './common/PageHeader';
+import ReportFlowStatusBar from './ReportFlowStatusBar';
 
 const tryParseJsonText = (value) => {
   if (typeof value !== 'string') return { ok: false, value: null };
@@ -1127,6 +1130,58 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     };
   };
 
+  const fetchFlowSignals = async (targetReportId, payload) => {
+    const regionId = payload?.region_id;
+    const year = payload?.year;
+    if (!targetReportId || !regionId || !year) return {};
+
+    try {
+      const comparisonsResp = await apiClient.get('/comparisons/history', {
+        params: {
+          region_id: regionId,
+          year,
+          pageSize: 20,
+        },
+      });
+      const comparisons = comparisonsResp.data?.data || [];
+      const relatedComparison = comparisons.find((item) => {
+        const leftId = String(item.leftReportId ?? '');
+        const rightId = String(item.rightReportId ?? '');
+        return leftId === String(targetReportId) || rightId === String(targetReportId);
+      }) || null;
+
+      if (!relatedComparison) {
+        return {};
+      }
+
+      const jobsResp = await apiClient.get('/pdf-jobs', {
+        params: { limit: 100 },
+      });
+      const jobs = jobsResp.data?.jobs || [];
+      const completedJob = jobs.find((job) =>
+        String(job.comparison_id ?? '') === String(relatedComparison.id) &&
+        String(job.status || '').toLowerCase() === 'done' &&
+        job.file_exists
+      ) || null;
+
+      return {
+        latestComparison: relatedComparison,
+        latestCompletedPdfJob: completedJob,
+      };
+    } catch (err) {
+      return {};
+    }
+  };
+
+  const loadFlowSignals = async (targetReportId, payload) => {
+    const flowSignals = await fetchFlowSignals(targetReportId, payload);
+    if (!flowSignals.latestComparison && !flowSignals.latestCompletedPdfJob) return;
+    setReport((prevReport) => {
+      if (!prevReport || String(prevReport.report_id) !== String(targetReportId)) return prevReport;
+      return { ...prevReport, flow_signals: flowSignals };
+    });
+  };
+
   const loadReportAndFacts = async (targetReportId, { errorPrefix = '加载报告详情失败' } = {}) => {
     if (!targetReportId) return;
 
@@ -1140,6 +1195,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
       setReport(payload || null);
       const workingVersionId =
         payload?.pending_review_version?.version_id || payload?.active_version?.version_id || null;
+      loadFlowSignals(targetReportId, payload || {});
 
       try {
         const facts = await fetchFacts(targetReportId, workingVersionId);
@@ -2433,10 +2489,73 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     }
   };
 
+  const handleFlowAction = async (action) => {
+    if (!action) return;
+    if (action.href) {
+      window.location.href = action.href;
+      return;
+    }
+    if (action.target === 'checks') {
+      setActiveTab('checks');
+      return;
+    }
+    if (action.target === 'parse') {
+      await handleReparse();
+      return;
+    }
+    if (action.target === 'versions') {
+      if (pendingVersion) {
+        setActiveTab('checks');
+        return;
+      }
+      if (activeVersion) {
+        await handlePublishVersion({
+          id: activeVersion.version_id,
+          review_status: activeVersion.review_status,
+        });
+        return;
+      }
+      setShowVersionHistory(true);
+      await loadVersionHistory(reportId);
+    }
+  };
+
   return (
     <div className="report-detail">
       <div className="card">
-        <div className="detail-header">
+        <PageHeader
+          title="报告详情"
+          subtitle="查看政府信息公开年度报告正文、数据表格与复核状态"
+          actions={(
+            <>
+              {technicalModeEnabled && (
+                <Button
+                  className="report-technical-toggle"
+                  onClick={() => setShowMetadata(!showMetadata)}
+                >
+                  {showMetadata ? '隐藏技术信息' : '显示技术信息'}
+                </Button>
+              )}
+              {canMaintainReports && (
+                <>
+                  <Button onClick={refresh} disabled={loading}>刷新</Button>
+                  <Button onClick={handleReparse} disabled={loading}>自动解析</Button>
+                  <Button
+                    variant="danger"
+                    className="report-danger-action"
+                    onClick={handleDelete}
+                    disabled={loading}
+                  >
+                    删除报告
+                  </Button>
+                </>
+              )}
+              <Button onClick={handleBack}>返回上一层</Button>
+            </>
+          )}
+        />
+        {false && (
+        <div className="detail-header report-detail__legacy-header">
           <div>
             <h2>报告详情</h2>
             <p className="subtitle">查看政府信息公开年度报告正文与数据表格</p>
@@ -2473,11 +2592,15 @@ function ReportDetail({ reportId: propReportId, onBack }) {
           </div>
         </div>
 
+        )}
         {loading && <p>加载中...</p>}
+
         {error && <div className="alert error">{error}</div>}
 
         {!loading && !error && report && (
           <>
+            <ReportFlowStatusBar report={report} onAction={handleFlowAction} />
+
             {/* 技术诊断信息仅在显式 debug 模式下允许展开，普通报告视图不渲染。 */}
             {technicalModeEnabled && showMetadata && (
               <div className="report-technical-info">

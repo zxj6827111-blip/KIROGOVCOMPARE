@@ -452,15 +452,6 @@
     white-space: nowrap;
 }
 
-.batch-btn.download-btn {
-    background-color: #3b82f6;
-    color: white;
-}
-
-.batch-btn.download-btn:hover {
-    background-color: #2563eb;
-}
-
 .batch-btn.delete-btn {
     background-color: #ef4444;
     color: white;
