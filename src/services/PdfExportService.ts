@@ -17,11 +17,12 @@ export interface ComparisonPdfOptions {
   regionName?: string;
   watermarkText?: string;
   watermarkOpacity?: number;
+  traceId?: string;
 }
 
-// Legacy compatibility renderer. P2-1 keeps this EJS path available but does not
-// migrate or delete it; user-facing comparison PDF exports use the React print page
-// through /api/pdf-jobs + PdfExportWorker.
+// Deprecated legacy compatibility renderer. P2-3 keeps this EJS path available
+// only for compatibility and observability; user-facing comparison PDF exports
+// use the React print page through /api/pdf-jobs + PdfExportWorker.
 class PdfExportService {
   private readonly outputDir: string;
   private readonly viewsDir: string;
@@ -40,13 +41,15 @@ class PdfExportService {
    * Returns the path to the generated PDF file
    */
   async generateComparisonPdf(options: ComparisonPdfOptions): Promise<string> {
-    const { comparisonId, data } = options;
+    const { comparisonId, data, traceId } = options;
     const fileName = `comparison_${comparisonId}_${Date.now()}.pdf`;
     const outputPath = path.join(this.outputDir, fileName);
 
     let browser;
     try {
-      console.warn(`[PdfExportService] Legacy EJS comparison PDF path invoked for comparison ${comparisonId}. Prefer /api/pdf-jobs for user-facing exports.`);
+      console.warn(
+        `[PdfExportService][DeprecatedLegacyEjsRenderer] trace=${traceId || 'unavailable'} comparison=${comparisonId} template=comparison_report.ejs replacement=/api/pdf-jobs`
+      );
       console.log(`[PdfExportService] Rendering HTML for comparison ${comparisonId}...`);
 
       // 1. Render EJS to HTML String

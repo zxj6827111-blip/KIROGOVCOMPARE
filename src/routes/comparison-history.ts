@@ -10,6 +10,57 @@ import { hasParsedContent } from '../utils/parsedContent';
 
 const router = express.Router();
 
+const LEGACY_EJS_COMPARISON_PDF_ROUTE = 'POST /api/comparisons/:id/export/pdf';
+const LEGACY_EJS_COMPARISON_PDF_REPLACEMENT = '/api/pdf-jobs';
+const LEGACY_EJS_EXPOSED_HEADERS = [
+  'Content-Disposition',
+  'Content-Length',
+  'Content-Type',
+  'Deprecation',
+  'Link',
+  'X-Kiro-Deprecated-Route',
+  'X-Kiro-Legacy-Export-Path',
+  'X-Kiro-Legacy-Export-Trace',
+  'X-Kiro-Replacement-Route',
+].join(', ');
+const LEGACY_EJS_TRACE_ID_PATTERN = /^[A-Za-z0-9._:-]{1,80}$/;
+
+function firstHeaderValue(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) return value[0] || null;
+  return value || null;
+}
+
+function normalizeLegacyEjsClientTraceId(value: string | string[] | undefined): string | null {
+  const traceId = firstHeaderValue(value)?.trim();
+  if (!traceId || !LEGACY_EJS_TRACE_ID_PATTERN.test(traceId)) {
+    return null;
+  }
+  return traceId;
+}
+
+function createGeneratedLegacyEjsExportTraceId(comparisonId: number): string {
+  const safeComparisonId = Number.isFinite(comparisonId) ? String(comparisonId) : 'invalid';
+  return `legacy-ejs-${safeComparisonId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createLegacyEjsExportTraceId(req: Request, comparisonId: number): string {
+  return (
+    normalizeLegacyEjsClientTraceId(req.headers['x-request-id']) ||
+    normalizeLegacyEjsClientTraceId(req.headers['x-correlation-id']) ||
+    createGeneratedLegacyEjsExportTraceId(comparisonId)
+  );
+}
+
+function setLegacyEjsExportHeaders(res: Response, traceId: string): void {
+  res.setHeader('Deprecation', 'true');
+  res.setHeader('Link', `<${LEGACY_EJS_COMPARISON_PDF_REPLACEMENT}>; rel="successor-version"`);
+  res.setHeader('X-Kiro-Deprecated-Route', LEGACY_EJS_COMPARISON_PDF_ROUTE);
+  res.setHeader('X-Kiro-Replacement-Route', LEGACY_EJS_COMPARISON_PDF_REPLACEMENT);
+  res.setHeader('X-Kiro-Legacy-Export-Path', 'comparison-ejs');
+  res.setHeader('X-Kiro-Legacy-Export-Trace', traceId);
+  res.setHeader('Access-Control-Expose-Headers', LEGACY_EJS_EXPOSED_HEADERS);
+}
+
 function parseDbJson(value: any): any {
   if (value === null || value === undefined) return null;
   if (typeof value === 'object') return value;
@@ -974,18 +1025,23 @@ router.delete('/:id', authMiddleware, async (req: AuthRequest, res: Response) =>
 
 /**
  * POST /api/comparisons/:id/export/pdf
- * Export comparison to PDF with optional watermark
- * Legacy compatibility path. Prefer /api/pdf-jobs for user-facing comparison PDF exports.
+ * Export comparison to PDF with optional watermark.
+ * Deprecated legacy EJS compatibility path. Prefer /api/pdf-jobs for user-facing comparison PDF exports.
  */
 router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Response) => {
+  let legacyTraceId = '';
   try {
     const comparisonId = Number(req.params.id);
+    legacyTraceId = createLegacyEjsExportTraceId(req, comparisonId);
+    setLegacyEjsExportHeaders(res, legacyTraceId);
     if (!comparisonId || Number.isNaN(comparisonId)) {
       return res.status(400).json({ error: '无效的比对ID' });
     }
 
     const { watermark_text, watermark_opacity } = req.body;
-    console.warn(`[ComparisonHistory] Legacy EJS PDF export endpoint invoked for comparison ${comparisonId}. Prefer /api/pdf-jobs.`);
+    console.warn(
+      `[ComparisonHistory][DeprecatedLegacyEjsPdfExport] trace=${legacyTraceId} route="${LEGACY_EJS_COMPARISON_PDF_ROUTE}" replacement="${LEGACY_EJS_COMPARISON_PDF_REPLACEMENT}" comparison=${comparisonId} user=${req.user?.id ?? 'unknown'}`
+    );
 
     const comparisonRes = await pool.query(`
       SELECT 
@@ -1113,6 +1169,7 @@ router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Res
       regionName: comparison.region_name || '未知地区',
       watermarkText: watermark_text,
       watermarkOpacity: watermark_opacity ? parseFloat(watermark_opacity) : 0.1,
+      traceId: legacyTraceId,
     });
 
     const fileSize = require('fs').statSync(pdfPath).size;
@@ -1124,7 +1181,7 @@ router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Res
 
     res.download(pdfPath, `comparison_${comparisonId}_${comparison.year_a}_vs_${comparison.year_b}.pdf`);
   } catch (error: any) {
-    console.error('Error exporting PDF:', error);
+    console.error(`[ComparisonHistory][DeprecatedLegacyEjsPdfExport] trace=${legacyTraceId || 'unavailable'} error exporting PDF:`, error);
     res.status(500).json({ error: `导出失败: ${error.message}` });
   }
 });
