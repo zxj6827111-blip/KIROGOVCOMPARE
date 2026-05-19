@@ -10,10 +10,11 @@ export async function getAllowedRegionIdsAsync(user?: AuthRequest['user']): Prom
     return null;
   }
 
-  const scopeNames = user.dataScope.regions.map((n: string) => `'${n.replace(/'/g, "''")}'`).join(',');
+  const scopeNames = user.dataScope.regions;
+  const placeholders = scopeNames.map((_: string, i: number) => `$${i + 1}`).join(',');
   const scopeIdsQuery = `
     WITH RECURSIVE allowed_ids AS (
-      SELECT id FROM regions WHERE name IN (${scopeNames})
+      SELECT id FROM regions WHERE name IN (${placeholders})
       UNION ALL
       SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
     )
@@ -21,7 +22,7 @@ export async function getAllowedRegionIdsAsync(user?: AuthRequest['user']): Prom
   `;
 
   try {
-    const result = await pool.query(scopeIdsQuery);
+    const result = await pool.query(scopeIdsQuery, scopeNames);
     return result.rows.map((row: any) => row.id);
   } catch (e) {
     console.error('Error calculating scope IDs:', e);

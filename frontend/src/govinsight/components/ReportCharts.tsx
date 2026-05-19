@@ -515,9 +515,15 @@ export const ReportAdminActionChart: React.FC<ChartProps> = ({ data, isPrinting 
 
 // 6. 雷达图
 export const ReportBenchmarkRadar: React.FC<BenchmarkProps> = ({ entity, avgProfile }) => {
-  const year = 2024;
-  const d = entity.data.find((x) => x.year === year)!;
-  const avg = avgProfile.data.find((x) => x.year === year)!;
+  const availableYears = entity.data.map((x) => x.year).sort((a, b) => b - a);
+  const benchmarkYears = avgProfile.data.map((x) => x.year).sort((a, b) => b - a);
+  const year = availableYears[0] ?? benchmarkYears[0];
+  const d = entity.data.find((x) => x.year === year) || entity.data[entity.data.length - 1];
+  const avg = avgProfile.data.find((x) => x.year === year) || avgProfile.data[avgProfile.data.length - 1];
+
+  if (!d || !avg || !year) {
+    return null;
+  }
 
   const normalize = (val: number, max: number) => Math.min(100, (val / max) * 100);
 

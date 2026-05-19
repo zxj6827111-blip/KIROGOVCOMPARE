@@ -1,6 +1,13 @@
 import express, { Request, Response } from 'express';
 import pool from '../config/database-llm';
-import { generateToken, verifyPassword, hashPassword, authMiddleware, AuthRequest } from '../middleware/auth';
+import {
+  generateToken,
+  verifyPassword,
+  hashPassword,
+  authMiddleware,
+  AuthRequest,
+  normalizePermissions,
+} from '../middleware/auth';
 
 const router = express.Router();
 
@@ -27,22 +34,21 @@ router.post('/login', async (req: Request, res: Response) => {
     }
 
     const user = users[0];
-
-    // Verify password
     const isMatch = verifyPassword(password, user.password_hash);
     if (!isMatch) {
       return res.status(401).json({ error: '用户名或密码错误' });
     }
 
-    // Generate token
     const token = generateToken(user.id, user.username);
-
-    // Update last login time
     await pool.query('UPDATE admin_users SET last_login_at = NOW() WHERE id = $1', [user.id]);
 
-    // Parse permissions and scope
-    const permissions = user.permissions ? (typeof user.permissions === 'string' ? JSON.parse(user.permissions) : user.permissions) : {};
-    const dataScope = user.data_scope ? (typeof user.data_scope === 'string' ? JSON.parse(user.data_scope) : user.data_scope) : {};
+    const rawPermissions = user.permissions
+      ? (typeof user.permissions === 'string' ? JSON.parse(user.permissions) : user.permissions)
+      : {};
+    const permissions = normalizePermissions(rawPermissions);
+    const dataScope = user.data_scope
+      ? (typeof user.data_scope === 'string' ? JSON.parse(user.data_scope) : user.data_scope)
+      : {};
 
     res.json({
       token,
@@ -51,7 +57,7 @@ router.post('/login', async (req: Request, res: Response) => {
         username: user.username,
         displayName: user.display_name || user.username,
         permissions,
-        dataScope
+        dataScope,
       },
     });
   } catch (error) {
@@ -62,20 +68,25 @@ router.post('/login', async (req: Request, res: Response) => {
 
 /**
  * POST /api/auth/reset-default-password
- * Reset password for users with the default bcrypt hash
- * This is a special endpoint to migrate from the insecure default password
+ * Migrate the bootstrap admin account away from a legacy bcrypt hash.
  */
 router.post('/reset-default-password', async (req: Request, res: Response) => {
   try {
-    const { username, currentPassword, newPassword, bootstrapToken } = req.body;
+    const { username, newPassword, bootstrapToken } = req.body;
+    const migrationEnabled = process.env.ALLOW_DEFAULT_PASSWORD_MIGRATION === '1';
 
-    if (!username || !currentPassword || !newPassword) {
-      return res.status(400).json({ error: '请提供用户名、当前密码和新密码' });
+    if (!migrationEnabled) {
+      return res.status(403).json({ error: 'default_password_migration_disabled' });
+    }
+
+    if (!username || !newPassword || !bootstrapToken) {
+      return res.status(400).json({ error: '请提供用户名、新密码和引导密钥' });
     }
 
     if (newPassword.length < 8) {
-      return res.status(400).json({ error: '新密码长度至少8位' });
+      return res.status(400).json({ error: '新密码长度至少 8 位' });
     }
+
     const expectedBootstrapToken = process.env.ADMIN_BOOTSTRAP_TOKEN;
     if (!expectedBootstrapToken || expectedBootstrapToken.length < 16) {
       return res.status(403).json({ error: 'ADMIN_BOOTSTRAP_TOKEN is missing or too short' });
@@ -89,7 +100,10 @@ router.post('/reset-default-password', async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'reset_only_allowed_for_admin' });
     }
 
-    const result = await pool.query('SELECT id, username, password_hash FROM admin_users WHERE username = $1', [username]);
+    const result = await pool.query(
+      'SELECT id, username, password_hash FROM admin_users WHERE username = $1',
+      [username]
+    );
     const users = result.rows;
 
     if (!users || users.length === 0) {
@@ -97,26 +111,20 @@ router.post('/reset-default-password', async (req: Request, res: Response) => {
     }
 
     const user = users[0];
-
-    // Only allow this endpoint for bcrypt hashes (default password)
     if (!user.password_hash.startsWith('$2b$') && !user.password_hash.startsWith('$2a$')) {
-      return res.status(400).json({ error: '密码格式不支持，请使用普通密码修改接口' });
+      return res.status(400).json({ error: 'password_migration_not_required' });
     }
 
-    // Verify the default password
-    if (currentPassword !== 'admin123') {
-      return res.status(401).json({ error: '当前密码错误' });
-    }
-
-    // Hash the new password with PBKDF2
     const newHash = hashPassword(newPassword);
+    await pool.query(
+      'UPDATE admin_users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
+      [newHash, user.id]
+    );
 
-    await pool.query('UPDATE admin_users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [newHash, user.id]);
-
-    res.json({ message: '密码重置成功，请使用新密码登录' });
+    res.json({ message: '密码迁移成功，请使用新密码重新登录' });
   } catch (error) {
     console.error('Reset default password error:', error);
-    res.status(500).json({ error: '密码重置失败' });
+    res.status(500).json({ error: '密码迁移失败' });
   }
 });
 
@@ -130,7 +138,10 @@ router.get('/me', authMiddleware, async (req: AuthRequest, res: Response) => {
       return res.status(401).json({ error: '未登录' });
     }
 
-    const result = await pool.query('SELECT id, username, display_name, created_at, last_login_at FROM admin_users WHERE id = $1', [req.user.id]);
+    const result = await pool.query(
+      'SELECT id, username, display_name, created_at, last_login_at FROM admin_users WHERE id = $1',
+      [req.user.id]
+    );
     const users = result.rows;
 
     if (!users || users.length === 0) {
@@ -169,10 +180,9 @@ router.post('/change-password', authMiddleware, async (req: AuthRequest, res: Re
     }
 
     if (newPassword.length < 6) {
-      return res.status(400).json({ error: '新密码长度至少6位' });
+      return res.status(400).json({ error: '新密码长度至少 6 位' });
     }
 
-    // Get current password hash
     const result = await pool.query('SELECT password_hash FROM admin_users WHERE id = $1', [req.user.id]);
     const users = result.rows;
 
@@ -180,15 +190,15 @@ router.post('/change-password', authMiddleware, async (req: AuthRequest, res: Re
       return res.status(404).json({ error: '用户不存在' });
     }
 
-    // Verify current password
     if (!verifyPassword(currentPassword, users[0].password_hash)) {
       return res.status(401).json({ error: '当前密码错误' });
     }
 
-    // Hash new password and update
     const newHash = hashPassword(newPassword);
-
-    await pool.query('UPDATE admin_users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [newHash, req.user.id]);
+    await pool.query(
+      'UPDATE admin_users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
+      [newHash, req.user.id]
+    );
 
     res.json({ message: '密码修改成功' });
   } catch (error) {
@@ -202,8 +212,6 @@ router.post('/change-password', authMiddleware, async (req: AuthRequest, res: Re
  * Logout (client should discard token)
  */
 router.post('/logout', (_req: Request, res: Response) => {
-  // With stateless JWT-like tokens, logout is handled client-side
-  // This endpoint exists for API completeness
   res.json({ message: '已退出登录' });
 });
 

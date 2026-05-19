@@ -16,7 +16,7 @@ export default function UserManagement() {
         displayName: '',
         permissions: {
             manage_users: false,
-            manage_cities: false,
+            manage_regions: false,
             upload_reports: false,
             compare_reports: false,
         },
@@ -140,7 +140,7 @@ export default function UserManagement() {
                 displayName: user.displayName || '',
                 permissions: {
                     manage_users: user.permissions?.manage_users || false,
-                    manage_cities: user.permissions?.manage_cities || false,
+                    manage_regions: user.permissions?.manage_regions || false,
                     manage_jobs: user.permissions?.manage_jobs || false,
                     view_reports: user.permissions?.view_reports || false,
                     upload_reports: user.permissions?.upload_reports || false,
@@ -158,7 +158,7 @@ export default function UserManagement() {
                 displayName: '',
                 permissions: {
                     manage_users: false,
-                    manage_cities: false,
+                    manage_regions: false,
                     upload_reports: true,
                     compare_reports: true,
                 },
@@ -261,7 +261,7 @@ export default function UserManagement() {
                                     <td>
                                         <div className="flex gap-1 flex-wrap">
                                             {user.permissions?.manage_users && <span className="tag-blue">用户管理</span>}
-                                            {user.permissions?.manage_cities && <span className="tag-green">城市管理</span>}
+                                            {user.permissions?.manage_regions && <span className="tag-green">城市管理</span>}
                                             {user.permissions?.view_reports && <span className="tag-cyan">查看</span>}
                                             {user.permissions?.upload_reports && <span className="tag-orange">上传</span>}
                                             {user.permissions?.compare_reports && <span className="tag-purple">比对</span>}
@@ -283,7 +283,7 @@ export default function UserManagement() {
                                             <button className="icon-btn edit" onClick={() => handleOpenModal(user)} title="编辑">
                                                 <Edit size={16} />
                                             </button>
-                                            {user.id !== 1 && (
+                                            {user.username !== 'admin' && (
                                                 <button className="icon-btn delete" onClick={(e) => { e.stopPropagation(); handleDelete(user.id); }} title="删除">
                                                     <Trash2 size={16} />
                                                 </button>
@@ -341,7 +341,7 @@ export default function UserManagement() {
                             <div className="form-section-title">功能权限</div>
                             <div className="permissions-grid-compact">
                                 <label className="checkbox-label"><input type="checkbox" checked={formData.permissions.manage_users} onChange={() => togglePermission('manage_users')} /> 用户管理</label>
-                                <label className="checkbox-label"><input type="checkbox" checked={formData.permissions.manage_cities} onChange={() => togglePermission('manage_cities')} /> 城市管理</label>
+                                <label className="checkbox-label"><input type="checkbox" checked={formData.permissions.manage_regions} onChange={() => togglePermission('manage_regions')} /> 城市管理</label>
                                 <label className="checkbox-label"><input type="checkbox" checked={formData.permissions.view_reports} onChange={() => togglePermission('view_reports')} /> 查看报告</label>
                                 <label className="checkbox-label"><input type="checkbox" checked={formData.permissions.upload_reports} onChange={() => togglePermission('upload_reports')} /> 上传报告</label>
                                 <label className="checkbox-label"><input type="checkbox" checked={formData.permissions.compare_reports} onChange={() => togglePermission('compare_reports')} /> 比对报告</label>

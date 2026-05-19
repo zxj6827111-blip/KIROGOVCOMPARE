@@ -15,6 +15,8 @@ interface GeminiResponse {
   }>;
 }
 
+const GEMINI_DEBUG_LOGS = process.env.LLM_DEBUG_LOGS === '1';
+
 function stripMarkdownJsonFences(text: string): string {
   return String(text || '')
     .replace(/```json\s*/gi, '')
@@ -441,18 +443,22 @@ export class GeminiLlmProvider implements LlmProvider {
     let userText = loaded.text;
     const visualMetadata = loaded.metadata;
 
-    console.log(`[Gemini] Reading file: ${absolutePath}, Size: ${fileStats.size}, Extracted Text Length: ${userText.length}`);
+    if (GEMINI_DEBUG_LOGS) {
+      console.log(`[Gemini] Reading file: ${absolutePath}, Size: ${fileStats.size}, Extracted Text Length: ${userText.length}`);
+    }
     if (visualMetadata.visual_border_missing) {
       console.warn(`[Gemini] Visual Audit Flag: Borders Missing detected in ${absolutePath}`);
     }
 
-    if (userText.length < 500) {
+    if (GEMINI_DEBUG_LOGS && userText.length < 500) {
       console.log(`[Gemini] DEBUG Content Preview: ${userText}`);
     }
 
     const maxChars = Number(process.env.GEMINI_INPUT_MAX_CHARS || 1000000);
     if (Number.isFinite(maxChars) && maxChars > 1000 && userText.length > maxChars) {
-      console.log(`[Gemini] Truncating input from ${userText.length} to ${maxChars}`);
+      if (GEMINI_DEBUG_LOGS) {
+        console.log(`[Gemini] Truncating input from ${userText.length} to ${maxChars}`);
+      }
       userText = userText.slice(0, maxChars);
     }
 

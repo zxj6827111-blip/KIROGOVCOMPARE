@@ -558,7 +558,6 @@ curl -X POST http://localhost:8787/api/auth/reset-default-password \
   -H "Content-Type: application/json" \
   -d '{
     "username": "admin",
-    "currentPassword": "admin123",
     "newPassword": "你的新安全密码(至少8位)",
     "bootstrapToken": "你设置的ADMIN_BOOTSTRAP_TOKEN值"
   }'
@@ -566,7 +565,7 @@ curl -X POST http://localhost:8787/api/auth/reset-default-password \
 
 成功响应:
 ```json
-{"message": "密码重置成功，请使用新密码登录"}
+{"message": "密码迁移成功，请使用新密码重新登录"}
 ```
 
 #### 安全配置验证
@@ -576,11 +575,11 @@ curl -X POST http://localhost:8787/api/auth/reset-default-password \
 curl http://localhost:8787/api/v1/assets
 # 预期: {"error":"未登录，请先登录"}
 
-# 验证 SSRF 防护
+# 验证旧版 Compare 任务接口已下线
 curl -X POST http://localhost:8787/api/v1/tasks/compare/url \
   -H "Authorization: Bearer YOUR_TOKEN" \
-  -d '{"urlA":"http://169.254.169.254/latest/meta-data","urlB":"..."}'
-# 预期: {"error":"URL被SSRF防护拒绝，不支持内网地址"}
+  -d '{"urlA":"https://example.com/a.pdf","urlB":"https://example.com/b.pdf"}'
+# 预期: 410 legacy_compare_tasks_retired
 ```
 
 ---

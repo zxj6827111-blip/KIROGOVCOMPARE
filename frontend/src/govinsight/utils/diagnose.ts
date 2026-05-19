@@ -82,6 +82,6 @@ export const diagnoseDistrictData = (entity: EntityProfile | null) => {
 };
 
 // 挂载到window对象供浏览器控制台调用
-if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
     (window as any).diagnoseDistrictData = diagnoseDistrictData;
 }

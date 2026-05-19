@@ -1,6 +1,6 @@
 import dotenv from "dotenv";
 import { dbType } from "./config/database-llm";
-import { runLLMMigrations } from "./db/migrations-llm";
+import { runMigrations } from "./db/migrations";
 import { llmJobRunner } from "./services/LlmJobRunner";
 import { startGovInsightReportJobWorker } from "./services/GovInsightReportJobWorker";
 import { startPdfExportWorker } from "./services/PdfExportWorker";
@@ -23,7 +23,7 @@ async function start(): Promise<void> {
 
     // Run migrations (can be disabled for worker-only processes)
     if (RUN_MIGRATIONS) {
-      await runLLMMigrations();
+      await runMigrations();
     }
 
     if (ENABLE_JOB_RUNNER) {

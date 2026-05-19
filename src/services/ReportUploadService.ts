@@ -10,6 +10,7 @@ import { hasParsedContent } from '../utils/parsedContent';
 import { resolveUnifiedLlmConfig } from '../utils/aiEnv';
 
 const NAMESPACE_uuid = '6ba7b810-9dad-11d1-80b4-00c04fd430c8'; // Standard namespace
+const REPORT_UPLOAD_DEBUG = process.env.REPORT_UPLOAD_DEBUG === '1';
 
 export interface ReportUploadPayload {
   regionId: number;
@@ -305,12 +306,14 @@ export class ReportUploadService {
   }
 
   async processTextUpload(payload: ReportTextUploadPayload): Promise<ReportUploadResult> {
-    console.log('[DEBUG] processTextUpload called with:', {
-      regionId: payload.regionId,
-      year: payload.year,
-      rawTextLength: payload.rawText?.length,
-      model: payload.model
-    });
+    if (REPORT_UPLOAD_DEBUG) {
+      console.log('[DEBUG] processTextUpload called with:', {
+        regionId: payload.regionId,
+        year: payload.year,
+        rawTextLength: payload.rawText?.length,
+        model: payload.model
+      });
+    }
     ensureStorageDir();
 
     // Check region exists
@@ -318,7 +321,9 @@ export class ReportUploadService {
     const region = regionResult.rows[0];
 
     if (!region) {
-      console.error('[DEBUG] Region not found:', payload.regionId);
+      if (REPORT_UPLOAD_DEBUG) {
+        console.error('[DEBUG] Region not found:', payload.regionId);
+      }
       throw new Error('region_not_found');
     }
 

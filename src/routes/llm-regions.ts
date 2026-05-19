@@ -5,7 +5,7 @@ import { authMiddleware, AuthRequest, requirePermission } from '../middleware/au
 const router = express.Router();
 
 // POST /api/regions - 创建区域（支持层级）
-router.post('/', authMiddleware, requirePermission('manage_cities'), async (req: Request, res: Response) => {
+router.post('/', authMiddleware, requirePermission('manage_regions'), async (req: Request, res: Response) => {
   try {
     const { code, name, province } = req.body;
     // 兼容前端 parentId / parent_id 传参
@@ -134,7 +134,7 @@ router.get('/:id', authMiddleware, async (req: Request, res: Response) => {
 });
 
 // PUT /api/regions/:id - 修改区域（名称、排序、分类等级等）
-router.put('/:id', authMiddleware, requirePermission('manage_cities'), async (req: Request, res: Response) => {
+router.put('/:id', authMiddleware, requirePermission('manage_regions'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { name, sort_order, level } = req.body;
@@ -194,7 +194,7 @@ router.put('/:id', authMiddleware, requirePermission('manage_cities'), async (re
 });
 
 // POST /api/regions/reorder - 批量更新排序
-router.post('/reorder', authMiddleware, requirePermission('manage_cities'), async (req: Request, res: Response) => {
+router.post('/reorder', authMiddleware, requirePermission('manage_regions'), async (req: Request, res: Response) => {
   try {
     const { orders } = req.body;
     // orders: [{ id: number, sort_order: number }, ...]
@@ -217,7 +217,7 @@ router.post('/reorder', authMiddleware, requirePermission('manage_cities'), asyn
 });
 
 // DELETE /api/regions/:id - 删除区域
-router.delete('/:id', authMiddleware, requirePermission('manage_cities'), async (req: Request, res: Response) => {
+router.delete('/:id', authMiddleware, requirePermission('manage_regions'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 

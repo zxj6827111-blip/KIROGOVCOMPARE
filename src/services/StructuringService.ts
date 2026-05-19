@@ -6,14 +6,7 @@ interface StructureResult {
 
 export class StructuringService {
   async structureDocument(_input: unknown): Promise<StructureResult> {
-    const document: StructuredDocument = {
-      documentId: 'stub',
-      assetId: 'stub',
-      title: 'stub',
-      sections: [],
-      metadata: {} as any,
-    };
-    return { document };
+    throw new Error('structuring_service_unavailable: legacy compare structuring has been retired');
   }
 }
 

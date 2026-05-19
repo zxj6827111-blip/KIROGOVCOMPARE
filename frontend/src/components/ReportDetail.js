@@ -80,6 +80,8 @@ const DISPLAY_METADATA_KEYS = new Set([
   'storage_path',
   'visual_audit',
 ]);
+const REPORT_DETAIL_DEBUG =
+  process.env.NODE_ENV !== 'production' && process.env.REACT_APP_REPORT_DETAIL_DEBUG === '1';
 const EMPTY_TABLE_TEXT_VALUES = new Set([
   '',
   '0',
@@ -205,9 +207,7 @@ const shouldSuppressDisplayTableSection = (section, displayQuality) =>
 const getUserCanMaintainReports = (user) =>
   Boolean(
     user &&
-      (user.username === 'admin' ||
-        user.id === 1 ||
-        user.permissions?.upload_reports ||
+      (user.permissions?.upload_reports ||
         user.permissions?.delete_reports ||
         user.permissions?.manage_jobs)
   );
@@ -1064,8 +1064,10 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const reportId = propReportId || window.location.pathname.split('/').pop();
   const currentUser = getCurrentUser();
   const canMaintainReports = getUserCanMaintainReports(currentUser);
+  const isDevDebugEnv = process.env.NODE_ENV !== 'production';
   // Technical diagnostics stay opt-in via URL so the formal report view is clean by default.
   const technicalModeEnabled =
+    isDevDebugEnv &&
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('debug') === 'true';
   const [report, setReport] = useState(null);
@@ -1214,7 +1216,9 @@ function ReportDetail({ reportId: propReportId, onBack }) {
         displayNoScope: 'group',
       });
 
-      console.log('[DEBUG ReportDetail] Fetched checks data:', data);
+      if (REPORT_DETAIL_DEBUG) {
+        console.log('[DEBUG ReportDetail] Fetched checks data:', data);
+      }
 
       // 提取未确认的问题路径
       const cellPaths = [];
@@ -1300,9 +1304,11 @@ function ReportDetail({ reportId: propReportId, onBack }) {
         });
       });
 
-      console.log('[DEBUG ReportDetail] Final cellPaths:', cellPaths);
-      console.log('[DEBUG ReportDetail] Final textInfos:', textInfos);
-      console.log('[DEBUG ReportDetail] Quality issues - Sec5:', sec5Issues, 'Sec6:', sec6Issues);
+      if (REPORT_DETAIL_DEBUG) {
+        console.log('[DEBUG ReportDetail] Final cellPaths:', cellPaths);
+        console.log('[DEBUG ReportDetail] Final textInfos:', textInfos);
+        console.log('[DEBUG ReportDetail] Quality issues - Sec5:', sec5Issues, 'Sec6:', sec6Issues);
+      }
       setHighlightCells(cellPaths);
       setHighlightTexts(textInfos);
       setQualityIssues({ sec5: sec5Issues, sec6: sec6Issues });

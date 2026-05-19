@@ -1,14 +1,15 @@
-
 import { Pool } from 'pg';
-import crypto from 'crypto';
 import dotenv from 'dotenv';
-import path from 'path';
 
 dotenv.config();
 
-// Simple PBKDF2 hashing matching the app's hashPassword in src/middleware/auth.ts (approximation)
-// Note: We need to be careful to match the app's hashing exactly.
-// Let's check middleware/auth.ts first.
+function resolveBootstrapPassword(): string {
+    const password = process.env.ADMIN_INITIAL_PASSWORD;
+    if (!password || password.length < 8) {
+        throw new Error('ADMIN_INITIAL_PASSWORD must be set and at least 8 characters long');
+    }
+    return password;
+}
 
 async function main() {
     console.log('Postgres connection:', {
@@ -27,26 +28,17 @@ async function main() {
 
     try {
         const username = 'admin';
-        const rawPassword = 'admin123';
-
-        // We'll use a Bcrypt hash that the app can also read if it supports it, 
-        // OR we just use what AuthController expects. 
-        // Wait, looking at routes/auth.ts, it uses verifyPassword(password, user.password_hash).
-        // Let's see how hashPassword is implemented.
-
+        const password = resolveBootstrapPassword();
         console.log('Ensuring user "admin" exists in Postgres...');
+        console.log(`Bootstrap password source length: ${password.length}`);
 
-        // Let's use a known hash or just let the app handle it.
-        // Actually, I'll just check if the user exists first.
         const res = await pool.query('SELECT id, username FROM admin_users WHERE username = $1', [username]);
 
         if (res.rows.length === 0) {
-            console.log('User "admin" not found. Creating default...');
-            // We need a proper hash. Let's look at src/middleware/auth.ts.
+            console.log('User "admin" not found.');
         } else {
             console.log('User "admin" already exists with ID:', res.rows[0].id);
         }
-
     } catch (e) {
         console.error('Error:', e);
     } finally {
@@ -54,4 +46,4 @@ async function main() {
     }
 }
 
-// Check middleware first
+main();

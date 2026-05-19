@@ -49,18 +49,6 @@ export const fetchGovernanceData = async (): Promise<EntityProfile[]> => {
       .map(records => transformToEntity(records))
       .filter((p): p is EntityProfile => p !== null);
 
-    // 4. Handle Parent-Child Relationships
-    const cities = profiles.filter(p => p.type === 'city');
-    const districts = profiles.filter(p => p.type === 'district');
-    
-    cities.forEach(city => {
-      // Simple logic: If Nanjing, mount all districts. 
-      // In production, match by org_parent_id
-      if (city.id === 'city_nanjing') {
-        city.children = districts;
-      }
-    });
-
     return profiles;
 
   } catch (error) {
