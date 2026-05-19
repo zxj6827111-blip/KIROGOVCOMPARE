@@ -2,8 +2,6 @@ import { uuidv4 } from '../utils/uuid';
 import pool from '../config/database';
 import { ReportAsset } from '../models';
 import StorageService from './StorageService';
-// Legacy service - commented out as it no longer exists
-// import ParsedDataStorageService from './ParsedDataStorageService';
 
 export interface QueryOptions {
   year?: number;
@@ -222,20 +220,6 @@ export class AssetService {
         return false;
       }
 
-      // 检查是否被任务引用
-      const refResult = await pool.query(
-        `
-        SELECT COUNT(*) as count FROM compare_tasks
-        WHERE asset_id_a = $1 OR asset_id_b = $1
-        `,
-        [assetId]
-      );
-
-      if (parseInt(refResult.rows[0].count) > 0) {
-        console.warn(`资产 ${assetId} 仍被任务引用，无法删除`);
-        return false;
-      }
-
       // 删除文件
       await StorageService.deleteFile(asset.storagePath);
 
@@ -290,10 +274,6 @@ export class AssetService {
         return null;
       }
 
-      // 从存储中读取解析数据
-      // Legacy service - commented out as it no longer exists
-      // const parseData = await ParsedDataStorageService.loadParseData(assetId);
-      // return parseData;
       return null;
     } catch (error) {
       console.error('获取资产解析数据失败:', error);

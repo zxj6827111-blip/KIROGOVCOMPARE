@@ -169,7 +169,9 @@ const document: StructuredDocument = {
 };
 ```
 
-### 在 DiffService 中使用表格信息
+### 历史 DiffService 示例（已退役）
+
+旧版 `DiffService` 已随 `/api/v1/tasks/compare/*` 任务管线退役并物理删除。以下片段仅保留为 schema 字段示例，不代表当前主线 Compare 的调用路径。
 
 ```typescript
 // 比对表格时，使用 rowLabel 和 colName
@@ -220,5 +222,5 @@ const readableChange = `${cellChange.rowLabel} / ${cellChange.colName}: ${cellCh
 - [政府信息公开条例](http://www.gov.cn/)
 - [年报表格规范](https://www.gov.cn/)
 - [PDF 解析指南](../services/PdfParseService.ts)
-- [差异比对指南](../services/DiffService.ts)
+- 当前主线 Compare: `/api/comparisons/*` 与 `LlmJobRunner.processCompareJob`
 

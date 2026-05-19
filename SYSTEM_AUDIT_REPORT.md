@@ -103,9 +103,9 @@
 | A6 | P2 | 安全设计问题 | `reset-default-password` 迁移端点保留 `admin123` 逻辑 | `src/routes/auth.ts:68-121` | 应替换为更稳妥的一次性迁移机制 |
 | A7 | P1 | 迁移/发布风险 | `migrations.ts` 只读取 `migrations/` 根目录，`migrations/postgres/` 不会被自动执行 | `src/db/migrations.ts:10-16` | 迁移 source of truth 分裂 |
 | A8 | P2 | 迁移/发布风险 | 当前仍缺少真实 down migration | `src/db/migrations.ts`, `src/db/migrations-llm.ts` | 本轮已统一入口并阻断伪回滚；后续若需要可回退发布，仍需单独设计 down migration 或恢复手册 |
-| A9 | P2 | 遗留功能 | 旧版 `/api/v1/tasks/compare/*` 任务管线已不属于当前主线 Compare | `src/routes/tasks.ts`, `src/services/CompareTaskProcessor.ts` | 本轮已显式下线旧入口；当前可用的 `/api/comparisons/*` 主线 Compare 保留 |
-| A10 | P2 | 遗留 stub | `ParsedDataStorageService` 已改为不可用时快速失败 | `src/services/ParsedDataStorageService.ts` | 不再应作为用户可用能力暴露 |
-| A11 | P2 | 遗留 stub | `StructuringService` 已改为不可用时快速失败 | `src/services/StructuringService.ts` | 不再应作为用户可用能力暴露 |
+| A9 | P2 | 遗留功能 | 旧版 `/api/v1/tasks/compare/*` 任务管线已不属于当前主线 Compare | `src/routes/retired-compare-tasks.ts` | 本轮已物理清理旧实现，仅保留 410 退役防线；当前可用的 `/api/comparisons/*` 主线 Compare 保留 |
+| A10 | P2 | 遗留 stub | `ParsedDataStorageService` 已物理删除 | `src/services/ParsedDataStorageService.ts` | 不再作为用户可用能力暴露 |
+| A11 | P2 | 遗留 stub | `StructuringService` 已物理删除 | `src/services/StructuringService.ts` | 不再作为用户可用能力暴露 |
 | A12 | P2 | 调试暴露面 | `window.diagnoseDistrictData` 无条件挂载到浏览器全局对象 | `frontend/src/govinsight/utils/diagnose.ts:84-86` | 生产构建中默认存在 |
 | A13 | P2 | 调试暴露面 | `?debug=true` 打开技术排查面板并显示内部信息 | `frontend/src/components/ReportDetail.js:1062-1064` | 应限制到开发环境 |
 | A14 | P2 | 用户可见缺陷 | 雷达图硬编码 `year=2024` | `frontend/src/govinsight/components/ReportCharts.tsx:518` | 非 2024 数据无法正确展示 |
@@ -306,12 +306,13 @@
 
 **本轮处理状态**
 
-当前分支已采用短期方案：
+当前分支已采用物理清理方案：
 
-1. `src/routes/tasks.ts` 统一返回 `410 legacy_compare_tasks_retired`。
-2. 响应中明确指向替代路径 `/api/comparisons`。
-3. 新增 `src/__tests__/legacyCompareTasks.test.ts` 防止旧入口被误恢复。
-4. 未改动当前主线 Compare 页面和 `/api/comparisons/*` 接口。
+1. 删除旧任务服务、旧任务模型、旧队列处理器和旧前端页面。
+2. `src/routes/retired-compare-tasks.ts` 仅对 `/api/v1/tasks/compare/*` 返回 `410 legacy_compare_tasks_retired`。
+3. 响应中明确指向替代路径 `/api/comparisons`。
+4. `src/__tests__/legacyCompareTasks.test.ts` 防止旧入口被误恢复。
+5. 未改动当前主线 Compare 页面和 `/api/comparisons/*` 接口。
 
 **整改要求**
 
@@ -495,9 +496,8 @@
 
 - **目标：** 显式下线旧 `/api/v1/tasks/compare/*`，保留当前 `/api/comparisons/*` 主线 Compare
 - **涉及文件：**
-  - `src/services/CompareTaskProcessor.ts`
-  - `src/services/ParsedDataStorageService.ts`
-  - `src/services/StructuringService.ts`
+  - `src/routes/retired-compare-tasks.ts`
+  - 已删除的旧任务服务、旧模型、旧队列处理器和旧前端页面
   - 相关路由与前端入口
 - **验收：**
   - 旧任务入口返回 `410 legacy_compare_tasks_retired`

@@ -55,10 +55,8 @@ frontend/
 │   ├── components/
 │   │   ├── ComparisonHistory.js
 │   │   ├── ComparisonDetailView.js
-│   │   ├── TextComparison.js          # Phase 5 新增
-│   │   ├── TextComparison.css         # Phase 5 新增
-│   │   ├── TableComparison.js         # Phase 5 新增
-│   │   └── TableComparison.css        # Phase 5 新增
+│   │   ├── ComparisonHistory.css
+│   │   └── ComparisonDetailView.css
 │   ├── App.js
 │   ├── App.css
 │   └── index.js
@@ -83,7 +81,7 @@ frontend/
 - `GET /comparisons/history` - 获取对比历史
 - `GET /comparisons/:comparisonId/result` - 获取对比详情
 
-旧版 `/api/v1/tasks/compare/*` 临时任务管线已下线，不再作为前端可用功能。
+旧版 `/api/v1/tasks/compare/*` 临时任务管线已物理清理，不再作为前端可用功能。
 
 ## 🎨 样式
 
