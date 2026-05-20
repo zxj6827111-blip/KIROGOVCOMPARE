@@ -1,5 +1,6 @@
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { toGovInsightPath } from '../../app/govInsightRoutes';
 import { EntityContext } from '../components/Layout';
 import {
   fetchLeaderCockpitComparison,
@@ -348,7 +349,7 @@ export const LeaderCockpit: React.FC = () => {
         onOpenCitySelector={openSelector}
         viewLevel={viewLevel}
         onViewLevelChange={setViewLevel}
-        onExit={() => navigate('/')}
+        onExit={() => navigate(toGovInsightPath('/'))}
       />
       {(model.meta.notices.length > 0 || backendModelNotice || backendComparisonNotice) && (
         <div className="bg-amber-50 border border-amber-200 text-amber-700 text-xs rounded-lg px-4 py-2">

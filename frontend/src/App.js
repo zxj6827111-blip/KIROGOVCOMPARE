@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import './App.css';
 import Login from './components/Login';
 import UploadReport from './components/UploadReport';
@@ -27,44 +28,149 @@ import GovInsightModule from './govinsight/DashboardApp';
 import { appendReturnTo, getRouteForPath } from './app/routeRegistry';
 import { resolveRouteReturnTo } from './app/returnTo';
 
+function ComparisonPrintRoute() {
+  const { comparisonId } = useParams();
+  return <ComparisonPrintView comparisonId={comparisonId} />;
+}
+
+function GovInsightPrintRoute() {
+  const { orgId = '', year = '' } = useParams();
+  return <GovInsightReportPrintView orgId={decodeURIComponent(orgId)} year={Number(year)} />;
+}
+
+function DataCenterRoute({ navigate }) {
+  return <DataCenterReportsList onSelectReport={(reportId) => navigate(`/datacenter/reports/${reportId}`)} />;
+}
+
+function DataCenterReportRoute({ navigate }) {
+  const { reportId } = useParams();
+  return <DataCenterReportDetail reportId={reportId} onBack={() => navigate('/datacenter')} />;
+}
+
+function JobDetailRoute({ navigate }) {
+  const { versionId } = useParams();
+  const location = useLocation();
+
+  if (!versionId || versionId === 'undefined' || Number.isNaN(Number(versionId))) {
+    return <Navigate to="/jobs" replace />;
+  }
+
+  const returnTo = resolveRouteReturnTo(location.search, location.pathname, '/jobs');
+  return <JobDetail versionId={versionId} onBack={() => navigate(returnTo)} />;
+}
+
+function CatalogRoute({ currentPath, navigate }) {
+  return (
+    <CityIndex
+      onNavigate={navigate}
+      onSelectReport={(reportId) => navigate(appendReturnTo(`/catalog/reports/${reportId}`, currentPath))}
+      onViewComparison={(comparisonId) => navigate(appendReturnTo(`/comparison/${comparisonId}`, '/history'))}
+    />
+  );
+}
+
+function ReportDetailRoute({ navigate }) {
+  const { reportId } = useParams();
+  const location = useLocation();
+  const returnTo = resolveRouteReturnTo(location.search, location.pathname, '/catalog');
+  return <ReportDetail reportId={reportId} onBack={() => navigate(returnTo)} />;
+}
+
+function IssueListRoute({ currentPath, navigate }) {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const regionId = params.get('region');
+  const regionName = params.get('name');
+
+  return (
+    <IssueList
+      regionId={regionId}
+      regionName={regionName}
+      onBack={() => navigate('/catalog')}
+      onSelectReport={(reportId) => navigate(appendReturnTo(`/catalog/reports/${reportId}`, currentPath || '/catalog'))}
+    />
+  );
+}
+
+function ReportMaintenanceRoute({ navigate }) {
+  return <ReportMaintenance onBack={() => navigate('/catalog')} onNavigate={navigate} />;
+}
+
+function ComparisonDetailRoute({ navigate }) {
+  const { comparisonId } = useParams();
+  const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
+  const autoPrint = searchParams.get('autoPrint') === 'true';
+  const returnTo = resolveRouteReturnTo(location.search, location.pathname, '/history');
+
+  return (
+    <ComparisonDetailView
+      comparisonId={comparisonId}
+      onBack={() => navigate(returnTo)}
+      autoPrint={autoPrint}
+    />
+  );
+}
+
+function AuthenticatedApp({ onLogout, user }) {
+  const location = useLocation();
+  const routerNavigate = useNavigate();
+  const currentPath = `${location.pathname}${location.search}`;
+  const activeRoute = getRouteForPath(location.pathname);
+  const navigate = useCallback(
+    (path, options) => {
+      if (!path) return;
+      routerNavigate(path, options);
+    },
+    [routerNavigate]
+  );
+
+  return (
+    <ToastProvider>
+      <ConfirmDialogProvider>
+        <AppShell
+          currentPath={currentPath}
+          navigate={navigate}
+          onLogout={onLogout}
+          route={activeRoute}
+          user={user}
+        >
+          <Routes>
+            <Route path="/" element={<Navigate to="/catalog" replace />} />
+            <Route path="/catalog" element={<CatalogRoute currentPath={currentPath} navigate={navigate} />} />
+            <Route path="/catalog/reports" element={<CatalogRoute currentPath={currentPath} navigate={navigate} />} />
+            <Route path="/catalog/reports/:reportId" element={<ReportDetailRoute navigate={navigate} />} />
+            <Route path="/upload" element={<UploadReport />} />
+            <Route path="/jobs" element={<JobCenter />} />
+            <Route path="/jobs/:versionId" element={<JobDetailRoute navigate={navigate} />} />
+            <Route path="/history" element={<ComparisonHistory />} />
+            <Route path="/comparison/:comparisonId" element={<ComparisonDetailRoute navigate={navigate} />} />
+            <Route path="/issues/*" element={<IssueListRoute currentPath={currentPath} navigate={navigate} />} />
+            <Route path="/report-maintenance" element={<ReportMaintenanceRoute navigate={navigate} />} />
+            <Route path="/regions" element={<RegionsManager />} />
+            <Route path="/admin/users" element={<UserManagement />} />
+            <Route path="/datacenter" element={<DataCenterRoute navigate={navigate} />} />
+            <Route path="/datacenter/reports/:reportId" element={<DataCenterReportRoute navigate={navigate} />} />
+            <Route path="/govinsight/*" element={<GovInsightModule />} />
+            <Route path="*" element={<Navigate to="/catalog" replace />} />
+          </Routes>
+        </AppShell>
+      </ConfirmDialogProvider>
+    </ToastProvider>
+  );
+}
+
 function App() {
-  const [currentPath, setCurrentPath] = useState(`${window.location.pathname}${window.location.search}`);
+  const navigate = useNavigate();
   const [user, setUser] = useState(() => getCurrentUser());
   const [authChecked, setAuthChecked] = useState(false);
 
-
-  // Check auth on mount
   useEffect(() => {
     if (isAuthenticated()) {
       setUser(getCurrentUser());
     }
     setAuthChecked(true);
   }, []);
-
-  useEffect(() => {
-    const handlePopState = () => {
-      setCurrentPath(`${window.location.pathname}${window.location.search}`);
-    };
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
-
-  const navigate = (path) => {
-    if (path === currentPath) return;
-    window.history.pushState({}, '', path);
-    setCurrentPath(path);
-  };
-
-  const location = useMemo(() => new URL(currentPath, window.location.origin), [currentPath]);
-  const pathname = location.pathname;
-  const activeRoute = getRouteForPath(pathname);
-
-  useEffect(() => {
-    if (pathname === '/') {
-      navigate('/catalog');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]);
 
   const handleLoginSuccess = (userData) => {
     setUser(userData);
@@ -76,112 +182,29 @@ function App() {
     setUser(null);
   };
 
-  // Show loading while checking auth
   if (!authChecked) {
     return (
       <div className="app app-loading">
-        <p>加载中...</p>
+        <p>Loading...</p>
       </div>
     );
   }
 
-  // Special route for print pages (no auth required for Puppeteer PDF export)
-  if (pathname.startsWith('/print/comparison/')) {
-    const comparisonId = pathname.split('/').pop();
-    return <ComparisonPrintView comparisonId={comparisonId} />;
-  }
-  if (pathname.startsWith('/print/govinsight-report/')) {
-    const parts = pathname.split('/');
-    const orgId = decodeURIComponent(parts[parts.length - 2] || '');
-    const year = Number(parts[parts.length - 1]);
-    return <GovInsightReportPrintView orgId={orgId} year={year} />;
-  }
-
-  // Show login if not authenticated
-  if (!user) {
-    return <Login onLoginSuccess={handleLoginSuccess} />;
-  }
-
-  const renderContent = () => {
-    if (pathname === '/govinsight' || pathname.startsWith('/govinsight')) {
-      return <GovInsightModule />;
-    }
-    if (pathname === '/regions') return <RegionsManager />;
-    if (pathname === '/upload') return <UploadReport />;
-    if (pathname === '/jobs' || pathname === '/jobs/') return <JobCenter />;
-    if (pathname === '/admin/users') return <UserManagement />;
-    if (pathname === '/datacenter') {
-      return <DataCenterReportsList onSelectReport={(reportId) => navigate(`/datacenter/reports/${reportId}`)} />;
-    }
-    if (pathname.startsWith('/datacenter/reports/')) {
-      const reportId = pathname.split('/').pop();
-      return <DataCenterReportDetail reportId={reportId} onBack={() => navigate('/datacenter')} />;
-    }
-    if (pathname.startsWith('/jobs/')) {
-      const versionId = pathname.split('/').pop();
-      // Validate versionId
-      if (!versionId || versionId === 'undefined' || isNaN(Number(versionId))) {
-        // Invalid versionId, redirect to jobs list
-        navigate('/jobs');
-        return null;
-      }
-      const returnTo = resolveRouteReturnTo(location.search, pathname, '/jobs');
-      return <JobDetail versionId={versionId} onBack={() => navigate(returnTo)} />;
-    }
-    if (pathname === '/catalog' || pathname === '/catalog/reports') {
-      return <CityIndex
-        onNavigate={navigate}
-        onSelectReport={(reportId) => navigate(appendReturnTo(`/catalog/reports/${reportId}`, currentPath))}
-        onViewComparison={(comparisonId) => navigate(appendReturnTo(`/comparison/${comparisonId}`, '/history'))}
-      />;
-    }
-    if (pathname.startsWith('/catalog/reports/')) {
-      const reportId = pathname.split('/').pop();
-      const returnTo = resolveRouteReturnTo(location.search, pathname, '/catalog');
-      return <ReportDetail reportId={reportId} onBack={() => navigate(returnTo)} />;
-    }
-    if (pathname === '/history') return <ComparisonHistory />;
-    if (pathname === '/issues' || pathname.startsWith('/issues')) {
-      // Extract region ID from query params if present
-      const params = new URLSearchParams(window.location.search);
-      const regionId = params.get('region');
-      const regionName = params.get('name');
-      return <IssueList
-        regionId={regionId}
-        regionName={regionName}
-        onBack={() => navigate('/catalog')}
-        onSelectReport={(reportId) => navigate(appendReturnTo(`/catalog/reports/${reportId}`, currentPath || '/catalog'))}
-      />;
-    }
-    if (pathname === '/report-maintenance') {
-      return <ReportMaintenance onBack={() => navigate('/catalog')} onNavigate={navigate} />;
-    }
-    if (pathname.startsWith('/comparison/')) {
-      // Extract ID from /comparison/:id
-      const parts = pathname.split('/');
-      const id = parts[parts.length - 1]; // or parts[2]
-      // Check for autoPrint query param
-      const autoPrint = new URLSearchParams(window.location.search).get('autoPrint') === 'true';
-      const returnTo = resolveRouteReturnTo(location.search, pathname, '/history');
-      return <ComparisonDetailView comparisonId={id} onBack={() => navigate(returnTo)} autoPrint={autoPrint} />;
-    }
-    return <CityIndex onNavigate={navigate} onSelectReport={(reportId) => navigate(appendReturnTo(`/catalog/reports/${reportId}`, '/catalog'))} />;
-  };
-
   return (
-    <ToastProvider>
-      <ConfirmDialogProvider>
-        <AppShell
-          currentPath={currentPath}
-          navigate={navigate}
-          onLogout={handleLogout}
-          route={activeRoute}
-          user={user}
-        >
-          {renderContent()}
-        </AppShell>
-      </ConfirmDialogProvider>
-    </ToastProvider>
+    <Routes>
+      <Route path="/print/comparison/:comparisonId" element={<ComparisonPrintRoute />} />
+      <Route path="/print/govinsight-report/:orgId/:year" element={<GovInsightPrintRoute />} />
+      <Route
+        path="/*"
+        element={
+          user ? (
+            <AuthenticatedApp onLogout={handleLogout} user={user} />
+          ) : (
+            <Login onLoginSuccess={handleLoginSuccess} />
+          )
+        }
+      />
+    </Routes>
   );
 }
 
