@@ -14,6 +14,7 @@ import {
   summarizeConsistencyGroups,
   summarizeQualityAuditGroups,
 } from '../utils/consistencyDisplay';
+import { buildEvidenceViewModel, shouldShowEvidenceViewModel } from '../utils/evidenceViewModel';
 import { aggregateIssuesFromChecks } from '../utils/issueAggregation';
 import { useToast } from './common/ToastProvider';
 import { useConfirmDialog } from './common/ConfirmDialogProvider';
@@ -108,6 +109,68 @@ const getSeverityColor = (status, isQualityMode = false) => {
     default:
       return 'status-other';
   }
+};
+
+const EVIDENCE_SEVERITY_LABELS = {
+  high: '高风险',
+  medium: '需复核',
+  low: '线索不足',
+  info: '来源说明',
+};
+
+const renderEvidenceSummary = (evidenceModel) => {
+  if (!evidenceModel) return null;
+  const sourceRefs = evidenceModel.sourceRefs || [];
+
+  return (
+    <div className={`evidence-view evidence-view--${evidenceModel.severity}`}>
+      <div className="evidence-view__head">
+        <span className="evidence-view__label">证据说明</span>
+        <span className="evidence-view__severity">
+          {EVIDENCE_SEVERITY_LABELS[evidenceModel.severity] || '来源说明'}
+        </span>
+      </div>
+      <p className="evidence-view__summary">{evidenceModel.summary}</p>
+      <div className="evidence-view__grid">
+        <div>
+          <span>风险原因</span>
+          <strong>{evidenceModel.reasonLabel}</strong>
+        </div>
+        <div>
+          <span>字段路径</span>
+          <code>{evidenceModel.fieldPath}</code>
+        </div>
+        <div>
+          <span>原始值</span>
+          <strong>{evidenceModel.originalValue}</strong>
+        </div>
+        <div>
+          <span>解析值</span>
+          <strong>{evidenceModel.parsedValue}</strong>
+        </div>
+        <div>
+          <span>比对值</span>
+          <strong>{evidenceModel.comparedValue}</strong>
+        </div>
+      </div>
+      {sourceRefs.length > 0 ? (
+        <div className="evidence-view__sources">
+          <span>来源线索</span>
+          <div>
+            {sourceRefs.slice(0, 4).map((sourceRef, index) => (
+              <code key={`${sourceRef.role}-${sourceRef.path}-${index}`}>
+                {sourceRef.label || sourceRef.path}
+              </code>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="evidence-view__fallback">
+          {evidenceModel.fallbackNotice || '暂无更详细来源，仅保留结构化字段路径'}
+        </div>
+      )}
+    </div>
+  );
 };
 
 const renderGroupSummary = (group, isQualityMode) => {
@@ -482,11 +545,21 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
 
               {expanded ? (
                 <div className="group-items">
+                  {group.hasOnlyNotAssessable && group.items.length > 0 ? (
+                    <div className="group-empty-state">
+                      <div className="group-empty-title">
+                        {modeMeta.isQualityMode ? '暂无可判断提示' : '暂无可评估规则'}
+                      </div>
+                      <div className="group-empty-desc">
+                        {modeMeta.isQualityMode ? '当前仅保留提示入口，不计入风险数量。' : '当前仅保留分组入口，不计入问题。'}
+                      </div>
+                    </div>
+                  ) : null}
                   {group.items.length === 0 ? (
                     <div className="no-issues">
                       {modeMeta.isQualityMode ? '暂无数据质量提示' : '暂无规则项'}
                     </div>
-                  ) : group.hasOnlyNotAssessable ? (
+                  ) : group.hasOnlyNotAssessable && group.items.length === 0 ? (
                     <div className="group-empty-state">
                       <div className="group-empty-title">
                         {modeMeta.isQualityMode ? '暂无可判断提示' : '暂无可评估规则'}
@@ -514,6 +587,9 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
                       const locateTitle = itemNo
                         ? `${modeMeta.isQualityMode ? '提示' : '问题'} ${itemNo}｜${item.title}`
                         : item.title;
+                      const evidenceModel = shouldShowEvidenceViewModel(item)
+                        ? buildEvidenceViewModel(item, { qualityMode: modeMeta.isQualityMode })
+                        : null;
 
                       return (
                         <div
@@ -606,6 +682,7 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
                                 </div>
                               ) : null}
                             </div>
+                            {renderEvidenceSummary(evidenceModel)}
                           </div>
 
                           <div className="item-actions">

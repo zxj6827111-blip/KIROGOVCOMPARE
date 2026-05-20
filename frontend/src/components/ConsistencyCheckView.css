@@ -532,6 +532,125 @@
   color: var(--text-main);
 }
 
+.evidence-view {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #cbd5e1;
+  border-left: 4px solid #64748b;
+  border-radius: var(--radius-sm);
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.evidence-view--high {
+  border-left-color: #dc2626;
+  background: #fef2f2;
+}
+
+.evidence-view--medium {
+  border-left-color: #d97706;
+  background: #fffbeb;
+}
+
+.evidence-view--low {
+  border-left-color: #64748b;
+  background: #f8fafc;
+}
+
+.evidence-view--info {
+  border-left-color: #2563eb;
+  background: #eff6ff;
+}
+
+.evidence-view__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.evidence-view__label {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.evidence-view__severity {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.evidence-view__summary {
+  margin: 0 0 10px;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.evidence-view__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.evidence-view__grid > div,
+.evidence-view__sources,
+.evidence-view__fallback {
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 8px;
+}
+
+.evidence-view__grid span,
+.evidence-view__sources > span {
+  display: block;
+  margin-bottom: 4px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.evidence-view__grid strong {
+  display: block;
+  color: #0f172a;
+  font-size: 13px;
+  word-break: break-word;
+}
+
+.evidence-view code {
+  display: inline-block;
+  max-width: 100%;
+  color: #1e293b;
+  background: rgba(226, 232, 240, 0.8);
+  border-radius: 4px;
+  padding: 2px 5px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.evidence-view__sources {
+  margin-top: 8px;
+}
+
+.evidence-view__sources > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.evidence-view__fallback {
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 13px;
+}
+
 .item-actions {
   margin-top: 16px;
   padding-top: 16px;

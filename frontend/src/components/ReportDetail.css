@@ -1057,14 +1057,20 @@
 
 .focus-banner {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
   gap: 16px;
   margin: 12px 0 20px;
   padding: 12px 16px;
   background: rgba(251, 191, 36, 0.12);
   border: 1px solid rgba(245, 158, 11, 0.4);
   border-radius: var(--radius-md);
+}
+
+.focus-banner-main {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
 }
 
 .focus-title {
@@ -1096,6 +1102,100 @@
 
 .btn-clear-focus:hover {
   background: #fef3c7;
+}
+
+.focus-evidence {
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  border-left: 4px solid #d97706;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.78);
+  padding: 12px;
+}
+
+.focus-evidence--high {
+  border-left-color: #dc2626;
+}
+
+.focus-evidence--low,
+.focus-evidence--info {
+  border-left-color: #64748b;
+}
+
+.focus-evidence-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.focus-evidence-summary strong {
+  color: #78350f;
+}
+
+.focus-evidence-summary span {
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.16);
+  color: #92400e;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.focus-evidence-summary p {
+  flex-basis: 100%;
+  margin: 4px 0 0;
+  color: #78350f;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.focus-evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.focus-evidence-grid > div,
+.focus-evidence-fallback {
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  border-radius: 6px;
+  background: #fffaf0;
+  padding: 8px;
+}
+
+.focus-evidence-grid span {
+  display: block;
+  margin-bottom: 4px;
+  color: #92400e;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.focus-evidence-grid strong {
+  display: block;
+  color: #451a03;
+  font-size: 13px;
+  word-break: break-word;
+}
+
+.focus-evidence-grid code {
+  display: inline-block;
+  max-width: 100%;
+  border-radius: 4px;
+  background: rgba(254, 243, 199, 0.85);
+  color: #451a03;
+  padding: 2px 5px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.focus-evidence-fallback {
+  margin-top: 8px;
+  color: #92400e;
+  font-size: 13px;
 }
 
 .trace-panel {

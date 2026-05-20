@@ -13,6 +13,7 @@ import ExportPanel from './ExportPanel';
 import PageHeader from './common/PageHeader';
 import StatusBadge from './common/StatusBadge';
 import { getAxiosFriendlyError } from '../utils/errorTranslator';
+import { buildComparisonEvidenceSummary } from '../utils/evidenceViewModel';
 import { resolveSafeReturnTo } from '../app/returnTo';
 
 // ---- Tokenization & Similarity Algorithm (Ported) ----
@@ -271,11 +272,30 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
   }, [data]);
 
   const renderSectionDiff = (row) => {
+    const renderWithEvidenceNote = (node, sectionType) => {
+      const evidence = buildComparisonEvidenceSummary({
+        sectionType,
+        yearA: data.year_a,
+        yearB: data.year_b,
+      });
+
+      return (
+        <>
+          {node}
+          <div className="mt-2 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+            <strong className="mr-1 text-slate-700">差异来源说明：</strong>
+            {evidence.summary}
+            <span className="ml-2 text-slate-500">{evidence.fieldPath}</span>
+          </div>
+        </>
+      );
+    };
+
     // 1. Active Disclosure Diff (Table 2)
     if (row.newSec?.type === 'table_2' && row.newSec.activeDisclosureData && row.oldSec?.activeDisclosureData) {
       const dA = row.oldSec.activeDisclosureData;
       const dB = row.newSec.activeDisclosureData;
-      return (
+      return renderWithEvidenceNote((
         <SimpleDiffTable
           title="主动公开数据差异"
           headers={["指标", `${data.year_a}年`, `${data.year_b}年`]}
@@ -287,14 +307,14 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
             { label: '行政事业性收费(万元)', valA: dA.fees?.amount, valB: dB.fees?.amount },
           ]}
         />
-      );
+      ), 'table_2');
     }
 
     // 2. Review Litigation Diff (Table 4)
     if (row.newSec?.type === 'table_4' && row.newSec.reviewLitigationData && row.oldSec?.reviewLitigationData) {
       const dA = row.oldSec.reviewLitigationData;
       const dB = row.newSec.reviewLitigationData;
-      return (
+      return renderWithEvidenceNote((
         <SimpleDiffTable
           title="复议诉讼数据差异"
           headers={["类型", `${data.year_a}总计`, `${data.year_b}总计`]}
@@ -304,7 +324,7 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
             { label: '行政诉讼(复议后)', valA: dA.litigationPostReview?.total, valB: dB.litigationPostReview?.total },
           ]}
         />
-      );
+      ), 'table_4');
     }
 
     // 3. Table 3 Diff
@@ -316,13 +336,13 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
         valA: r.val,
         valB: rowsB[i] ? rowsB[i].val : 0
       }));
-      return (
+      return renderWithEvidenceNote((
         <SimpleDiffTable
           title="依申请公开情况 - 详细指标差异分析"
           headers={["指标", `${data.year_a}年`, `${data.year_b}年`]}
           rows={diffRows}
         />
-      );
+      ), 'table_3');
     }
 
     return null;
