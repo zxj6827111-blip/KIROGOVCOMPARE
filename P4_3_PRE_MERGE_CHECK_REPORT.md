@@ -4,19 +4,20 @@
 
 - 当前分支：`codex/p4-deployment-operations`
 - 基准分支：`origin/main`
-- 验证时 P4-3 实施 commit：`0a62fe02aae1a3ed808d9981672df72dabfc7271`
+- 验证时 P4-3 实施 commit：`4b90e66216e0c1d042683fa2c2b279d4e2545b00`
 - commit 标题：`docs: add P4 deployment operations materials`
 
-说明：本报告在 P4-3E 验证通过后生成，并会作为 P4-3 交付材料一并提交到当前分支。
+说明：本报告在 P4-3E 验证通过后生成，并作为 P4-3 交付材料提交到当前分支。后续如仅修正本报告文字，不改变 P4-3 实施 diff 范围。
 
 ## 2. 与 origin/main 的 diff 文件清单
 
-P4-3 实施 diff：
+P4-3 最终 diff：
 
 ```text
 .env.example
 DEPLOYMENT.md
 OPERATIONS.md
+P4_3_PRE_MERGE_CHECK_REPORT.md
 P4_DEPLOYMENT_OPERATIONS_PLAN.md
 P4_DEPLOYMENT_OPERATIONS_REPORT.md
 TROUBLESHOOTING.md
@@ -25,25 +26,20 @@ scripts/diagnostic-bundle.js
 scripts/health-check.js
 ```
 
-本报告提交后，最终分支还会包含：
-
-```text
-P4_3_PRE_MERGE_CHECK_REPORT.md
-```
-
 diff 统计：
 
 ```text
 .env.example                       |  25 ++
 DEPLOYMENT.md                      | 383 ++++++++++++++++++++----------
 OPERATIONS.md                      | 360 ++++++++++++++++++++++++++++
+P4_3_PRE_MERGE_CHECK_REPORT.md     | 194 +++++++++++++++
 P4_DEPLOYMENT_OPERATIONS_PLAN.md   | 377 ++++++++++++++++++++++++++++++
 P4_DEPLOYMENT_OPERATIONS_REPORT.md | 348 +++++++++++++++++++++++++++
 TROUBLESHOOTING.md                 | 468 +++++++++++++++++++++++++++++++++++++
 package.json                       |   5 +
 scripts/diagnostic-bundle.js       | 349 +++++++++++++++++++++++++++
 scripts/health-check.js            | 465 ++++++++++++++++++++++++++++++++++++
-9 files changed, 2653 insertions(+), 127 deletions(-)
+10 files changed, 2847 insertions(+), 127 deletions(-)
 ```
 
 ## 3. 禁止项检查
