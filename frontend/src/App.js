@@ -4,7 +4,6 @@ import Login from './components/Login';
 import UploadReport from './components/UploadReport';
 
 import ReportDetail from './components/ReportDetail';
-import Logo from './components/Logo';
 import CityIndex from './components/CityIndex';
 import RegionsManager from './components/RegionsManager';
 import ComparisonHistory from './components/ComparisonHistory';
@@ -19,12 +18,14 @@ import IssueList from './components/IssueList';
 import ReportMaintenance from './components/ReportMaintenance';
 import { ToastProvider } from './components/common/ToastProvider';
 import { ConfirmDialogProvider } from './components/common/ConfirmDialogProvider';
+import AppShell from './components/app/AppShell';
 
 import DataCenterReportsList from './components/datacenter/DataCenterReportsList';
 import DataCenterReportDetail from './components/datacenter/DataCenterReportDetail';
 import { isAuthenticated, getCurrentUser, logout } from './apiClient';
-import { Map, UploadCloud, ListTodo, PieChart, GitCompare, User, Activity } from 'lucide-react';
 import GovInsightModule from './govinsight/DashboardApp';
+import { appendReturnTo, getRouteForPath } from './app/routeRegistry';
+import { resolveRouteReturnTo } from './app/returnTo';
 
 function App() {
   const [currentPath, setCurrentPath] = useState(`${window.location.pathname}${window.location.search}`);
@@ -56,6 +57,7 @@ function App() {
 
   const location = useMemo(() => new URL(currentPath, window.location.origin), [currentPath]);
   const pathname = location.pathname;
+  const activeRoute = getRouteForPath(pathname);
 
   useEffect(() => {
     if (pathname === '/') {
@@ -123,17 +125,20 @@ function App() {
         navigate('/jobs');
         return null;
       }
-      return <JobDetail versionId={versionId} onBack={() => navigate('/jobs')} />;
+      const returnTo = resolveRouteReturnTo(location.search, pathname, '/jobs');
+      return <JobDetail versionId={versionId} onBack={() => navigate(returnTo)} />;
     }
     if (pathname === '/catalog' || pathname === '/catalog/reports') {
       return <CityIndex
-        onSelectReport={(reportId) => navigate(`/catalog/reports/${reportId}`)}
-        onViewComparison={(comparisonId) => navigate(`/comparison/${comparisonId}`)}
+        onNavigate={navigate}
+        onSelectReport={(reportId) => navigate(appendReturnTo(`/catalog/reports/${reportId}`, currentPath))}
+        onViewComparison={(comparisonId) => navigate(appendReturnTo(`/comparison/${comparisonId}`, '/history'))}
       />;
     }
     if (pathname.startsWith('/catalog/reports/')) {
       const reportId = pathname.split('/').pop();
-      return <ReportDetail reportId={reportId} onBack={() => window.history.back()} />;
+      const returnTo = resolveRouteReturnTo(location.search, pathname, '/catalog');
+      return <ReportDetail reportId={reportId} onBack={() => navigate(returnTo)} />;
     }
     if (pathname === '/history') return <ComparisonHistory />;
     if (pathname === '/issues' || pathname.startsWith('/issues')) {
@@ -145,7 +150,7 @@ function App() {
         regionId={regionId}
         regionName={regionName}
         onBack={() => navigate('/catalog')}
-        onSelectReport={(reportId) => navigate(`/catalog/reports/${reportId}`)}
+        onSelectReport={(reportId) => navigate(appendReturnTo(`/catalog/reports/${reportId}`, currentPath || '/catalog'))}
       />;
     }
     if (pathname === '/report-maintenance') {
@@ -157,127 +162,24 @@ function App() {
       const id = parts[parts.length - 1]; // or parts[2]
       // Check for autoPrint query param
       const autoPrint = new URLSearchParams(window.location.search).get('autoPrint') === 'true';
-      return <ComparisonDetailView comparisonId={id} onBack={() => navigate('/history')} autoPrint={autoPrint} />;
+      const returnTo = resolveRouteReturnTo(location.search, pathname, '/history');
+      return <ComparisonDetailView comparisonId={id} onBack={() => navigate(returnTo)} autoPrint={autoPrint} />;
     }
-    return <CityIndex onSelectReport={(reportId) => navigate(`/catalog/reports/${reportId}`)} />;
+    return <CityIndex onNavigate={navigate} onSelectReport={(reportId) => navigate(appendReturnTo(`/catalog/reports/${reportId}`, '/catalog'))} />;
   };
-
-  const isNavActive = (path) => pathname.startsWith(path);
 
   return (
     <ToastProvider>
       <ConfirmDialogProvider>
-        <div className="app">
-      <header className="header">
-        <Logo />
-        <div className="header-user">
-          {/* User Management moved to header, replacing NotificationCenter as requested */}
-          {user.permissions?.manage_users && (
-            <button
-              onClick={() => navigate('/admin/users')}
-              className={`header-nav-btn ${isNavActive('/admin/users') ? 'active' : ''}`}
-              title="用户管理"
-              style={{
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                color: isNavActive('/admin/users') ? '#2563eb' : '#64748b',
-                fontWeight: 500,
-                fontSize: '14px',
-                marginRight: '12px'
-              }}
-            >
-              <User size={18} />
-              <span>用户管理</span>
-            </button>
-          )}
-
-          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{
-              width: 32, height: 32, borderRadius: '50%', background: '#eff6ff',
-              color: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontWeight: 'bold', fontSize: '14px'
-            }}>
-              {user.displayName?.[0] || user.username?.[0] || 'A'}
-            </div>
-            <span style={{ fontWeight: 500 }}>{user.displayName || user.username}</span>
-          </span>
-          <button onClick={handleLogout} className="logout-btn">退出登录</button>
-        </div>
-      </header>
-
-      <nav className="nav">
-        {user.permissions?.manage_regions && (
-          <button
-            type="button"
-            className={`nav-btn ${isNavActive('/regions') ? 'active' : ''}`}
-            onClick={() => navigate('/regions')}
-          >
-            <Map size={20} className="nav-icon" />
-            <span>城市管理</span>
-          </button>
-        )}
-        {user.permissions?.upload_reports && (
-          <button
-            type="button"
-            className={`nav-btn ${isNavActive('/upload') ? 'active' : ''}`}
-            onClick={() => navigate('/upload')}
-          >
-            <UploadCloud size={20} className="nav-icon" />
-            <span>上传报告</span>
-          </button>
-        )}
-        <button
-          type="button"
-          className={`nav-btn ${isNavActive('/catalog') ? 'active' : ''}`}
-          onClick={() => navigate('/catalog')}
+        <AppShell
+          currentPath={currentPath}
+          navigate={navigate}
+          onLogout={handleLogout}
+          route={activeRoute}
+          user={user}
         >
-          <PieChart size={20} className="nav-icon" />
-          <span>年报汇总</span>
-        </button>
-        {/* <button
-          type="button"
-          className={`nav-btn ${isNavActive('/datacenter') ? 'active' : ''}`}
-          onClick={() => navigate('/datacenter')}
-        >
-          <Database size={20} className="nav-icon" />
-          <span>Data Center</span>
-        </button> */}
-        <button
-          type="button"
-          className={`nav-btn ${isNavActive('/history') ? 'active' : ''}`}
-          onClick={() => navigate('/history')}
-        >
-          <GitCompare size={20} className="nav-icon" />
-          <span>比对结果汇总</span>
-        </button>
-        <button
-          type="button"
-          className={`nav-btn ${isNavActive('/jobs') ? 'active' : ''}`}
-          onClick={() => navigate('/jobs')}
-        >
-          <ListTodo size={20} className="nav-icon" />
-          <span>任务中心</span>
-        </button>
-        <button
-          type="button"
-          className={`nav-btn ${isNavActive('/govinsight') ? 'active' : ''}`}
-          onClick={() => navigate('/govinsight')}
-        >
-          <Activity size={20} className="nav-icon" />
-          <span>智慧治理</span>
-        </button>
-      </nav>
-
-      <main className="main">{renderContent()}</main>
-
-      <footer className="footer">
-        <p>© 2025 政府信息公开年度报告差异比对系统</p>
-      </footer>
-        </div>
+          {renderContent()}
+        </AppShell>
       </ConfirmDialogProvider>
     </ToastProvider>
   );

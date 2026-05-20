@@ -12,6 +12,7 @@ import ExportPanel from './ExportPanel';
 import PageHeader from './common/PageHeader';
 import StatusBadge from './common/StatusBadge';
 import { getAxiosFriendlyError } from '../utils/errorTranslator';
+import { resolveSafeReturnTo } from '../app/returnTo';
 
 // ---- Tokenization & Similarity Algorithm (Ported) ----
 const tokenizeText = (text) => {
@@ -128,6 +129,10 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
   const [leftIssueHighlightCells, setLeftIssueHighlightCells] = useState([]);
+  const handleBack = useCallback(() => {
+    if (onBack) return onBack();
+    window.location.href = resolveSafeReturnTo(window.location.search, '/history');
+  }, [onBack]);
   // Auto-print effect
   useEffect(() => {
     if (autoPrint && data && !loading && !error) {
@@ -376,7 +381,7 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
     <div className="space-y-4 pb-20 comparison-container bg-gray-50 min-h-screen p-4">
       {/* Back Button */}
       <div className="back-nav mb-4 no-print block">
-        <button onClick={onBack} className="flex items-center text-blue-600 hover:text-blue-800">
+        <button onClick={handleBack} className="flex items-center text-blue-600 hover:text-blue-800">
           <ArrowLeft size={18} className="mr-1" /> 返回列表
         </button>
       </div>

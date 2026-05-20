@@ -1,0 +1,156 @@
+.app-shell {
+  min-height: 100vh;
+  background-color: var(--color-bg-secondary);
+}
+
+.app-shell__header {
+  height: var(--header-height);
+  background: var(--color-bg-main);
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: var(--shadow-sm);
+}
+
+.app-shell__user {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.app-shell__user-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.app-shell__user-nav.active,
+.app-shell__user-nav:hover {
+  color: var(--primary);
+}
+
+.app-shell__identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-shell__avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--primary-light);
+  color: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.app-shell__name {
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.app-shell__nav {
+  background: var(--color-bg-main);
+  border-bottom: 1px solid var(--color-border);
+  padding: 0 24px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 48px;
+  overflow-x: auto;
+}
+
+.app-shell__nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 0 14px;
+  background: var(--bg-surface);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: #64748b;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+
+.app-shell__nav-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.app-shell__nav-btn.active {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.app-shell__main {
+  flex: 1;
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.app-shell__footer {
+  background: var(--color-bg-main);
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-tertiary);
+  text-align: center;
+  padding: 16px;
+  font-size: 12px;
+  margin-top: auto;
+}
+
+.app-shell__footer p {
+  margin: 0;
+}
+
+body.leader-cockpit-mode .app-shell__header,
+body.leader-cockpit-mode .app-shell__nav,
+body.leader-cockpit-mode .app-shell__footer {
+  display: none;
+}
+
+body.leader-cockpit-mode .app-shell__main {
+  max-width: none;
+  padding: 0;
+}
+
+@media (max-width: 760px) {
+  .app-shell__header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+    height: auto;
+    padding: 12px 16px;
+  }
+
+  .app-shell__user {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .app-shell__main {
+    padding: 16px;
+  }
+}

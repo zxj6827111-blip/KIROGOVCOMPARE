@@ -14,6 +14,7 @@ import PageHeader from './common/PageHeader';
 import ReportFlowStatusBar from './ReportFlowStatusBar';
 import { useToast } from './common/ToastProvider';
 import { useConfirmDialog } from './common/ConfirmDialogProvider';
+import { resolveSafeReturnTo } from '../app/returnTo';
 
 const tryParseJsonText = (value) => {
   if (typeof value !== 'string') return { ok: false, value: null };
@@ -1116,7 +1117,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
 
   const handleBack = () => {
     if (onBack) return onBack();
-    window.history.back();
+    window.location.href = resolveSafeReturnTo(window.location.search, '/catalog');
   };
 
   const fetchFacts = async (targetReportId, versionId) => {
