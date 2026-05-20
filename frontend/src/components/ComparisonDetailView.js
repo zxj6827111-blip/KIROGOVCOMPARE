@@ -8,6 +8,7 @@ import DiffText from './DiffText';
 import CrossYearCheckView from './CrossYearCheckView';
 import { normalizeTablePath } from '../utils/tableRowColMapping';
 import { useToast } from './common/ToastProvider';
+import { useTaskDrawer } from './tasks/TaskDrawerProvider';
 import ExportPanel from './ExportPanel';
 import PageHeader from './common/PageHeader';
 import StatusBadge from './common/StatusBadge';
@@ -125,6 +126,7 @@ const getTable3Rows = (data) => {
 
 const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
   const toast = useToast();
+  const taskDrawer = useTaskDrawer();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
@@ -343,6 +345,16 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
       });
 
       if (response.data?.success) {
+        taskDrawer.trackPdfJob({
+          job_id: response.data.job_id,
+          comparison_id: comparisonId,
+          status: 'queued',
+          progress: 0,
+          export_title: response.data.export_title || title,
+          file_name: response.data.file_name,
+          file_exists: false,
+        });
+        taskDrawer.openDrawer();
         setDownloadStage('任务已创建!');
 
         // Brief delay to show success status

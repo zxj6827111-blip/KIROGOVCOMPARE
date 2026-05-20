@@ -4,6 +4,7 @@ import { apiClient } from '../apiClient';
 import ComparisonDetailView from './ComparisonDetailView';
 import CompareFailureModal from './CompareFailureModal';
 import { useToast } from './common/ToastProvider';
+import { useTaskDrawer } from './tasks/TaskDrawerProvider';
 import Button from './common/Button';
 import ExportPanel from './ExportPanel';
 import PageHeader from './common/PageHeader';
@@ -41,6 +42,7 @@ async function runBatchWithConcurrency(items, worker, concurrency = BATCH_REQUES
 
 function ComparisonHistory() {
   const toast = useToast();
+  const taskDrawer = useTaskDrawer();
   const confirmAction = useConfirmDialog();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -233,6 +235,16 @@ function ComparisonHistory() {
       });
 
       if (response.data?.success) {
+        taskDrawer.trackPdfJob({
+          job_id: response.data.job_id,
+          comparison_id: id,
+          status: 'queued',
+          progress: 0,
+          export_title: response.data.export_title || title,
+          file_name: response.data.file_name,
+          file_exists: false,
+        });
+        taskDrawer.openDrawer();
         toast.success('PDF 导出任务已创建', `${response.data.export_title || title} 已加入任务中心。`, {
           actionLabel: '查看导出任务',
           onAction: () => { window.location.href = '/jobs?tab=download'; },
@@ -312,10 +324,21 @@ function ComparisonHistory() {
       targets,
       async (target) => {
         try {
-          await apiClient.post('/pdf-jobs', {
+          const response = await apiClient.post('/pdf-jobs', {
             comparison_id: target.id,
             title: target.title
           });
+          if (response.data?.success) {
+            taskDrawer.trackPdfJob({
+              job_id: response.data.job_id,
+              comparison_id: target.id,
+              status: 'queued',
+              progress: 0,
+              export_title: response.data.export_title || target.title,
+              file_name: response.data.file_name,
+              file_exists: false,
+            });
+          }
           return true;
         } catch (err) {
           console.error('Failed to create PDF job for', target.id, err);
@@ -325,6 +348,9 @@ function ComparisonHistory() {
     );
 
     setSelectedIds([]);
+    if (successCount > 0) {
+      taskDrawer.openDrawer();
+    }
     toast.success('批量导出任务已创建', `成功 ${successCount} 个，失败 ${failedCount} 个。`, {
       actionLabel: '查看导出任务',
       onAction: () => { window.location.href = '/jobs?tab=download'; },

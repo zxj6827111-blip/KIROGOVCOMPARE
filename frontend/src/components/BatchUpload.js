@@ -17,6 +17,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { useToast } from './common/ToastProvider';
+import { useTaskDrawer } from './tasks/TaskDrawerProvider';
 
 const MAX_FILES = 50;
 
@@ -107,6 +108,7 @@ function BatchUpload({
   modelConfigLoading = false,
 }) {
   const toast = useToast();
+  const taskDrawer = useTaskDrawer();
   const [regions, setRegions] = useState([]);
   const [files, setFiles] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -449,6 +451,15 @@ function BatchUpload({
         const versionId = uploadResult.version_id || uploadResult.versionId;
 
         if (jobId && versionId) {
+          taskDrawer.trackParseJob({
+            job_id: jobId,
+            version_id: versionId,
+            status: 'queued',
+            progress: 0,
+            step_name: '等待解析',
+            file_name: fileItem.file?.name || fileItem.name,
+          });
+
           // 更新状态为提交成功/解析中
           setFiles((prev) =>
             prev.map((f) =>
@@ -496,10 +507,12 @@ function BatchUpload({
     setIsProcessing(false);
     setCurrentIndex(-1);
 
-    // FIX: Redirect to Task Center after batch upload completes
-    setTimeout(() => {
-      window.location.href = '/jobs';
-    }, 1500); // Brief delay to show final statistics
+    taskDrawer.openDrawer();
+    toast.success('批量上传已提交', '解析进度会在右侧任务抽屉持续更新。', {
+      actionLabel: '打开任务中心',
+      onAction: () => { window.location.href = '/jobs'; },
+      duration: 9000,
+    });
   };
 
   // 计算进度
