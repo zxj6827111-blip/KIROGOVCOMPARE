@@ -1,5 +1,6 @@
 import React, { useContext, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { toGovInsightPath } from '../../app/govInsightRoutes';
 import { EntityContext } from '../components/Layout';
 import { KPICard } from '../components/KPICard';
 import { MetricTip } from '../components/MetricTip';
@@ -138,7 +139,7 @@ export const DashboardHome: React.FC = () => {
     const target = entity.children?.find((child) => child.name === name) || null;
     if (target) {
       setEntity(target);
-      navigate('/portrait');
+      navigate(toGovInsightPath('/portrait'));
     }
   };
 

@@ -8,6 +8,7 @@ import { EntityProfile } from '../types';
 import { buildRegionTree, loadEntityData } from '../data';
 import { fetchOrgs } from '../api';
 import { getCurrentUser } from '../../apiClient';
+import { normalizeGovInsightSubPath, toGovInsightPath } from '../../app/govInsightRoutes';
 import { canAccessLeaderCockpit, isLeaderCockpitAdmin, isLeaderCockpitEnabled } from '../leader-cockpit/access';
 import { isDistrictLikeGovInsightEntity } from '../utils/entityClassification';
 
@@ -91,10 +92,11 @@ const partitionChildren = (children: EntityProfile[]) => {
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const location = useLocation();
   const navigate = useNavigate();
+  const govInsightSubPath = normalizeGovInsightSubPath(location.pathname);
   const user = getCurrentUser();
   const canShowLeaderCockpit = canAccessLeaderCockpit(user)
     && (isLeaderCockpitEnabled() || isLeaderCockpitAdmin(user));
-  const isLeaderCockpitRoute = location.pathname === '/leader-cockpit';
+  const isLeaderCockpitRoute = govInsightSubPath === '/leader-cockpit';
   const sectionLabels: Record<string, string> = {
     '/': '全景态势',
     '/portrait': '精准画像',
@@ -104,7 +106,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     '/benchmark': '横向对标',
     '/report': '智能辅策',
   };
-  const currentSectionLabel = sectionLabels[location.pathname] || '治理分析';
+  const currentSectionLabel = sectionLabels[govInsightSubPath] || '治理分析';
 
   const [regionTree, setRegionTree] = useState<EntityProfile[]>([]);
   const [currentEntity, setCurrentEntity] = useState<EntityProfile | null>(null);
@@ -473,7 +475,8 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
               {subNavItems.map((item) => (
                 <NavLink
                   key={item.path}
-                  to={item.path}
+                  to={toGovInsightPath(item.path)}
+                  end={item.path === '/'}
                   className={({ isActive }) =>
                     `flex items-center px-4 py-2 rounded-md text-sm font-medium transition-all ${isActive
                       ? 'bg-slate-800 text-white shadow-md'
@@ -492,7 +495,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
               {canShowLeaderCockpit && (
                 <button
                   type="button"
-                  onClick={() => navigate('/leader-cockpit')}
+                  onClick={() => navigate(toGovInsightPath('/leader-cockpit'))}
                   className="inline-flex items-center px-3 py-1.5 text-xs font-semibold rounded-md border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
                   title="进入领导驾驶舱"
                 >
@@ -555,7 +558,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                 <span className="font-medium text-slate-800">
                   {currentSectionLabel}
                 </span>
-                {location.pathname === '/report' && (
+                {govInsightSubPath === '/report' && (
                   <span className="ml-auto flex items-center text-blue-600 bg-blue-50 px-2 py-0.5 rounded text-xs">
                     <Printer className="w-3 h-3 mr-1" />
                     支持 A4 打印模式
