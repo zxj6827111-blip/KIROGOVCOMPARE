@@ -1,0 +1,53 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  --color-bg-main: #ffffff;
+  --color-bg-secondary: #f5f7fa;
+  --color-bg-hover: #f1f5f9;
+  --color-border: #cbd5e1;
+  --color-border-hover: #94a3b8;
+
+  --font-primary: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --color-text-primary: #171717;
+  --color-text-secondary: #475569;
+  --color-text-tertiary: #94a3b8;
+
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-light: #eff6ff;
+
+  --color-tag-blue-bg: #e0f2fe;
+  --color-tag-blue-text: #0284c7;
+  --color-tag-green-bg: #dcfce7;
+  --color-tag-green-text: #16a34a;
+  --color-tag-purple-bg: #f3e8ff;
+  --color-tag-purple-text: #9333ea;
+  --color-tag-red-bg: #fee2e2;
+  --color-tag-red-text: #dc2626;
+  --color-tag-warning-bg: #fef3c7;
+  --color-tag-warning-text: #d97706;
+
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+
+  --header-height: 64px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 16px;
+  --radius-full: 9999px;
+
+  --bg-app: var(--color-bg-secondary);
+  --bg-secondary: var(--color-bg-secondary);
+  --bg-surface: var(--color-bg-main);
+  --bg-surface-hover: var(--color-bg-hover);
+  --text-main: var(--color-text-primary);
+  --text-muted: var(--color-text-secondary);
+  --border-color: var(--color-border);
+  --success: var(--color-tag-green-text);
+  --warning: var(--color-tag-warning-text);
+  --danger: var(--color-tag-red-text);
+  --secondary: var(--color-text-secondary);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+}

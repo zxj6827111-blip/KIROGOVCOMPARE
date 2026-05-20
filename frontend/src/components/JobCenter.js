@@ -5,6 +5,8 @@ import { Trash2, RefreshCw, AlertTriangle, Ban, Eye, Download, RotateCw, Upload,
 import { useToast } from './common/ToastProvider';
 import { useConfirmDialog } from './common/ConfirmDialogProvider';
 import Button from './common/Button';
+import DataTable from './common/DataTable';
+import EmptyState from './common/EmptyState';
 import PageHeader from './common/PageHeader';
 import StatusBadge from './common/StatusBadge';
 import { getAxiosFriendlyError, getRawErrorDetail, translateFailureReason, translateJobError } from '../utils/errorTranslator';
@@ -790,10 +792,10 @@ function JobCenter() {
                     {loading ? (
                         <div className="loading-message">加载中...</div>
                     ) : jobs.length === 0 ? (
-                        <div className="empty-message">暂无任务</div>
+                        <EmptyState className="empty-message" title="暂无任务" />
                     ) : (
                         <div className="jobs-list-container">
-                            <table className="jobs-table">
+                            <DataTable className="jobs-table" containerClassName="jobs-table-container">
                                 <thead>
                                     <tr>
                                         <th style={{ width: '40px' }}>
@@ -883,7 +885,7 @@ function JobCenter() {
                                         </tr>
                                     ))}
                                 </tbody>
-                            </table>
+                            </DataTable>
                         </div>
                     )}
 
@@ -996,10 +998,10 @@ function JobCenter() {
                         {downloadLoading ? (
                             <div className="loading-message">加载中...</div>
                         ) : downloadJobs.length === 0 ? (
-                            <div className="empty-message">暂无下载任务</div>
+                            <EmptyState className="empty-message" title="暂无下载任务" />
                         ) : (
                             <div className="jobs-list-container">
-                                <table className="jobs-table">
+                                <DataTable className="jobs-table" containerClassName="jobs-table-container">
                                     <thead>
                                         <tr>
                                             <th style={{ width: '40px' }}>
@@ -1085,7 +1087,7 @@ function JobCenter() {
                                             </tr>
                                         ))}
                                     </tbody>
-                                </table>
+                                </DataTable>
                             </div>
                         )}
 

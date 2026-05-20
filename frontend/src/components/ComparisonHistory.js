@@ -6,6 +6,9 @@ import CompareFailureModal from './CompareFailureModal';
 import { useToast } from './common/ToastProvider';
 import { useTaskDrawer } from './tasks/TaskDrawerProvider';
 import Button from './common/Button';
+import DataTable from './common/DataTable';
+import EmptyState from './common/EmptyState';
+import ErrorState from './common/ErrorState';
 import ExportPanel from './ExportPanel';
 import PageHeader from './common/PageHeader';
 import StatusBadge from './common/StatusBadge';
@@ -702,18 +705,19 @@ function ComparisonHistory() {
         </div>
       )}
 
-      {error && <div className="alert error">{error}</div>}
+      {error && <ErrorState className="alert error" message={error} title="加载失败" />}
 
       {loading ? (
         <div className="loading-state">加载中...</div>
       ) : grandTotal === 0 ? (
-        <div className="empty-state">
-          <p>暂无比对记录</p>
-          <p className="hint">上传年报后，系统将自动生成与上一年的比对报告。</p>
-        </div>
+        <EmptyState
+          className="empty-state"
+          description="上传年报后，系统将自动生成与上一年的比对报告。"
+          title="暂无比对记录"
+        />
       ) : (
         <>
-          <table className="history-table tree-table">
+          <DataTable className="history-table tree-table">
             <thead>
               <tr>
                 <th style={{ width: '40px' }}>
@@ -740,7 +744,7 @@ function ComparisonHistory() {
                 <tr><td colSpan="8" style={{ textAlign: 'center', padding: '40px', color: '#9ca3af' }}>暂无数据</td></tr>
               )}
             </tbody>
-          </table>
+          </DataTable>
         </>
       )}
 

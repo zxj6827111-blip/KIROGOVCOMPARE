@@ -19,10 +19,11 @@ function AppShell({
 }) {
   const pathname = new URL(currentPath, window.location.origin).pathname;
   const activeNavGroup = getNavGroupForPath(pathname);
+  const isGovInsightRoute = pathname.startsWith('/govinsight');
   const navItems = getVisiblePrimaryNavItems(user);
 
   return (
-    <div className="app app-shell">
+    <div className={`app app-shell main-system-scope ${isGovInsightRoute ? 'app-shell--govinsight' : ''}`}>
       <header className="app-shell__header">
         <Logo />
         <div className="app-shell__user">
