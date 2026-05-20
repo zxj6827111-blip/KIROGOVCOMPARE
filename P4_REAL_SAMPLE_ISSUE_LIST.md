@@ -1,0 +1,7 @@
+# P4-1 真实样本问题清单
+
+| issue_id | 样本名称 | 所属环节 | 页面/接口 | 现象 | 预期 | 实际 | 严重程度 | 是否可复现 | 复现步骤 | 影响范围 | 初步原因 | 修复建议 | 是否需要进入 P4-2/P4-3/P4-5 | 当前状态 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| P4-1-001 | GovInsight 淮安市 2025 | GovInsight 报告生成 | `/api/gov-insight/ai-report/jobs/latest?org_id=city_721&year=2025` | 最新 AI 报告生成任务失败 | 最新生成任务应成功，或失败原因应不影响可复核报告生成链路 | latest job `17` 为 `failed`，错误 `overrides?.overallJudgments?.filter is not a function`；历史成功 job `16`、存储报告和 PDF 均可用 | medium | 是 | 查询 latest job；再查询 `/ai-report`、`/ai-report/payload`、`/report-pdf` 对照 | 影响 GovInsight 重新生成/演示时的任务状态可信度，不影响当前已存报告和 PDF 导出 | 生成协议或 override 字段类型兼容问题，可能把非数组传入 `overallJudgments.filter` | P4-5 做异常场景加固；同时在 P4-2 核对 report payload 与 evidence chain 的字段形态约束 | P4-2、P4-5 | 待处理 |
+| P4-1-002 | PDF 导出样本 | 自动验证环境 | `npm.cmd run smoke:pdf` | PDF smoke 缺少原生视觉工具，只能降级检查 | 交付前应具备文本、页数、空白页和像素级视觉基线 | pdfjs 可用；`pdfinfo`、`pdftoppm`、ImageMagick、Ghostscript 不可用 | low | 是 | 运行 `npm.cmd run smoke:pdf` 查看工具可用性摘要 | 不影响当前 smoke 通过，但降低 PDF 版式回归的可复核强度 | 本地验证机未安装 PDF 原生渲染/图像工具链 | P4-3 部署运维文档中补齐工具安装与巡检项；必要时在 CI 或验收机固定版本 | P4-3 | 待纳入环境清单 |
+| P4-1-003 | TaskDrawer 业务页 | 人工/浏览器验证 | `/upload`、`/jobs`、`/jobs?tab=download`、`/comparison/4670` | 当前工具无法完成认证后业务页 TaskDrawer 可视化点击确认 | P4-1 应有 TaskDrawer 页面级观察记录 | 内置浏览器只读沙箱和安全策略阻止写入登录态；仓库未安装可直接调用的 Playwright 包；接口、代码和测试证据已补齐，但缺少一次人工登录视觉确认 | low | 是 | 尝试在浏览器写入 `admin_token` 后访问业务页；安全策略阻止写入 | 影响本轮报告的 UI 观察完整性，不代表产品功能失败 | 当前自动化工具权限限制，不是业务代码错误 | 人工审核时用真实登录账号补一次：上传页、比对详情、任务中心、下载 tab；若需自动化，P4-3 固化验收浏览器环境 | P4-3 | 待人工复核 |
