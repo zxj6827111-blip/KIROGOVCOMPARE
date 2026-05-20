@@ -26,21 +26,9 @@ scripts/diagnostic-bundle.js
 scripts/health-check.js
 ```
 
-diff 统计：
+diff 统计已通过 `git diff --stat origin/main...HEAD` 检查。由于本报告本身也属于 P4-3E 交付材料，报告文字修正会改变本文件的行数统计；最终边界以本节文件清单和 `git diff --name-only origin/main...HEAD` 为准。
 
-```text
-.env.example                       |  25 ++
-DEPLOYMENT.md                      | 383 ++++++++++++++++++++----------
-OPERATIONS.md                      | 360 ++++++++++++++++++++++++++++
-P4_3_PRE_MERGE_CHECK_REPORT.md     | 194 +++++++++++++++
-P4_DEPLOYMENT_OPERATIONS_PLAN.md   | 377 ++++++++++++++++++++++++++++++
-P4_DEPLOYMENT_OPERATIONS_REPORT.md | 348 +++++++++++++++++++++++++++
-TROUBLESHOOTING.md                 | 468 +++++++++++++++++++++++++++++++++++++
-package.json                       |   5 +
-scripts/diagnostic-bundle.js       | 349 +++++++++++++++++++++++++++
-scripts/health-check.js            | 465 ++++++++++++++++++++++++++++++++++++
-10 files changed, 2847 insertions(+), 127 deletions(-)
-```
+确认：最终 diff 只包含 P4-3 文档、P4-3 报告、运维脚本、`.env.example` 和 `package.json` scripts。
 
 ## 3. 禁止项检查
 
