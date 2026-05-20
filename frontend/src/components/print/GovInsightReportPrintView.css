@@ -1,4 +1,5 @@
-:root {
+.pdf-document-shell,
+.pdf-loading {
   --pdf-page-width: 210mm;
   --pdf-page-height: 297mm;
   --pdf-margin-top: 20mm;
@@ -19,6 +20,7 @@
   --pdf-space-2: 5mm;
   --pdf-space-3: 7mm;
   --pdf-space-4: 10mm;
+  --pdf-total-pages: "?";
 }
 
 @page {

@@ -276,19 +276,19 @@
   opacity: 0.82;
 }
 
-table {
+.report-detail table {
   width: 100%;
   border-collapse: collapse;
   margin-top: 8px;
 }
 
-td {
+.report-detail td {
   padding: 8px 0;
   color: var(--text-main);
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-tr:last-child td {
+.report-detail tr:last-child td {
   border-bottom: none;
 }
 
@@ -1404,15 +1404,15 @@ tr:last-child td {
 }
 
 @media print {
-  .actions,
-  .report-actions,
-  .report-technical-info,
-  .report-debug-panel,
-  .report-technical-toggle {
+  .report-detail .actions,
+  .report-detail .report-actions,
+  .report-detail .report-technical-info,
+  .report-detail .report-debug-panel,
+  .report-detail .report-technical-toggle {
     display: none !important;
   }
 
-  .report-content-toolbar {
+  .report-detail .report-content-toolbar {
     padding: 0 0 8px;
     background: transparent;
     border: 0;

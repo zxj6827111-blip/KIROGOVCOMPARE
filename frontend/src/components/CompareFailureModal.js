@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { X, RefreshCw, AlertCircle } from 'lucide-react';
+import { RefreshCw, AlertCircle } from 'lucide-react';
 import { apiClient } from '../apiClient';
+import Button from './common/Button';
+import DataTable from './common/DataTable';
+import EmptyState from './common/EmptyState';
+import Modal from './common/Modal';
 import './CompareFailureModal.css';
 
 const CompareFailureModal = ({ isOpen, onClose, onJobRetried }) => {
@@ -61,77 +65,80 @@ const CompareFailureModal = ({ isOpen, onClose, onJobRetried }) => {
 
     if (!isOpen) return null;
 
+    const footer = (
+        <>
+            <Button className="cancel-btn" onClick={onClose} variant="secondary">关闭</Button>
+            {failedJobs.length > 0 && (
+                <Button
+                    className="retry-all-btn"
+                    icon={<RefreshCw size={16} className={retrying ? 'spinning' : ''} />}
+                    onClick={handleRetryAll}
+                    disabled={retrying || loading}
+                    variant="primary"
+                >
+                    一键重试所有
+                </Button>
+            )}
+        </>
+    );
+
     return (
-        <div className="failure-modal-overlay">
-            <div className="failure-modal-content">
-                <div className="failure-modal-header">
-                    <h3>
-                        <AlertCircle size={20} className="header-icon" />
-                        比对失败任务 ({failedJobs.length})
-                    </h3>
-                    <button className="close-btn" onClick={onClose}>
-                        <X size={20} />
-                    </button>
-                </div>
-
-                <div className="failure-modal-body">
-                    {loading ? (
-                        <div className="loading-state">加载中...</div>
-                    ) : failedJobs.length === 0 ? (
-                        <div className="empty-state">暂无失败任务</div>
-                    ) : (
-                        <div className="failed-jobs-table-container">
-                            <table className="failed-jobs-table">
-                                <thead>
-                                    <tr>
-                                        <th>地区</th>
-                                        <th>年份</th>
-                                        <th>失败原因</th>
-                                        <th>时间</th>
-                                        <th>操作</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {failedJobs.map(job => (
-                                        <tr key={job.id}>
-                                            <td>{job.regionName}</td>
-                                            <td>{job.yearA} vs {job.yearB}</td>
-                                            <td className="error-msg" title={job.errorMessage}>
-                                                {job.errorMessage || '未知错误'}
-                                            </td>
-                                            <td>{new Date(job.failedAt).toLocaleString()}</td>
-                                            <td>
-                                                <button
-                                                    className="retry-btn-small"
-                                                    onClick={() => handleRetryOne(job.id)}
-                                                    disabled={retrying}
-                                                >
-                                                    重试
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-                    )}
-                </div>
-
-                <div className="failure-modal-footer">
-                    <button className="cancel-btn" onClick={onClose}>关闭</button>
-                    {failedJobs.length > 0 && (
-                        <button
-                            className="retry-all-btn"
-                            onClick={handleRetryAll}
-                            disabled={retrying || loading}
-                        >
-                            <RefreshCw size={16} className={retrying ? 'spinning' : ''} />
-                            一键重试所有
-                        </button>
-                    )}
-                </div>
-            </div>
-        </div>
+        <Modal
+            bodyClassName="failure-modal-body"
+            className="failure-modal-content"
+            footer={footer}
+            isOpen={isOpen}
+            onClose={onClose}
+            overlayClassName="failure-modal-overlay"
+            size="lg"
+            title={(
+                <span className="failure-modal-title">
+                    <AlertCircle size={20} className="header-icon" />
+                    比对失败任务 ({failedJobs.length})
+                </span>
+            )}
+        >
+            {loading ? (
+                <div className="loading-state">加载中...</div>
+            ) : failedJobs.length === 0 ? (
+                <EmptyState className="empty-state" title="暂无失败任务" />
+            ) : (
+                <DataTable className="failed-jobs-table" containerClassName="failed-jobs-table-container">
+                    <thead>
+                        <tr>
+                            <th>地区</th>
+                            <th>年份</th>
+                            <th>失败原因</th>
+                            <th>时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {failedJobs.map(job => (
+                            <tr key={job.id}>
+                                <td>{job.regionName}</td>
+                                <td>{job.yearA} vs {job.yearB}</td>
+                                <td className="error-msg" title={job.errorMessage}>
+                                    {job.errorMessage || '未知错误'}
+                                </td>
+                                <td>{new Date(job.failedAt).toLocaleString()}</td>
+                                <td>
+                                    <Button
+                                        className="retry-btn-small"
+                                        onClick={() => handleRetryOne(job.id)}
+                                        disabled={retrying}
+                                        size="sm"
+                                        variant="secondary"
+                                    >
+                                        重试
+                                    </Button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </DataTable>
+            )}
+        </Modal>
     );
 };
 

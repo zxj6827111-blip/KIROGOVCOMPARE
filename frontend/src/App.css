@@ -1,410 +1,193 @@
-/* Antigravity Design System - Airtable Light Mode */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+/* Main system compatibility styles. Shared tokens, base rules, components, and print rules live in src/styles. */
 
-:root {
-  /* --- Airtable Palette --- */
-
-  /* Backgrounds */
-  --color-bg-main: #FFFFFF;
-  /* Clean White */
-  --color-bg-secondary: #F5F7FA;
-  /* Soft Light Gray for structure */
-  --color-bg-hover: #F1F5F9;
-
-  /* Borders */
-  --color-border: #CBD5E1;
-  /* Darker border for contrast */
-  --color-border-hover: #94A3B8;
-
-  /* Typography & Text Colors */
-  --font-primary: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --color-text-primary: #171717;
-  /* High emphasis */
-  --color-text-secondary: #475569;
-  /* Medium emphasis */
-  --color-text-tertiary: #94A3B8;
-  /* Low emphasis */
-
-  /* Accents & Brand */
-  --primary: #2563EB;
-  /* Vibrant Blue */
-  --primary-light: #EFF6FF;
-  /* Very light blue for active states */
-
-  /* --- Tags (Pastel Bg + Dark Text) --- */
-  --color-tag-blue-bg: #E0F2FE;
-  --color-tag-blue-text: #0284C7;
-
-  --color-tag-green-bg: #DCFCE7;
-  --color-tag-green-text: #16A34A;
-
-  --color-tag-purple-bg: #F3E8FF;
-  --color-tag-purple-text: #9333EA;
-
-  --color-tag-red-bg: #FEE2E2;
-  /* Exception / Anomaly */
-  --color-tag-red-text: #DC2626;
-
-  --color-tag-warning-bg: #FEF3C7;
-  --color-tag-warning-text: #D97706;
-
-  /* --- Elevation System --- */
-  /* Soft, diffused shadows */
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
-
-  /* --- Layout & Spacing --- */
-  --header-height: 64px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  /* Standard Airtable curve */
-  --radius-lg: 16px;
-
-  /* Legacy token compatibility layer */
-  --bg-app: var(--color-bg-secondary);
-  --bg-secondary: var(--color-bg-secondary);
-  --bg-surface: var(--color-bg-main);
-  --bg-surface-hover: var(--color-bg-hover);
-  --text-main: var(--color-text-primary);
-  --text-muted: var(--color-text-secondary);
-  --border-color: var(--color-border);
-  --success: var(--color-tag-green-text);
-  --warning: var(--color-tag-warning-text);
-  --danger: var(--color-tag-red-text);
-  --secondary: var(--color-text-secondary);
-  --color-success: var(--success);
-  --color-danger: var(--danger);
-  --radius-full: 9999px;
-}
-
-/* Base Reset & Typography */
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-body {
-  font-family: var(--font-primary);
-  background-color: var(--color-bg-secondary);
-  /* Structural base is gray */
-  color: var(--color-text-primary);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  line-height: 1.5;
-}
-
-/* Scrollbar styling for a cleaner look */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #CBD5E1;
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #94A3B8;
-}
-
-/* --- App Layout --- */
-.app {
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-  background-color: var(--color-bg-secondary);
-}
-
-body.leader-cockpit-mode .header,
-body.leader-cockpit-mode .nav {
-  display: none;
-}
-
-/* --- Header --- */
-.header {
-  height: var(--header-height);
-  background: var(--color-bg-main);
-  border-bottom: 1px solid var(--color-border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 24px;
+.main-system-scope .header {
   position: sticky;
   top: 0;
   z-index: 100;
+  display: flex;
+  height: var(--header-height);
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-main);
   box-shadow: var(--shadow-sm);
 }
 
-.header-content h1 {
+.main-system-scope .header-content h1 {
+  margin: 0;
+  color: var(--color-text-primary);
   font-size: 18px;
   font-weight: 600;
-  color: var(--color-text-primary);
-  margin: 0;
 }
 
-.header-content p {
+.main-system-scope .header-content p {
   display: none;
 }
 
-.header-user {
+.main-system-scope .header-user {
   display: flex;
   align-items: center;
   gap: 16px;
 }
 
-.header-user span {
-  font-size: 14px;
+.main-system-scope .header-user span {
   color: var(--color-text-secondary);
+  font-size: 14px;
   font-weight: 500;
 }
 
-.logout-btn {
-  background: transparent;
-  border: 1px solid var(--color-border);
-  color: var(--color-text-secondary);
+.main-system-scope .logout-btn {
   padding: 6px 14px;
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  font-size: 13px;
+  background: transparent;
+  color: var(--color-text-secondary);
   cursor: pointer;
+  font-size: 13px;
   transition: all 0.2s;
 }
 
-.logout-btn:hover {
+.main-system-scope .logout-btn:hover {
   background: var(--color-bg-hover);
   color: var(--color-text-primary);
 }
 
-/* --- Navigation --- */
-.nav {
-  background: var(--color-bg-main);
-  border-bottom: 1px solid var(--color-border);
-  padding: 0 24px;
+.main-system-scope .nav {
   display: flex;
-  gap: 8px;
-  align-items: center;
   height: 48px;
-  /* Sub-header bar similar to Airtable views */
+  align-items: center;
+  gap: 8px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-main);
 }
 
-.nav-btn {
+.main-system-scope .nav-btn {
   display: flex;
+  width: 100%;
   align-items: center;
   gap: 12px;
-  /* Space between icon and text */
   padding: 12px 16px;
-  background: var(--bg-surface);
   border: 1px solid transparent;
   border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+  color: #64748b;
   cursor: pointer;
-  text-align: left;
   font-size: 15px;
   font-weight: 500;
-  color: #64748B;
-  /* Slate-500 (Inactive) */
-  transition: all 0.2s;
-  box-shadow: var(--shadow-sm);
-  width: 100%;
-  /* For sidebar layout */
   stroke-width: 1.5px;
+  text-align: left;
+  transition: all 0.2s;
 }
 
-.nav-img {
+.main-system-scope .nav-img {
   display: none;
-  /* Hide old emoji images if any */
 }
 
-.nav-icon {
+.main-system-scope .nav-icon {
   flex-shrink: 0;
 }
 
-.nav-btn:hover {
+.main-system-scope .nav-btn:hover {
   background: var(--color-bg-hover);
   color: var(--color-text-primary);
 }
 
-.nav-btn.active {
+.main-system-scope .nav-btn.active {
   background: var(--primary-light);
   color: var(--primary);
   font-weight: 600;
 }
 
-/* --- Main Content --- */
-.main {
-  flex: 1;
+.main-system-scope .main {
   width: 100%;
   max-width: 1600px;
-  /* Wide canvas */
+  flex: 1;
   margin: 0 auto;
   padding: 24px;
 }
 
-/* --- Footer --- */
-.footer {
-  background: var(--color-bg-main);
-  border-top: 1px solid var(--color-border);
-  color: var(--color-text-tertiary);
-  text-align: center;
-  padding: 16px;
-  font-size: 12px;
+.main-system-scope .footer {
   margin-top: auto;
+  padding: 16px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-main);
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  text-align: center;
 }
 
-/* --- Utility Classes --- */
-
-/* Cards - "The elevated white card" */
-.card,
-.panel {
-  background: var(--color-bg-main);
+.main-system-scope .card,
+.main-system-scope .panel {
+  margin-bottom: 24px;
+  padding: 24px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  padding: 24px;
+  background: var(--color-bg-main);
   box-shadow: var(--shadow-sm);
-  margin-bottom: 24px;
   transition: box-shadow 0.2s;
 }
 
-.card:hover {
+.main-system-scope .card:hover {
   box-shadow: var(--shadow-md);
-  /* Lift on hover */
 }
 
-/* Typography Helpers */
-h2 {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  margin-bottom: 16px;
-}
-
-p {
-  color: var(--color-text-secondary);
-  margin-bottom: 12px;
-}
-
-/* Buttons */
-.btn-primary,
-button.primary-btn {
-  background: var(--primary);
-  color: #FFFFFF;
-  border: none;
+.main-system-scope .btn-primary,
+.main-system-scope button.primary-btn {
   padding: 8px 16px;
+  border: 0;
   border-radius: var(--radius-sm);
-  font-weight: 500;
-  font-size: 13px;
-  cursor: pointer;
+  background: var(--primary);
   box-shadow: var(--shadow-sm);
+  color: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
   transition: all 0.2s;
 }
 
-.btn-primary:hover {
-  background: #1D4ED8;
-  /* Darker Blue */
-  transform: translateY(-1px);
+.main-system-scope .btn-primary:hover,
+.main-system-scope button.primary-btn:hover {
+  background: var(--primary-hover);
   box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
-/* Inputs */
-input,
-select,
-textarea {
-  background: #FFFFFF;
-  border: 1px solid var(--color-border);
-  color: var(--color-text-primary);
-  padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 14px;
+.main-system-scope:not(.app-shell--govinsight) input:not([type="checkbox"]):not([type="radio"]),
+.main-system-scope:not(.app-shell--govinsight) select,
+.main-system-scope:not(.app-shell--govinsight) textarea {
   width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--color-text-primary);
+  font-size: 14px;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-input:focus,
-select:focus,
-textarea:focus {
-  outline: none;
+.main-system-scope:not(.app-shell--govinsight) input:not([type="checkbox"]):not([type="radio"]):focus,
+.main-system-scope:not(.app-shell--govinsight) select:focus,
+.main-system-scope:not(.app-shell--govinsight) textarea:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 2px var(--primary-light);
+  outline: none;
 }
 
-/* Tables (Base Style - "Spreadsheet") */
-table {
-  width: 100%;
-  border-collapse: collapse;
-  /* Clean lines */
-  background: var(--color-bg-main);
+.main-system-scope .alert {
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  margin-bottom: 20px;
 }
 
-th {
-  background: #FFFFFF;
-  text-align: left;
-  padding: 10px 16px;
-  font-size: 11px;
-  /* Small, uppercase */
-  font-weight: 700;
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  border-bottom: 2px solid var(--color-border);
-  /* Slightly thicker header border */
-  white-space: nowrap;
+.main-system-scope .alert.error {
+  background-color: #fee2e2;
+  color: var(--danger);
 }
 
-td {
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--color-border);
-  color: var(--color-text-primary);
-  font-size: 13px;
-  vertical-align: middle;
-}
-
-tr:hover td {
-  background-color: var(--color-bg-secondary);
-  /* Row hover effect */
-}
-
-/* Loaders */
-.app-loading {
-  justify-content: center;
-  align-items: center;
-  font-size: 14px;
-  color: var(--color-text-secondary);
-}
-
-/* ===================================================== */
-/* 全局打印样式                                           */
-/* ===================================================== */
-
-@media print {
-
-  /* 隐藏主应用的非打印元素 */
-  .no-print,
-  .header,
-  .nav,
-  .footer {
-    display: none !important;
-  }
-
-  /* 背景与颜色 */
-  body {
-    background: white !important;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
-
-  /* 主内容区域 */
-  .main {
-    padding: 0 !important;
-    max-width: none !important;
-    margin: 0 !important;
-  }
-
-  /* 隐藏应用外层 */
-  .app>*:not(.main):not(.gov-dashboard-root) {
-    display: none !important;
-  }
+.main-system-scope .loading-state,
+.main-system-scope .empty-state {
+  color: var(--text-muted);
 }

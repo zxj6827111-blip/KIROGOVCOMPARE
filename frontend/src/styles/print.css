@@ -1,0 +1,30 @@
+@media print {
+  .main-system-scope .no-print,
+  .main-system-scope .app-shell__header,
+  .main-system-scope .app-shell__nav,
+  .main-system-scope .app-shell__footer,
+  .task-drawer-trigger,
+  .task-drawer-backdrop,
+  .task-drawer,
+  .ui-toast-viewport,
+  .ui-confirm-backdrop,
+  .kc-modal-backdrop {
+    display: none !important;
+  }
+
+  body {
+    background: #fff !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .main-system-scope,
+  .main-system-scope .app-shell__main {
+    width: auto !important;
+    max-width: none !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+}

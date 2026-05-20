@@ -1,5 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
+import './styles/tokens.css';
+import './styles/base.css';
+import './styles/print.css';
 import './App.css';
 import Login from './components/Login';
 import UploadReport from './components/UploadReport';
