@@ -54,9 +54,18 @@ const baseData = {
           title: '表三勾稽问题',
           auto_status: 'FAIL',
           human_status: 'pending',
+          left_value: 193,
+          right_value: 217,
+          delta: -24,
           evidence: {
             leftPaths: ['tableData.total.result'],
             rightPaths: ['tableData.total.detail'],
+            values: {
+              reason: 'mismatch',
+              originalValue: '193',
+              parsedValue: 193,
+              comparedValue: 217,
+            },
           },
         },
       ],
@@ -89,6 +98,62 @@ describe('ConsistencyCheckView quality mode', () => {
     expect(screen.getAllByText('需复核 1').length).toBeGreaterThan(0);
     expect(screen.getByText('数据质量提示不计入勾稽问题，也不会改变表三/表四的问题编号与定位。')).toBeInTheDocument();
     expect(screen.getByText('提示 1｜语义审计：第五部分存在问题及改进情况空缺')).toBeInTheDocument();
+  });
+
+  test('review items show readable evidence summary without changing numbering', async () => {
+    renderWithFeedback(
+      <ConsistencyCheckView
+        reportId={1}
+        versionId={2}
+        filterGroups={['table3']}
+      />
+    );
+
+    await screen.findByText('勾稽关系校验');
+    expect(screen.getAllByText('证据说明').length).toBeGreaterThan(0);
+    expect(screen.getByText('比对值不一致')).toBeInTheDocument();
+    expect(screen.getByText('tableData.total.result')).toBeInTheDocument();
+    expect(screen.getAllByText('193').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('217').length).toBeGreaterThan(0);
+  });
+
+  test('pure not assessable groups still render conservative evidence summary', async () => {
+    apiClient.get.mockResolvedValue({
+      data: {
+        data: {
+          latest_run: { id: 2 },
+          groups: [
+            {
+              group_key: 'table2',
+              items: [
+                {
+                  id: 401,
+                  check_key: 't2_no_rules',
+                  title: '表二暂不具备可评估规则',
+                  auto_status: 'NOT_ASSESSABLE',
+                  human_status: 'pending',
+                  evidence: { paths: ['activeDisclosureData.total'] },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    renderWithFeedback(
+      <ConsistencyCheckView
+        reportId={1}
+        versionId={2}
+        filterGroups={['table2']}
+      />
+    );
+
+    expect((await screen.findAllByText('暂无可评估规则')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('证据说明').length).toBeGreaterThan(0);
+    expect(screen.getByText('字段为空或未抽取')).toBeInTheDocument();
+    expect(screen.getAllByText('activeDisclosureData.total').length).toBeGreaterThan(0);
+    expect(screen.queryByText('问题 1｜表二暂不具备可评估规则')).toBeNull();
   });
 
   test('bulk confirm in quality mode only patches quality items', async () => {

@@ -14,7 +14,38 @@ jest.mock('../apiClient', () => ({
   getCurrentUser: jest.fn(),
 }));
 
-jest.mock('./ConsistencyCheckView', () => () => <div data-testid="checks-view" />);
+jest.mock('./ConsistencyCheckView', () => ({ onLocate }) => (
+  <div data-testid="checks-view">
+    <button
+      type="button"
+      onClick={() =>
+        onLocate?.({
+          title: '问题 1｜表三勾稽问题',
+          leftPaths: ['tableData.total.newReceived'],
+          rightPaths: ['tableData.total.results.totalProcessed'],
+          item: {
+            auto_status: 'FAIL',
+            title: '表三勾稽问题',
+            left_value: 193,
+            right_value: 217,
+            evidence: {
+              leftPaths: ['tableData.total.newReceived'],
+              rightPaths: ['tableData.total.results.totalProcessed'],
+              values: {
+                reason: 'mismatch',
+                originalValue: '193',
+                parsedValue: 193,
+                comparedValue: 217,
+              },
+            },
+          },
+        })
+      }
+    >
+      mock locate
+    </button>
+  </div>
+));
 jest.mock('./ParsedDataEditor', () => () => <div data-testid="parsed-editor" />);
 jest.mock('./TableViews', () => ({
   Table2View: ({ data }) => <div data-testid="table-2-view">{JSON.stringify(data)}</div>,
@@ -135,5 +166,21 @@ describe('ReportDetail vision review integration', () => {
     const parsed = JSON.parse(table3View.textContent);
     expect(parsed.total.newReceived).toBe(7);
     expect(parsed.total.results.unableToProvide.noInfo).toBeNull();
+  });
+
+  test('locating a check shows evidence summary in the focus banner', async () => {
+    const user = userEvent.setup();
+
+    render(<ReportDetail reportId="123" />);
+
+    await screen.findByText('报告详情');
+    await user.click(screen.getByRole('button', { name: '勾稽关系校验' }));
+    await user.click(screen.getByRole('button', { name: 'mock locate' }));
+
+    expect(await screen.findByText('定位：问题 1｜表三勾稽问题')).toBeInTheDocument();
+    expect(screen.getByText('证据说明')).toBeInTheDocument();
+    expect(screen.getByText('比对值不一致')).toBeInTheDocument();
+    expect(screen.getByText('tableData.total.newReceived')).toBeInTheDocument();
+    expect(screen.getByText('217')).toBeInTheDocument();
   });
 });

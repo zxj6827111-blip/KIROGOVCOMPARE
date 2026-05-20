@@ -24,6 +24,7 @@ import {
   type GovInsightBackendReportPayload,
   type ScorecardItem,
 } from '../utils/aiReport';
+import { buildGovInsightSourceStatus, type GovInsightReportSourceMeta } from '../utils/sourceStatus';
 import { AuxiliaryRiskGuide } from '../components/AuxiliaryRiskGuide';
 import { AuxiliaryRiskThresholdPanel } from '../components/AuxiliaryRiskThresholdPanel';
 import { HierarchySupportSummary } from '../components/HierarchySupportSummary';
@@ -260,6 +261,7 @@ export const ReportGenerator: React.FC = () => {
   const [annualReportSummary, setAnnualReportSummary] = useState<AnnualReportSummary | null>(null);
   const [backendPayload, setBackendPayload] = useState<GovInsightBackendReportPayload | null>(null);
   const [resolvedPayload, setResolvedPayload] = useState<GovInsightBackendReportPayload | null>(null);
+  const [sourceMeta, setSourceMeta] = useState<GovInsightReportSourceMeta | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [engine, setEngine] = useState<EngineMode>('ai');
   const [loadedModel, setLoadedModel] = useState<string>('');
@@ -394,6 +396,7 @@ export const ReportGenerator: React.FC = () => {
         if (isMounted) {
           setReportData(null);
           setResolvedPayload(null);
+          setSourceMeta(null);
           setLoadedModel('');
           setLoadedUpdatedAt('');
           setSaveStatus('idle');
@@ -403,6 +406,7 @@ export const ReportGenerator: React.FC = () => {
 
       setReportData(null);
       setResolvedPayload(null);
+      setSourceMeta(null);
       setLoadedModel('');
       setLoadedUpdatedAt('');
       setSaveStatus('idle');
@@ -438,6 +442,13 @@ export const ReportGenerator: React.FC = () => {
         if (!normalized) return;
         setReportData(normalized);
         setResolvedPayload((cloudReport.reportPayload || backendPayload || null) as GovInsightBackendReportPayload | null);
+        setSourceMeta({
+          payloadSource: cloudReport.payloadSource,
+          materializeStatus: cloudReport.materializeStatus,
+          sourceJobId: cloudReport.sourceJobId,
+          sourceReportVersionId: cloudReport.sourceReportVersionId,
+          storedPayloadErrors: cloudReport.storedPayloadErrors,
+        });
         sessionStorage.setItem(cacheKey, JSON.stringify(normalized));
         setEngine(inferEngineModeFromModel(cloudReport.model || ''));
         setLoadedModel(cloudReport.model || '');
@@ -555,6 +566,13 @@ export const ReportGenerator: React.FC = () => {
           const cacheKey = `report_cache_${entity.id}_${year}`;
           setReportData(normalized);
           setResolvedPayload((cloudReport.reportPayload || backendPayload || null) as GovInsightBackendReportPayload | null);
+          setSourceMeta({
+            payloadSource: cloudReport.payloadSource,
+            materializeStatus: cloudReport.materializeStatus,
+            sourceJobId: cloudReport.sourceJobId,
+            sourceReportVersionId: cloudReport.sourceReportVersionId,
+            storedPayloadErrors: cloudReport.storedPayloadErrors,
+          });
           sessionStorage.setItem(cacheKey, JSON.stringify(normalized));
           setEngine(inferEngineModeFromModel(cloudReport.model || nextJob.model || ''));
           setLoadedModel(cloudReport.model || nextJob.model || '');
@@ -605,6 +623,7 @@ export const ReportGenerator: React.FC = () => {
   const hasHierarchySummary = Boolean(effectivePayload?.hierarchyAnalysis);
   const riskAssessment = effectivePayload?.riskAssessment;
   const clientFacingWarnings = filterClientFacingWarnings(reportData?.dataQuality.warnings);
+  const sourceStatus = buildGovInsightSourceStatus(effectivePayload as (GovInsightBackendReportPayload & Record<string, unknown>) | null, sourceMeta);
   const primaryRiskItems = reportData ? splitRiskItems(reportData.riskItems).primary : [];
   const secondaryRiskItems = reportData ? splitRiskItems(reportData.riskItems).secondary : [];
   const trackingRiskItems = reportData ? splitRiskItems(reportData.riskItems).tracking : [];
@@ -771,7 +790,7 @@ export const ReportGenerator: React.FC = () => {
             </p>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className="grid gap-4 lg:grid-cols-3">
             <div className="border border-sky-200 bg-gradient-to-br from-sky-50/90 via-white to-white px-5 py-4 shadow-sm">
               <p className="inline-flex items-center border border-sky-200 bg-white px-3 py-1 text-xs font-semibold tracking-wide text-sky-700">
                 编制说明
@@ -798,6 +817,32 @@ export const ReportGenerator: React.FC = () => {
                   <ul className="space-y-1 border-t border-amber-100 bg-white/75 pt-3 text-sm text-slate-700">
                     {clientFacingWarnings.map((warning, index) => (
                       <li key={`warning-${index}`}>{warning}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-white px-5 py-4 shadow-sm">
+              <p className="inline-flex items-center border border-slate-200 bg-white px-3 py-1 text-xs font-semibold tracking-wide text-slate-700">
+                来源状态
+              </p>
+              <div className="mt-3 grid gap-2 text-sm leading-6 text-slate-700">
+                <div className="grid grid-cols-2 gap-2">
+                  <TaskField label="PAYLOAD" value={sourceStatus.sourceLabel} className="bg-slate-50/60" />
+                  <TaskField label="MATERIALIZE" value={sourceStatus.materializeLabel} className="bg-slate-50/60" />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <TaskField label="SOURCE JOB" value={sourceStatus.sourceJobLabel} className="bg-slate-50/60" />
+                  <TaskField label="REPORT VERSION" value={sourceStatus.sourceVersionLabel} className="bg-slate-50/60" />
+                </div>
+                <p className={sourceStatus.hasAnomaly ? 'text-amber-700' : 'text-slate-600'}>
+                  {sourceStatus.dataQualitySummary}
+                </p>
+                {sourceStatus.warnings.length ? (
+                  <ul className="space-y-1 border-t border-slate-100 pt-2 text-xs text-slate-600">
+                    {sourceStatus.warnings.slice(0, 3).map((warning, index) => (
+                      <li key={`source-warning-${index}`}>{warning}</li>
                     ))}
                   </ul>
                 ) : null}

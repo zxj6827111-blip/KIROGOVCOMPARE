@@ -284,6 +284,11 @@
   line-height: 1.55;
 }
 
+.pdf-cover-source-status {
+  border-left: 1.2mm solid #475569;
+  padding-left: 3mm;
+}
+
 .pdf-cover-risk {
   margin-top: 12mm;
   border-top: 0.8pt solid var(--pdf-color-line);

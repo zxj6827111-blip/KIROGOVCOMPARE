@@ -16,6 +16,7 @@ import {
   type ReportRating,
   type ScorecardItem,
 } from '../../govinsight/utils/aiReport';
+import { buildGovInsightSourceStatus, type GovInsightReportSourceMeta } from '../../govinsight/utils/sourceStatus';
 import { MIN_N_FOR_RANKING, RISK_THRESHOLDS } from '../../govinsight/leader-cockpit/riskPolicy';
 import './GovInsightReportPrintView.css';
 
@@ -188,18 +189,24 @@ const CoverPage = ({
   reportData,
   reportContext,
   resolvedPayload,
+  sourceMeta,
 }: {
   entity: EntityProfile;
   year: number;
   reportData: EnhancedAIReportResponse;
   reportContext: ReturnType<typeof buildReportContextPayload>;
   resolvedPayload: GovInsightBackendReportPayload | null;
+  sourceMeta: GovInsightReportSourceMeta | null;
 }) => {
   const guide = buildAuxiliaryRiskLevelExplanation(reportContext.current, reportContext.previous, reportData.dataQuality || reportContext.dataQuality, {
     rating: resolvedPayload?.riskAssessment?.rating || reportContext.rating,
     riskLabel: resolvedPayload?.riskAssessment?.riskLabel || reportContext.riskLabel,
     reason: resolvedPayload?.riskAssessment?.reason,
   });
+  const sourceStatus = buildGovInsightSourceStatus(
+    resolvedPayload as (GovInsightBackendReportPayload & Record<string, unknown>) | null,
+    sourceMeta
+  );
 
   return (
     <section className="pdf-page pdf-page--cover">
@@ -222,6 +229,13 @@ const CoverPage = ({
         <div>
           <span>审阅提示</span>
           <p>{reportData.metadata.cautionNote}</p>
+        </div>
+        <div className="pdf-cover-source-status">
+          <span>来源状态</span>
+          <p>
+            {sourceStatus.sourceLabel}；{sourceStatus.materializeLabel}；{sourceStatus.sourceJobLabel}；{sourceStatus.sourceVersionLabel}。
+            {sourceStatus.dataQualitySummary}
+          </p>
         </div>
       </div>
 
@@ -698,6 +712,7 @@ export const GovInsightReportPrintView: React.FC<{ orgId: string; year: number }
   const [entity, setEntity] = useState<EntityProfile | null>(null);
   const [reportData, setReportData] = useState<EnhancedAIReportResponse | null>(null);
   const [resolvedPayload, setResolvedPayload] = useState<GovInsightBackendReportPayload | null>(null);
+  const [sourceMeta, setSourceMeta] = useState<GovInsightReportSourceMeta | null>(null);
   const [tocPages, setTocPages] = useState<Record<string, number>>({});
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -754,6 +769,13 @@ export const GovInsightReportPrintView: React.FC<{ orgId: string; year: number }
         setEntity(nextEntity);
         setReportData(normalized);
         setResolvedPayload((cloudReport?.reportPayload || backendReportPayload || null) as GovInsightBackendReportPayload | null);
+        setSourceMeta(cloudReport ? {
+          payloadSource: cloudReport.payloadSource,
+          materializeStatus: cloudReport.materializeStatus,
+          sourceJobId: cloudReport.sourceJobId,
+          sourceReportVersionId: cloudReport.sourceReportVersionId,
+          storedPayloadErrors: cloudReport.storedPayloadErrors,
+        } : null);
         document.title = `${nextEntity.name}_${year}_政务公开智能辅策报告`;
       } catch (loadError: any) {
         if (isMounted) {
@@ -879,6 +901,7 @@ export const GovInsightReportPrintView: React.FC<{ orgId: string; year: number }
           reportData={reportData}
           reportContext={reportContext}
           resolvedPayload={resolvedPayload}
+          sourceMeta={sourceMeta}
         />
 
         <OverviewPage

@@ -5,6 +5,7 @@ import { Table2View, Table3View, Table4View } from './TableViews';
 import { normalizeTablePath } from '../utils/tableRowColMapping';
 import { buildTable3TraceModel } from '../utils/reportTrace';
 import { normalizeConsistencyGroups } from '../utils/consistencyDisplay';
+import { buildEvidenceViewModel } from '../utils/evidenceViewModel';
 import { aggregateIssuesFromChecks } from '../utils/issueAggregation';
 import ParsedDataEditor from './ParsedDataEditor';
 import ConsistencyCheckView from './ConsistencyCheckView';
@@ -65,6 +66,13 @@ const hasMeaningfulObjectData = (obj) => {
 
 const getErrorMessage = (err, fallback = '请求失败') =>
   err?.response?.data?.error || err?.message || fallback;
+
+const EVIDENCE_SEVERITY_LABELS = {
+  high: '高风险',
+  medium: '需复核',
+  low: '线索不足',
+  info: '来源说明',
+};
 
 const DISPLAY_TEXT_THRESHOLD = 100;
 const TABLE_SECTION_TYPES = new Set(['table_2', 'table_3', 'table_4']);
@@ -1415,7 +1423,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     }, 160);
   };
 
-  const handleLocateIssue = ({ title, leftPaths = [], rightPaths = [], fallbackPaths = [] }) => {
+  const handleLocateIssue = ({ item, title, leftPaths = [], rightPaths = [], fallbackPaths = [] }) => {
     const fallbackTargets = (fallbackPaths || [])
       .map((p) => normalizeTablePath(p))
       .filter((p) => p && isTablePath(p));
@@ -1424,7 +1432,14 @@ function ReportDetail({ reportId: propReportId, onBack }) {
     if (focusCells.length === 0 && fallbackTargets.length === 0) return;
 
     if (focusCells.length > 0) {
-      setFocusedCheck({ title: title || '勾稽关系定位' });
+      const evidenceModel = buildEvidenceViewModel(
+        item || {
+          auto_status: 'UNCERTAIN',
+          title,
+          evidence: { leftPaths, rightPaths, paths: fallbackTargets },
+        }
+      );
+      setFocusedCheck({ title: title || '勾稽关系定位', evidenceModel });
       setFocusedCells(focusCells);
     } else {
       setFocusedCheck(null);
@@ -1885,15 +1900,53 @@ function ReportDetail({ reportId: propReportId, onBack }) {
 
         {isFocusMode && (
           <div className="focus-banner">
-            <div className="focus-title">定位：{focusedCheck?.title}</div>
-            <div className="focus-actions">
-              <span className="focus-legend">
-                蓝色=左值，橙色=右值，角标显示左/右
-              </span>
-              <button className="btn-clear-focus" onClick={clearFocus}>
-                清除定位
-              </button>
+            <div className="focus-banner-main">
+              <div className="focus-title">定位：{focusedCheck?.title}</div>
+              <div className="focus-actions">
+                <span className="focus-legend">
+                  蓝色=左值，橙色=右值，角标显示左/右
+                </span>
+                <button className="btn-clear-focus" onClick={clearFocus}>
+                  清除定位
+                </button>
+              </div>
             </div>
+            {focusedCheck?.evidenceModel ? (
+              <div className={`focus-evidence focus-evidence--${focusedCheck.evidenceModel.severity}`}>
+                <div className="focus-evidence-summary">
+                  <strong>证据说明</strong>
+                  <span>{EVIDENCE_SEVERITY_LABELS[focusedCheck.evidenceModel.severity] || '来源说明'}</span>
+                  <p>{focusedCheck.evidenceModel.summary}</p>
+                </div>
+                <div className="focus-evidence-grid">
+                  <div>
+                    <span>字段路径</span>
+                    <code>{focusedCheck.evidenceModel.fieldPath}</code>
+                  </div>
+                  <div>
+                    <span>原始值</span>
+                    <strong>{focusedCheck.evidenceModel.originalValue}</strong>
+                  </div>
+                  <div>
+                    <span>解析值</span>
+                    <strong>{focusedCheck.evidenceModel.parsedValue}</strong>
+                  </div>
+                  <div>
+                    <span>比对值</span>
+                    <strong>{focusedCheck.evidenceModel.comparedValue}</strong>
+                  </div>
+                  <div>
+                    <span>风险原因</span>
+                    <strong>{focusedCheck.evidenceModel.reasonLabel}</strong>
+                  </div>
+                </div>
+                {!focusedCheck.evidenceModel.hasDetailedSource ? (
+                  <div className="focus-evidence-fallback">
+                    {focusedCheck.evidenceModel.fallbackNotice || '暂无更详细来源，仅保留结构化字段路径'}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         )}
 
