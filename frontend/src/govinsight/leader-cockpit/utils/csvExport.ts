@@ -1,5 +1,10 @@
 import type { EntityMetrics, DisclosureMethod, CorrectionMethod } from '../types';
 
+export interface CsvExportResult {
+    ok: boolean;
+    message: string;
+}
+
 const DISCLOSURE_LABELS: Record<DisclosureMethod, string> = {
     'substantive': '实质公开率',
     'absolute': '绝对公开率'
@@ -17,12 +22,11 @@ export function exportRiskList(
     entities: EntityMetrics[],
     calibration: { disclosureMethod: DisclosureMethod; correctionMethod: CorrectionMethod },
     viewLevel: 'district' | 'department'
-): void {
+): CsvExportResult {
     const riskEntities = entities.filter(e => e.riskLevel === 'red' || e.riskLevel === 'yellow');
 
     if (riskEntities.length === 0) {
-        alert('暂无红黄牌区县/部门');
-        return;
+        return { ok: false, message: '暂无红黄牌区县/部门' };
     }
 
     const entityLabel = viewLevel === 'district' ? '区县' : '部门';
@@ -66,6 +70,7 @@ export function exportRiskList(
 
     // 下载 CSV
     downloadCSV(csvContent, `红黄牌清单_${new Date().toISOString().slice(0, 10)}.csv`);
+    return { ok: true, message: `已导出 ${riskEntities.length} 条红黄牌记录` };
 }
 
 /**
@@ -75,12 +80,11 @@ export function exportTaskList(
     entities: EntityMetrics[],
     calibration: { disclosureMethod: DisclosureMethod; correctionMethod: CorrectionMethod },
     viewLevel: 'district' | 'department'
-): void {
+): CsvExportResult {
     const riskEntities = entities.filter(e => e.riskLevel === 'red' || e.riskLevel === 'yellow');
 
     if (riskEntities.length === 0) {
-        alert('暂无需要整改的区县/部门');
-        return;
+        return { ok: false, message: '暂无需要整改的区县/部门' };
     }
 
     const entityLabel = viewLevel === 'district' ? '区县' : '部门';
@@ -125,6 +129,7 @@ export function exportTaskList(
 
     // 下载 CSV
     downloadCSV(csvContent, `整改任务清单_${new Date().toISOString().slice(0, 10)}.csv`);
+    return { ok: true, message: `已导出 ${riskEntities.length} 条整改任务` };
 }
 
 /**

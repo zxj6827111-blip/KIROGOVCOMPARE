@@ -1,8 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import './ReportsList.css';
 import { apiClient } from '../apiClient';
+import { useToast } from './common/ToastProvider';
+import { useConfirmDialog } from './common/ConfirmDialogProvider';
 
 function ReportsList({ onSelectReport }) {
+  const toast = useToast();
+  const confirmAction = useConfirmDialog();
   const [filters, setFilters] = useState({ regionId: '', year: '' });
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -56,14 +60,22 @@ function ReportsList({ onSelectReport }) {
   };
 
   const handleDeleteReport = async (reportId) => {
-    if (!window.confirm(`确认删除报告 #${reportId} 吗？该操作将删除版本与任务记录。`)) return;
+    const confirmed = await confirmAction({
+      title: '删除报告',
+      message: `确认删除报告 #${reportId} 吗？该操作将删除版本与任务记录。`,
+      confirmText: '删除',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     setError('');
     try {
       await apiClient.delete(`/reports/${reportId}`);
       await fetchReports();
+      toast.success('报告已删除', `报告 #${reportId} 已删除。`);
     } catch (err) {
       const message = err.response?.data?.error || err.message || '请求失败';
       setError(`删除报告失败：${message}`);
+      toast.error('删除报告失败', message);
     }
   };
 

@@ -13,6 +13,8 @@ import {
 } from 'lucide-react';
 import Button from './common/Button';
 import PageHeader from './common/PageHeader';
+import { useToast } from './common/ToastProvider';
+import { useConfirmDialog } from './common/ConfirmDialogProvider';
 
 // Global cache to persist data across component remounts (e.g., navigating back from detail page)
 // This prevents the "loading..." flash when returning to the list
@@ -24,6 +26,8 @@ const globalCache = {
 };
 
 function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
+  const toast = useToast();
+  const confirmAction = useConfirmDialog();
   // Initialize from cache if available
   const [regions, setRegions] = useState(() => globalCache.regions || []);
   const [reports, setReports] = useState(() => globalCache.reports || []);
@@ -265,13 +269,20 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
 
   const handleDeleteReport = async (e, reportId) => {
     e.stopPropagation();
-    if (!window.confirm('确定要删除这份报告吗？此操作不可恢复。')) return;
+    const confirmed = await confirmAction({
+      title: '删除报告',
+      message: '确定要删除这份报告吗？此操作不可恢复。',
+      confirmText: '删除',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     try {
       await apiClient.delete(`/reports/${reportId}`);
       await fetchAll();
+      toast.success('报告已删除');
     } catch (err) {
       const message = err.response?.data?.error || err.message || '删除失败';
-      alert(`删除失败：${message} `);
+      toast.error('删除失败', message);
     }
   };
 
@@ -290,7 +301,7 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
 
   const handleCompare = async () => {
     if (selectedForCompare.length !== 2) {
-      alert('请选择两份报告进行比对');
+      toast.warning('请选择两份报告进行比对');
       return;
     }
 
@@ -327,16 +338,16 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
         if (onViewComparison) {
           onViewComparison(response.data.comparisonId);
         } else {
-          alert('比对任务已创建！请在"比对结果汇总"页面查看。');
+          toast.success('比对任务已创建', '请在比对结果汇总页面查看。');
         }
       } else {
-        alert('比对任务已创建！请在"比对结果汇总"页面查看。');
+        toast.success('比对任务已创建', '请在比对结果汇总页面查看。');
       }
 
       setSelectedForCompare([]);
     } catch (err) {
       const message = err.response?.data?.error || err.message || '创建比对失败';
-      alert(`创建比对失败：${message} `);
+      toast.error('创建比对失败', message);
     } finally {
       setComparing(false);
     }
@@ -449,11 +460,17 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
     if (batchChecking) return;
     const reportIds = visibleReports.map(r => r.report_id || r.id).filter(Boolean);
     if (reportIds.length === 0) {
-      alert('当前筛选没有可校验的报告');
+      toast.warning('当前筛选没有可校验的报告');
       return;
     }
 
-    if (!window.confirm(`确认对当前筛选的 ${reportIds.length} 份报告批量校验？`)) return;
+    const confirmed = await confirmAction({
+      title: '批量校验',
+      message: `确认对当前筛选的 ${reportIds.length} 份报告批量校验？`,
+      confirmText: '开始校验',
+      tone: 'default',
+    });
+    if (!confirmed) return;
 
     setBatchChecking(true);
     try {
@@ -463,10 +480,10 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
       const skipped = data.skipped || 0;
       const failed = data.failed || 0;
       await fetchCheckStatusForReports(reports);
-      alert(`批量校验完成：成功 ${processed}，跳过 ${skipped}，失败 ${failed}`);
+      toast.success('批量校验完成', `成功 ${processed}，跳过 ${skipped}，失败 ${failed}`);
     } catch (err) {
       const message = err.response?.data?.error || err.message || '批量校验失败';
-      alert(message);
+      toast.error('批量校验失败', message);
     } finally {
       setBatchChecking(false);
     }

@@ -5,9 +5,14 @@ import Button from './common/Button';
 import DataTable from './common/DataTable';
 import EmptyState from './common/EmptyState';
 import Modal from './common/Modal';
+import { useToast } from './common/ToastProvider';
+import { useConfirmDialog } from './common/ConfirmDialogProvider';
+import { getAxiosFriendlyError } from '../utils/errorTranslator';
 import './CompareFailureModal.css';
 
 const CompareFailureModal = ({ isOpen, onClose, onJobRetried }) => {
+    const toast = useToast();
+    const confirmAction = useConfirmDialog();
     const [failedJobs, setFailedJobs] = useState([]);
     const [loading, setLoading] = useState(false);
     const [retrying, setRetrying] = useState(false);
@@ -31,7 +36,13 @@ const CompareFailureModal = ({ isOpen, onClose, onJobRetried }) => {
     };
 
     const handleRetryAll = async () => {
-        if (!window.confirm(`确定要重试所有 ${failedJobs.length} 个失败任务吗？`)) return;
+        const confirmed = await confirmAction({
+            title: '重试失败任务',
+            message: `确定要重试所有 ${failedJobs.length} 个失败任务吗？`,
+            confirmText: '重试所有',
+            tone: 'default',
+        });
+        if (!confirmed) return;
 
         setRetrying(true);
         try {
@@ -39,11 +50,12 @@ const CompareFailureModal = ({ isOpen, onClose, onJobRetried }) => {
             // Clear list locally to reflect immediate "disappearance"
             setFailedJobs([]);
             if (onJobRetried) onJobRetried();
-            alert('已将所有失败任务加入重试队列');
+            toast.success('已加入重试队列', `共 ${failedJobs.length} 个失败任务。`);
             onClose();
         } catch (error) {
             console.error('Failed to retry all jobs:', error);
-            alert('重试失败，请稍后重试');
+            const friendly = getAxiosFriendlyError(error, '重试失败，请稍后重试。');
+            toast.error('重试失败', friendly.message, { detail: friendly.detail });
         } finally {
             setRetrying(false);
         }
@@ -55,9 +67,11 @@ const CompareFailureModal = ({ isOpen, onClose, onJobRetried }) => {
             await apiClient.post('/comparisons/retry-jobs', { jobIds: [jobId] });
             setFailedJobs(prev => prev.filter(job => job.id !== jobId));
             if (onJobRetried) onJobRetried();
+            toast.success('已加入重试队列');
         } catch (error) {
             console.error('Failed to retry job:', error);
-            alert('重试失败');
+            const friendly = getAxiosFriendlyError(error, '重试失败，请稍后重试。');
+            toast.error('重试失败', friendly.message, { detail: friendly.detail });
         } finally {
             setRetrying(false);
         }

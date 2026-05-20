@@ -1,8 +1,17 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ConsistencyCheckView from './ConsistencyCheckView';
 import { apiClient } from '../apiClient';
+
+const mockToast = {
+  showToast: jest.fn(),
+  success: jest.fn(),
+  error: jest.fn(),
+  warning: jest.fn(),
+  info: jest.fn(),
+};
+const mockConfirmAction = jest.fn();
 
 jest.mock('../apiClient', () => ({
   apiClient: {
@@ -10,6 +19,14 @@ jest.mock('../apiClient', () => ({
     post: jest.fn(),
     patch: jest.fn(),
   },
+}));
+
+jest.mock('./common/ToastProvider', () => ({
+  useToast: () => mockToast,
+}));
+
+jest.mock('./common/ConfirmDialogProvider', () => ({
+  useConfirmDialog: () => mockConfirmAction,
 }));
 
 const baseData = {
@@ -47,18 +64,19 @@ const baseData = {
   ],
 };
 
+const renderWithFeedback = (ui) => render(ui);
+
 describe('ConsistencyCheckView quality mode', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     apiClient.get.mockResolvedValue({ data: { data: baseData } });
     apiClient.patch.mockResolvedValue({ data: { success: true } });
     apiClient.post.mockResolvedValue({ data: { success: true } });
-    window.alert = jest.fn();
-    window.confirm = jest.fn(() => true);
+    mockConfirmAction.mockResolvedValue(true);
   });
 
   test('quality mode shows amber summary and does not reuse consistency numbering label', async () => {
-    render(
+    renderWithFeedback(
       <ConsistencyCheckView
         reportId={1}
         versionId={2}
@@ -76,7 +94,7 @@ describe('ConsistencyCheckView quality mode', () => {
   test('bulk confirm in quality mode only patches quality items', async () => {
     const user = userEvent.setup();
 
-    render(
+    renderWithFeedback(
       <ConsistencyCheckView
         reportId={1}
         versionId={2}
@@ -85,7 +103,13 @@ describe('ConsistencyCheckView quality mode', () => {
     );
 
     await screen.findByText('数据质量审计');
-    await user.click(screen.getByRole('button', { name: '一键标记为已处理' }));
+    await act(async () => {
+      await user.click(screen.getByRole('button', { name: '一键标记为已处理' }));
+    });
+    expect(mockConfirmAction).toHaveBeenCalledWith(expect.objectContaining({
+      title: expect.any(String),
+      confirmText: expect.any(String),
+    }));
 
     await waitFor(() => {
       expect(apiClient.patch).toHaveBeenCalledTimes(1);
@@ -137,15 +161,14 @@ describe('ConsistencyCheckView onChecksUpdated callback', () => {
     jest.clearAllMocks();
     apiClient.get.mockResolvedValue({ data: { data: consistencyData } });
     apiClient.patch.mockResolvedValue({ data: { success: true } });
-    window.alert = jest.fn();
-    window.confirm = jest.fn(() => true);
+    mockConfirmAction.mockResolvedValue(true);
   });
 
   test('onChecksUpdated is called after bulk confirm completes', async () => {
     const user = userEvent.setup();
     const onChecksUpdated = jest.fn();
 
-    render(
+    renderWithFeedback(
       <ConsistencyCheckView
         reportId={1}
         versionId={2}
@@ -155,7 +178,13 @@ describe('ConsistencyCheckView onChecksUpdated callback', () => {
     );
 
     await screen.findByText('勾稽关系校验');
-    await user.click(screen.getByRole('button', { name: '一键确认' }));
+    await act(async () => {
+      await user.click(screen.getByRole('button', { name: '一键确认' }));
+    });
+    expect(mockConfirmAction).toHaveBeenCalledWith(expect.objectContaining({
+      title: expect.any(String),
+      confirmText: expect.any(String),
+    }));
 
     await waitFor(() => {
       expect(onChecksUpdated).toHaveBeenCalledTimes(1);
@@ -185,7 +214,7 @@ describe('ConsistencyCheckView onChecksUpdated callback', () => {
     };
     apiClient.get.mockResolvedValue({ data: { data: allConfirmedData } });
 
-    render(
+    renderWithFeedback(
       <ConsistencyCheckView
         reportId={1}
         versionId={2}

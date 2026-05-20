@@ -11,8 +11,12 @@ import {
     RefreshCw,
     Eye
 } from 'lucide-react';
+import { useToast } from './common/ToastProvider';
+import { useConfirmDialog } from './common/ConfirmDialogProvider';
 
 function IssueList({ regionId, regionName, onBack, onSelectReport }) {
+    const toast = useToast();
+    const confirmAction = useConfirmDialog();
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [data, setData] = useState({ total_issues: 0, tree: [] });
@@ -144,11 +148,17 @@ function IssueList({ regionId, regionName, onBack, onSelectReport }) {
     const handleBatchCheck = async () => {
         if (batchChecking) return;
         if (issueReportIds.length === 0) {
-            alert('当前没有需要校验的问题报告');
+            toast.info('当前没有需要校验的问题报告');
             return;
         }
 
-        if (!window.confirm(`确认对当前筛选的 ${issueReportIds.length} 份问题报告进行一键校验？\n(系统将以 50 份为一组分批处理，防止超时)`)) return;
+        const confirmed = await confirmAction({
+            title: '一键校验问题报告',
+            message: `确认对当前筛选的 ${issueReportIds.length} 份问题报告进行一键校验？系统将以 50 份为一组分批处理，防止超时。`,
+            confirmText: '开始校验',
+            tone: 'default',
+        });
+        if (!confirmed) return;
 
         setBatchChecking(true);
         let totalProcessed = 0;
@@ -173,12 +183,12 @@ function IssueList({ regionId, regionName, onBack, onSelectReport }) {
                 totalFailed += (rData.failed || 0);
             }
             await fetchData();
-            alert(`一键校验完成：\n成功：${totalProcessed}\n跳过：${totalSkipped}\n失败：${totalFailed}`);
+            toast.success('一键校验完成', `成功 ${totalProcessed}，跳过 ${totalSkipped}，失败 ${totalFailed}`);
         } catch (err) {
             const message = err.response?.data?.error || err.message || '一键校验失败';
             console.error('Batch check error:', err);
             await fetchData();
-            alert(`校验过程中断：${message}\n\n已尝试处理：${totalProcessed} 份。`);
+            toast.error('校验过程中断', `已尝试处理 ${totalProcessed} 份。${message}`);
         } finally {
             setBatchChecking(false);
         }

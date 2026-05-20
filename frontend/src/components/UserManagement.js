@@ -2,8 +2,12 @@ import React, { useState, useEffect, useMemo } from 'react';
 import './JobCenter.css'; // Reuse existing styles
 import { apiClient } from '../apiClient';
 import { User, Plus, Edit, Trash2, X } from 'lucide-react';
+import { useToast } from './common/ToastProvider';
+import { useConfirmDialog } from './common/ConfirmDialogProvider';
 
 export default function UserManagement() {
+    const toast = useToast();
+    const confirmAction = useConfirmDialog();
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [modalOpen, setModalOpen] = useState(false);
@@ -45,7 +49,7 @@ export default function UserManagement() {
             setUsers(res.data);
         } catch (error) {
             console.error('Failed to load users:', error);
-            alert('加载用户失败: ' + (error.response?.data?.error || error.message));
+            toast.error('加载用户失败', error.response?.data?.error || error.message);
         } finally {
             setLoading(false);
         }
@@ -104,7 +108,7 @@ export default function UserManagement() {
         
         if (!region) {
             console.warn('Region not found for targetId:', targetId);
-            alert('无法找到对应的区域，请刷新页面重试');
+            toast.warning('无法找到对应的区域', '请刷新页面后重试。');
             return;
         }
         
@@ -177,19 +181,25 @@ export default function UserManagement() {
 
     const handleDelete = async (userId) => {
         if (!userId) {
-            alert('错误：未找到用户ID');
+            toast.error('删除失败', '未找到用户 ID。');
             return;
         }
-        if (!window.confirm('确定要删除该用户吗？此操作无法撤销。')) return;
+        const confirmed = await confirmAction({
+            title: '删除用户',
+            message: '确定要删除该用户吗？此操作无法撤销。',
+            confirmText: '删除',
+            tone: 'danger',
+        });
+        if (!confirmed) return;
 
         try {
             console.log('Deleting user:', userId);
             await apiClient.delete(`/users/${userId}`);
-            alert('删除成功'); // Immediate feedback
+            toast.success('用户已删除');
             loadUsers();
         } catch (error) {
             console.error('Delete failed:', error);
-            alert('删除失败: ' + (error.response?.data?.error || error.message));
+            toast.error('删除失败', error.response?.data?.error || error.message);
         }
     };
 
@@ -207,9 +217,10 @@ export default function UserManagement() {
                 await apiClient.post('/users', payload);
             }
             setModalOpen(false);
+            toast.success(editingUser ? '用户已保存' : '用户已创建');
             loadUsers();
         } catch (error) {
-            alert('保存失败: ' + (error.response?.data?.error || error.message));
+            toast.error('保存失败', error.response?.data?.error || error.message);
         }
     };
 

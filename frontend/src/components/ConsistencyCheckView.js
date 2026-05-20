@@ -15,6 +15,8 @@ import {
   summarizeQualityAuditGroups,
 } from '../utils/consistencyDisplay';
 import { aggregateIssuesFromChecks } from '../utils/issueAggregation';
+import { useToast } from './common/ToastProvider';
+import { useConfirmDialog } from './common/ConfirmDialogProvider';
 
 const isTablePath = (path) =>
   path &&
@@ -202,6 +204,8 @@ const buildModeMeta = (filterGroups = []) => {
 };
 
 const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], onLocate, onChecksUpdated }) => {
+  const toast = useToast();
+  const confirmAction = useConfirmDialog();
   const [checksData, setChecksData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -295,7 +299,7 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
       await fetchChecks();
       onChecksUpdated?.();
     } catch (err) {
-      window.alert(err.response?.data?.error || err.message || '更新失败');
+      toast.error('更新失败', err.response?.data?.error || err.message || '更新失败');
     }
   };
 
@@ -350,14 +354,20 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
       : (consistencyAggregation?.pendingItemIds || collectPendingConsistencyItemIds(displayedGroups));
 
     if (pendingItems.length === 0) {
-      window.alert(modeMeta.isQualityMode ? '没有可标记为已处理的数据质量提示' : '没有可确认的待处理项');
+      toast.info(modeMeta.isQualityMode ? '没有可标记为已处理的数据质量提示' : '没有可确认的待处理项');
       return;
     }
 
     const confirmText = modeMeta.isQualityMode
       ? `确认将 ${pendingItems.length} 个数据质量提示全部标记为“已处理”吗？`
       : `确认将 ${pendingItems.length} 个待处理项全部标记为“已确认”吗？`;
-    if (!window.confirm(confirmText)) {
+    const confirmed = await confirmAction({
+      title: modeMeta.isQualityMode ? '批量标记数据质量提示' : '批量确认待处理项',
+      message: confirmText,
+      confirmText: modeMeta.isQualityMode ? '标记已处理' : '确认处理',
+      tone: 'default',
+    });
+    if (!confirmed) {
       return;
     }
 
@@ -372,8 +382,9 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
       }
       await fetchChecks();
       onChecksUpdated?.();
+      toast.success('批量处理完成', `已处理 ${pendingItems.length} 项。`);
     } catch (err) {
-      window.alert(err.response?.data?.error || err.message || '批量处理失败');
+      toast.error('批量处理失败', err.response?.data?.error || err.message || '批量处理失败');
       setLoading(false);
     }
   };
