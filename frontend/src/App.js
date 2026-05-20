@@ -19,6 +19,7 @@ import IssueList from './components/IssueList';
 import ReportMaintenance from './components/ReportMaintenance';
 import { ToastProvider } from './components/common/ToastProvider';
 import { ConfirmDialogProvider } from './components/common/ConfirmDialogProvider';
+import { TaskDrawerProvider } from './components/tasks/TaskDrawerProvider';
 import AppShell from './components/app/AppShell';
 
 import DataCenterReportsList from './components/datacenter/DataCenterReportsList';
@@ -117,6 +118,7 @@ function AuthenticatedApp({ onLogout, user }) {
   const routerNavigate = useNavigate();
   const currentPath = `${location.pathname}${location.search}`;
   const activeRoute = getRouteForPath(location.pathname);
+  const isLeaderCockpitRoute = location.pathname === '/govinsight/leader-cockpit';
   const navigate = useCallback(
     (path, options) => {
       if (!path) return;
@@ -128,33 +130,35 @@ function AuthenticatedApp({ onLogout, user }) {
   return (
     <ToastProvider>
       <ConfirmDialogProvider>
-        <AppShell
-          currentPath={currentPath}
-          navigate={navigate}
-          onLogout={onLogout}
-          route={activeRoute}
-          user={user}
-        >
-          <Routes>
-            <Route path="/" element={<Navigate to="/catalog" replace />} />
-            <Route path="/catalog" element={<CatalogRoute currentPath={currentPath} navigate={navigate} />} />
-            <Route path="/catalog/reports" element={<CatalogRoute currentPath={currentPath} navigate={navigate} />} />
-            <Route path="/catalog/reports/:reportId" element={<ReportDetailRoute navigate={navigate} />} />
-            <Route path="/upload" element={<UploadReport />} />
-            <Route path="/jobs" element={<JobCenter />} />
-            <Route path="/jobs/:versionId" element={<JobDetailRoute navigate={navigate} />} />
-            <Route path="/history" element={<ComparisonHistory />} />
-            <Route path="/comparison/:comparisonId" element={<ComparisonDetailRoute navigate={navigate} />} />
-            <Route path="/issues/*" element={<IssueListRoute currentPath={currentPath} navigate={navigate} />} />
-            <Route path="/report-maintenance" element={<ReportMaintenanceRoute navigate={navigate} />} />
-            <Route path="/regions" element={<RegionsManager />} />
-            <Route path="/admin/users" element={<UserManagement />} />
-            <Route path="/datacenter" element={<DataCenterRoute navigate={navigate} />} />
-            <Route path="/datacenter/reports/:reportId" element={<DataCenterReportRoute navigate={navigate} />} />
-            <Route path="/govinsight/*" element={<GovInsightModule />} />
-            <Route path="*" element={<Navigate to="/catalog" replace />} />
-          </Routes>
-        </AppShell>
+        <TaskDrawerProvider navigate={navigate} disabled={isLeaderCockpitRoute}>
+          <AppShell
+            currentPath={currentPath}
+            navigate={navigate}
+            onLogout={onLogout}
+            route={activeRoute}
+            user={user}
+          >
+            <Routes>
+              <Route path="/" element={<Navigate to="/catalog" replace />} />
+              <Route path="/catalog" element={<CatalogRoute currentPath={currentPath} navigate={navigate} />} />
+              <Route path="/catalog/reports" element={<CatalogRoute currentPath={currentPath} navigate={navigate} />} />
+              <Route path="/catalog/reports/:reportId" element={<ReportDetailRoute navigate={navigate} />} />
+              <Route path="/upload" element={<UploadReport />} />
+              <Route path="/jobs" element={<JobCenter />} />
+              <Route path="/jobs/:versionId" element={<JobDetailRoute navigate={navigate} />} />
+              <Route path="/history" element={<ComparisonHistory />} />
+              <Route path="/comparison/:comparisonId" element={<ComparisonDetailRoute navigate={navigate} />} />
+              <Route path="/issues/*" element={<IssueListRoute currentPath={currentPath} navigate={navigate} />} />
+              <Route path="/report-maintenance" element={<ReportMaintenanceRoute navigate={navigate} />} />
+              <Route path="/regions" element={<RegionsManager />} />
+              <Route path="/admin/users" element={<UserManagement />} />
+              <Route path="/datacenter" element={<DataCenterRoute navigate={navigate} />} />
+              <Route path="/datacenter/reports/:reportId" element={<DataCenterReportRoute navigate={navigate} />} />
+              <Route path="/govinsight/*" element={<GovInsightModule />} />
+              <Route path="*" element={<Navigate to="/catalog" replace />} />
+            </Routes>
+          </AppShell>
+        </TaskDrawerProvider>
       </ConfirmDialogProvider>
     </ToastProvider>
   );

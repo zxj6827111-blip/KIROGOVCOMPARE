@@ -22,6 +22,7 @@ import {
     ShieldCheck,
     X
 } from 'lucide-react';
+import { useTaskDrawer } from './tasks/TaskDrawerProvider';
 
 const EMPTY_VALUE = '--';
 
@@ -359,6 +360,7 @@ function StatusBadge({ map, value }) {
 }
 
 function ReportMaintenance({ onBack, onNavigate }) {
+    const taskDrawer = useTaskDrawer();
     const initialParams = useMemo(() => getInitialParams(), []);
     const [year, setYear] = useState(initialParams.year);
     const [regionId, setRegionId] = useState(initialParams.regionId);
@@ -636,6 +638,18 @@ function ReportMaintenance({ onBack, onNavigate }) {
                 params: { force: 'true' }
             });
             const jobId = resp.data?.job_id;
+            if (jobId) {
+                taskDrawer.trackParseJob({
+                    job_id: jobId,
+                    report_id: row.report_id,
+                    version_id: row.effective_version_id,
+                    status: 'queued',
+                    progress: 0,
+                    step_name: '重新解析已提交',
+                    file_name: row.file_name || row.unit_name || row.region_name,
+                });
+                taskDrawer.openDrawer();
+            }
             setActionMessage(jobId ? `已提交重新解析任务 #${jobId}。` : '已提交重新解析任务。');
             fetchData();
         } catch (err) {

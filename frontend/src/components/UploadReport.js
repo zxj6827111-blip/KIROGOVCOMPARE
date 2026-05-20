@@ -14,6 +14,7 @@ import {
 } from '../utils/uploadAutoDetect';
 import { useToast } from './common/ToastProvider';
 import { useConfirmDialog } from './common/ConfirmDialogProvider';
+import { useTaskDrawer } from './tasks/TaskDrawerProvider';
 import { getAxiosFriendlyError } from '../utils/errorTranslator';
 import PageHeader from './common/PageHeader';
 
@@ -72,6 +73,7 @@ const extractPdfFirstPageText = async (selectedFile) => {
 function UploadReport() {
   const toast = useToast();
   const confirmAction = useConfirmDialog();
+  const taskDrawer = useTaskDrawer();
   const [regions, setRegions] = useState([]);
   const [regionId, setRegionId] = useState('');
   const [year, setYear] = useState(new Date().getFullYear());
@@ -418,28 +420,58 @@ function UploadReport() {
       const payload = response.data || {};
       const uploadResult = {
         versionId: extractField(payload, 'version_id'),
+        jobId: extractField(payload, 'job_id'),
       };
 
-      setMessage('✅ 任务已创建，正在跳转到任务中心...');
+      setMessage('✅ 解析任务已创建，可在右侧任务抽屉查看进度。');
 
-      setTimeout(() => {
-        if (uploadResult.versionId) {
-          window.location.href = `/jobs/${uploadResult.versionId}`;
-        }
-      }, 1000);
+      if (uploadResult.jobId) {
+        taskDrawer.trackParseJob({
+          job_id: uploadResult.jobId,
+          version_id: uploadResult.versionId,
+          status: 'queued',
+          progress: 0,
+          step_name: '等待解析',
+          file_name: file?.name,
+        });
+        taskDrawer.openDrawer();
+      }
+
+      toast.success('解析任务已创建', '无需跳转任务中心，右侧任务抽屉会持续更新进度。', {
+        actionLabel: uploadResult.versionId ? '查看任务详情' : '打开任务中心',
+        onAction: () => {
+          window.location.href = uploadResult.versionId ? `/jobs/${uploadResult.versionId}` : '/jobs';
+        },
+        duration: 8000,
+      });
     } catch (error) {
       const status = error.response?.status;
       if (status === 409) {
         const payload = error.response?.data || {};
         const versionId = extractField(payload, 'version_id');
+        const jobId = extractField(payload, 'job_id');
 
-        setMessage('⚠️ 该报告已存在，正在跳转到任务详情...');
+        setMessage('⚠️ 该报告已存在，可在任务抽屉或任务详情查看状态。');
 
-        setTimeout(() => {
-          if (versionId) {
-            window.location.href = `/jobs/${versionId}`;
-          }
-        }, 1000);
+        if (jobId || versionId) {
+          taskDrawer.trackParseJob({
+            job_id: jobId,
+            version_id: versionId,
+            status: 'queued',
+            progress: 0,
+            step_name: '已存在报告，正在同步任务状态',
+            file_name: file?.name,
+          });
+          taskDrawer.openDrawer();
+        }
+
+        toast.warning('报告已存在', '已保留当前页面，可从任务抽屉查看或进入任务详情。', {
+          actionLabel: versionId ? '查看任务详情' : '打开任务中心',
+          onAction: () => {
+            window.location.href = versionId ? `/jobs/${versionId}` : '/jobs';
+          },
+          duration: 8000,
+        });
       } else {
         const friendly = getAxiosFriendlyError(error, '上传失败，请稍后重试。');
         setMessage(`❌ ${friendly.message}`);

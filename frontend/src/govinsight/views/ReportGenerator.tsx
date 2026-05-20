@@ -29,13 +29,20 @@ import { AuxiliaryRiskThresholdPanel } from '../components/AuxiliaryRiskThreshol
 import { HierarchySupportSummary } from '../components/HierarchySupportSummary';
 import { ReconciliationCheckCards } from '../components/ReconciliationCheckCards';
 import { useToast } from '../../components/common/ToastProvider';
+import { useTaskDrawer } from '../../components/tasks/TaskDrawerProvider';
 import { getAxiosFriendlyError } from '../../utils/errorTranslator';
 
 type EngineMode = 'ai' | 'rule';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 type GovInsightReportJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 type ToastApi = {
+  success: (title: string, message?: string, options?: { actionLabel?: string; onAction?: () => void; duration?: number }) => void;
   error: (title: string, message?: string, options?: { detail?: string }) => void;
+};
+
+type TaskDrawerApi = {
+  trackGovInsightJob: (job: Record<string, unknown>) => void;
+  openDrawer: () => void;
 };
 
 interface GovInsightReportJob {
@@ -245,6 +252,7 @@ const TaskField = ({ label, value, className = '' }: { label: string; value: Rea
 
 export const ReportGenerator: React.FC = () => {
   const toast = useToast() as ToastApi;
+  const taskDrawer = useTaskDrawer() as TaskDrawerApi;
   const { entity } = useContext(EntityContext);
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
@@ -640,11 +648,21 @@ export const ReportGenerator: React.FC = () => {
 
       setActiveJob(nextJob);
       setLoadedModel(nextJob.model || '');
+      taskDrawer.trackGovInsightJob({
+        ...nextJob,
+        title: `${nextJob.orgName || entity.name} ${nextJob.year || year} AI 报告`,
+      });
+      taskDrawer.openDrawer();
       setJobMessage(
         response.data?.data?.reused
           ? `复用已有后台任务：${nextJob.stepName}`
           : `后台任务已创建：${nextJob.stepName}`
       );
+      toast.success('AI 报告任务已创建', '生成进度会在右侧任务抽屉持续更新。', {
+        actionLabel: '打开任务抽屉',
+        onAction: () => taskDrawer.openDrawer(),
+        duration: 8000,
+      });
     } catch (error: any) {
       setIsGenerating(false);
       setSaveStatus('error');

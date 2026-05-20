@@ -14,6 +14,7 @@ import PageHeader from './common/PageHeader';
 import ReportFlowStatusBar from './ReportFlowStatusBar';
 import { useToast } from './common/ToastProvider';
 import { useConfirmDialog } from './common/ConfirmDialogProvider';
+import { useTaskDrawer } from './tasks/TaskDrawerProvider';
 import { resolveSafeReturnTo } from '../app/returnTo';
 
 const tryParseJsonText = (value) => {
@@ -1068,6 +1069,7 @@ const applyPendingOcrCorrections = (parsed, corrections = []) => {
 
 function ReportDetail({ reportId: propReportId, onBack }) {
   const toast = useToast();
+  const taskDrawer = useTaskDrawer();
   const confirmAction = useConfirmDialog();
   const reportId = propReportId || window.location.pathname.split('/').pop();
   const currentUser = getCurrentUser();
@@ -1570,7 +1572,19 @@ function ReportDetail({ reportId: propReportId, onBack }) {
         workingVersionId ? { version_id: workingVersionId } : {}
       );
       const jobId = resp.data?.job_id || resp.data?.jobId;
+
       if (!jobId) throw new Error('未返回有效 job_id');
+
+      taskDrawer.trackParseJob({
+        job_id: jobId,
+        version_id: workingVersionId,
+        report_id: reportId,
+        status: 'queued',
+        progress: 0,
+        step_name: 'Reparse queued',
+        file_name: report?.file_name,
+      });
+      taskDrawer.openDrawer();
 
       const job = await pollJob(jobId);
       if ((job.status || '').toLowerCase() === 'failed') {
