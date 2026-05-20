@@ -2,8 +2,10 @@ import React, { useState } from 'react';
 import './ParsedDataEditor.css';
 import { apiClient } from '../apiClient';
 import Table3FullEditor from './Table3FullEditor';
+import { useToast } from './common/ToastProvider';
 
 const ParsedDataEditor = ({ reportId, versionId, parsedJson, onSave, onCancel }) => {
+  const toast = useToast();
   // 确保parsedJson是对象
   let initialData = parsedJson;
   if (typeof parsedJson === 'string') {
@@ -104,7 +106,11 @@ const ParsedDataEditor = ({ reportId, versionId, parsedJson, onSave, onCancel })
           : '已自动完成一致性校验。')
         : `但自动校验未成功：${checksRunError}。可在“勾稽关系校验”页手动重试。`;
 
-      alert(`${saveMessage}${checksMessage}`);
+      if (checksRunSuccess) {
+        toast.success('解析数据已保存', checksMessage);
+      } else {
+        toast.warning('解析数据已保存', checksMessage);
+      }
       onSave({
         parsedJson: editedData,
         newVersionId: new_version_id,

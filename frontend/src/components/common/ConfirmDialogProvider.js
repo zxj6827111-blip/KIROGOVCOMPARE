@@ -56,7 +56,7 @@ export function ConfirmDialogProvider({ children }) {
 export function useConfirmDialog() {
   const context = useContext(ConfirmDialogContext);
   if (!context) {
-    return async () => window.confirm('确认继续？');
+    return async () => false;
   }
   return context.confirm;
 }

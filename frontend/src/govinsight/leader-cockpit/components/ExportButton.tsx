@@ -2,6 +2,12 @@ import React from 'react';
 import { Download } from 'lucide-react';
 import type { EntityMetrics, ViewLevel, DisclosureMethod, CorrectionMethod } from '../types';
 import { exportRiskList, exportTaskList } from '../utils/csvExport';
+import { useToast } from '../../../components/common/ToastProvider';
+
+type ToastApi = {
+    success: (title: string, message?: string) => void;
+    info: (title: string, message?: string) => void;
+};
 
 interface ExportButtonProps {
     entities: EntityMetrics[];
@@ -17,14 +23,25 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
     calibration,
     viewLevel,
 }) => {
+    const toast = useToast() as ToastApi;
     if (viewLevel === 'city') return null;
 
     const handleExportRiskList = () => {
-        exportRiskList(entities, calibration, viewLevel);
+        const result = exportRiskList(entities, calibration, viewLevel);
+        if (result.ok) {
+            toast.success('导出完成', result.message);
+        } else {
+            toast.info('暂无可导出数据', result.message);
+        }
     };
 
     const handleExportTaskList = () => {
-        exportTaskList(entities, calibration, viewLevel);
+        const result = exportTaskList(entities, calibration, viewLevel);
+        if (result.ok) {
+            toast.success('导出完成', result.message);
+        } else {
+            toast.info('暂无可导出数据', result.message);
+        }
     };
 
     return (

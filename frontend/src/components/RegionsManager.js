@@ -12,14 +12,17 @@ import {
   Upload,
   X,
   Download,
-  AlertTriangle,
   Edit2,
   ArrowUp,
   ArrowDown,
   ArrowRightLeft
 } from 'lucide-react';
+import { useToast } from './common/ToastProvider';
+import { useConfirmDialog } from './common/ConfirmDialogProvider';
 
 function RegionsManager() {
+  const toast = useToast();
+  const confirmAction = useConfirmDialog();
   const [regions, setRegions] = useState([]);
   const [isReordering, setIsReordering] = useState(false);
 
@@ -42,32 +45,6 @@ function RegionsManager() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingRegion, setEditingRegion] = useState(null);
   const [editName, setEditName] = useState('');
-
-  // Confirm Dialog State
-  const [confirmDialog, setConfirmDialog] = useState({
-    isOpen: false,
-    message: '',
-    onConfirm: null,
-  });
-
-  const closeConfirm = () => {
-    setConfirmDialog({ isOpen: false, message: '', onConfirm: null });
-  };
-
-  const showConfirm = (message, onConfirm) => {
-    setConfirmDialog({
-      isOpen: true,
-      message,
-      onConfirm: () => {
-        try {
-          onConfirm();
-        } catch (e) {
-          console.log('Error executing onConfirm callback:', e);
-        }
-        closeConfirm();
-      }
-    });
-  };
 
   const confirmBatchUpload = async () => {
     if (!batchFile) return;
@@ -131,7 +108,7 @@ function RegionsManager() {
       }, 500);
 
     } catch (err) {
-      alert('导入失败: ' + err.message);
+      toast.error('导入失败', err.message);
       setIsImporting(false);
     }
   };
@@ -139,14 +116,21 @@ function RegionsManager() {
   const handleDeleteRegion = async (e, region) => {
     e.stopPropagation();
 
-    showConfirm(`确定要删除 "${region.name}" 及其所有下级区域吗？`, async () => {
-      try {
-        await apiClient.delete(`/regions/${region.id}`);
-        fetchData();
-      } catch (err) {
-        alert('删除失败: ' + (err.response?.data?.error || err.message));
-      }
+    const confirmed = await confirmAction({
+      title: '删除区域',
+      message: `确定要删除 "${region.name}" 及其所有下级区域吗？`,
+      confirmText: '删除',
+      tone: 'danger',
     });
+    if (!confirmed) return;
+
+    try {
+      await apiClient.delete(`/regions/${region.id}`);
+      toast.success('区域已删除');
+      fetchData();
+    } catch (err) {
+      toast.error('删除失败', err.response?.data?.error || err.message);
+    }
   };
 
   const scrollContainerRef = useRef(null);
@@ -249,9 +233,10 @@ function RegionsManager() {
         parent_id: addParentId
       });
       setShowAddModal(false);
+      toast.success('区域已添加');
       fetchData(); // Refresh list
     } catch (err) {
-      alert('添加失败: ' + (err.response?.data?.error || err.message));
+      toast.error('添加失败', err.response?.data?.error || err.message);
     }
   };
 
@@ -269,9 +254,10 @@ function RegionsManager() {
       await apiClient.put(`/regions/${editingRegion.id}`, { name: editName });
       setShowEditModal(false);
       setEditingRegion(null);
+      toast.success('区域已修改');
       fetchData();
     } catch (err) {
-      alert('修改失败: ' + (err.response?.data?.error || err.message));
+      toast.error('修改失败', err.response?.data?.error || err.message);
     }
   };
 
@@ -284,15 +270,22 @@ function RegionsManager() {
     const newLevel = isDept ? 2 : 3;
     const actionName = isDept ? '区县' : '部门';
 
-    if (!window.confirm(`确定要将「${item.name}」移动到「${actionName}」分类吗？`)) {
+    const confirmed = await confirmAction({
+      title: '移动分类',
+      message: `确定要将「${item.name}」移动到「${actionName}」分类吗？`,
+      confirmText: '移动',
+      tone: 'default',
+    });
+    if (!confirmed) {
       return;
     }
 
     try {
       await apiClient.put(`/regions/${item.id}`, { level: newLevel });
+      toast.success('分类已移动', `已移动到「${actionName}」。`);
       fetchData();
     } catch (err) {
-      alert('移动失败: ' + (err.response?.data?.error || err.message));
+      toast.error('移动失败', err.response?.data?.error || err.message);
     }
   };
 
@@ -318,7 +311,7 @@ function RegionsManager() {
       await apiClient.post('/regions/reorder', { orders });
       await fetchData();
     } catch (err) {
-      alert('排序失败: ' + (err.response?.data?.error || err.message));
+      toast.error('排序失败', err.response?.data?.error || err.message);
     } finally {
       setIsReordering(false);
     }
@@ -345,7 +338,7 @@ function RegionsManager() {
       await apiClient.post('/regions/reorder', { orders });
       await fetchData();
     } catch (err) {
-      alert('排序失败: ' + (err.response?.data?.error || err.message));
+      toast.error('排序失败', err.response?.data?.error || err.message);
     } finally {
       setIsReordering(false);
     }
@@ -718,24 +711,6 @@ function RegionsManager() {
         </div>
       )}
 
-      {/* Custom Confirm Modal */}
-      {
-        confirmDialog.isOpen && (
-          <div className="confirm-modal-overlay">
-            <div className="confirm-modal">
-              <div className="confirm-modal-icon">
-                <AlertTriangle size={48} />
-              </div>
-              <h3>确认操作</h3>
-              <p>{confirmDialog.message}</p>
-              <div className="confirm-modal-actions">
-                <button className="btn-cancel-modal" onClick={closeConfirm}>取消</button>
-                <button className="btn-confirm-modal" onClick={confirmDialog.onConfirm}>确定</button>
-              </div>
-            </div>
-          </div>
-        )
-      }
     </div >
   );
 }

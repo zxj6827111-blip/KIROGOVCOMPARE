@@ -9,6 +9,7 @@ import {
 } from '../api';
 import { buildRegionTree } from '../data';
 import { getCurrentUser } from '../../apiClient';
+import { useToast } from '../../components/common/ToastProvider';
 import { canAccessLeaderCockpit, isLeaderCockpitAdmin, isLeaderCockpitEnabled } from './access';
 import {
   LEADER_COCKPIT_DEFAULT_CITY_NAME,
@@ -42,6 +43,10 @@ import { Step3Funnel } from './sections/Step3Funnel';
 import { Step4ActionPack } from './sections/Step4ActionPack';
 import { Step5Report } from './sections/Step5Report';
 
+type ToastApi = {
+  info: (title: string, message?: string) => void;
+};
+
 const steps = ['总览', '原因结构', '风险漏斗', '行动包', 'AI报告'];
 
 const isLegacyLeaderCockpitFallbackEnabled = () => {
@@ -51,6 +56,7 @@ const isLegacyLeaderCockpitFallbackEnabled = () => {
 
 export const LeaderCockpit: React.FC = () => {
   const navigate = useNavigate();
+  const toast = useToast() as ToastApi;
   const { entity, setEntity, openSelector } = useContext(EntityContext);
   const user = getCurrentUser();
   const legacyFallbackEnabled = isLegacyLeaderCockpitFallbackEnabled();
@@ -370,7 +376,7 @@ export const LeaderCockpit: React.FC = () => {
               interviewList={comparisonModel.managementActions.interviewList}
               commonShortcomings={comparisonModel.managementActions.commonShortcomings}
               governanceSuggestions={comparisonModel.managementActions.governanceSuggestions}
-              onExportInterviewList={() => alert('导出功能待实现')}
+              onExportInterviewList={() => toast.info('导出功能待接入', '访谈清单导出入口已保留，当前暂无可下载文件。')}
             />
           )}
 

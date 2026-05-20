@@ -23,6 +23,8 @@ import {
     X
 } from 'lucide-react';
 import { useTaskDrawer } from './tasks/TaskDrawerProvider';
+import { useToast } from './common/ToastProvider';
+import { useConfirmDialog } from './common/ConfirmDialogProvider';
 
 const EMPTY_VALUE = '--';
 
@@ -361,6 +363,8 @@ function StatusBadge({ map, value }) {
 
 function ReportMaintenance({ onBack, onNavigate }) {
     const taskDrawer = useTaskDrawer();
+    const toast = useToast();
+    const confirmAction = useConfirmDialog();
     const initialParams = useMemo(() => getInitialParams(), []);
     const [year, setYear] = useState(initialParams.year);
     const [regionId, setRegionId] = useState(initialParams.regionId);
@@ -583,9 +587,11 @@ function ReportMaintenance({ onBack, onNavigate }) {
             link.click();
             link.remove();
             window.URL.revokeObjectURL(url);
+            toast.success('导出完成', scope === 'abnormal' ? '异常明细已下载。' : '维护明细已下载。');
         } catch (err) {
             const message = err.response?.data?.error || err.message || '导出失败';
             setActionMessage(`导出失败：${message}`);
+            toast.error('导出失败', message);
         } finally {
             setExporting('');
         }
@@ -628,9 +634,16 @@ function ReportMaintenance({ onBack, onNavigate }) {
     const handleReparse = async (row) => {
         if (!row.report_id) {
             setActionMessage('该单位尚未上传年报，无法重新解析。');
+            toast.warning('无法重新解析', '该单位尚未上传年报。');
             return;
         }
-        if (!window.confirm(`确认重新解析“${row.unit_name || row.region_name}”的年报吗？`)) return;
+        const confirmed = await confirmAction({
+            title: '重新解析年报',
+            message: `确认重新解析“${row.unit_name || row.region_name}”的年报吗？`,
+            confirmText: '重新解析',
+            tone: 'default',
+        });
+        if (!confirmed) return;
         const key = getRowKey(row);
         setReparseBusyKey(key);
         try {
@@ -651,10 +664,12 @@ function ReportMaintenance({ onBack, onNavigate }) {
                 taskDrawer.openDrawer();
             }
             setActionMessage(jobId ? `已提交重新解析任务 #${jobId}。` : '已提交重新解析任务。');
+            toast.success('重新解析任务已提交', jobId ? `任务 #${jobId} 已加入队列。` : '任务已加入队列。');
             fetchData();
         } catch (err) {
             const message = err.response?.data?.message || err.response?.data?.error || err.message || '重新解析失败';
             setActionMessage(`重新解析失败：${message}`);
+            toast.error('重新解析失败', message);
         } finally {
             setReparseBusyKey('');
         }
@@ -667,9 +682,11 @@ function ReportMaintenance({ onBack, onNavigate }) {
     const batchPlaceholder = (label) => {
         if (selectedRows.length === 0) {
             setActionMessage('请先选择需要处理的单位。');
+            toast.warning('请先选择需要处理的单位');
             return;
         }
         setActionMessage(`${label}接口暂未接入，当前先保留操作入口。`);
+        toast.info(`${label}暂未接入`, '当前先保留操作入口。');
     };
 
     const closeDrawer = () => setDrawer({ type: '', row: null });
