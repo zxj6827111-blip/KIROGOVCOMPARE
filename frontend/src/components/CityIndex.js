@@ -8,10 +8,11 @@ import {
   BarChart,
   Eye,
   Trash2,
-  Map as MapIcon,
   Plus,
   RefreshCw
 } from 'lucide-react';
+import Button from './common/Button';
+import PageHeader from './common/PageHeader';
 
 // Global cache to persist data across component remounts (e.g., navigating back from detail page)
 // This prevents the "loading..." flash when returning to the list
@@ -22,7 +23,7 @@ const globalCache = {
   lastFetch: 0,
 };
 
-function CityIndex({ onSelectReport, onViewComparison }) {
+function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
   // Initialize from cache if available
   const [regions, setRegions] = useState(() => globalCache.regions || []);
   const [reports, setReports] = useState(() => globalCache.reports || []);
@@ -72,6 +73,13 @@ function CityIndex({ onSelectReport, onViewComparison }) {
   const [hideEmptyReports, setHideEmptyReports] = useState(true); // 默认隐藏无内容报告
   const [selectedYear, setSelectedYear] = useState('all'); // 年份筛选
   const [batchChecking, setBatchChecking] = useState(false);
+  const goTo = useCallback((target) => {
+    if (onNavigate) {
+      onNavigate(target);
+      return;
+    }
+    window.location.href = target;
+  }, [onNavigate]);
 
   // extract all unique years from reports
   const availableYears = useMemo(() => {
@@ -468,28 +476,27 @@ function CityIndex({ onSelectReport, onViewComparison }) {
     <div className="city-index">
       <div className="header-row">
         <div>
-          <h2>数据概览</h2>
-          <p className="subtitle">全区政府信息公开年报数字化归档与分析总览。</p>
-        </div>
-        <div className="header-actions">
-          <button className="ghost-btn" onClick={() => {
-            const regionParam = currentParentId ? `?region=${currentParentId}&name=${encodeURIComponent(currentRegion?.name || '')}` : '';
-            window.location.href = `/issues${regionParam}`;
-          }}>
-            <AlertCircle size={16} /> 问题清单
-          </button>
-          <button className="ghost-btn" onClick={() => (window.location.href = '/regions')}>
-            <MapIcon size={16} /> 区域管理
-          </button>
-          <button className="ghost-btn" onClick={() => (window.location.href = '/report-maintenance')}>
-            <AlertCircle size={16} /> 年报维护
-          </button>
-          <button className="primary-btn" onClick={() => (window.location.href = '/upload')}>
-            <Plus size={16} /> 录入新报告
-          </button>
-          <button className="ghost-btn" onClick={handleRefresh} title="刷新列表" disabled={loading}>
-            <RefreshCw size={16} className={loading ? 'spin' : ''} />
-          </button>
+          <PageHeader
+            title="年报工作台"
+            subtitle="全区政府信息公开年报数字化归档与分析总览。"
+            actions={(
+              <>
+                <Button variant="secondary" icon={<AlertCircle size={16} />} onClick={() => {
+                  const regionParam = currentParentId ? `?region=${currentParentId}&name=${encodeURIComponent(currentRegion?.name || '')}` : '';
+                  goTo(`/issues${regionParam}`);
+                }}>
+                  问题清单
+                </Button>
+                <Button variant="secondary" icon={<AlertCircle size={16} />} onClick={() => goTo('/report-maintenance')}>
+                  年报维护
+                </Button>
+                <Button variant="primary" icon={<Plus size={16} />} onClick={() => goTo('/upload')}>
+                  录入新报告
+                </Button>
+                <Button variant="ghost" icon={<RefreshCw size={16} className={loading ? 'spin' : ''} />} onClick={handleRefresh} title="刷新列表" disabled={loading} />
+              </>
+            )}
+          />
         </div>
       </div>
 

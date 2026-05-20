@@ -4,6 +4,7 @@ import { apiClient } from '../apiClient';
 import { useToast } from './common/ToastProvider';
 import { useConfirmDialog } from './common/ConfirmDialogProvider';
 import { getAxiosFriendlyError, getRawErrorDetail, translateJobError } from '../utils/errorTranslator';
+import { resolveSafeReturnTo } from '../app/returnTo';
 
 function JobDetail({ versionId, onBack }) {
     const toast = useToast();
@@ -11,6 +12,10 @@ function JobDetail({ versionId, onBack }) {
     const [job, setJob] = useState(null);
     const [loading, setLoading] = useState(true);
     const [retrying, setRetrying] = useState(false);
+    const handleBack = () => {
+        if (onBack) return onBack();
+        window.location.href = resolveSafeReturnTo(window.location.search, '/jobs');
+    };
 
     const loadJobDetail = useCallback(async () => {
         if (!versionId) return;
@@ -126,8 +131,8 @@ function JobDetail({ versionId, onBack }) {
     return (
         <div className="job-detail">
             <div className="job-detail-header">
-                {onBack && (
-                    <button className="btn-back" onClick={onBack}>
+                {(onBack || window.location.search) && (
+                    <button className="btn-back" onClick={handleBack}>
                         ← 返回列表
                     </button>
                 )}

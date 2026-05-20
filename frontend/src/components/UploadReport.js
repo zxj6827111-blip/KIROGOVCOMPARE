@@ -15,6 +15,7 @@ import {
 import { useToast } from './common/ToastProvider';
 import { useConfirmDialog } from './common/ConfirmDialogProvider';
 import { getAxiosFriendlyError } from '../utils/errorTranslator';
+import PageHeader from './common/PageHeader';
 
 const extractField = (payload, key) =>
   payload?.[key] || payload?.[key.replace(/_./g, (m) => m[1].toUpperCase())];
@@ -465,6 +466,10 @@ function UploadReport() {
 
   return (
     <div className="upload-report-page">
+      <PageHeader
+        title="上传报告"
+        subtitle="上传单份或批量年报文件，系统会自动识别首页信息并创建解析任务。"
+      />
       <div className="upload-tabs">
         <button
           className={`upload-tab ${uploadMode === 'single' ? 'active' : ''}`}

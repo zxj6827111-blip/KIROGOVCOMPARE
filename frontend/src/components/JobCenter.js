@@ -8,6 +8,7 @@ import Button from './common/Button';
 import PageHeader from './common/PageHeader';
 import StatusBadge from './common/StatusBadge';
 import { getAxiosFriendlyError, getRawErrorDetail, translateFailureReason, translateJobError } from '../utils/errorTranslator';
+import { appendReturnTo } from '../app/routeRegistry';
 
 const UPLOAD_POLL_ACTIVE_MS = 3000;
 const UPLOAD_POLL_IDLE_MS = 10000;
@@ -269,7 +270,7 @@ function JobCenter() {
     };
 
     const handleViewDetail = (versionId) => {
-        window.location.href = `/jobs/${versionId}`;
+        window.location.href = appendReturnTo(`/jobs/${versionId}`, window.location.pathname + window.location.search);
     };
 
     const getStatusBadge = (status) => {
