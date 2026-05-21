@@ -7,6 +7,11 @@ import {
     COMPARISON_LANDSCAPE_PRINT_CSS,
     createComparisonPrintPageAdapter,
 } from './report-export/PrintPageAdapter';
+import {
+    buildPdfExportPath,
+    ensurePdfExportsDir,
+    resolvePdfExportFilePath,
+} from '../utils/pdfExportPath';
 
 const DATA_DIR = path.resolve(process.env.DATA_DIR || 'data');
 const PDF_EXPORTS_DIR = path.join(DATA_DIR, 'exports', 'pdf');
@@ -23,13 +28,28 @@ let pollIntervalRef: NodeJS.Timeout | null = null;
 let cleanupIntervalRef: NodeJS.Timeout | null = null;
 
 function ensureExportsDir(): void {
-    if (!fs.existsSync(PDF_EXPORTS_DIR)) {
-        fs.mkdirSync(PDF_EXPORTS_DIR, { recursive: true });
-    }
+    ensurePdfExportsDir(PDF_EXPORTS_DIR);
 }
 
 function buildPrintPath(comparisonId: number): string {
     return `/print/comparison/${comparisonId}`;
+}
+
+function toReadablePdfExportError(error: any): string {
+    const message = String(error?.message || error || 'Unknown error');
+    if (/frontend service|ECONNREFUSED|ERR_CONNECTION_REFUSED|net::ERR/i.test(message)) {
+        return 'PDF 生成失败：前端打印服务不可用，请确认前端服务已启动后重试';
+    }
+    if (/browser|puppeteer|chrome|chromium|executable|spawn/i.test(message)) {
+        return 'PDF 生成失败：浏览器渲染组件不可用，请检查 Chrome/Puppeteer 环境';
+    }
+    if (/permission|EACCES|EPERM|EROFS/i.test(message)) {
+        return 'PDF 生成失败：导出目录不可写，请检查 data/exports/pdf 权限';
+    }
+    if (/invalid_pdf_export_file_path/i.test(message)) {
+        return 'PDF 生成失败：导出文件名异常，请重新提交导出任务';
+    }
+    return message;
 }
 
 async function findFrontendUrl(comparisonId: number): Promise<string | null> {
@@ -116,7 +136,7 @@ async function processJob(job: {
         });
 
         ensureExportsDir();
-        const filePath = path.join(PDF_EXPORTS_DIR, job.file_name);
+        const filePath = buildPdfExportPath(job.file_name, PDF_EXPORTS_DIR);
         fs.writeFileSync(filePath, pdfBuffer);
         const fileSize = pdfBuffer.length;
 
@@ -137,6 +157,7 @@ async function processJob(job: {
         console.log(`[PdfExportWorker] Job ${job.id} completed successfully`);
     } catch (error: any) {
         console.error(`[PdfExportWorker] Job ${job.id} failed:`, error);
+        const readableError = toReadablePdfExportError(error);
 
         await pool.query(`
       UPDATE jobs SET 
@@ -147,7 +168,7 @@ async function processJob(job: {
         error_message = $1,
         finished_at = NOW()
       WHERE id = $2
-    `, [error.message || 'Unknown error', job.id]);
+    `, [readableError, job.id]);
     }
 }
 
@@ -167,12 +188,13 @@ async function cleanupExpiredFiles(): Promise<void> {
             const age = now - finishedTime;
 
             if (age > FILE_EXPIRY_MS) {
-                if (fs.existsSync(job.file_path)) {
+                const safeFilePath = resolvePdfExportFilePath(job.file_path);
+                if (safeFilePath && fs.existsSync(safeFilePath)) {
                     try {
-                        fs.unlinkSync(job.file_path);
-                        console.log(`[PdfExportWorker] Cleaned up expired file: ${job.file_path}`);
+                        fs.unlinkSync(safeFilePath);
+                        console.log(`[PdfExportWorker] Cleaned up expired file: ${safeFilePath}`);
                     } catch {
-                        console.warn(`[PdfExportWorker] Failed to delete expired file: ${job.file_path}`);
+                        console.warn(`[PdfExportWorker] Failed to delete expired file: ${safeFilePath}`);
                     }
                 }
 

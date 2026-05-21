@@ -1,6 +1,6 @@
 import express from 'express';
 import pool from '../config/database-llm';
-import { authMiddleware, AuthRequest } from '../middleware/auth';
+import { authMiddleware, AuthRequest, requirePermission } from '../middleware/auth';
 import ReportFactoryService from '../services/report-factory/ReportFactoryService';
 import DerivedMetricsService from '../services/DerivedMetricsService';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
@@ -99,6 +99,58 @@ function buildEvidenceForFact(tableKey: string, row: any, versionId: number): Ev
   return [];
 }
 
+function isRegionAllowed(regionId: number | null | undefined, allowedRegionIds: number[] | null): boolean {
+  if (!allowedRegionIds) return true;
+  if (regionId === undefined) return true;
+  if (regionId === null) return false;
+  const numericRegionId = Number(regionId);
+  if (!Number.isFinite(numericRegionId)) return false;
+  return allowedRegionIds.includes(numericRegionId);
+}
+
+async function getReportRegionId(reportId: number): Promise<number | null> {
+  const result = await pool.query(
+    `SELECT region_id FROM reports WHERE id = $1 LIMIT 1`,
+    [reportId]
+  );
+  return result.rows[0]?.region_id ?? null;
+}
+
+async function ensureReportScope(req: AuthRequest, reportId: number, res: express.Response): Promise<boolean> {
+  const regionId = await getReportRegionId(reportId);
+  if (regionId === null) {
+    res.status(404).json({ error: 'Report not found' });
+    return false;
+  }
+
+  const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
+  if (!isRegionAllowed(regionId, allowedRegionIds)) {
+    res.status(403).json({ error: 'forbidden' });
+    return false;
+  }
+
+  return true;
+}
+
+async function applyRegionScope(
+  req: AuthRequest,
+  filters: string[],
+  params: any[],
+  columnName: string
+): Promise<boolean> {
+  const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
+  if (allowedRegionIds) {
+    if (allowedRegionIds.length === 0) {
+      filters.push('1=0');
+    } else {
+      params.push(allowedRegionIds);
+      filters.push(`${columnName} = ANY($${params.length}::int[])`);
+    }
+    return true;
+  }
+  return false;
+}
+
 router.get('/v2/reports', async (req, res) => {
   try {
     const year = typeof req.query.year === 'string' ? req.query.year.trim() : '';
@@ -134,6 +186,16 @@ router.get('/v2/reports', async (req, res) => {
       } else {
         conditions.push(`${materializeStatusQuery} = $${paramIndex++}`);
         params.push(status);
+      }
+    }
+
+    const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
+    if (allowedRegionIds) {
+      if (allowedRegionIds.length === 0) {
+        conditions.push('1=0');
+      } else {
+        conditions.push(`r.region_id = ANY($${paramIndex++}::int[])`);
+        params.push(allowedRegionIds);
       }
     }
 
@@ -189,15 +251,28 @@ router.get('/v2/reports', async (req, res) => {
   }
 });
 
-router.get('/v2/batches', async (_req, res) => {
+router.get('/v2/batches', async (req: AuthRequest, res) => {
   try {
+    const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
+    if (allowedRegionIds && allowedRegionIds.length === 0) {
+      return res.json({ data: [] });
+    }
+
     const result = await pool.query(`
       SELECT id, batch_uuid, created_by, created_at, source, note,
              report_count, success_count, fail_count, status, completed_at
-      FROM ingestion_batches
+      FROM ingestion_batches b
+      ${allowedRegionIds ? `
+      WHERE EXISTS (
+        SELECT 1
+        FROM report_versions rv
+        JOIN reports r ON r.id = rv.report_id
+        WHERE rv.ingestion_batch_id = b.id
+          AND r.region_id = ANY($1::int[])
+      )` : ''}
       ORDER BY created_at DESC
       LIMIT 50;
-    `);
+    `, allowedRegionIds ? [allowedRegionIds] : []);
 
     res.json({ data: result.rows });
   } catch (error) {
@@ -223,19 +298,29 @@ router.get('/v2/batches/:batchUuid', async (req, res) => {
       return res.status(404).json({ error: 'Batch not found' });
     }
 
+    const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
+
     const versionsRes = await pool.query(`
       SELECT rv.id as version_id, rv.report_id, rv.state, rv.created_at
       FROM report_versions rv
+      JOIN reports r ON r.id = rv.report_id
       WHERE rv.ingestion_batch_id = $1
+        ${allowedRegionIds ? 'AND r.region_id = ANY($2::int[])' : ''}
       ORDER BY rv.created_at DESC
-    `, [batch.id]);
+    `, allowedRegionIds ? [batch.id, allowedRegionIds] : [batch.id]);
 
     const jobsRes = await pool.query(`
-      SELECT id, report_id, version_id, kind, status, progress, created_at, finished_at
-      FROM jobs
-      WHERE ingestion_batch_id = $1
+      SELECT j.id, j.report_id, j.version_id, j.kind, j.status, j.progress, j.created_at, j.finished_at
+      FROM jobs j
+      LEFT JOIN reports r ON r.id = j.report_id
+      WHERE j.ingestion_batch_id = $1
+        ${allowedRegionIds ? 'AND r.region_id = ANY($2::int[])' : ''}
       ORDER BY created_at DESC
-    `, [batch.id]);
+    `, allowedRegionIds ? [batch.id, allowedRegionIds] : [batch.id]);
+
+    if (allowedRegionIds && versionsRes.rows.length === 0 && jobsRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Batch not found' });
+    }
 
     return res.json({
       data: {
@@ -250,7 +335,7 @@ router.get('/v2/batches/:batchUuid', async (req, res) => {
   }
 });
 
-router.post('/v2/batches/:batchUuid/retry', async (req, res) => {
+router.post('/v2/batches/:batchUuid/retry', requirePermission('manage_jobs'), async (req, res) => {
   try {
     const batchUuid = req.params.batchUuid;
     const batchRes = await pool.query(
@@ -263,6 +348,8 @@ router.post('/v2/batches/:batchUuid/retry', async (req, res) => {
       return res.status(404).json({ error: 'Batch not found' });
     }
 
+    const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
+
     const failedJobsRes = await pool.query(
       `SELECT
          j.id,
@@ -274,11 +361,13 @@ router.post('/v2/batches/:batchUuid/retry', async (req, res) => {
          rv.storage_path
        FROM jobs j
        LEFT JOIN report_versions rv ON rv.id = j.version_id
+       LEFT JOIN reports r ON r.id = j.report_id
        WHERE j.ingestion_batch_id = $1
          AND j.status IN ('failed', 'cancelled')
          AND j.kind != 'pdf_export'
+         ${allowedRegionIds ? 'AND r.region_id = ANY($2::int[])' : ''}
        ORDER BY j.created_at DESC`,
-      [batch.id]
+      allowedRegionIds ? [batch.id, allowedRegionIds] : [batch.id]
     );
     const failedJobs = failedJobsRes.rows;
 
@@ -495,6 +584,7 @@ router.get('/v2/reports/:reportId/facts/:tableName', async (req, res) => {
     if (!reportId || Number.isNaN(reportId)) {
       return res.status(400).json({ error: 'Invalid reportId' });
     }
+    if (!(await ensureReportScope(req as AuthRequest, reportId, res))) return;
 
     const tableName = getTableName(req.params.tableName);
     if (!tableName) {
@@ -591,6 +681,7 @@ router.get('/v2/reports/:reportId/cells', async (req, res) => {
     if (!reportId || Number.isNaN(reportId)) {
       return res.status(400).json({ error: 'Invalid reportId' });
     }
+    if (!(await ensureReportScope(req as AuthRequest, reportId, res))) return;
 
     const requestedVersionId = typeof req.query.version_id === 'string'
       ? Number(req.query.version_id)
@@ -672,6 +763,7 @@ router.get('/v2/reports/:reportId/quality-issues', async (req, res) => {
     if (!reportId || Number.isNaN(reportId)) {
       return res.status(400).json({ error: 'Invalid reportId' });
     }
+    if (!(await ensureReportScope(req as AuthRequest, reportId, res))) return;
 
     const reportRes = await pool.query(
       `SELECT active_version_id FROM reports WHERE id = $1 LIMIT 1`,
@@ -707,6 +799,7 @@ router.get('/v2/reports/:reportId/quality-flags', async (req, res) => {
     if (!reportId || Number.isNaN(reportId)) {
       return res.status(400).json({ error: 'Invalid reportId' });
     }
+    if (!(await ensureReportScope(req as AuthRequest, reportId, res))) return;
 
     const reportRes = await pool.query(
       `SELECT active_version_id FROM reports WHERE id = $1 LIMIT 1`,
@@ -743,6 +836,7 @@ router.get('/v2/reports/:reportId/report', async (req, res) => {
     if (!reportId || Number.isNaN(reportId)) {
       return res.status(400).json({ error: 'Invalid reportId' });
     }
+    if (!(await ensureReportScope(req as AuthRequest, reportId, res))) return;
 
     const formatParam = typeof req.query.format === 'string' ? req.query.format.trim().toLowerCase() : 'md';
     if (formatParam !== 'md' && formatParam !== 'html') {
@@ -807,7 +901,7 @@ router.get('/v2/metrics', async (_req, res) => {
   }
 });
 
-router.post('/v2/derived/run', async (req, res) => {
+router.post('/v2/derived/run', requirePermission('manage_jobs'), async (req, res) => {
   try {
     const yearParam = typeof req.query.year === 'string' ? Number(req.query.year) : undefined;
     const regionParam = typeof req.query.region_id === 'string' ? Number(req.query.region_id) : undefined;
@@ -817,6 +911,13 @@ router.post('/v2/derived/run', async (req, res) => {
     }
     if (regionParam !== undefined && (!Number.isFinite(regionParam) || regionParam <= 0)) {
       return res.status(400).json({ error: 'Invalid region_id' });
+    }
+    const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
+    if (allowedRegionIds && regionParam === undefined) {
+      return res.status(400).json({ error: 'region_id_required_for_scoped_user' });
+    }
+    if (!isRegionAllowed(regionParam, allowedRegionIds)) {
+      return res.status(403).json({ error: 'forbidden' });
     }
 
     const result = await DerivedMetricsService.run({
@@ -842,6 +943,10 @@ router.get('/v2/dashboard/kpis', async (req, res) => {
     if (regionParam !== undefined && (!Number.isFinite(regionParam) || regionParam <= 0)) {
       return res.status(400).json({ error: 'Invalid region_id' });
     }
+    const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
+    if (!isRegionAllowed(regionParam, allowedRegionIds)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
 
     const filters: string[] = [];
     const params: any[] = [];
@@ -855,6 +960,7 @@ router.get('/v2/dashboard/kpis', async (req, res) => {
       filters.push(`region_id = $${paramIndex++}`);
       params.push(regionParam);
     }
+    await applyRegionScope(req as AuthRequest, filters, params, 'region_id');
     const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
 
     const rowsRes = await pool.query(`
@@ -900,14 +1006,21 @@ router.get('/v2/dashboard/trends', async (req, res) => {
     if (unitParam !== undefined && (!Number.isFinite(unitParam) || unitParam <= 0)) {
       return res.status(400).json({ error: 'Invalid unit_id' });
     }
+    const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
+    if (!isRegionAllowed(regionParam, allowedRegionIds)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
 
     if (unitParam !== undefined) {
+      const unitFilters = ['report_id = $1'];
+      const unitParams: any[] = [unitParam];
+      await applyRegionScope(req as AuthRequest, unitFilters, unitParams, 'region_id');
       const rowsRes = await pool.query(`
         SELECT year, derived_risk_score, quality_issue_count_total, application_total, legal_total
         FROM derived_unit_year_metrics
-        WHERE report_id = $1
+        WHERE ${unitFilters.join(' AND ')}
         ORDER BY year ASC
-      `, [unitParam]);
+      `, unitParams);
       return res.json({ data: rowsRes.rows });
     }
 
@@ -917,6 +1030,7 @@ router.get('/v2/dashboard/trends', async (req, res) => {
       filters.push(`region_id = $1`);
       params.push(regionParam);
     }
+    await applyRegionScope(req as AuthRequest, filters, params, 'region_id');
     const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
 
     const rowsRes = await pool.query(`
@@ -947,6 +1061,10 @@ router.get('/v2/dashboard/rankings', async (req, res) => {
     if (regionParam !== undefined && (!Number.isFinite(regionParam) || regionParam <= 0)) {
       return res.status(400).json({ error: 'Invalid region_id' });
     }
+    const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
+    if (!isRegionAllowed(regionParam, allowedRegionIds)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
 
     const filters: string[] = [];
     const params: any[] = [];
@@ -960,6 +1078,7 @@ router.get('/v2/dashboard/rankings', async (req, res) => {
       filters.push(`region_id = $${paramIndex++}`);
       params.push(regionParam);
     }
+    await applyRegionScope(req as AuthRequest, filters, params, 'region_id');
     const whereClause = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
 
     let orderBy = 'derived_risk_score DESC';

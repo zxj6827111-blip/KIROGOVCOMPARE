@@ -18,6 +18,17 @@ const PDF_EXPORT_PRINT_READY_TIMEOUT_MS = Number(
   process.env.PDF_EXPORT_PRINT_READY_TIMEOUT_MS || 45000
 );
 
+function toReadablePdfExportError(error: any): string {
+  const message = String(error?.message || error || 'Unknown error');
+  if (/frontend service|ECONNREFUSED|ERR_CONNECTION_REFUSED|net::ERR/i.test(message)) {
+    return 'PDF 生成失败：前端打印服务不可用，请确认前端服务已启动后重试';
+  }
+  if (/browser|puppeteer|chrome|chromium|executable|spawn/i.test(message)) {
+    return 'PDF 生成失败：浏览器渲染组件不可用，请检查 Chrome/Puppeteer 环境';
+  }
+  return message;
+}
+
 const escapeHtml = (value: string): string =>
   value
     .replace(/&/g, '&amp;')
@@ -322,7 +333,7 @@ router.get('/report-pdf', authMiddleware, async (req: AuthRequest, res: Response
     console.error('[GovInsight PDF] Error generating PDF:', error);
     res.status(500).json({
       error: 'pdf_export_failed',
-      message: error?.message || 'Unknown error',
+      message: toReadablePdfExportError(error),
     });
   }
 });

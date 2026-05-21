@@ -1,22 +1,38 @@
 import express, { Response, Router } from 'express';
-import path from 'path';
 import fs from 'fs';
 import archiver from 'archiver';
 import pool from '../config/database-llm';
-import { DATA_DIR } from '../config/constants';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
+import {
+    DEFAULT_PDF_EXPORTS_DIR,
+    ensurePdfExportsDir,
+    resolvePdfExportFilePath,
+    sanitizePdfExportFileName,
+} from '../utils/pdfExportPath';
 
 const router: Router = express.Router();
+const MAX_BATCH_DOWNLOAD_JOBS = 50;
 
 // PDF 导出文件存储目录
-export const PDF_EXPORTS_DIR = path.join(DATA_DIR, 'exports', 'pdf');
+export const PDF_EXPORTS_DIR = DEFAULT_PDF_EXPORTS_DIR;
 
 // 确保导出目录存在
 function ensureExportsDir(): void {
-    if (!fs.existsSync(PDF_EXPORTS_DIR)) {
-        fs.mkdirSync(PDF_EXPORTS_DIR, { recursive: true });
+    ensurePdfExportsDir(PDF_EXPORTS_DIR);
+}
+
+function normalizeBatchJobIds(value: unknown): number[] | null {
+    if (!Array.isArray(value) || value.length === 0 || value.length > MAX_BATCH_DOWNLOAD_JOBS) {
+        return null;
     }
+
+    const ids = value.map((item) => Number(item));
+    if (ids.some((id) => !Number.isInteger(id) || id <= 0)) {
+        return null;
+    }
+
+    return Array.from(new Set(ids));
 }
 
 /**
@@ -191,7 +207,8 @@ router.get('/', authMiddleware, async (req: AuthRequest, res: Response) => {
             let fileExists = false;
 
             if (row.file_path && row.status === 'done') {
-                fileExists = fs.existsSync(row.file_path);
+                const safeFilePath = resolvePdfExportFilePath(row.file_path);
+                fileExists = Boolean(safeFilePath && fs.existsSync(safeFilePath));
             }
 
             return {
@@ -267,8 +284,18 @@ router.get('/:id/download', authMiddleware, async (req: AuthRequest, res: Respon
             });
         }
 
+        const safeFilePath = resolvePdfExportFilePath(job.file_path);
+        if (!safeFilePath) {
+            return res.status(409).json({
+                error: 'Invalid PDF file path',
+                message: 'PDF 文件路径异常，请重新生成',
+                comparison_id: job.comparison_id,
+                needs_regeneration: true
+            });
+        }
+
         // 检查文件是否存在
-        if (!job.file_path || !fs.existsSync(job.file_path)) {
+        if (!fs.existsSync(safeFilePath)) {
             return res.status(410).json({
                 error: 'File expired',
                 message: '文件已过期被清理，请重新生成',
@@ -278,11 +305,11 @@ router.get('/:id/download', authMiddleware, async (req: AuthRequest, res: Respon
         }
 
         // 发送文件
-        const fileName = job.file_name || `comparison_${job.comparison_id}.pdf`;
+        const fileName = sanitizePdfExportFileName(job.file_name, `comparison_${job.comparison_id}.pdf`);
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
 
-        const fileStream = fs.createReadStream(job.file_path);
+        const fileStream = fs.createReadStream(safeFilePath);
         fileStream.pipe(res);
 
     } catch (error: any) {
@@ -330,7 +357,7 @@ router.delete('/:id', authMiddleware, async (req: AuthRequest, res: Response) =>
         }
 
         // 删除文件（如果存在）
-        const filePath = jobRes.rows[0].file_path;
+        const filePath = resolvePdfExportFilePath(jobRes.rows[0].file_path);
         if (filePath && fs.existsSync(filePath)) {
             try {
                 fs.unlinkSync(filePath);
@@ -429,10 +456,13 @@ router.post('/:id/regenerate', authMiddleware, async (req: AuthRequest, res: Res
  */
 router.post('/batch-download', authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
-        const { job_ids } = req.body;
+        const jobIds = normalizeBatchJobIds(req.body?.job_ids);
 
-        if (!job_ids || !Array.isArray(job_ids) || job_ids.length === 0) {
-            return res.status(400).json({ error: 'job_ids array is required' });
+        if (!jobIds) {
+            return res.status(400).json({
+                error: 'invalid_job_ids',
+                message: `job_ids must be 1-${MAX_BATCH_DOWNLOAD_JOBS} positive integer ids`
+            });
         }
 
         const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
@@ -446,7 +476,7 @@ router.post('/batch-download', authMiddleware, async (req: AuthRequest, res: Res
             `j.status = 'done'`,
             `j.file_path IS NOT NULL`
         ];
-        const params: any[] = [job_ids];
+        const params: any[] = [jobIds];
         let paramIndex = 2;
 
         if (allowedRegionIds) {
@@ -469,7 +499,12 @@ router.post('/batch-download', authMiddleware, async (req: AuthRequest, res: Res
         }
 
         // 检查文件是否存在
-        const existingFiles = jobs.filter((job: any) => fs.existsSync(job.file_path));
+        const existingFiles = jobs
+            .map((job: any) => ({
+                ...job,
+                safe_file_path: resolvePdfExportFilePath(job.file_path),
+            }))
+            .filter((job: any) => job.safe_file_path && fs.existsSync(job.safe_file_path));
 
         if (existingFiles.length === 0) {
             return res.status(404).json({ error: '所有文件已过期，请重新生成' });
@@ -498,8 +533,8 @@ router.post('/batch-download', authMiddleware, async (req: AuthRequest, res: Res
 
         // 添加文件到 ZIP
         for (const job of existingFiles) {
-            const fileName = job.file_name || `比对报告_${job.id}.pdf`;
-            archive.file(job.file_path, { name: fileName });
+            const fileName = sanitizePdfExportFileName(job.file_name, `比对报告_${job.id}.pdf`);
+            archive.file(job.safe_file_path, { name: fileName });
         }
 
         // 完成打包
