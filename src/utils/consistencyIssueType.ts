@@ -6,6 +6,7 @@ export type ConsistencyIssueType =
   | 'consistency_table3_column_sum'
   | 'consistency_table3_other'
   | 'consistency_table4_row_sum'
+  | 'consistency_hierarchy_sum'
   | 'quality_empty'
   | 'quality_format'
   | 'quality_structure'
@@ -103,6 +104,13 @@ export function classifyConsistencyIssueType(item: ConsistencyIssueTypeSource): 
 
   if (groupKey === 'table4') {
     return 'consistency_table4_row_sum';
+  }
+
+  if (groupKey === 'hierarchy') {
+    if (autoStatus === 'NOT_ASSESSABLE') {
+      return 'unsupported_not_assessable';
+    }
+    return 'consistency_hierarchy_sum';
   }
 
   if (groupKey === 'visual' || groupKey === 'structure' || groupKey === 'quality') {

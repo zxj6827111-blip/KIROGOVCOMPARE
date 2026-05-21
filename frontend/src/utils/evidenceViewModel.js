@@ -100,9 +100,20 @@ const REASON_DEFINITIONS = [
   },
   {
     key: 'difference',
-    patterns: ['delta', 'mismatch', 'difference', 'not_equal', '不一致', '差异'],
+    patterns: ['delta', 'mismatch', 'difference', 'not_equal', 'hierarchy_sum_mismatch', '不一致', '差异'],
     label: '比对值不一致',
     summary: '左右值或期望值与实际值存在差异，需要结合来源字段确认差异来自解析值还是规则比对。',
+  },
+  {
+    key: 'hierarchy_incomplete',
+    patterns: [
+      'hierarchy_sum_incomplete_inputs',
+      'hierarchy_no_child_reports',
+      'hierarchy_no_direct_children',
+      'hierarchy_no_materialized_metrics',
+    ],
+    label: '层级汇总输入不完整',
+    summary: '当前行政层级缺少同年下级报告或可汇总字段，系统保留复核线索，不直接认定上下级汇总不一致。',
   },
   {
     key: 'quality',

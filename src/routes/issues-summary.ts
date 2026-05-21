@@ -93,8 +93,8 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
                   report_version_id,
                   COUNT(*)::int AS total,
                   COUNT(*) FILTER (WHERE group_key = 'visual')::int AS visual,
-                  COUNT(*) FILTER (WHERE group_key IN ('structure', 'table2', 'table3', 'table4', 'text'))::int AS structure,
-                  COUNT(*) FILTER (WHERE group_key NOT IN ('visual', 'structure', 'table2', 'table3', 'table4', 'text'))::int AS quality
+                  COUNT(*) FILTER (WHERE group_key IN ('structure', 'table2', 'table3', 'table4', 'text', 'hierarchy'))::int AS structure,
+                  COUNT(*) FILTER (WHERE group_key NOT IN ('visual', 'structure', 'table2', 'table3', 'table4', 'text', 'hierarchy'))::int AS quality
                 FROM report_consistency_items
                 WHERE report_version_id = ANY($1::int[])
                   AND auto_status = 'FAIL'

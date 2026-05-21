@@ -155,7 +155,7 @@ async function countOpenReviewIssues(versionId: number | null): Promise<number> 
      FROM report_consistency_items
      WHERE report_version_id = $1
        AND auto_status IN ('FAIL', 'UNCERTAIN')
-       AND COALESCE(human_status, 'pending') != 'dismissed'`,
+       AND COALESCE(human_status, 'pending') = 'pending'`,
     [versionId]
   );
   return Number(result.rows[0]?.count || 0);

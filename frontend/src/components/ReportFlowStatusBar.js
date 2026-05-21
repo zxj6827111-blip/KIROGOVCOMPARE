@@ -24,16 +24,27 @@ const hasParsedContent = (version) => {
   return typeof parsed === 'object' && Object.keys(parsed).length > 0;
 };
 
+const normalizePdfJobStatus = (status) => {
+  const value = String(status || '').toLowerCase();
+  if (value === 'running') return 'processing';
+  return value;
+};
+
 export function buildReportFlowState(report) {
   const activeVersion = report?.active_version || null;
   const pendingVersion = report?.pending_review_version || null;
   const workingVersion = pendingVersion || activeVersion || null;
   const flowSignals = report?.flow_signals || {};
   const comparison = flowSignals.latestComparison || null;
-  const pdfJob = flowSignals.latestCompletedPdfJob || null;
+  const completedPdfJob = flowSignals.latestCompletedPdfJob || null;
+  const pdfJob = completedPdfJob || flowSignals.latestPdfJob || null;
+  const pdfJobStatus = completedPdfJob ? 'done' : normalizePdfJobStatus(pdfJob?.status);
+  const pdfFileExists = completedPdfJob ? pdfJob?.file_exists !== false : Boolean(pdfJob?.file_exists);
   const latestJobStatus = String(report?.latest_job?.status || '').toLowerCase();
   const parsed = hasParsedContent(workingVersion);
   const hasPending = Boolean(pendingVersion);
+  const hasPendingIssueCount = pendingVersion?.open_issue_count !== null && pendingVersion?.open_issue_count !== undefined;
+  const pendingIssueCount = hasPendingIssueCount ? Number(pendingVersion.open_issue_count) : null;
   const published = Boolean(activeVersion && activeVersion.review_status === 'published');
 
   if (!report) {
@@ -48,12 +59,28 @@ export function buildReportFlowState(report) {
   }
 
   if (hasPending) {
+    if (parsed && pendingIssueCount === 0) {
+      return {
+        activeKey: 'publish',
+        completedKeys: ['uploaded', 'parsed', 'review'],
+        tone: 'info',
+        label: '待发布',
+        description: `待复核版本 #${pendingVersion.version_id} 已处理完复核项，可以发布为正式版本。`,
+        nextAction: {
+          label: '发布正式版本',
+          target: 'publishPending',
+        },
+      };
+    }
+
     return {
       activeKey: 'review',
       completedKeys: ['uploaded', ...(parsed ? ['parsed'] : [])],
       tone: 'warning',
       label: '待复核',
-      description: `当前展示待复核版本 #${pendingVersion.version_id}，请先处理勾稽、质量或视觉复核问题。`,
+      description: pendingIssueCount === null
+        ? `当前展示待复核版本 #${pendingVersion.version_id}，请先处理勾稽、质量或视觉复核问题。`
+        : `当前展示待复核版本 #${pendingVersion.version_id}，还有 ${pendingIssueCount} 个复核项需要确认或忽略。`,
       nextAction: {
         label: '处理问题',
         target: 'checks',
@@ -61,15 +88,56 @@ export function buildReportFlowState(report) {
     };
   }
 
-  if (published && pdfJob && comparison) {
+  if (published && pdfJob && comparison && pdfJobStatus === 'done' && pdfFileExists) {
     return {
       activeKey: 'exportable',
       completedKeys: ['uploaded', 'parsed', 'review', 'publish', 'published', 'comparable', 'exportable'],
       tone: 'success',
-      label: '可导出',
-      description: `已找到比对 #${comparison.id} 和已完成 PDF 任务 #${pdfJob.job_id}，可查看或下载导出结果。`,
+      label: 'PDF可下载',
+      description: `比对 #${comparison.id} 的 PDF 任务 #${pdfJob.job_id} 已完成，可进入任务中心下载。`,
+      stepLabelOverrides: {
+        comparable: '已比对',
+        exportable: 'PDF可下载',
+      },
       nextAction: {
-        label: '查看导出任务',
+        label: '查看下载任务',
+        href: '/jobs?tab=download',
+      },
+    };
+  }
+
+  if (published && pdfJob && comparison && (pdfJobStatus === 'queued' || pdfJobStatus === 'processing')) {
+    const statusLabel = pdfJobStatus === 'queued' ? '排队中' : '生成中';
+    return {
+      activeKey: 'exportable',
+      completedKeys: ['uploaded', 'parsed', 'review', 'publish', 'published', 'comparable'],
+      tone: 'warning',
+      label: 'PDF生成中',
+      description: `比对 #${comparison.id} 的 PDF 任务 #${pdfJob.job_id} ${statusLabel}，完成后这里会变成“PDF可下载”。`,
+      stepLabelOverrides: {
+        comparable: '已比对',
+        exportable: 'PDF生成中',
+      },
+      nextAction: {
+        label: '查看生成进度',
+        href: '/jobs?tab=download',
+      },
+    };
+  }
+
+  if (published && pdfJob && comparison && pdfJobStatus === 'failed') {
+    return {
+      activeKey: 'exportable',
+      completedKeys: ['uploaded', 'parsed', 'review', 'publish', 'published', 'comparable'],
+      tone: 'danger',
+      label: 'PDF生成失败',
+      description: `比对 #${comparison.id} 的 PDF 任务 #${pdfJob.job_id} 生成失败，请进入任务中心查看原因或重新生成。`,
+      stepLabelOverrides: {
+        comparable: '已比对',
+        exportable: 'PDF失败',
+      },
+      nextAction: {
+        label: '查看失败任务',
         href: '/jobs?tab=download',
       },
     };
@@ -81,9 +149,12 @@ export function buildReportFlowState(report) {
       completedKeys: ['uploaded', 'parsed', 'review', 'publish', 'published', 'comparable'],
       tone: 'success',
       label: '已比对',
-      description: `已找到相关比对 #${comparison.id}（${comparison.yearA} vs ${comparison.yearB}），可查看比对详情。`,
+      description: `已找到相关比对 #${comparison.id}（${comparison.yearA} vs ${comparison.yearB}），点击“查看比对详情”进入比对结果；生成 PDF 后才会进入可导出。`,
+      stepLabelOverrides: {
+        comparable: '已比对',
+      },
       nextAction: {
-        label: '查看比对',
+        label: '查看比对详情',
         href: `/comparison/${comparison.id}`,
       },
     };
@@ -95,7 +166,7 @@ export function buildReportFlowState(report) {
       completedKeys: ['uploaded', 'parsed', 'review', 'publish', 'published'],
       tone: 'success',
       label: '可比对',
-      description: `正式版本 #${activeVersion.version_id} 已发布，可生成跨年比对；导出需先进入比对结果。`,
+      description: `正式版本 #${activeVersion.version_id} 已发布，可生成跨年比对；在比对详情中生成 PDF 后才会进入可导出。`,
       nextAction: {
         label: '生成比对',
         href: '/catalog',
@@ -111,7 +182,7 @@ export function buildReportFlowState(report) {
       label: '待发布',
       description: `当前版本 #${workingVersion.version_id} 已解析，但尚未成为正式发布版本。`,
       nextAction: {
-        label: '发布工作版本',
+        label: '发布正式版本',
         target: 'versions',
       },
     };
@@ -164,6 +235,7 @@ function ReportFlowStatusBar({ onAction, report }) {
           const Icon = step.icon || Circle;
           const isDone = state.completedKeys.includes(step.key);
           const isActive = state.activeKey === step.key;
+          const stepLabel = state.stepLabelOverrides?.[step.key] || step.label;
           return (
             <div
               key={step.key}
@@ -176,7 +248,7 @@ function ReportFlowStatusBar({ onAction, report }) {
               <span className="report-flow-step__dot">
                 {isDone ? <CheckCircle2 size={16} /> : <Icon size={16} />}
               </span>
-              <span className="report-flow-step__label">{step.label}</span>
+              <span className="report-flow-step__label">{stepLabel}</span>
             </div>
           );
         })}

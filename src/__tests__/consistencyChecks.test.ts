@@ -1,11 +1,24 @@
 import { buildConsistencyRunSummary, ConsistencyCheckService } from '../services/ConsistencyCheckService';
 import { classifyConsistencyIssueType } from '../utils/consistencyIssueType';
 
+jest.mock('../config/database-llm', () => ({
+    __esModule: true,
+    default: {
+        query: jest.fn(),
+        connect: jest.fn(),
+    },
+}));
+
+import pool from '../config/database-llm';
+
+const mockedQuery = pool.query as jest.Mock;
+
 describe('ConsistencyCheckService', () => {
     let service: ConsistencyCheckService;
 
     beforeEach(() => {
         service = new ConsistencyCheckService();
+        mockedQuery.mockReset();
     });
 
     describe('buildConsistencyRunSummary', () => {
@@ -143,6 +156,20 @@ describe('ConsistencyCheckService', () => {
                 group_key: 'table4',
                 check_key: 't4_sum_review',
             })).toBe('consistency_table4_row_sum');
+        });
+
+        it('classifies hierarchy aggregation items separately', () => {
+            expect(classifyConsistencyIssueType({
+                group_key: 'hierarchy',
+                check_key: 'hierarchy_sum_application__total__new_received',
+                auto_status: 'FAIL',
+            })).toBe('consistency_hierarchy_sum');
+
+            expect(classifyConsistencyIssueType({
+                group_key: 'hierarchy',
+                check_key: 'hierarchy_no_direct_children',
+                auto_status: 'NOT_ASSESSABLE',
+            })).toBe('unsupported_not_assessable');
         });
 
         it('classifies quality empty, text extraction and structure items', () => {
@@ -969,6 +996,130 @@ describe('ConsistencyCheckService', () => {
             items.forEach((item) => {
                 expect(classifyConsistencyIssueType(item)).toBe('consistency_table4_row_sum');
             });
+        });
+    });
+
+    describe('hierarchy aggregation checks', () => {
+        const mockSuccessfulRunPreamble = () => {
+            mockedQuery
+                .mockResolvedValueOnce({ rows: [{ year: 2024 }] })
+                .mockResolvedValueOnce({ rows: [{ id: 9001 }] });
+        };
+
+        const mockFinalPersistQueries = () => {
+            mockedQuery.mockImplementation(async () => ({ rows: [] }));
+        };
+
+        it('keeps a visible hierarchy group when report region context is unavailable', async () => {
+            mockSuccessfulRunPreamble();
+            mockedQuery.mockResolvedValueOnce({ rows: [] });
+            mockFinalPersistQueries();
+
+            const result = await service.runAndPersist(1000, { sections: [] });
+            const contextMissing = result.items.find((item) => item.checkKey === 'hierarchy_context_missing');
+
+            expect(contextMissing).toMatchObject({
+                groupKey: 'hierarchy',
+                autoStatus: 'NOT_ASSESSABLE',
+                title: '层级汇总一致性：当前报告未绑定可用区域层级',
+            });
+            expect(contextMissing?.evidenceJson.values).toMatchObject({
+                reason: 'hierarchy_context_missing',
+                reportVersionId: 1000,
+            });
+        });
+
+        it('flags parent metric when it does not equal direct child report sum', async () => {
+            mockSuccessfulRunPreamble();
+            mockedQuery
+                .mockResolvedValueOnce({
+                    rows: [{
+                        report_id: 100,
+                        version_id: 1000,
+                        region_id: 10,
+                        region_name: '淮安市',
+                        region_level: 2,
+                        unit_name: '淮安市人民政府',
+                        year: 2024,
+                    }],
+                })
+                .mockResolvedValueOnce({
+                    rows: [
+                        { region_id: 11, region_name: '淮安区', region_level: 3, sort_order: 1, report_id: 101, version_id: 1001, unit_name: '淮安区人民政府' },
+                        { region_id: 12, region_name: '清江浦区', region_level: 3, sort_order: 2, report_id: 102, version_id: 1002, unit_name: '清江浦区人民政府' },
+                    ],
+                })
+                .mockResolvedValueOnce({ rows: [] })
+                .mockResolvedValueOnce({
+                    rows: [
+                        { report_id: 100, version_id: 1000, region_id: 10, region_name: '淮安市', applicant_type: 'total', response_type: 'new_received', count: 100 },
+                        { report_id: 101, version_id: 1001, region_id: 11, region_name: '淮安区', applicant_type: 'total', response_type: 'new_received', count: 40 },
+                        { report_id: 102, version_id: 1002, region_id: 12, region_name: '清江浦区', applicant_type: 'total', response_type: 'new_received', count: 50 },
+                    ],
+                })
+                .mockResolvedValueOnce({ rows: [] });
+            mockFinalPersistQueries();
+
+            const result = await service.runAndPersist(1000, { sections: [] });
+            const hierarchyItems = result.items.filter((item) => item.groupKey === 'hierarchy');
+            const newReceived = hierarchyItems.find((item) => item.checkKey === 'hierarchy_sum_application__total__new_received');
+
+            expect(newReceived).toMatchObject({
+                autoStatus: 'FAIL',
+                leftValue: 100,
+                rightValue: 90,
+                delta: 10,
+            });
+            expect(newReceived?.evidenceJson.values).toMatchObject({
+                metricLabel: '合计-本年新收',
+                childReportCount: 2,
+                childMetricCount: 2,
+            });
+        });
+
+        it('keeps hierarchy item uncertain when a direct child lacks same-year report', async () => {
+            mockSuccessfulRunPreamble();
+            mockedQuery
+                .mockResolvedValueOnce({
+                    rows: [{
+                        report_id: 100,
+                        version_id: 1000,
+                        region_id: 10,
+                        region_name: '淮安市',
+                        region_level: 2,
+                        unit_name: '淮安市人民政府',
+                        year: 2024,
+                    }],
+                })
+                .mockResolvedValueOnce({
+                    rows: [
+                        { region_id: 11, region_name: '淮安区', region_level: 3, sort_order: 1, report_id: 101, version_id: 1001, unit_name: '淮安区人民政府' },
+                        { region_id: 12, region_name: '清江浦区', region_level: 3, sort_order: 2, report_id: null, version_id: null, unit_name: null },
+                    ],
+                })
+                .mockResolvedValueOnce({ rows: [] })
+                .mockResolvedValueOnce({
+                    rows: [
+                        { report_id: 100, version_id: 1000, region_id: 10, region_name: '淮安市', applicant_type: 'total', response_type: 'new_received', count: 40 },
+                        { report_id: 101, version_id: 1001, region_id: 11, region_name: '淮安区', applicant_type: 'total', response_type: 'new_received', count: 40 },
+                    ],
+                })
+                .mockResolvedValueOnce({ rows: [] });
+            mockFinalPersistQueries();
+
+            const result = await service.runAndPersist(1000, { sections: [] });
+            const newReceived = result.items.find((item) => item.checkKey === 'hierarchy_sum_application__total__new_received');
+
+            expect(newReceived).toMatchObject({
+                groupKey: 'hierarchy',
+                autoStatus: 'UNCERTAIN',
+                leftValue: 40,
+                rightValue: 40,
+                delta: 0,
+            });
+            expect(newReceived?.evidenceJson.values.missingReports).toEqual([
+                { regionId: 12, regionName: '清江浦区' },
+            ]);
         });
     });
 });

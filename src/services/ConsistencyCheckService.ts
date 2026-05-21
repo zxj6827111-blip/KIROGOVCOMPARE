@@ -70,7 +70,7 @@ interface Table4Data {
 
 export type AutoStatus = 'PASS' | 'FAIL' | 'UNCERTAIN' | 'NOT_ASSESSABLE';
 export type HumanStatus = 'pending' | 'confirmed' | 'dismissed';
-export type GroupKey = 'table2' | 'table3' | 'table4' | 'text' | 'visual' | 'structure' | 'quality';
+export type GroupKey = 'table2' | 'table3' | 'table4' | 'text' | 'visual' | 'structure' | 'quality' | 'hierarchy';
 
 export interface ConsistencyItem {
     groupKey: GroupKey;
@@ -183,6 +183,115 @@ interface Table2FieldConfig {
     checkKeySuffix: string;
     kind: 'count' | 'amount';
 }
+
+interface HierarchyReportContext {
+    reportId: number;
+    versionId: number;
+    regionId: number;
+    regionName: string;
+    regionLevel: number | null;
+    unitName: string;
+    year: number;
+}
+
+interface HierarchyChildReportContext {
+    regionId: number;
+    regionName: string;
+    regionLevel: number | null;
+    sortOrder: number | null;
+    reportId: number | null;
+    versionId: number | null;
+    unitName: string | null;
+}
+
+interface HierarchyMetricValue {
+    source: 'parent' | 'child';
+    reportId: number;
+    versionId: number;
+    regionId: number;
+    regionName: string;
+    metricKey: string;
+    metricLabel: string;
+    tableLabel: string;
+    value: number | null;
+}
+
+interface HierarchyMetricBucket {
+    metricKey: string;
+    metricLabel: string;
+    tableLabel: string;
+    parentValue: number | null;
+    childValues: HierarchyMetricValue[];
+}
+
+const HIERARCHY_ACTIVE_CATEGORY_LABELS: Record<string, string> = {
+    regulations: '规章',
+    normative_documents: '行政规范性文件',
+    licensing: '行政许可',
+    punishment: '行政处罚',
+    coercion: '行政强制',
+    fees: '行政事业性收费',
+};
+
+const HIERARCHY_ACTIVE_FIELD_LABELS: Record<string, string> = {
+    made_count: '本年制发件数',
+    repealed_count: '本年废止件数',
+    valid_count: '现行有效件数',
+    processed_count: '处理决定数量',
+    amount: '收费金额',
+};
+
+const HIERARCHY_APPLICATION_APPLICANT_LABELS: Record<string, string> = {
+    natural_person: '自然人',
+    legal_person_commercial: '商业企业',
+    legal_person_research: '科研机构',
+    legal_person_social: '社会公益组织',
+    legal_person_legal: '法律服务机构',
+    legal_person_other: '其他组织',
+    total: '合计',
+};
+
+const HIERARCHY_APPLICATION_RESPONSE_LABELS: Record<string, string> = {
+    new_received: '本年新收',
+    carried_over: '上年结转',
+    granted: '予以公开',
+    partial_grant: '部分公开',
+    denied_state_secret: '不予公开-国家秘密',
+    denied_law_forbidden: '不予公开-法律行政法规禁止',
+    denied_safety_stability: '不予公开-三安全一稳定',
+    denied_third_party_rights: '不予公开-第三方合法权益',
+    denied_internal_affairs: '不予公开-内部事务信息',
+    denied_process_info: '不予公开-过程性信息',
+    denied_enforcement_case: '不予公开-行政执法案卷',
+    denied_admin_query: '不予公开-行政查询事项',
+    unable_no_info: '无法提供-本机关不掌握',
+    unable_need_creation: '无法提供-需另行制作',
+    unable_unclear: '无法提供-补正后仍不明确',
+    not_processed_complaint: '不予处理-信访举报投诉',
+    not_processed_repeat: '不予处理-重复申请',
+    not_processed_publication: '不予处理-公开出版物',
+    not_processed_massive_requests: '不予处理-大量反复申请',
+    not_processed_confirm_info: '不予处理-确认或重新出具',
+    other_overdue_correction: '其他处理-逾期未补正',
+    other_overdue_fee: '其他处理-逾期未缴费',
+    other_other_reasons: '其他处理-其他',
+    total_processed: '办理结果总计',
+    carried_forward: '结转下年度继续办理',
+};
+
+const HIERARCHY_LEGAL_CASE_LABELS: Record<string, string> = {
+    review: '行政复议',
+    litigation_direct: '未经复议直接起诉',
+    litigation_post_review: '复议后起诉',
+};
+
+const HIERARCHY_LEGAL_RESULT_LABELS: Record<string, string> = {
+    maintain: '结果维持',
+    correct: '结果纠正',
+    other: '其他结果',
+    unfinished: '尚未审结',
+    total: '总计',
+};
 
 function createEmptySummaryBucket(): ConsistencySummaryBucket {
     return {
@@ -584,6 +693,487 @@ export class ConsistencyCheckService {
             autoStatus,
             evidenceJson: { paths, values, leftPaths, rightPaths }, // Store distinct paths
         };
+    }
+
+    private createManualItem(
+        groupKey: GroupKey,
+        checkKey: string,
+        title: string,
+        expr: string,
+        leftValue: number | null,
+        rightValue: number | null,
+        delta: number | null,
+        tolerance: number,
+        autoStatus: AutoStatus,
+        paths: string[],
+        values: Record<string, any>,
+        leftPaths?: string[],
+        rightPaths?: string[]
+    ): ConsistencyItem {
+        return {
+            groupKey,
+            checkKey,
+            fingerprint: this.generateFingerprint(groupKey, checkKey, expr),
+            title,
+            expr,
+            leftValue,
+            rightValue,
+            delta,
+            tolerance,
+            autoStatus,
+            evidenceJson: { paths, values, leftPaths, rightPaths },
+        };
+    }
+
+    private async loadHierarchyContext(reportVersionId: number): Promise<HierarchyReportContext | null> {
+        const result = await pool.query(
+            `SELECT
+                r.id AS report_id,
+                rv.id AS version_id,
+                r.region_id,
+                COALESCE(reg.name, r.unit_name, '') AS region_name,
+                reg.level AS region_level,
+                r.unit_name,
+                r.year
+             FROM report_versions rv
+             JOIN reports r ON r.id = rv.report_id
+             JOIN regions reg ON reg.id = r.region_id
+             WHERE rv.id = $1
+             LIMIT 1`,
+            [reportVersionId]
+        );
+
+        const row = result.rows?.[0];
+        if (!row) return null;
+
+        return {
+            reportId: Number(row.report_id),
+            versionId: Number(row.version_id),
+            regionId: Number(row.region_id),
+            regionName: String(row.region_name || row.unit_name || row.region_id),
+            regionLevel: row.region_level === null || row.region_level === undefined ? null : Number(row.region_level),
+            unitName: String(row.unit_name || ''),
+            year: Number(row.year),
+        };
+    }
+
+    private async loadDirectChildReportContexts(context: HierarchyReportContext): Promise<HierarchyChildReportContext[]> {
+        const result = await pool.query(
+            `SELECT
+                child.id AS region_id,
+                child.name AS region_name,
+                child.level AS region_level,
+                child.sort_order,
+                r.id AS report_id,
+                rv.id AS version_id,
+                r.unit_name
+             FROM regions child
+             LEFT JOIN reports r ON r.region_id = child.id AND r.year = $2
+             LEFT JOIN report_versions rv ON rv.id = r.active_version_id
+             WHERE child.parent_id = $1
+             ORDER BY child.sort_order NULLS LAST, child.id ASC`,
+            [context.regionId, context.year]
+        );
+
+        return (result.rows || []).map((row: any) => ({
+            regionId: Number(row.region_id),
+            regionName: String(row.region_name || row.region_id),
+            regionLevel: row.region_level === null || row.region_level === undefined ? null : Number(row.region_level),
+            sortOrder: row.sort_order === null || row.sort_order === undefined ? null : Number(row.sort_order),
+            reportId: row.report_id === null || row.report_id === undefined ? null : Number(row.report_id),
+            versionId: row.version_id === null || row.version_id === undefined ? null : Number(row.version_id),
+            unitName: row.unit_name === null || row.unit_name === undefined ? null : String(row.unit_name),
+        }));
+    }
+
+    private buildHierarchyMetricKey(tableName: string, parts: Array<string | number | null | undefined>): string {
+        return [tableName, ...parts.map((part) => String(part || '').replace(/[^a-zA-Z0-9]+/g, '_'))]
+            .filter(Boolean)
+            .join('__');
+    }
+
+    private getHierarchyMetricBucket(
+        buckets: Map<string, HierarchyMetricBucket>,
+        metricKey: string,
+        metricLabel: string,
+        tableLabel: string
+    ): HierarchyMetricBucket {
+        let bucket = buckets.get(metricKey);
+        if (!bucket) {
+            bucket = {
+                metricKey,
+                metricLabel,
+                tableLabel,
+                parentValue: null,
+                childValues: [],
+            };
+            buckets.set(metricKey, bucket);
+        }
+        return bucket;
+    }
+
+    private buildHierarchyValueFromRow(
+        row: any,
+        source: 'parent' | 'child',
+        metricKey: string,
+        metricLabel: string,
+        tableLabel: string,
+        value: unknown
+    ): HierarchyMetricValue {
+        return {
+            source,
+            reportId: Number(row.report_id),
+            versionId: Number(row.version_id),
+            regionId: Number(row.region_id),
+            regionName: String(row.region_name || row.unit_name || row.region_id),
+            metricKey,
+            metricLabel,
+            tableLabel,
+            value: value === null || value === undefined ? null : Number(value),
+        };
+    }
+
+    private async loadHierarchyMetricBuckets(
+        context: HierarchyReportContext,
+        childVersionIds: number[]
+    ): Promise<Map<string, HierarchyMetricBucket>> {
+        const buckets = new Map<string, HierarchyMetricBucket>();
+        const versionIds = [context.versionId, ...childVersionIds];
+        if (versionIds.length === 0) {
+            return buckets;
+        }
+
+        const activeRows = await pool.query(
+            `SELECT
+                fad.report_id,
+                fad.version_id,
+                r.region_id,
+                COALESCE(reg.name, r.unit_name, '') AS region_name,
+                r.unit_name,
+                fad.category,
+                fad.made_count,
+                fad.repealed_count,
+                fad.valid_count,
+                fad.processed_count,
+                fad.amount
+             FROM fact_active_disclosure fad
+             JOIN reports r ON r.id = fad.report_id
+             LEFT JOIN regions reg ON reg.id = r.region_id
+             WHERE fad.version_id = ANY($1::bigint[])`,
+            [versionIds]
+        );
+
+        for (const row of activeRows.rows || []) {
+            const category = String(row.category || '');
+            const categoryLabel = HIERARCHY_ACTIVE_CATEGORY_LABELS[category] || category;
+            for (const column of ['made_count', 'repealed_count', 'valid_count', 'processed_count', 'amount']) {
+                if (row[column] === null || row[column] === undefined) continue;
+                const fieldLabel = HIERARCHY_ACTIVE_FIELD_LABELS[column] || column;
+                const metricKey = this.buildHierarchyMetricKey('active', [category, column]);
+                const metricLabel = `${categoryLabel}-${fieldLabel}`;
+                const bucket = this.getHierarchyMetricBucket(buckets, metricKey, metricLabel, '表二');
+                const source = Number(row.version_id) === context.versionId ? 'parent' : 'child';
+                const metricValue = this.buildHierarchyValueFromRow(row, source, metricKey, metricLabel, '表二', row[column]);
+                if (source === 'parent') {
+                    bucket.parentValue = metricValue.value;
+                } else {
+                    bucket.childValues.push(metricValue);
+                }
+            }
+        }
+
+        const applicationRows = await pool.query(
+            `SELECT
+                fa.report_id,
+                fa.version_id,
+                r.region_id,
+                COALESCE(reg.name, r.unit_name, '') AS region_name,
+                r.unit_name,
+                fa.applicant_type,
+                fa.response_type,
+                fa.count
+             FROM fact_application fa
+             JOIN reports r ON r.id = fa.report_id
+             LEFT JOIN regions reg ON reg.id = r.region_id
+             WHERE fa.version_id = ANY($1::bigint[])`,
+            [versionIds]
+        );
+
+        for (const row of applicationRows.rows || []) {
+            if (row.count === null || row.count === undefined) continue;
+            const applicantType = String(row.applicant_type || '');
+            const responseType = String(row.response_type || '');
+            const applicantLabel = HIERARCHY_APPLICATION_APPLICANT_LABELS[applicantType] || applicantType;
+            const responseLabel = HIERARCHY_APPLICATION_RESPONSE_LABELS[responseType] || responseType;
+            const metricKey = this.buildHierarchyMetricKey('application', [applicantType, responseType]);
+            const metricLabel = `${applicantLabel}-${responseLabel}`;
+            const bucket = this.getHierarchyMetricBucket(buckets, metricKey, metricLabel, '表三');
+            const source = Number(row.version_id) === context.versionId ? 'parent' : 'child';
+            const metricValue = this.buildHierarchyValueFromRow(row, source, metricKey, metricLabel, '表三', row.count);
+            if (source === 'parent') {
+                bucket.parentValue = metricValue.value;
+            } else {
+                bucket.childValues.push(metricValue);
+            }
+        }
+
+        const legalRows = await pool.query(
+            `SELECT
+                flp.report_id,
+                flp.version_id,
+                r.region_id,
+                COALESCE(reg.name, r.unit_name, '') AS region_name,
+                r.unit_name,
+                flp.case_type,
+                flp.result_type,
+                flp.count
+             FROM fact_legal_proceeding flp
+             JOIN reports r ON r.id = flp.report_id
+             LEFT JOIN regions reg ON reg.id = r.region_id
+             WHERE flp.version_id = ANY($1::bigint[])`,
+            [versionIds]
+        );
+
+        for (const row of legalRows.rows || []) {
+            if (row.count === null || row.count === undefined) continue;
+            const caseType = String(row.case_type || '');
+            const resultType = String(row.result_type || '');
+            const caseLabel = HIERARCHY_LEGAL_CASE_LABELS[caseType] || caseType;
+            const resultLabel = HIERARCHY_LEGAL_RESULT_LABELS[resultType] || resultType;
+            const metricKey = this.buildHierarchyMetricKey('legal', [caseType, resultType]);
+            const metricLabel = `${caseLabel}-${resultLabel}`;
+            const bucket = this.getHierarchyMetricBucket(buckets, metricKey, metricLabel, '表四');
+            const source = Number(row.version_id) === context.versionId ? 'parent' : 'child';
+            const metricValue = this.buildHierarchyValueFromRow(row, source, metricKey, metricLabel, '表四', row.count);
+            if (source === 'parent') {
+                bucket.parentValue = metricValue.value;
+            } else {
+                bucket.childValues.push(metricValue);
+            }
+        }
+
+        return buckets;
+    }
+
+    private createHierarchyItem(
+        context: HierarchyReportContext,
+        bucket: HierarchyMetricBucket,
+        childContexts: HierarchyChildReportContext[],
+        childWithReports: HierarchyChildReportContext[],
+        missingReportChildren: HierarchyChildReportContext[]
+    ): ConsistencyItem {
+        const childSum = bucket.childValues.reduce((sum, item) => sum + (item.value || 0), 0);
+        const hasParentValue = bucket.parentValue !== null && bucket.parentValue !== undefined;
+        const childVersionSet = new Set(bucket.childValues.map((item) => item.versionId));
+        const childMissingMetric = childWithReports.filter((child) => child.versionId && !childVersionSet.has(child.versionId));
+        const hasComparableChildren = childWithReports.length > 0;
+        const canCompare = hasParentValue && hasComparableChildren && childMissingMetric.length === 0 && missingReportChildren.length === 0;
+        const autoStatus: AutoStatus = canCompare
+            ? (Math.abs((bucket.parentValue || 0) - childSum) <= 0 ? 'PASS' : 'FAIL')
+            : 'UNCERTAIN';
+        const leftValue = hasParentValue ? bucket.parentValue : null;
+        const rightValue = hasComparableChildren ? childSum : null;
+        const delta = leftValue !== null && rightValue !== null ? leftValue - rightValue : null;
+        const childNames = bucket.childValues.map((item) => item.regionName);
+        const missingReportNames = missingReportChildren.map((item) => item.regionName);
+        const missingMetricNames = childMissingMetric.map((item) => item.regionName);
+        const summarizeNames = (names: string[], limit = 12): string => {
+            if (names.length <= limit) {
+                return names.join('、');
+            }
+            return `${names.slice(0, limit).join('、')}等${names.length}个`;
+        };
+        const checkKey = `hierarchy_sum_${bucket.metricKey}`;
+
+        return this.createManualItem(
+            'hierarchy',
+            checkKey,
+            `层级汇总一致性：${context.regionName} ${bucket.tableLabel} ${bucket.metricLabel}`,
+            `self.${bucket.metricKey} = sum(direct_children.${bucket.metricKey})`,
+            leftValue,
+            rightValue,
+            delta,
+            0,
+            autoStatus,
+            [`hierarchy.${context.regionId}.${bucket.metricKey}`],
+            {
+                reason: autoStatus === 'FAIL'
+                    ? 'hierarchy_sum_mismatch'
+                    : canCompare
+                        ? 'hierarchy_sum_matched'
+                        : 'hierarchy_sum_incomplete_inputs',
+                table: bucket.tableLabel,
+                metricKey: bucket.metricKey,
+                metricLabel: bucket.metricLabel,
+                parent: {
+                    regionId: context.regionId,
+                    regionName: context.regionName,
+                    reportId: context.reportId,
+                    versionId: context.versionId,
+                    value: leftValue,
+                },
+                childSum,
+                childCount: childContexts.length,
+                childReportCount: childWithReports.length,
+                childMetricCount: bucket.childValues.length,
+                includedChildrenPreview: bucket.childValues.slice(0, 12).map((item) => ({
+                    regionId: item.regionId,
+                    regionName: item.regionName,
+                    reportId: item.reportId,
+                    versionId: item.versionId,
+                    value: item.value,
+                })),
+                missingReports: missingReportChildren.map((item) => ({
+                    regionId: item.regionId,
+                    regionName: item.regionName,
+                })),
+                missingMetricChildren: childMissingMetric.map((item) => ({
+                    regionId: item.regionId,
+                    regionName: item.regionName,
+                    reportId: item.reportId,
+                    versionId: item.versionId,
+                })),
+                context: [
+                    `${context.regionName}：${leftValue ?? '缺失'}`,
+                    `直接下级合计：${rightValue ?? '缺失'}`,
+                    childNames.length ? `已纳入下级：${summarizeNames(childNames)}` : '',
+                    missingReportNames.length ? `缺少同年报告：${summarizeNames(missingReportNames)}` : '',
+                    missingMetricNames.length ? `缺少该字段：${summarizeNames(missingMetricNames)}` : '',
+                ].filter(Boolean).join('\n'),
+            },
+            [`hierarchy.parent.${context.regionId}.${bucket.metricKey}`],
+            bucket.childValues.map((item) => `hierarchy.child.${item.regionId}.${bucket.metricKey}`)
+        );
+    }
+
+    private async generateHierarchyItems(reportVersionId: number): Promise<ConsistencyItem[]> {
+        const context = await this.loadHierarchyContext(reportVersionId);
+        if (!context) {
+            return [
+                this.createManualItem(
+                    'hierarchy',
+                    'hierarchy_context_missing',
+                    '层级汇总一致性：当前报告未绑定可用区域层级',
+                    'report_region_hierarchy_context_exists',
+                    null,
+                    null,
+                    null,
+                    0,
+                    'NOT_ASSESSABLE',
+                    ['hierarchy'],
+                    {
+                        reason: 'hierarchy_context_missing',
+                        reportVersionId,
+                    }
+                ),
+            ];
+        }
+
+        const childContexts = await this.loadDirectChildReportContexts(context);
+        if (childContexts.length === 0) {
+            return [
+                this.createManualItem(
+                    'hierarchy',
+                    'hierarchy_no_direct_children',
+                    `层级汇总一致性：${context.regionName} 暂无直接下级机构`,
+                    'direct_children_exists',
+                    null,
+                    null,
+                    null,
+                    0,
+                    'NOT_ASSESSABLE',
+                    [`hierarchy.${context.regionId}`],
+                    {
+                        reason: 'hierarchy_no_direct_children',
+                        parent: {
+                            regionId: context.regionId,
+                            regionName: context.regionName,
+                            reportId: context.reportId,
+                            versionId: context.versionId,
+                        },
+                    }
+                ),
+            ];
+        }
+
+        const childWithReports = childContexts.filter((child) => child.versionId);
+        const missingReportChildren = childContexts.filter((child) => !child.versionId);
+
+        if (childWithReports.length === 0) {
+            return [
+                this.createManualItem(
+                    'hierarchy',
+                    'hierarchy_no_child_reports',
+                    `层级汇总一致性：${context.regionName} 下级缺少同年年报`,
+                    'direct_child_reports_exist_for_same_year',
+                    null,
+                    null,
+                    null,
+                    0,
+                    'UNCERTAIN',
+                    [`hierarchy.${context.regionId}`],
+                    {
+                        reason: 'hierarchy_no_child_reports',
+                        year: context.year,
+                        parent: {
+                            regionId: context.regionId,
+                            regionName: context.regionName,
+                            reportId: context.reportId,
+                            versionId: context.versionId,
+                        },
+                        missingReports: missingReportChildren.map((child) => ({
+                            regionId: child.regionId,
+                            regionName: child.regionName,
+                        })),
+                    }
+                ),
+            ];
+        }
+
+        const buckets = await this.loadHierarchyMetricBuckets(
+            context,
+            childWithReports.map((child) => child.versionId!).filter(Boolean)
+        );
+
+        const items = Array.from(buckets.values())
+            .filter((bucket) => bucket.parentValue !== null || bucket.childValues.length > 0)
+            .map((bucket) => this.createHierarchyItem(
+                context,
+                bucket,
+                childContexts,
+                childWithReports,
+                missingReportChildren
+            ));
+
+        if (items.length === 0) {
+            return [
+                this.createManualItem(
+                    'hierarchy',
+                    'hierarchy_no_materialized_metrics',
+                    `层级汇总一致性：${context.regionName} 暂无可汇总事实数据`,
+                    'hierarchy_materialized_metrics_exist',
+                    null,
+                    null,
+                    null,
+                    0,
+                    'NOT_ASSESSABLE',
+                    [`hierarchy.${context.regionId}`],
+                    {
+                        reason: 'hierarchy_no_materialized_metrics',
+                        year: context.year,
+                        parent: {
+                            regionId: context.regionId,
+                            regionName: context.regionName,
+                            reportId: context.reportId,
+                            versionId: context.versionId,
+                        },
+                        childReportCount: childWithReports.length,
+                    }
+                ),
+            ];
+        }
+
+        return items;
     }
 
     /**
@@ -1657,6 +2247,27 @@ export class ConsistencyCheckService {
         }
 
         const items = this.runChecks(parsedJson, reportYear);
+        try {
+            items.push(...await this.generateHierarchyItems(reportVersionId));
+        } catch (err: any) {
+            console.warn('[ConsistencyCheck] Failed to generate hierarchy checks:', err);
+            items.push(this.createManualItem(
+                'hierarchy',
+                'hierarchy_generation_failed',
+                '层级汇总一致性：生成失败',
+                'hierarchy_checks_generate_successfully',
+                null,
+                null,
+                null,
+                0,
+                'NOT_ASSESSABLE',
+                ['hierarchy'],
+                {
+                    reason: 'hierarchy_generation_failed',
+                    error: err?.message || String(err),
+                }
+            ));
+        }
 
         // Upsert each item, resetting human_status to pending on re-run
         for (const item of items) {
@@ -1714,7 +2325,7 @@ export class ConsistencyCheckService {
         const failItems = items.filter(i => i.autoStatus === 'FAIL');
         const visualCount = failItems.filter(i => i.groupKey === 'visual').length;
         const qualityCount = failItems.filter(i => i.groupKey === 'quality').length;
-        const structureCount = failItems.filter(i => ['structure', 'table2', 'table3', 'table4', 'text'].includes(i.groupKey)).length;
+        const structureCount = failItems.filter(i => ['structure', 'table2', 'table3', 'table4', 'text', 'hierarchy'].includes(i.groupKey)).length;
         const totalCount = failItems.length;
 
         await pool.query(`

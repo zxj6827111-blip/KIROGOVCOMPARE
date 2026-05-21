@@ -105,7 +105,20 @@ function serveStatic(request, response) {
 }
 
 const compiler = webpack(createWebpackConfig({}, { mode: 'development' }));
-compiler.watch({}, (error, stats) => {
+compiler.watch(
+  {
+    ignored: [
+      '**/node_modules/**',
+      '**/build/**',
+      '**/.git/**',
+      '**/.codegraph/**',
+      '**/.worktrees/**',
+      '**/coverage/**',
+      '**/*.log',
+      '**/tmp-*',
+    ],
+  },
+  (error, stats) => {
   if (error) {
     latestCompilationError = error.stack || error.message;
     console.error(latestCompilationError);
@@ -122,7 +135,8 @@ compiler.watch({}, (error, stats) => {
   latestCompilationError = null;
   hasCompiled = true;
   console.log(stats.toString({ colors: true, chunks: false, modules: false }));
-});
+  }
+);
 
 http
   .createServer((request, response) => {
