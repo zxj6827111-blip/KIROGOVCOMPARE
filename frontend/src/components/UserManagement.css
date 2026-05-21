@@ -1,0 +1,91 @@
+.user-management {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.user-management__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 0;
+}
+
+.user-management__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-main);
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.user-management__title svg {
+  color: var(--primary);
+}
+
+.user-management__subtitle {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.user-management__card {
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.user-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.user-table th,
+.user-table td {
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-main);
+  font-size: 13px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.user-table th {
+  background: #f9fafb;
+  color: var(--text-muted);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.user-table tr:last-child td {
+  border-bottom: none;
+}
+
+.user-table tbody tr:hover td {
+  background: var(--bg-surface-hover);
+}
+
+.user-management .action-buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tag-blue { background: #e6f7ff; color: #1890ff; padding: 2px 8px; border-radius: 4px; font-size: 12px; border: 1px solid #91d5ff; }
+.tag-green { background: #f6ffed; color: #52c41a; padding: 2px 8px; border-radius: 4px; font-size: 12px; border: 1px solid #b7eb8f; }
+.tag-orange { background: #fff7e6; color: #fa8c16; padding: 2px 8px; border-radius: 4px; font-size: 12px; border: 1px solid #ffd591; }
+.tag-purple { background: #f9f0ff; color: #722ed1; padding: 2px 8px; border-radius: 4px; font-size: 12px; border: 1px solid #d3adf7; }
+.tag-cyan { background: #e6fffb; color: #13c2c2; padding: 2px 8px; border-radius: 4px; font-size: 12px; border: 1px solid #87e8de; }
+.tag-red { background: #fff1f0; color: #f5222d; padding: 2px 8px; border-radius: 4px; font-size: 12px; border: 1px solid #ffa39e; }
+
+@media (max-width: 760px) {
+  .user-management__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

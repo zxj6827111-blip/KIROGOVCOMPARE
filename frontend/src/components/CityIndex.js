@@ -490,48 +490,44 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
   };
 
   return (
-    <div className="city-index">
-      <div className="header-row">
-        <div>
-          <PageHeader
-            title="年报工作台"
-            subtitle="全区政府信息公开年报数字化归档与分析总览。"
-            actions={(
-              <>
-                <Button variant="secondary" icon={<AlertCircle size={16} />} onClick={() => {
-                  const regionParam = currentParentId ? `?region=${currentParentId}&name=${encodeURIComponent(currentRegion?.name || '')}` : '';
-                  goTo(`/issues${regionParam}`);
-                }}>
-                  问题清单
-                </Button>
-                <Button variant="secondary" icon={<AlertCircle size={16} />} onClick={() => goTo('/report-maintenance')}>
-                  年报维护
-                </Button>
-                <Button variant="primary" icon={<Plus size={16} />} onClick={() => goTo('/upload')}>
-                  录入新报告
-                </Button>
-                <Button variant="ghost" icon={<RefreshCw size={16} className={loading ? 'spin' : ''} />} onClick={handleRefresh} title="刷新列表" disabled={loading} />
-              </>
-            )}
-          />
-        </div>
-      </div>
+    <div className="city-index kc-page">
+      <PageHeader
+        title="年报工作台"
+        subtitle="全区政府信息公开年报数字化归档与分析总览。"
+        actions={(
+          <>
+            <Button variant="secondary" icon={<AlertCircle size={16} />} onClick={() => {
+              const regionParam = currentParentId ? `?region=${currentParentId}&name=${encodeURIComponent(currentRegion?.name || '')}` : '';
+              goTo(`/issues${regionParam}`);
+            }}>
+              问题清单
+            </Button>
+            <Button variant="secondary" icon={<AlertCircle size={16} />} onClick={() => goTo('/report-maintenance')}>
+              年报维护
+            </Button>
+            <Button variant="primary" icon={<Plus size={16} />} onClick={() => goTo('/upload')}>
+              录入新报告
+            </Button>
+            <Button variant="ghost" icon={<RefreshCw size={16} className={loading ? 'spin' : ''} />} onClick={handleRefresh} title="刷新列表" disabled={loading} />
+          </>
+        )}
+      />
 
       {/* Global Summary Dashboard */}
       {
         !loading && path.length === 0 && (
-          <div className="dashboard-summary" style={{ display: 'flex', gap: '24px', marginBottom: '12px' }}>
-            <div className="summary-card" style={{ background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: 'var(--shadow-sm)', flex: 1, display: 'flex', flexDirection: 'column' }}>
-              <span style={{ fontSize: '13px', color: 'var(--color-text-secondary)', fontWeight: 600, textTransform: 'uppercase' }}>已收录年报</span>
-              <span style={{ fontSize: '36px', fontWeight: 800, color: 'var(--primary)', marginTop: '8px' }}>{reports.length}</span>
+          <div className="dashboard-summary kc-summary-grid">
+            <div className="kc-summary-card">
+              <span className="kc-summary-card__label">已收录年报</span>
+              <span className="kc-summary-card__value kc-summary-card__value--primary">{reports.length}</span>
             </div>
-            <div className="summary-card" style={{ background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: 'var(--shadow-sm)', flex: 1, display: 'flex', flexDirection: 'column' }}>
-              <span style={{ fontSize: '13px', color: 'var(--color-text-secondary)', fontWeight: 600, textTransform: 'uppercase' }}>覆盖区域</span>
-              <span style={{ fontSize: '36px', fontWeight: 800, color: 'var(--category-purple)', marginTop: '8px' }}>{new Set(reports.map(r => r.region_id)).size}</span>
+            <div className="kc-summary-card">
+              <span className="kc-summary-card__label">覆盖区域</span>
+              <span className="kc-summary-card__value">{new Set(reports.map(r => r.region_id)).size}</span>
             </div>
-            <div className="summary-card" style={{ background: '#fff', padding: '20px', borderRadius: '12px', boxShadow: 'var(--shadow-sm)', flex: 1, display: 'flex', flexDirection: 'column' }}>
-              <span style={{ fontSize: '13px', color: 'var(--color-text-secondary)', fontWeight: 600, textTransform: 'uppercase' }}>最新更新</span>
-              <span style={{ fontSize: '16px', fontWeight: 600, color: 'var(--color-text-primary)', marginTop: 'auto' }}>{latestReportLabel}</span>
+            <div className="kc-summary-card">
+              <span className="kc-summary-card__label">最新更新</span>
+              <span className="kc-summary-card__value dashboard-summary__latest">{latestReportLabel}</span>
             </div>
           </div>
         )
@@ -724,11 +720,11 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
       {
         allCards.length > 0 && (
           <div className="children-section">
-            <div className="section-header-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <div className="section-header-row">
               <h3>下级索引</h3>
-              <div className="filter-controls" style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+              <div className="filter-controls">
                 {/* Tabs */}
-                <div className="tabs" style={{ display: 'flex', gap: '8px' }}>
+                <div className="tabs kc-segmented">
                   <button
                     className={`tab-btn ${activeTab === 'all' ? 'active' : ''}`}
                     onClick={() => setActiveTab('all')}

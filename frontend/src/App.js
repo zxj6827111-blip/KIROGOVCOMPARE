@@ -9,12 +9,11 @@ import UploadReport from './components/UploadReport';
 
 import ReportDetail from './components/ReportDetail';
 import CityIndex from './components/CityIndex';
-import RegionsManager from './components/RegionsManager';
+import SystemManagement from './components/SystemManagement';
 import ComparisonHistory from './components/ComparisonHistory';
 import ComparisonDetailView from './components/ComparisonDetailView';
 import ComparisonPrintView from './components/print/ComparisonPrintView';
 import GovInsightReportPrintView from './components/print/GovInsightReportPrintView';
-import UserManagement from './components/UserManagement';
 
 import JobCenter from './components/JobCenter';
 import JobDetail from './components/JobDetail';
@@ -153,8 +152,9 @@ function AuthenticatedApp({ onLogout, user }) {
               <Route path="/comparison/:comparisonId" element={<ComparisonDetailRoute navigate={navigate} />} />
               <Route path="/issues/*" element={<IssueListRoute currentPath={currentPath} navigate={navigate} />} />
               <Route path="/report-maintenance" element={<ReportMaintenanceRoute navigate={navigate} />} />
-              <Route path="/regions" element={<RegionsManager />} />
-              <Route path="/admin/users" element={<UserManagement />} />
+              <Route path="/admin" element={<SystemManagement activeTab={new URLSearchParams(location.search).get('tab') || 'regions'} onNavigate={navigate} user={user} />} />
+              <Route path="/regions" element={<SystemManagement activeTab="regions" onNavigate={navigate} user={user} />} />
+              <Route path="/admin/users" element={<SystemManagement activeTab="users" onNavigate={navigate} user={user} />} />
               <Route path="/datacenter" element={<DataCenterRoute navigate={navigate} />} />
               <Route path="/datacenter/reports/:reportId" element={<DataCenterReportRoute navigate={navigate} />} />
               <Route path="/govinsight/*" element={<GovInsightModule />} />

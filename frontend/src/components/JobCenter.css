@@ -1,7 +1,5 @@
 .job-center {
-    padding: 20px 32px;
-    max-width: 1400px;
-    margin: 0 auto;
+    padding: 0;
 }
 
 .job-center-header {
@@ -9,7 +7,7 @@
     justify-content: space-between;
     align-items: flex-end;
     margin-bottom: 16px;
-    padding: 12px 16px;
+    padding: 16px;
     background: var(--bg-surface);
     border-radius: var(--radius-md);
     border: 1px solid var(--border-color);
@@ -62,8 +60,10 @@
     flex-wrap: wrap;
     align-items: flex-end;
     flex: 1;
-    flex-wrap: wrap;
-    box-shadow: var(--shadow-sm);
+}
+
+.job-center-tabs.kc-segmented {
+    margin-bottom: 18px;
 }
 
 .filter-group {
@@ -236,6 +236,25 @@
 
 .icon-btn.view:hover {
     background-color: #dbeafe;
+}
+
+/* Report Detail Button */
+.icon-btn.report {
+    color: #0f766e;
+    border-color: #ccfbf1;
+    background-color: #f0fdfa;
+}
+
+.icon-btn.report:hover:not(:disabled) {
+    background-color: #ccfbf1;
+}
+
+.icon-btn.report:disabled {
+    color: #94a3b8;
+    border-color: #e2e8f0;
+    background-color: #f8fafc;
+    cursor: not-allowed;
+    opacity: 0.72;
 }
 
 /* Delete Button */

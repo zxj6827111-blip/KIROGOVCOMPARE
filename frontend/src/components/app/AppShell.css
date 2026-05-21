@@ -10,7 +10,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
+  padding: 0 clamp(24px, 4vw, 56px);
   position: sticky;
   top: 0;
   z-index: 100;
@@ -21,23 +21,6 @@
   display: flex;
   align-items: center;
   gap: 16px;
-}
-
-.app-shell__user-nav {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: transparent;
-  border: none;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.app-shell__user-nav.active,
-.app-shell__user-nav:hover {
-  color: var(--primary);
 }
 
 .app-shell__identity {
@@ -68,9 +51,10 @@
 .app-shell__nav {
   background: var(--color-bg-main);
   border-bottom: 1px solid var(--color-border);
-  padding: 0 24px;
-  display: flex;
-  gap: 8px;
+  padding: 0 clamp(24px, 4vw, 56px);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
   align-items: center;
   min-height: 48px;
   overflow-x: auto;
@@ -79,12 +63,14 @@
 .app-shell__nav-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
-  min-height: 36px;
+  width: 100%;
+  min-height: 40px;
   padding: 0 14px;
   background: var(--bg-surface);
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   color: #64748b;
   font-size: 14px;
@@ -100,15 +86,16 @@
 
 .app-shell__nav-btn.active {
   background: var(--primary-light);
+  border-color: #dbeafe;
   color: var(--primary);
 }
 
 .app-shell__main {
   flex: 1;
   width: 100%;
-  max-width: 1600px;
+  max-width: 1840px;
   margin: 0 auto;
-  padding: 24px;
+  padding: 40px clamp(28px, 5vw, 64px);
 }
 
 .app-shell__footer {
@@ -152,5 +139,14 @@ body.leader-cockpit-mode .app-shell__main {
 
   .app-shell__main {
     padding: 16px;
+  }
+
+  .app-shell__nav {
+    display: flex;
+    padding: 8px 16px;
+  }
+
+  .app-shell__nav-btn {
+    width: auto;
   }
 }

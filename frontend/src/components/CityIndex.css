@@ -1,7 +1,5 @@
 .city-index {
-  padding: 20px;
-  max-width: 1400px;
-  margin: 0 auto;
+  padding: 0;
 }
 
 .header-row {
@@ -586,4 +584,54 @@
   background: #fef2f2;
   color: #dc2626;
   border: 1px solid #fecaca;
+}
+
+.dashboard-summary__latest {
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.children-section {
+  margin-top: 24px;
+}
+
+.filter-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.tabs.kc-segmented {
+  gap: 4px;
+}
+
+.tabs.kc-segmented .tab-btn {
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+}
+
+.tabs.kc-segmented .tab-btn.active {
+  box-shadow: var(--shadow-sm);
+}
+
+@media (max-width: 900px) {
+  .section-header-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .filter-controls {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .tabs.kc-segmented {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .search-input {
+    width: 100%;
+  }
 }

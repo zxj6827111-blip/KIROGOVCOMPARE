@@ -1,16 +1,17 @@
 .comparison-history {
-    padding: 20px;
-    max-width: 1680px;
-    margin: 0 auto;
+    padding: 0;
 }
 
 .comparison-history .history-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 20px;
     gap: 20px;
     width: 100%;
+}
+
+.comparison-history .history-header.kc-toolbar {
+    margin-bottom: 20px;
 }
 
 .history-header h2 {
@@ -485,7 +486,8 @@
     display: flex;
     gap: 20px;
     padding: 12px 16px;
-    background: #f8fafc;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
     border-radius: 8px;
     margin-bottom: 16px;
 }
@@ -755,4 +757,163 @@
 .comparison-history .clickable:hover {
     opacity: 0.8;
     text-decoration: underline;
+}
+
+/* Task-center aligned table tone: remove large colored hierarchy bands. */
+.comparison-history .summary-bar {
+    min-height: 48px;
+    align-items: center;
+    gap: 24px;
+    padding: 12px 16px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: none;
+}
+
+.comparison-history .summary-item {
+    color: var(--text-muted);
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.comparison-history .summary-item strong {
+    color: var(--text-main);
+    font-weight: 800;
+}
+
+.comparison-history .summary-item.issue,
+.comparison-history .summary-item.failure,
+.comparison-history .summary-item.issue strong,
+.comparison-history .summary-item.failure strong {
+    color: var(--danger);
+}
+
+.comparison-history .history-table {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+}
+
+.comparison-history .history-table th {
+    background: var(--bg-surface-hover);
+    border-bottom: 2px solid var(--border-color);
+    color: var(--text-muted);
+    font-size: 14px;
+    font-weight: 700;
+    text-align: center;
+}
+
+.comparison-history .history-table td {
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-main);
+    font-size: 14px;
+    text-align: center;
+}
+
+.comparison-history .region-header-row,
+.comparison-history .region-header-row.level-1,
+.comparison-history .region-header-row.level-2,
+.comparison-history .region-header-row.level-3 {
+    background: var(--bg-surface);
+}
+
+.comparison-history .region-header-row:hover,
+.comparison-history .region-header-row.level-1:hover,
+.comparison-history .region-header-row.level-2:hover,
+.comparison-history .region-header-row.level-3:hover {
+    background: var(--bg-surface-hover);
+}
+
+.comparison-history .region-header-row td {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.comparison-history .region-header-row .region-name,
+.comparison-history .region-header-row.level-1 .region-name,
+.comparison-history .region-header-row.level-2 .region-name,
+.comparison-history .region-header-row.level-3 .region-name {
+    color: var(--text-main);
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.comparison-history .region-header-content {
+    min-height: 28px;
+}
+
+.comparison-history .region-stats {
+    gap: 8px;
+}
+
+.comparison-history .stat-badge {
+    background: #fff;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.comparison-history .stat-badge.issue {
+    background: #fff;
+    border-color: #fecaca;
+    color: var(--danger);
+}
+
+.comparison-history .comparison-row {
+    background: var(--bg-surface);
+}
+
+.comparison-history .comparison-row:hover,
+.comparison-history .comparison-row.selected-row:hover {
+    background: var(--bg-surface-hover);
+}
+
+.comparison-history .comparison-row td {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.comparison-history .comparison-row.selected-row {
+    background: #f8fafc;
+}
+
+.comparison-history .sub-region-name {
+    color: var(--text-main);
+    font-weight: 600;
+}
+
+.comparison-history .cell-year {
+    color: var(--text-main);
+}
+
+.comparison-history .cell-date {
+    color: var(--text-muted);
+}
+
+.comparison-history .similarity-value,
+.comparison-history .similarity-value.high,
+.comparison-history .similarity-value.medium,
+.comparison-history .similarity-value.low {
+    background: #fff;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    color: var(--text-main);
+}
+
+.comparison-history .status-badge.issue {
+    background: #fff;
+    border: 1px solid #fecaca;
+    border-radius: 999px;
+    color: var(--danger);
+}
+
+.comparison-history .status-badge.ok {
+    background: #fff;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    color: var(--text-muted);
 }

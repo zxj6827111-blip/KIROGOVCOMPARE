@@ -18,9 +18,9 @@ export const NAV_GROUPS = {
 
 export const NAV_GROUP_LABELS = {
   [NAV_GROUPS.WORKBENCH]: '年报工作台',
-  [NAV_GROUPS.REVIEW]: '问题复核',
+  [NAV_GROUPS.REVIEW]: '问题清单',
   [NAV_GROUPS.COMPARISON]: '比对中心',
-  [NAV_GROUPS.EXPORT]: '导出中心',
+  [NAV_GROUPS.EXPORT]: '任务中心',
   [NAV_GROUPS.GOVINSIGHT]: '智能治理',
   [NAV_GROUPS.ADMIN]: '系统管理',
 };
@@ -56,7 +56,7 @@ export const routeRegistry = [
     key: 'issues',
     path: '/issues',
     title: '问题清单',
-    navLabel: '问题复核',
+    navLabel: '问题清单',
     navGroup: NAV_GROUPS.REVIEW,
     icon: FileCheck2,
     fallbackReturnTo: '/catalog',
@@ -83,8 +83,8 @@ export const routeRegistry = [
   {
     key: 'jobs',
     path: '/jobs',
-    title: '导出中心',
-    navLabel: '导出中心',
+    title: '任务中心',
+    navLabel: '任务中心',
     navGroup: NAV_GROUPS.EXPORT,
     icon: ListTodo,
     fallbackReturnTo: '/jobs',
@@ -102,14 +102,14 @@ export const routeRegistry = [
   },
   {
     key: 'system-admin',
-    path: '/regions',
+    path: '/admin',
     title: '系统管理',
     navLabel: '系统管理',
     navGroup: NAV_GROUPS.ADMIN,
     icon: Settings,
     permissionsAny: ['manage_regions', 'manage_users'],
     fallbackReturnTo: '/catalog',
-    match: (pathname) => pathname === '/regions' || pathname === '/admin/users',
+    match: (pathname) => pathname === '/admin',
   },
   {
     key: 'regions',
@@ -178,7 +178,7 @@ export function getVisiblePrimaryNavItems(user) {
 
 export function getPrimaryNavTarget(route, user) {
   if (route?.key === 'system-admin' && !user?.permissions?.manage_regions && user?.permissions?.manage_users) {
-    return '/admin/users';
+    return '/admin?tab=users';
   }
   return route?.path || '/catalog';
 }
