@@ -2,6 +2,7 @@ import {
   buildQualityAuditGroups,
   buildTable3CategoryStats,
   normalizeConsistencyGroup,
+  normalizeConsistencyGroups,
   summarizeQualityAuditGroups,
   summarizeConsistencyGroups,
 } from './consistencyDisplay';
@@ -186,6 +187,34 @@ describe('consistency summary semantics', () => {
       pendingCount: 5,
       confirmedCount: 0,
       dismissedCount: 0,
+    });
+  });
+});
+
+describe('normalizeConsistencyGroups', () => {
+  test('keeps table2 and hierarchy visible when backend returns no items for those groups', () => {
+    const groups = normalizeConsistencyGroups(
+      [
+        {
+          group_key: 'text',
+          items: [makeItem({ checkKey: 'text_vs_table3_newReceived', autoStatus: 'PASS' })],
+        },
+        {
+          group_key: 'table3',
+          items: [makeItem({ autoStatus: 'PASS' })],
+        },
+      ],
+      ['table2', 'table3', 'table4', 'text', 'hierarchy']
+    );
+
+    expect(groups.map((group) => group.group_key)).toEqual(['text', 'hierarchy', 'table2', 'table3', 'table4']);
+    expect(groups.find((group) => group.group_key === 'table2')).toMatchObject({
+      displayName: '表二：主动公开政府信息情况',
+      items: [],
+    });
+    expect(groups.find((group) => group.group_key === 'hierarchy')).toMatchObject({
+      displayName: '层级汇总一致性',
+      items: [],
     });
   });
 });

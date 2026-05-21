@@ -19,6 +19,115 @@ import { aggregateIssuesFromChecks } from '../utils/issueAggregation';
 import { useToast } from './common/ToastProvider';
 import { useConfirmDialog } from './common/ConfirmDialogProvider';
 
+const HEAVY_GROUP_INITIAL_LIMIT = 20;
+const HIERARCHY_TABLE_ORDER = {
+  '表二': 1,
+  '表三': 2,
+  '表四': 3,
+};
+
+const getHierarchyEvidenceValues = (item) =>
+  item?.evidence?.values || item?.evidence_json?.values || {};
+
+const toFiniteNumber = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+};
+
+const formatHierarchyNumber = (value) => {
+  const number = toFiniteNumber(value);
+  if (number === null) return value === null || value === undefined || value === '' ? '缺失' : String(value);
+  return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 4 }).format(number);
+};
+
+const asArray = (value) => (Array.isArray(value) ? value : []);
+
+const hasHierarchyDelta = (item) => {
+  const delta = toFiniteNumber(item?.delta);
+  const tolerance = toFiniteNumber(item?.tolerance) ?? 0;
+  return delta !== null && Math.abs(delta) > tolerance;
+};
+
+const getHierarchyDisplayStats = (items = []) => {
+  const missingReportUnits = new Set();
+  const missingMetricUnits = new Set();
+  const stats = {
+    totalCount: items.length,
+    deltaCount: 0,
+    reviewCount: 0,
+    incompleteCount: 0,
+    failCount: 0,
+    passCount: 0,
+    confirmedCount: 0,
+    notAssessableCount: 0,
+    missingReportUnitCount: 0,
+    missingMetricUnitCount: 0,
+  };
+
+  items.forEach((item) => {
+    const values = getHierarchyEvidenceValues(item);
+    const missingReports = asArray(values.missingReports);
+    const missingMetricChildren = asArray(values.missingMetricChildren);
+    const hasIncompleteInputs =
+      values.reason === 'hierarchy_sum_incomplete_inputs' ||
+      missingReports.length > 0 ||
+      missingMetricChildren.length > 0;
+
+    if (hasHierarchyDelta(item)) stats.deltaCount += 1;
+    if (item.auto_status === 'FAIL') stats.failCount += 1;
+    if (item.auto_status === 'PASS') stats.passCount += 1;
+    if (item.human_status === 'confirmed') stats.confirmedCount += 1;
+    if (item.auto_status === 'NOT_ASSESSABLE') stats.notAssessableCount += 1;
+    if (item.human_status === 'pending' && item.auto_status !== 'PASS' && item.auto_status !== 'NOT_ASSESSABLE') {
+      stats.reviewCount += 1;
+    }
+    if (hasIncompleteInputs) stats.incompleteCount += 1;
+
+    missingReports.forEach((unit) => missingReportUnits.add(unit.regionName || unit.regionId));
+    missingMetricChildren.forEach((unit) => missingMetricUnits.add(unit.regionName || unit.regionId));
+  });
+
+  stats.missingReportUnitCount = missingReportUnits.size;
+  stats.missingMetricUnitCount = missingMetricUnits.size;
+  return stats;
+};
+
+const getHierarchyTableLabel = (item) => {
+  const values = getHierarchyEvidenceValues(item);
+  if (values.table) return values.table;
+  const match = String(item?.title || '').match(/表[二三四]/);
+  return match ? match[0] : '其他';
+};
+
+const sortHierarchyItemsForDisplay = (items = []) =>
+  [...items].sort((a, b) => {
+    const tableDiff =
+      (HIERARCHY_TABLE_ORDER[getHierarchyTableLabel(a)] || 99) -
+      (HIERARCHY_TABLE_ORDER[getHierarchyTableLabel(b)] || 99);
+    if (tableDiff !== 0) return tableDiff;
+
+    const deltaDiff = Math.abs(toFiniteNumber(b.delta) || 0) - Math.abs(toFiniteNumber(a.delta) || 0);
+    if (deltaDiff !== 0) return deltaDiff;
+
+    const statusWeight = (item) => {
+      if (hasHierarchyDelta(item)) return 0;
+      if (item.auto_status === 'FAIL') return 1;
+      if (item.auto_status === 'UNCERTAIN') return 2;
+      if (item.auto_status === 'NOT_ASSESSABLE') return 3;
+      return 4;
+    };
+
+    return statusWeight(a) - statusWeight(b);
+  });
+
+const getHierarchyStatusLabel = (item) => {
+  if (item.auto_status === 'FAIL') return '不一致';
+  if (hasHierarchyDelta(item)) return '有差额，待核查';
+  if (item.auto_status === 'PASS') return '一致';
+  return getConsistencyAutoStatusLabel(item.auto_status);
+};
+
 const isTablePath = (path) =>
   path &&
   (path.includes('tableData') ||
@@ -207,6 +316,34 @@ const renderGroupSummary = (group, isQualityMode) => {
   }
 
   const { stats, table3CategoryStats } = group;
+  if (group.group_key === 'hierarchy') {
+    const hierarchyStats = getHierarchyDisplayStats(group.items || []);
+    return (
+      <div className="group-summary group-summary--hierarchy">
+        <span className="group-summary-pill">指标 {hierarchyStats.totalCount}</span>
+        <span className="group-summary-pill group-summary-pill--problem">
+          差额项 {hierarchyStats.deltaCount}
+        </span>
+        <span className="group-summary-pill group-summary-pill--warning">
+          缺报告单位 {hierarchyStats.missingReportUnitCount}
+        </span>
+        <span className="group-summary-pill group-summary-pill--warning">
+          缺字段单位 {hierarchyStats.missingMetricUnitCount}
+        </span>
+        {hierarchyStats.confirmedCount > 0 ? (
+          <span className="group-summary-pill group-summary-pill--confirmed">
+            已确认 {hierarchyStats.confirmedCount}
+          </span>
+        ) : null}
+        {hierarchyStats.notAssessableCount > 0 ? (
+          <span className="group-summary-pill group-summary-pill--muted">
+            不可评估 {hierarchyStats.notAssessableCount}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="group-summary">
@@ -273,6 +410,7 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [expandedGroups, setExpandedGroups] = useState({});
+  const [showAllGroups, setShowAllGroups] = useState({});
 
   const modeMeta = useMemo(() => buildModeMeta(filterGroups), [filterGroups]);
   const consistencySourceGroups = useMemo(() => {
@@ -305,7 +443,8 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
         params: versionId ? { version_id: versionId } : undefined,
       });
       const data = response.data?.data || response.data || { groups: [], latest_run: null };
-      const normalizedGroups = normalizeConsistencyGroups(data.groups || []);
+      const requiredGroups = modeMeta.isQualityMode ? [] : filterGroups;
+      const normalizedGroups = normalizeConsistencyGroups(data.groups || [], requiredGroups);
       setChecksData({ ...data, groups: normalizedGroups });
 
       setExpandedGroups((prev) => {
@@ -384,6 +523,31 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
     }));
   }, [checksData, consistencyAggregation, consistencySourceGroups, filterGroups, modeMeta.isQualityMode]);
 
+  const getVisibleGroupItems = (group) => {
+    const items = group.group_key === 'hierarchy'
+      ? sortHierarchyItemsForDisplay(group.items || [])
+      : (group.items || []);
+    if (group.group_key !== 'hierarchy' || showAllGroups[group.group_key] || items.length <= HEAVY_GROUP_INITIAL_LIMIT) {
+      return {
+        visibleItems: items,
+        hiddenCount: 0,
+        totalCount: items.length,
+      };
+    }
+
+    const activeItems = items.filter((item) => item.auto_status !== 'PASS');
+    const passItems = items.filter((item) => item.auto_status === 'PASS');
+    const visibleItems = activeItems.length >= HEAVY_GROUP_INITIAL_LIMIT
+      ? activeItems.slice(0, HEAVY_GROUP_INITIAL_LIMIT)
+      : [...activeItems, ...passItems.slice(0, HEAVY_GROUP_INITIAL_LIMIT - activeItems.length)];
+
+    return {
+      visibleItems,
+      hiddenCount: Math.max(items.length - visibleItems.length, 0),
+      totalCount: items.length,
+    };
+  };
+
   const summary = useMemo(() => {
     if (!checksData?.latest_run) {
       return modeMeta.isQualityMode
@@ -411,10 +575,17 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
       : (consistencyAggregation?.summary || summarizeConsistencyGroups(displayedGroups));
   }, [checksData, displayedGroups, consistencyAggregation, modeMeta.isQualityMode]);
 
+  const hierarchySummaryStats = useMemo(() => {
+    if (modeMeta.isQualityMode) return null;
+    const hierarchyGroup = displayedGroups.find((group) => group.group_key === 'hierarchy');
+    return hierarchyGroup ? getHierarchyDisplayStats(hierarchyGroup.items || []) : null;
+  }, [displayedGroups, modeMeta.isQualityMode]);
+
   const handleBulkConfirm = async () => {
-    const pendingItems = modeMeta.isQualityMode
+    const pendingItemIds = modeMeta.isQualityMode
       ? collectPendingConsistencyItemIds(displayedGroups)
       : (consistencyAggregation?.pendingItemIds || collectPendingConsistencyItemIds(displayedGroups));
+    const pendingItems = Array.from(new Set(pendingItemIds));
 
     if (pendingItems.length === 0) {
       toast.info(modeMeta.isQualityMode ? '没有可标记为已处理的数据质量提示' : '没有可确认的待处理项');
@@ -436,17 +607,22 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
 
     setLoading(true);
     try {
-      for (const itemId of pendingItems) {
-        await apiClient.patch(`/reports/${reportId}/checks/items/${itemId}`, {
-          ...(versionId ? { version_id: versionId } : {}),
-          human_status: 'confirmed',
-          human_comment: modeMeta.isQualityMode ? '批量标记为已处理' : '批量确认',
-        });
-      }
+      const response = await apiClient.post(`/reports/${reportId}/checks/items/bulk-status`, {
+        ...(versionId ? { version_id: versionId } : {}),
+        item_ids: pendingItems,
+        human_status: 'confirmed',
+        human_comment: modeMeta.isQualityMode ? '批量标记为已处理' : '批量确认',
+      });
+      const updatedCount = response.data?.updated_count ?? pendingItems.length;
       await fetchChecks();
       onChecksUpdated?.();
-      toast.success('批量处理完成', `已处理 ${pendingItems.length} 项。`);
+      if (updatedCount === pendingItems.length) {
+        toast.success('批量处理完成', `已处理 ${updatedCount} 项。`);
+      } else {
+        toast.warning('批量处理部分完成', `已处理 ${updatedCount} / ${pendingItems.length} 项，请刷新后查看剩余项。`);
+      }
     } catch (err) {
+      await fetchChecks();
       toast.error('批量处理失败', err.response?.data?.error || err.message || '批量处理失败');
       setLoading(false);
     }
@@ -457,6 +633,178 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
       ...prev,
       [groupKey]: !prev[groupKey],
     }));
+  };
+
+  const renderHierarchyActions = (item) => (
+    <div className="hierarchy-row-actions">
+      {item.human_status !== 'confirmed' && item.id ? (
+        <button
+          className="btn-confirm"
+          onClick={() => handleUpdateStatus(item.id, 'confirmed', '层级汇总差额已人工确认')}
+        >
+          确认
+        </button>
+      ) : null}
+      {item.human_status !== 'dismissed' && item.id ? (
+        <button
+          className="btn-dismiss"
+          onClick={() => handleUpdateStatus(item.id, 'dismissed', '经核查无需处理')}
+        >
+          忽略
+        </button>
+      ) : null}
+      {item.human_status !== 'pending' && item.id ? (
+        <button className="btn-pending" onClick={() => handleUpdateStatus(item.id, 'pending', null)}>
+          恢复待核查
+        </button>
+      ) : null}
+    </div>
+  );
+
+  const renderNamePreview = (items, emptyText) => {
+    const names = asArray(items)
+      .map((item) => item.regionName || item.name || item.regionId)
+      .filter(Boolean);
+    if (names.length === 0) return emptyText;
+    return names.join('、');
+  };
+
+  const renderHierarchyGroup = (group, visibleItems, hiddenCount, totalCount) => {
+    const hierarchyStats = getHierarchyDisplayStats(group.items || []);
+    const visibleItemsByTable = visibleItems.reduce((buckets, item) => {
+      const tableLabel = getHierarchyTableLabel(item);
+      if (!buckets[tableLabel]) {
+        buckets[tableLabel] = [];
+      }
+      buckets[tableLabel].push(item);
+      return buckets;
+    }, {});
+    const visibleTableLabels = Object.keys(visibleItemsByTable).sort(
+      (a, b) => (HIERARCHY_TABLE_ORDER[a] || 99) - (HIERARCHY_TABLE_ORDER[b] || 99)
+    );
+
+    return (
+      <>
+        <div className="hierarchy-overview">
+          <div className="hierarchy-overview-card hierarchy-overview-card--danger">
+            <span>有差额的指标</span>
+            <strong>{hierarchyStats.deltaCount}</strong>
+          </div>
+          <div className="hierarchy-overview-card">
+            <span>缺同年报告单位</span>
+            <strong>{hierarchyStats.missingReportUnitCount}</strong>
+          </div>
+          <div className="hierarchy-overview-card">
+            <span>缺字段单位</span>
+            <strong>{hierarchyStats.missingMetricUnitCount}</strong>
+          </div>
+        </div>
+
+        {hiddenCount > 0 ? (
+          <div className="group-render-limit-note">
+            <div>
+              层级汇总本次共有 {totalCount} 条指标，已按表格分组并在表内按差额展示前 {visibleItems.length} 条，减少页面卡顿和长滚动。
+            </div>
+            <button
+              type="button"
+              className="btn-show-all"
+              onClick={() => setShowAllGroups((prev) => ({ ...prev, [group.group_key]: true }))}
+            >
+              查看全部
+            </button>
+          </div>
+        ) : null}
+
+        {visibleItems.length === 0 ? (
+          <div className="no-issues">暂无层级汇总指标</div>
+        ) : (
+          <div className="hierarchy-compact-list">
+            {visibleTableLabels.map((tableLabel) => (
+              <section key={tableLabel} className="hierarchy-table-section">
+                <div className="hierarchy-table-section__head">
+                  <span>{tableLabel}</span>
+                  <strong>{visibleItemsByTable[tableLabel].length} 项</strong>
+                </div>
+                <div className="hierarchy-table-section__items">
+                  {visibleItemsByTable[tableLabel].map((item, index) => {
+                    const values = getHierarchyEvidenceValues(item);
+                    const missingReports = asArray(values.missingReports);
+                    const missingMetricChildren = asArray(values.missingMetricChildren);
+                    const hasDelta = hasHierarchyDelta(item);
+                    const statusLabel = getHierarchyStatusLabel(item);
+                    const metricTitle = values.metricLabel || item.title?.replace(/^层级汇总一致性：\S+\s+/, '') || item.title;
+                    const childReportCount = values.childReportCount ?? 0;
+                    const childCount = values.childCount ?? 0;
+                    const childMetricCount = values.childMetricCount ?? 0;
+
+                    return (
+                      <div
+                        key={item.stableIssueId || item.id || `hierarchy-${tableLabel}-${index}`}
+                        className={`hierarchy-row${hasDelta ? ' hierarchy-row--delta' : ''}`}
+                      >
+                        <div className="hierarchy-row-main">
+                          <span className="hierarchy-row-table">{tableLabel}</span>
+                          <div className="hierarchy-row-title">
+                            <strong>{metricTitle}</strong>
+                            <span>人工状态：{getConsistencyHumanStatusLabel(item.human_status)}</span>
+                          </div>
+                          <span className={`hierarchy-row-status${hasDelta ? ' hierarchy-row-status--danger' : ''}`}>
+                            {statusLabel}
+                          </span>
+                        </div>
+
+                        <div className="hierarchy-values-grid">
+                          <div>
+                            <span>本级值</span>
+                            <strong>{formatHierarchyNumber(item.left_value)}</strong>
+                          </div>
+                          <div>
+                            <span>下级合计</span>
+                            <strong>{formatHierarchyNumber(item.right_value)}</strong>
+                          </div>
+                          <div>
+                            <span>差额</span>
+                            <strong className={hasDelta ? 'delta-nonzero' : ''}>
+                              {formatHierarchyNumber(item.delta)}
+                            </strong>
+                          </div>
+                          <div>
+                            <span>纳入范围</span>
+                            <strong>{childReportCount}/{childCount}</strong>
+                          </div>
+                        </div>
+
+                        <div className="hierarchy-row-meta">
+                          <span>已纳入字段单位 {childMetricCount}</span>
+                          <span>缺同年报告 {missingReports.length}</span>
+                          <span>缺该字段 {missingMetricChildren.length}</span>
+                        </div>
+
+                        {(missingReports.length > 0 || missingMetricChildren.length > 0) ? (
+                          <details className="hierarchy-missing-detail">
+                            <summary>查看缺失单位</summary>
+                            <div>
+                              <span>缺同年报告：</span>
+                              <strong>{renderNamePreview(missingReports, '无')}</strong>
+                            </div>
+                            <div>
+                              <span>缺该字段：</span>
+                              <strong>{renderNamePreview(missingMetricChildren, '无')}</strong>
+                            </div>
+                          </details>
+                        ) : null}
+
+                        {renderHierarchyActions(item)}
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
+      </>
+    );
   };
 
   if (loading && !checksData) return <div className="loading">{modeMeta.runButtonText.loading}</div>;
@@ -481,6 +829,11 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
                 ) : (
                   <>
                     <span className="summary-item fail">问题 {summary.problemCount}</span>
+                    {hierarchySummaryStats?.deltaCount > 0 ? (
+                      <span className="summary-item hierarchy-delta">
+                        层级差额 {hierarchySummaryStats.deltaCount}
+                      </span>
+                    ) : null}
                     <span className="summary-item pending">待复核 {summary.pendingCount}</span>
                     <span className="summary-item confirmed">已确认 {summary.confirmedCount}</span>
                     <span className="summary-item dismissed">不可评估 {summary.notAssessableCount}</span>
@@ -529,6 +882,7 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
         {displayedGroups.map((group) => {
           const groupKey = group.group_key || 'unknown';
           const expanded = expandedGroups[groupKey] ?? false;
+          const { visibleItems, hiddenCount, totalCount } = getVisibleGroupItems(group);
 
           return (
             <div
@@ -545,31 +899,35 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
 
               {expanded ? (
                 <div className="group-items">
-                  {group.hasOnlyNotAssessable && group.items.length > 0 ? (
-                    <div className="group-empty-state">
-                      <div className="group-empty-title">
-                        {modeMeta.isQualityMode ? '暂无可判断提示' : '暂无可评估规则'}
-                      </div>
-                      <div className="group-empty-desc">
-                        {modeMeta.isQualityMode ? '当前仅保留提示入口，不计入风险数量。' : '当前仅保留分组入口，不计入问题。'}
-                      </div>
-                    </div>
-                  ) : null}
-                  {group.items.length === 0 ? (
-                    <div className="no-issues">
-                      {modeMeta.isQualityMode ? '暂无数据质量提示' : '暂无规则项'}
-                    </div>
-                  ) : group.hasOnlyNotAssessable && group.items.length === 0 ? (
-                    <div className="group-empty-state">
-                      <div className="group-empty-title">
-                        {modeMeta.isQualityMode ? '暂无可判断提示' : '暂无可评估规则'}
-                      </div>
-                      <div className="group-empty-desc">
-                        {modeMeta.isQualityMode ? '当前仅保留提示入口，不计入风险数量。' : '当前仅保留分组入口，不计入问题。'}
-                      </div>
-                    </div>
+                  {groupKey === 'hierarchy' ? (
+                    renderHierarchyGroup(group, visibleItems, hiddenCount, totalCount)
                   ) : (
-                    group.items.map((item, index) => {
+                    <>
+                      {group.hasOnlyNotAssessable && visibleItems.length > 0 ? (
+                        <div className="group-empty-state">
+                          <div className="group-empty-title">
+                            {modeMeta.isQualityMode ? '暂无可判断提示' : '暂无可评估规则'}
+                          </div>
+                          <div className="group-empty-desc">
+                            {modeMeta.isQualityMode ? '当前仅保留提示入口，不计入风险数量。' : '当前仅保留分组入口，不计入问题。'}
+                          </div>
+                        </div>
+                      ) : null}
+                      {visibleItems.length === 0 ? (
+                        <div className="no-issues">
+                          {modeMeta.isQualityMode ? '暂无数据质量提示' : '暂无规则项'}
+                        </div>
+                      ) : group.hasOnlyNotAssessable && visibleItems.length === 0 ? (
+                        <div className="group-empty-state">
+                          <div className="group-empty-title">
+                            {modeMeta.isQualityMode ? '暂无可判断提示' : '暂无可评估规则'}
+                          </div>
+                          <div className="group-empty-desc">
+                            {modeMeta.isQualityMode ? '当前仅保留提示入口，不计入风险数量。' : '当前仅保留分组入口，不计入问题。'}
+                          </div>
+                        </div>
+                      ) : (
+                    visibleItems.map((item, index) => {
                       const severityClass = getSeverityColor(item.auto_status, modeMeta.isQualityMode);
                       const locatePayload = getLocatePayload(item);
                       const canLocate =
@@ -750,6 +1108,8 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
                         </div>
                       );
                     })
+                      )}
+                    </>
                   )}
                 </div>
               ) : null}

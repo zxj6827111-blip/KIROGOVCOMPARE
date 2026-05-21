@@ -16,6 +16,7 @@ import { useToast } from './common/ToastProvider';
 import { useConfirmDialog } from './common/ConfirmDialogProvider';
 import { useTaskDrawer } from './tasks/TaskDrawerProvider';
 import { getAxiosFriendlyError } from '../utils/errorTranslator';
+import { appendReturnTo } from '../app/routeRegistry';
 import PageHeader from './common/PageHeader';
 
 const extractField = (payload, key) =>
@@ -440,7 +441,9 @@ function UploadReport() {
       toast.success('解析任务已创建', '无需跳转任务中心，右侧任务抽屉会持续更新进度。', {
         actionLabel: uploadResult.versionId ? '查看任务详情' : '打开任务中心',
         onAction: () => {
-          window.location.href = uploadResult.versionId ? `/jobs/${uploadResult.versionId}` : '/jobs';
+          window.location.href = uploadResult.versionId
+            ? appendReturnTo(`/jobs/${uploadResult.versionId}`, window.location.pathname + window.location.search)
+            : '/jobs';
         },
         duration: 8000,
       });
@@ -468,7 +471,9 @@ function UploadReport() {
         toast.warning('报告已存在', '已保留当前页面，可从任务抽屉查看或进入任务详情。', {
           actionLabel: versionId ? '查看任务详情' : '打开任务中心',
           onAction: () => {
-            window.location.href = versionId ? `/jobs/${versionId}` : '/jobs';
+            window.location.href = versionId
+              ? appendReturnTo(`/jobs/${versionId}`, window.location.pathname + window.location.search)
+              : '/jobs';
           },
           duration: 8000,
         });

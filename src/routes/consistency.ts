@@ -169,7 +169,7 @@ async function refreshCachedStatsForVersion(reportVersionId: number): Promise<vo
       ) AS quality,
       COUNT(*) FILTER (
         WHERE auto_status = 'FAIL'
-          AND group_key IN ('structure','table2','table3','table4','text')
+          AND group_key IN ('structure','table2','table3','table4','text','hierarchy')
           AND (human_status != 'dismissed' OR human_status IS NULL)
       ) AS structure
     FROM report_consistency_items
@@ -270,10 +270,11 @@ router.get('/reports/:id/checks', async (req: AuthRequest, res) => {
       'text': '正文一致性校验',
       'visual': '视觉与结构审计',
       'structure': '结构完整性审计',
-      'quality': '数据质量审计'
+      'quality': '数据质量审计',
+      'hierarchy': '层级汇总一致性'
     };
 
-    const orderedKeys = ['visual', 'structure', 'quality', 'text', 'table2', 'table3', 'table4'];
+    const orderedKeys = ['visual', 'structure', 'quality', 'text', 'hierarchy', 'table2', 'table3', 'table4'];
 
     const groupsMap: Record<string, any[]> = {};
     items.forEach((item: any) => {
@@ -282,8 +283,9 @@ router.get('/reports/:id/checks', async (req: AuthRequest, res) => {
       groupsMap[k].push(item);
     });
 
+    const visibleEmptyGroups = ['table2', 'table3', 'table4', 'text', 'hierarchy'];
     const groups = orderedKeys.map(key => {
-      if (groupsMap[key] || ['table3', 'table4', 'text'].includes(key)) {
+      if (groupsMap[key] || visibleEmptyGroups.includes(key)) {
         return {
           group_key: key,
           group_name: groupDefs[key] || key,
@@ -470,6 +472,96 @@ router.post('/reports/:id/vision-review/corrections/resolve', async (req: AuthRe
   } catch (err: any) {
     console.error('Error resolving OCR corrections:', err);
     res.status(500).json({ error: 'Failed to resolve OCR corrections: ' + err.message });
+  }
+});
+
+/**
+ * POST /reports/:id/checks/items/bulk-status - Batch update check item status.
+ * Used by "one-click confirm" to avoid hundreds of single PATCH requests hitting
+ * the global API rate limiter and refreshing cached stats repeatedly.
+ */
+router.post('/reports/:id/checks/items/bulk-status', async (req: AuthRequest, res) => {
+  const reportId = Number(req.params.id);
+  const { version_id, item_ids, human_status, human_comment } = req.body || {};
+
+  if (!human_status) {
+    res.status(400).json({ error: 'Missing human_status' });
+    return;
+  }
+
+  const ALLOWED_HUMAN_STATUSES = new Set(['pending', 'confirmed', 'dismissed']);
+  const normalizedHumanStatus = String(human_status).toLowerCase();
+  if (!ALLOWED_HUMAN_STATUSES.has(normalizedHumanStatus)) {
+    res.status(400).json({ error: 'Invalid human_status. Allowed: pending, confirmed, dismissed' });
+    return;
+  }
+
+  if (!Array.isArray(item_ids)) {
+    res.status(400).json({ error: 'Missing item_ids' });
+    return;
+  }
+
+  const itemIds = Array.from(
+    new Set(
+      item_ids
+        .map((value: unknown) => Number(value))
+        .filter((value: number) => isPositiveInteger(value))
+    )
+  );
+
+  if (itemIds.length === 0) {
+    res.status(400).json({ error: 'No valid item_ids' });
+    return;
+  }
+
+  if (itemIds.length > 2000) {
+    res.status(400).json({ error: 'Too many item_ids. Max: 2000' });
+    return;
+  }
+
+  try {
+    const access = await checkReportAccess(reportId, req.user);
+    if (!access.ok) {
+      res.status(access.status).json({ error: access.error });
+      return;
+    }
+
+    const versionId = await resolveReportVersionId(reportId, version_id);
+    if (!versionId) {
+      res.status(404).json({ error: 'Report version not found' });
+      return;
+    }
+
+    const updateRes = await pool.query(
+      `UPDATE report_consistency_items rci
+       SET human_status = $1,
+           human_comment = $2,
+           updated_at = NOW()
+       WHERE rci.report_version_id = $3
+         AND rci.id = ANY($4::bigint[])
+       RETURNING rci.id`,
+      [normalizedHumanStatus, human_comment || null, versionId, itemIds]
+    );
+
+    try {
+      await refreshCachedStatsForVersion(Number(versionId));
+      await refreshComparisonStatusForReport(reportId);
+    } catch (refreshError) {
+      console.warn('[Consistency] Failed to refresh cached stats or comparison status after bulk update:', refreshError);
+    }
+
+    res.json({
+      success: true,
+      report_id: reportId,
+      version_id: versionId,
+      requested_count: itemIds.length,
+      updated_count: updateRes.rowCount || 0,
+      missing_count: Math.max(itemIds.length - (updateRes.rowCount || 0), 0),
+      updated_item_ids: updateRes.rows.map((row: any) => Number(row.id)),
+    });
+  } catch (err: any) {
+    console.error('Error bulk updating check items:', err);
+    res.status(500).json({ error: 'Failed to bulk update items' });
   }
 });
 

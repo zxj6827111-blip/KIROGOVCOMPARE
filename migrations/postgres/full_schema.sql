@@ -210,7 +210,7 @@ CREATE TABLE IF NOT EXISTS report_consistency_items (
   id BIGSERIAL PRIMARY KEY,
   run_id BIGINT NOT NULL REFERENCES report_consistency_runs(id) ON DELETE CASCADE,
   report_version_id BIGINT NOT NULL REFERENCES report_versions(id) ON DELETE CASCADE,
-  group_key VARCHAR(30) NOT NULL CHECK(group_key IN ('table2', 'table3', 'table4', 'text', 'visual', 'structure', 'quality')),
+  group_key VARCHAR(30) NOT NULL CHECK(group_key IN ('table2', 'table3', 'table4', 'text', 'visual', 'structure', 'quality', 'hierarchy')),
   check_key VARCHAR(100) NOT NULL,
   fingerprint VARCHAR(32) NOT NULL,
   title TEXT NOT NULL,

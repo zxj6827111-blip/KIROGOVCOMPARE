@@ -69,6 +69,48 @@ table.gov-data-table {
   min-width: 980px;
 }
 
+.gov-table-card--table2.gov-table-card--compact .gov-data-table--table2 {
+  min-width: 0;
+  width: 100%;
+}
+
+.gov-table-card--table2.gov-table-card--compact .gov-table-scroll--fit {
+  overflow-x: hidden;
+}
+
+.gov-table-card--table2.gov-table-card--compact table.gov-data-table {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.gov-table-card--table2.gov-table-card--compact .gov-data-table th,
+.gov-table-card--table2.gov-table-card--compact .gov-data-table td,
+.gov-table-card--table2.gov-table-card--compact .comparison-table.gov-data-table th,
+.gov-table-card--table2.gov-table-card--compact .comparison-table.gov-data-table td {
+  min-height: 34px;
+  padding: 8px 6px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.gov-table-card--table2.gov-table-card--compact .gov-table-section-row th,
+.gov-table-card--table2.gov-table-card--compact .gov-table-section-heading {
+  height: 42px;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.gov-table-card--table2.gov-table-card--compact .gov-table-text-cell {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.gov-table-card--table2.gov-table-card--compact .gov-table-number-cell {
+  font-size: 12px;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
 .gov-data-table--table3 {
   min-width: 1320px;
 }

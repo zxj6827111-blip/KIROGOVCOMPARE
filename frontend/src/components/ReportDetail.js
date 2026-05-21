@@ -17,6 +17,7 @@ import { useToast } from './common/ToastProvider';
 import { useConfirmDialog } from './common/ConfirmDialogProvider';
 import { useTaskDrawer } from './tasks/TaskDrawerProvider';
 import { resolveSafeReturnTo } from '../app/returnTo';
+import { appendReturnTo } from '../app/routeRegistry';
 
 const tryParseJsonText = (value) => {
   if (typeof value !== 'string') return { ok: false, value: null };
@@ -1173,14 +1174,17 @@ function ReportDetail({ reportId: propReportId, onBack }) {
         params: { limit: 100 },
       });
       const jobs = jobsResp.data?.jobs || [];
-      const completedJob = jobs.find((job) =>
-        String(job.comparison_id ?? '') === String(relatedComparison.id) &&
-        String(job.status || '').toLowerCase() === 'done' &&
-        job.file_exists
+      const relatedPdfJobs = jobs.filter((job) =>
+        String(job.comparison_id ?? '') === String(relatedComparison.id)
+      );
+      const latestPdfJob = relatedPdfJobs[0] || null;
+      const completedJob = relatedPdfJobs.find((job) =>
+        String(job.status || '').toLowerCase() === 'done' && job.file_exists
       ) || null;
 
       return {
         latestComparison: relatedComparison,
+        latestPdfJob,
         latestCompletedPdfJob: completedJob,
       };
     } catch (err) {
@@ -1190,7 +1194,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
 
   const loadFlowSignals = async (targetReportId, payload) => {
     const flowSignals = await fetchFlowSignals(targetReportId, payload);
-    if (!flowSignals.latestComparison && !flowSignals.latestCompletedPdfJob) return;
+    if (!flowSignals.latestComparison && !flowSignals.latestPdfJob && !flowSignals.latestCompletedPdfJob) return;
     setReport((prevReport) => {
       if (!prevReport || String(prevReport.report_id) !== String(targetReportId)) return prevReport;
       return { ...prevReport, flow_signals: flowSignals };
@@ -2592,7 +2596,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const handleFlowAction = async (action) => {
     if (!action) return;
     if (action.href) {
-      window.location.href = action.href;
+      window.location.href = appendReturnTo(action.href, window.location.pathname + window.location.search);
       return;
     }
     if (action.target === 'checks') {
@@ -2618,6 +2622,19 @@ function ReportDetail({ reportId: propReportId, onBack }) {
       setShowVersionHistory(true);
       await loadVersionHistory(reportId);
     }
+    if (action.target === 'publishPending') {
+      if (pendingVersion) {
+        await handlePublishVersion({
+          id: pendingVersion.version_id,
+          review_status: pendingVersion.review_status,
+        });
+      }
+    }
+  };
+
+  const refreshAfterChecksUpdated = async () => {
+    await fetchHighlights(workingVersionId);
+    await refresh();
   };
 
   return (
@@ -2950,9 +2967,9 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                 <ConsistencyCheckView
                   reportId={reportId}
                   versionId={workingVersionId}
-                  filterGroups={['table2', 'table3', 'table4', 'text']}
+                  filterGroups={['table2', 'table3', 'table4', 'text', 'hierarchy']}
                   onLocate={handleLocateIssue}
-                  onChecksUpdated={() => fetchHighlights(workingVersionId)}
+                  onChecksUpdated={refreshAfterChecksUpdated}
                   onEdit={(paths) => {
                     if (!displayParsedJson) return;
                     const editData = {
@@ -2972,7 +2989,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                   versionId={workingVersionId}
                   filterGroups={['visual', 'structure', 'quality']}
                   onLocate={handleLocateIssue}
-                  onChecksUpdated={() => fetchHighlights(workingVersionId)}
+                  onChecksUpdated={refreshAfterChecksUpdated}
                   onEdit={(paths) => {
                     if (!displayParsedJson) return;
                     const editData = {

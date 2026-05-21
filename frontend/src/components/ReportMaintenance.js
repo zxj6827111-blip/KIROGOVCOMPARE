@@ -25,6 +25,7 @@ import {
 import { useTaskDrawer } from './tasks/TaskDrawerProvider';
 import { useToast } from './common/ToastProvider';
 import { useConfirmDialog } from './common/ConfirmDialogProvider';
+import { appendReturnTo } from '../app/routeRegistry';
 
 const EMPTY_VALUE = '--';
 
@@ -617,7 +618,7 @@ function ReportMaintenance({ onBack, onNavigate }) {
 
     const navigateToDetail = (row) => {
         if (row.report_id && onNavigate) {
-            onNavigate(`/catalog/reports/${row.report_id}`);
+            onNavigate(appendReturnTo(`/catalog/reports/${row.report_id}`, window.location.pathname + window.location.search));
             return;
         }
         setActionMessage('该单位尚未上传年报，暂无详情页。');

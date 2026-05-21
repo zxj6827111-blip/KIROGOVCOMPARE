@@ -306,7 +306,7 @@ CREATE TABLE IF NOT EXISTS report_consistency_items (
   run_id BIGINT NOT NULL REFERENCES report_consistency_runs(id) ON DELETE CASCADE,
   report_version_id BIGINT NOT NULL REFERENCES report_versions(id) ON DELETE CASCADE,
   
-  group_key VARCHAR(30) NOT NULL CHECK(group_key IN ('table2', 'table3', 'table4', 'text', 'visual', 'structure', 'quality')),
+  group_key VARCHAR(30) NOT NULL CHECK(group_key IN ('table2', 'table3', 'table4', 'text', 'visual', 'structure', 'quality', 'hierarchy')),
   check_key VARCHAR(100) NOT NULL,
   fingerprint VARCHAR(32) NOT NULL,
   
@@ -475,7 +475,7 @@ ALTER TABLE jobs ADD COLUMN IF NOT EXISTS ingestion_batch_id BIGINT REFERENCES i
 ALTER TABLE report_consistency_items DROP CONSTRAINT IF EXISTS report_consistency_items_group_key_check;
 ALTER TABLE report_consistency_items
   ADD CONSTRAINT report_consistency_items_group_key_check
-  CHECK (group_key IN ('table2', 'table3', 'table4', 'text', 'visual', 'structure', 'quality'));
+  CHECK (group_key IN ('table2', 'table3', 'table4', 'text', 'visual', 'structure', 'quality', 'hierarchy'));
 
 ALTER TABLE regions ADD COLUMN IF NOT EXISTS sort_order INTEGER;
 ALTER TABLE comparisons ADD COLUMN IF NOT EXISTS similarity INTEGER;

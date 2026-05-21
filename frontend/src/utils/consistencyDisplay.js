@@ -3,6 +3,7 @@ export const GROUP_DISPLAY_NAMES = {
   table2: '表二：主动公开政府信息情况',
   table3: '表三：收到和处理政府信息公开申请情况',
   table4: '表四：政府信息公开行政复议、行政诉讼情况',
+  hierarchy: '层级汇总一致性',
   visual: '视觉与结构审计',
   structure: '结构完整性审计',
   quality: '数据质量审计',
@@ -237,8 +238,44 @@ export const normalizeConsistencyGroup = (group) => {
   };
 };
 
-export const normalizeConsistencyGroups = (groups = []) =>
-  (groups || []).map((group) => normalizeConsistencyGroup(group));
+const DEFAULT_CONSISTENCY_GROUP_ORDER = ['text', 'hierarchy', 'table2', 'table3', 'table4'];
+
+const getGroupOrder = (groupKey) => {
+  const index = DEFAULT_CONSISTENCY_GROUP_ORDER.indexOf(groupKey);
+  return index === -1 ? DEFAULT_CONSISTENCY_GROUP_ORDER.length : index;
+};
+
+export const ensureConsistencyGroups = (groups = [], requiredGroupKeys = []) => {
+  const byKey = new Map();
+  (groups || []).forEach((group) => {
+    const groupKey = getConsistencyGroupKey(group);
+    if (groupKey && !byKey.has(groupKey)) {
+      byKey.set(groupKey, group);
+    }
+  });
+
+  (requiredGroupKeys || []).forEach((groupKey) => {
+    if (groupKey && !byKey.has(groupKey)) {
+      byKey.set(groupKey, {
+        group_key: groupKey,
+        group_name: GROUP_DISPLAY_NAMES[groupKey] || groupKey,
+        items: [],
+      });
+    }
+  });
+
+  return Array.from(byKey.values()).sort((left, right) => {
+    const leftKey = getConsistencyGroupKey(left);
+    const rightKey = getConsistencyGroupKey(right);
+    const leftOrder = getGroupOrder(leftKey);
+    const rightOrder = getGroupOrder(rightKey);
+    if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+    return leftKey.localeCompare(rightKey, 'zh-CN');
+  });
+};
+
+export const normalizeConsistencyGroups = (groups = [], requiredGroupKeys = []) =>
+  ensureConsistencyGroups(groups, requiredGroupKeys).map((group) => normalizeConsistencyGroup(group));
 
 export const summarizeConsistencyGroups = (groups = []) =>
   (groups || []).reduce(

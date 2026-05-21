@@ -156,7 +156,115 @@ describe('ConsistencyCheckView quality mode', () => {
     expect(screen.queryByText('问题 1｜表二暂不具备可评估规则')).toBeNull();
   });
 
-  test('bulk confirm in quality mode only patches quality items', async () => {
+  test('hierarchy group surfaces delta count and renders compact business rows', async () => {
+    apiClient.get.mockResolvedValue({
+      data: {
+        data: {
+          latest_run: { id: 3 },
+          groups: [
+            {
+              group_key: 'hierarchy',
+              displayName: '层级汇总一致性',
+              items: [
+                {
+                  id: 501,
+                  check_key: 'hierarchy_sum_active__punishment__processed_count',
+                  title: '层级汇总一致性：淮安市 表二 行政处罚-处理决定数量',
+                  auto_status: 'UNCERTAIN',
+                  human_status: 'pending',
+                  left_value: 4289602,
+                  right_value: 4128940,
+                  delta: 160662,
+                  tolerance: 0,
+                  evidence: {
+                    leftPaths: ['hierarchy.parent.721.active__punishment__processed_count'],
+                    rightPaths: ['hierarchy.child.801.active__punishment__processed_count'],
+                    values: {
+                      reason: 'hierarchy_sum_incomplete_inputs',
+                      table: '表二',
+                      metricLabel: '行政处罚-处理决定数量',
+                      childCount: 21,
+                      childReportCount: 16,
+                      childMetricCount: 16,
+                      missingReports: [
+                        { regionId: 9001, regionName: '涟水县' },
+                        { regionId: 9002, regionName: '淮安区' },
+                        { regionId: 9004, regionName: '金湖县' },
+                        { regionId: 9005, regionName: '盱眙县' },
+                        { regionId: 9006, regionName: '洪泽区' },
+                        { regionId: 9007, regionName: '淮安经济技术开发区' },
+                      ],
+                      missingMetricChildren: [
+                        { regionId: 9003, regionName: '生态文旅区' },
+                        { regionId: 9008, regionName: '农业农村局' },
+                      ],
+                      context: '很长的旧上下文不应默认展示 hierarchy.child.801.active__punishment__processed_count',
+                    },
+                  },
+                },
+                {
+                  id: 502,
+                  check_key: 'hierarchy_sum_legal__review__maintained',
+                  title: '层级汇总一致性：淮安市 表四 复议后起诉-结果维持',
+                  auto_status: 'UNCERTAIN',
+                  human_status: 'pending',
+                  left_value: 20,
+                  right_value: 12,
+                  delta: 8,
+                  tolerance: 0,
+                  evidence: {
+                    values: {
+                      reason: 'hierarchy_sum_incomplete_inputs',
+                      table: '表四',
+                      metricLabel: '复议后起诉-结果维持',
+                      childCount: 50,
+                      childReportCount: 24,
+                      childMetricCount: 24,
+                      missingReports: [],
+                      missingMetricChildren: [],
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    renderWithFeedback(
+      <ConsistencyCheckView
+        reportId={1}
+        versionId={2}
+        filterGroups={['hierarchy']}
+      />
+    );
+
+    await screen.findByRole('heading', { name: /层级汇总一致性/ });
+    expect(screen.getByText('层级差额 2')).toBeInTheDocument();
+    expect(screen.getByText('差额项 2')).toBeInTheDocument();
+    expect(screen.getByText('缺报告单位 6')).toBeInTheDocument();
+    expect(screen.getByText('缺字段单位 2')).toBeInTheDocument();
+    expect(screen.queryByText('受资料缺口影响')).toBeNull();
+    expect(screen.getByText('有差额的指标')).toBeInTheDocument();
+    expect(screen.getByText('行政处罚-处理决定数量')).toBeInTheDocument();
+    expect(screen.getByText('4,289,602')).toBeInTheDocument();
+    expect(screen.getByText('4,128,940')).toBeInTheDocument();
+    expect(screen.getByText('160,662')).toBeInTheDocument();
+    expect(screen.getAllByText('有差额，待核查')).toHaveLength(2);
+    expect(screen.queryByText(/hierarchy\.child/)).toBeNull();
+    const tableSections = document.querySelectorAll('.hierarchy-table-section');
+    expect(tableSections).toHaveLength(2);
+    expect(tableSections[0]).toHaveTextContent('表二');
+    expect(tableSections[0]).toHaveTextContent('行政处罚-处理决定数量');
+    expect(tableSections[1]).toHaveTextContent('表四');
+    expect(tableSections[1]).toHaveTextContent('复议后起诉-结果维持');
+    expect(screen.getByText('涟水县、淮安区、金湖县、盱眙县、洪泽区、淮安经济技术开发区')).toBeInTheDocument();
+    expect(screen.getByText('生态文旅区、农业农村局')).toBeInTheDocument();
+    expect(screen.queryByText(/等 \d+ 个/)).toBeNull();
+  });
+
+  test('bulk confirm in quality mode updates quality items with one request', async () => {
     const user = userEvent.setup();
 
     renderWithFeedback(
@@ -177,14 +285,15 @@ describe('ConsistencyCheckView quality mode', () => {
     }));
 
     await waitFor(() => {
-      expect(apiClient.patch).toHaveBeenCalledTimes(1);
+      expect(apiClient.post).toHaveBeenCalledWith('/reports/1/checks/items/bulk-status', {
+        version_id: 2,
+        item_ids: [101],
+        human_status: 'confirmed',
+        human_comment: '批量标记为已处理',
+      });
     });
 
-    expect(apiClient.patch).toHaveBeenCalledWith('/reports/1/checks/items/101', {
-      version_id: 2,
-      human_status: 'confirmed',
-      human_comment: '批量标记为已处理',
-    });
+    expect(apiClient.patch).not.toHaveBeenCalled();
   });
 });
 
@@ -226,6 +335,7 @@ describe('ConsistencyCheckView onChecksUpdated callback', () => {
     jest.clearAllMocks();
     apiClient.get.mockResolvedValue({ data: { data: consistencyData } });
     apiClient.patch.mockResolvedValue({ data: { success: true } });
+    apiClient.post.mockResolvedValue({ data: { success: true, updated_count: 2 } });
     mockConfirmAction.mockResolvedValue(true);
   });
 
@@ -252,6 +362,12 @@ describe('ConsistencyCheckView onChecksUpdated callback', () => {
     }));
 
     await waitFor(() => {
+      expect(apiClient.post).toHaveBeenCalledWith('/reports/1/checks/items/bulk-status', {
+        version_id: 2,
+        item_ids: [201, 202],
+        human_status: 'confirmed',
+        human_comment: '批量确认',
+      });
       expect(onChecksUpdated).toHaveBeenCalledTimes(1);
     });
   });

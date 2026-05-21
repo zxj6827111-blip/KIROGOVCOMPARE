@@ -99,6 +99,26 @@ describe('issueViewModelAdapter', () => {
     expect(issue.markers[0].path).toBe('reviewLitigationData.review.total');
   });
 
+  test('normalizes hierarchy aggregation issue as a consistency problem', () => {
+    const issue = normalizeIssueItem({
+      group_key: 'hierarchy',
+      check_key: 'hierarchy_sum_application__total__new_received',
+      auto_status: 'FAIL',
+      human_status: 'pending',
+      displayNo: 1,
+      evidence: {
+        leftPaths: ['hierarchy.parent.10.application__total__new_received'],
+        rightPaths: ['hierarchy.child.11.application__total__new_received'],
+      },
+    });
+
+    expect(issue.issueType).toBe('consistency_hierarchy_sum');
+    expect(issue.tableId).toBe('hierarchy');
+    expect(issue.shortTitle).toBe('层级汇总');
+    expect(issue.markers.every((marker) => marker.tone === 'hierarchy')).toBe(true);
+    expect(issue.severity).toBe('error');
+  });
+
   test('normalizes quality issue with quality tone and warning severity', () => {
     const issue = normalizeIssueItem({
       group_key: 'quality',

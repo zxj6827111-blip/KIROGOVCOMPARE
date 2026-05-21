@@ -11,6 +11,7 @@ const SHORT_TITLE_BY_TYPE = {
   consistency_table3_column_sum: '横向总计',
   consistency_table3_other: '表三其他',
   consistency_table4_row_sum: '行内合计',
+  consistency_hierarchy_sum: '层级汇总',
   consistency_table2: '表二低风险规则',
   consistency_text: '正文一致性',
   unsupported_not_assessable: '暂无可评估规则',
@@ -33,6 +34,7 @@ const ISSUE_TONE_BY_TYPE = {
   consistency_table3_column_sum: 'column_sum',
   consistency_table3_other: 'neutral',
   consistency_table4_row_sum: 'table4',
+  consistency_hierarchy_sum: 'hierarchy',
   consistency_table2: 'table2',
   consistency_text: 'text',
   quality_empty: 'quality',
@@ -81,6 +83,8 @@ const resolveTableId = (groupKey) => {
     case 'table4':
     case 'table_4':
       return 'table_4';
+    case 'hierarchy':
+      return 'hierarchy';
     case 'text':
       return 'text';
     case 'visual':
@@ -160,6 +164,13 @@ export const classifyIssueTypeFallback = (item) => {
 
   if (groupKey === 'table4') {
     return 'consistency_table4_row_sum';
+  }
+
+  if (groupKey === 'hierarchy') {
+    if (autoStatus === 'NOT_ASSESSABLE') {
+      return 'unsupported_not_assessable';
+    }
+    return 'consistency_hierarchy_sum';
   }
 
   if (groupKey === 'visual' || groupKey === 'structure' || groupKey === 'quality') {

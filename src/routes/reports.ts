@@ -153,7 +153,7 @@ async function countOpenReviewIssues(versionId: number): Promise<number> {
      FROM report_consistency_items
      WHERE report_version_id = $1
        AND auto_status IN ('FAIL', 'UNCERTAIN')
-       AND COALESCE(human_status, 'pending') != 'dismissed'`,
+       AND COALESCE(human_status, 'pending') = 'pending'`,
     [versionId]
   );
   return Number(result.rows[0]?.count || 0);
@@ -205,6 +205,7 @@ function mapVersionRow(row: any) {
     is_active: Boolean(row.is_active),
     version_type: row.version_type || null,
     parent_version_id: row.parent_version_id || null,
+    open_issue_count: Number(row.open_issue_count || 0),
   };
 }
 
@@ -1467,7 +1468,7 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
           ) AS quality,
           COUNT(*) FILTER (
             WHERE auto_status = 'FAIL'
-              AND group_key IN ('structure','table2','table3','table4','text')
+              AND group_key IN ('structure','table2','table3','table4','text','hierarchy')
               AND (human_status != 'dismissed' OR human_status IS NULL)
           ) AS structure
         FROM report_consistency_items
@@ -1648,7 +1649,7 @@ router.get('/reports/:id/versions', authMiddleware, async (req: AuthRequest, res
            report_version_id,
            COUNT(*) FILTER (
              WHERE auto_status IN ('FAIL', 'UNCERTAIN')
-               AND COALESCE(human_status, 'pending') != 'dismissed'
+               AND COALESCE(human_status, 'pending') = 'pending'
            ) AS open_issue_count
          FROM report_consistency_items
          WHERE report_version_id IN (
@@ -1923,21 +1924,51 @@ router.get('/reports/:id', authMiddleware, async (req, res) => {
     const job = jobRes.rows[0];
 
     const activeVersionRes = await pool.query(
-      `SELECT *
-       FROM report_versions
-       WHERE id = (
+      `WITH issue_counts AS (
+         SELECT
+           report_version_id,
+           COUNT(*) FILTER (
+             WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+               AND COALESCE(human_status, 'pending') = 'pending'
+           ) AS open_issue_count
+         FROM report_consistency_items
+         WHERE report_version_id = (
+           SELECT active_version_id FROM reports WHERE id = $1 LIMIT 1
+         )
+         GROUP BY report_version_id
+       )
+       SELECT rv.*, COALESCE(ic.open_issue_count, 0) AS open_issue_count
+       FROM report_versions rv
+       LEFT JOIN issue_counts ic ON ic.report_version_id = rv.id
+       WHERE rv.id = (
          SELECT active_version_id FROM reports WHERE id = $1 LIMIT 1
        )
        LIMIT 1`,
       [reportId]
     );
     const pendingVersionRes = await pool.query(
-      `SELECT *
-       FROM report_versions
-       WHERE report_id = $1
-         AND review_status = 'pending_review'
-       ORDER BY created_at DESC, id DESC
-       LIMIT 1`,
+      `WITH pending_version AS (
+         SELECT *
+         FROM report_versions
+         WHERE report_id = $1
+           AND review_status = 'pending_review'
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1
+       ),
+       issue_counts AS (
+         SELECT
+           report_version_id,
+           COUNT(*) FILTER (
+             WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+               AND COALESCE(human_status, 'pending') = 'pending'
+           ) AS open_issue_count
+         FROM report_consistency_items
+         WHERE report_version_id IN (SELECT id FROM pending_version)
+         GROUP BY report_version_id
+       )
+       SELECT pv.*, COALESCE(ic.open_issue_count, 0) AS open_issue_count
+       FROM pending_version pv
+       LEFT JOIN issue_counts ic ON ic.report_version_id = pv.id`,
       [reportId]
     );
 

@@ -1,4 +1,4 @@
-import { resolveSafeReturnTo } from './returnTo';
+import { resolveRouteReturnTo, resolveSafeReturnTo } from './returnTo';
 
 describe('resolveSafeReturnTo', () => {
   test('accepts /catalog', () => {
@@ -35,5 +35,19 @@ describe('resolveSafeReturnTo', () => {
 
   test('uses fallback when returnTo is missing', () => {
     expect(resolveSafeReturnTo('', '/fallback')).toBe('/fallback');
+  });
+});
+
+describe('resolveRouteReturnTo', () => {
+  test('uses query returnTo before route fallback', () => {
+    expect(resolveRouteReturnTo('?returnTo=%2Fcatalog%3Fregion%3D1%252C2', '/catalog/reports/9001', '/catalog')).toBe('/catalog?region=1,2');
+  });
+
+  test('uses location state when query returnTo is missing', () => {
+    expect(resolveRouteReturnTo('', '/datacenter/reports/9001', '/datacenter', { returnTo: '/datacenter?status=success' })).toBe('/datacenter?status=success');
+  });
+
+  test('rejects unsafe location state values', () => {
+    expect(resolveRouteReturnTo('', '/jobs/8001', '/jobs', { returnTo: 'https://evil.com' })).toBe('/jobs');
   });
 });
