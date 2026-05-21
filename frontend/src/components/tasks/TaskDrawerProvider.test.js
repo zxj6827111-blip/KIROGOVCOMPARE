@@ -77,6 +77,23 @@ describe('TaskDrawerProvider', () => {
     });
   });
 
+  test('uses a small PDF polling window for tracked drawer tasks', async () => {
+    render(
+      <ToastProvider>
+        <TaskDrawerProvider navigate={jest.fn()}>
+          <Harness />
+        </TaskDrawerProvider>
+      </ToastProvider>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'add expired job' }));
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }));
+
+    await waitFor(() => {
+      expect(apiClient.get).toHaveBeenCalledWith('/pdf-jobs', { params: { page: 1, limit: 20 } });
+    });
+  });
+
   test('does not render the drawer entry when disabled', () => {
     render(
       <ToastProvider>

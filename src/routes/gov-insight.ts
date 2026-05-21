@@ -104,25 +104,36 @@ const parseBooleanParam = (value: unknown, fallback = false): boolean => {
   return fallback;
 };
 
-const serializeGovInsightJob = (row: Record<string, any>) => ({
-  id: Number(row.id),
-  regionId: Number(row.region_id),
-  orgId: String(row.org_id || ''),
-  orgName: String(row.org_name || ''),
-  year: Number(row.year),
-  status: String(row.status || 'queued'),
-  progress: Number(row.progress || 0),
-  stepCode: String(row.step_code || 'QUEUED'),
-  stepName: String(row.step_name || '等待处理'),
-  model: String(row.model || ''),
-  errorCode: row.error_code ? String(row.error_code) : '',
-  errorMessage: row.error_message ? String(row.error_message) : '',
-  retryCount: Number(row.retry_count || 0),
-  maxRetries: Number(row.max_retries || 0),
-  createdAt: row.created_at,
-  startedAt: row.started_at,
-  finishedAt: row.finished_at,
-});
+const serializeGovInsightJob = (row: Record<string, any>) => {
+  const status = String(row.status || 'queued');
+  const errorMessage = row.error_message ? String(row.error_message) : '';
+  const isFailed = status === 'failed';
+  const readableStatus = isFailed
+    ? (errorMessage ? `报告生成失败：${errorMessage}` : '报告生成失败，请检查任务日志或重新生成')
+    : String(row.step_name || '等待处理');
+
+  return {
+    id: Number(row.id),
+    regionId: Number(row.region_id),
+    orgId: String(row.org_id || ''),
+    orgName: String(row.org_name || ''),
+    year: Number(row.year),
+    status,
+    progress: Number(row.progress || 0),
+    stepCode: String(row.step_code || 'QUEUED'),
+    stepName: String(row.step_name || '等待处理'),
+    readableStatus,
+    isFailed,
+    model: String(row.model || ''),
+    errorCode: row.error_code ? String(row.error_code) : '',
+    errorMessage,
+    retryCount: Number(row.retry_count || 0),
+    maxRetries: Number(row.max_retries || 0),
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+  };
+};
 
 const resolveStoredReportEnvelope = (row: Record<string, any>) => {
   const extracted = extractGovInsightStoredEnvelope(row.content_json);

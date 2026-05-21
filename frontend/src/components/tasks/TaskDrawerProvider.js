@@ -23,6 +23,7 @@ const ACTIVE_STATUSES = new Set(['queued', 'processing', 'running']);
 const FINAL_STATUSES = new Set(['done', 'succeeded', 'failed', 'cancelled']);
 const POLL_ACTIVE_MS = 3000;
 const POLL_IDLE_MS = 12000;
+const PDF_TRACKED_REFRESH_LIMIT = 20;
 
 const TASK_TYPE_META = {
   parse: {
@@ -354,7 +355,7 @@ export function TaskDrawerProvider({ children, navigate, disabled = false }) {
     }));
 
     if (pdfTasks.length > 0) {
-      const response = await apiClient.get('/pdf-jobs', { params: { page: 1, limit: 100 } });
+      const response = await apiClient.get('/pdf-jobs', { params: { page: 1, limit: PDF_TRACKED_REFRESH_LIMIT } });
       const rows = response.data?.jobs || [];
       pdfTasks.forEach((task) => {
         const row = rows.find((item) => Number(item.job_id) === Number(task.jobId));

@@ -5,6 +5,7 @@ import path from 'path';
 import request from 'supertest';
 import pool from '../config/database-llm';
 import pdfJobsRouter from '../routes/pdf-jobs';
+import { DEFAULT_PDF_EXPORTS_DIR } from '../utils/pdfExportPath';
 
 jest.mock('../middleware/auth', () => ({
   authMiddleware: (req: any, _res: any, next: () => void) => {
@@ -47,6 +48,16 @@ function binaryParser(res: any, callback: (error: Error | null, body?: Buffer) =
 function makeTempPdf(name: string): string {
   const filePath = path.join(
     os.tmpdir(),
+    `${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.pdf`
+  );
+  fs.writeFileSync(filePath, Buffer.from('%PDF-1.4\n% pdf jobs regression\n'));
+  return filePath;
+}
+
+function makeExportPdf(name: string): string {
+  fs.mkdirSync(DEFAULT_PDF_EXPORTS_DIR, { recursive: true });
+  const filePath = path.join(
+    DEFAULT_PDF_EXPORTS_DIR,
     `${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.pdf`
   );
   fs.writeFileSync(filePath, Buffer.from('%PDF-1.4\n% pdf jobs regression\n'));
@@ -115,7 +126,7 @@ describe('PDF jobs regression baseline', () => {
   });
 
   it('downloads a completed PDF job when the file exists', async () => {
-    const pdfPath = makeTempPdf('pdf-jobs-done');
+    const pdfPath = makeExportPdf('pdf-jobs-done');
     mockDownloadJob({
       id: 1,
       status: 'done',
@@ -158,7 +169,7 @@ describe('PDF jobs regression baseline', () => {
   });
 
   it('returns an explicit expired-file response when the stored PDF is missing', async () => {
-    const missingPath = path.join(os.tmpdir(), `missing-pdf-${Date.now()}.pdf`);
+    const missingPath = path.join(DEFAULT_PDF_EXPORTS_DIR, `missing-pdf-${Date.now()}.pdf`);
     mockDownloadJob({
       id: 3,
       status: 'done',
@@ -178,10 +189,35 @@ describe('PDF jobs regression baseline', () => {
     });
   });
 
+  it('rejects completed PDF downloads whose stored path is outside the export directory', async () => {
+    const unsafePdfPath = makeTempPdf('pdf-jobs-unsafe');
+    mockDownloadJob({
+      id: 4,
+      status: 'done',
+      file_path: unsafePdfPath,
+      file_name: 'unsafe.pdf',
+      comparison_id: 1143,
+      export_title: 'Unsafe PDF',
+    });
+
+    try {
+      const response = await request(buildApp()).get('/api/pdf-jobs/4/download');
+
+      expect(response.status).toBe(409);
+      expect(response.body).toMatchObject({
+        error: 'Invalid PDF file path',
+        comparison_id: 1143,
+        needs_regeneration: true,
+      });
+    } finally {
+      fs.rmSync(unsafePdfPath, { force: true });
+    }
+  });
+
   it('packages only completed jobs with existing files in batch download', async () => {
-    const firstPdf = makeTempPdf('pdf-batch-first');
-    const secondPdf = makeTempPdf('pdf-batch-second');
-    const missingPdf = path.join(os.tmpdir(), `pdf-batch-missing-${Date.now()}.pdf`);
+    const firstPdf = makeExportPdf('pdf-batch-first');
+    const secondPdf = makeExportPdf('pdf-batch-second');
+    const missingPdf = path.join(DEFAULT_PDF_EXPORTS_DIR, `pdf-batch-missing-${Date.now()}.pdf`);
 
     mockedQuery.mockImplementation(async (sql: unknown) => {
       const text = String(sql);
@@ -213,6 +249,56 @@ describe('PDF jobs regression baseline', () => {
     } finally {
       fs.rmSync(firstPdf, { force: true });
       fs.rmSync(secondPdf, { force: true });
+    }
+  });
+
+  it('rejects invalid batch download ids before querying', async () => {
+    const response = await request(buildApp())
+      .post('/api/pdf-jobs/batch-download')
+      .send({ job_ids: [1, 'bad'] });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({ error: 'invalid_job_ids' });
+    expect(mockedQuery).not.toHaveBeenCalled();
+  });
+
+  it('rejects overly large batch download requests before querying', async () => {
+    const response = await request(buildApp())
+      .post('/api/pdf-jobs/batch-download')
+      .send({ job_ids: Array.from({ length: 51 }, (_, index) => index + 1) });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({ error: 'invalid_job_ids' });
+    expect(mockedQuery).not.toHaveBeenCalled();
+  });
+
+  it('sanitizes stored file names before putting files into the batch ZIP', async () => {
+    const pdfPath = makeExportPdf('pdf-batch-unsafe-name');
+
+    mockedQuery.mockImplementation(async (sql: unknown) => {
+      const text = String(sql);
+      if (text.includes('SELECT j.id, j.file_path, j.file_name')) {
+        return {
+          rows: [
+            { id: 9, file_path: pdfPath, file_name: '../unsafe:name.pdf', export_title: 'Unsafe name', status: 'done' },
+          ],
+        };
+      }
+      return { rows: [] };
+    });
+
+    try {
+      const response = await request(buildApp())
+        .post('/api/pdf-jobs/batch-download')
+        .send({ job_ids: [9] })
+        .buffer(true)
+        .parse(binaryParser);
+
+      expect(response.status).toBe(200);
+      expect(response.body.includes(Buffer.from('unsafe_name.pdf'))).toBe(true);
+      expect(response.body.includes(Buffer.from('../unsafe:name.pdf'))).toBe(false);
+    } finally {
+      fs.rmSync(pdfPath, { force: true });
     }
   });
 });
