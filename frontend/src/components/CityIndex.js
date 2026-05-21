@@ -15,6 +15,7 @@ import Button from './common/Button';
 import PageHeader from './common/PageHeader';
 import { useToast } from './common/ToastProvider';
 import { useConfirmDialog } from './common/ConfirmDialogProvider';
+import { appendReturnTo } from '../app/routeRegistry';
 
 // Global cache to persist data across component remounts (e.g., navigating back from detail page)
 // This prevents the "loading..." flash when returning to the list
@@ -24,6 +25,21 @@ const globalCache = {
   checkStatusMap: null,
   lastFetch: 0,
 };
+
+export function buildCatalogReturnPath(path = [], search = '') {
+  const params = new URLSearchParams(search || '');
+  const normalizedPath = path.map((id) => String(id)).filter(Boolean);
+  params.delete('returnTo');
+
+  if (normalizedPath.length > 0) {
+    params.set('region', normalizedPath.join(','));
+  } else {
+    params.delete('region');
+  }
+
+  const query = params.toString();
+  return `/catalog${query ? `?${query}` : ''}`;
+}
 
 function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
   const toast = useToast();
@@ -77,6 +93,10 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
   const [hideEmptyReports, setHideEmptyReports] = useState(true); // 默认隐藏无内容报告
   const [selectedYear, setSelectedYear] = useState('all'); // 年份筛选
   const [batchChecking, setBatchChecking] = useState(false);
+  const currentCatalogPath = useMemo(
+    () => buildCatalogReturnPath(path, window.location.search),
+    [path]
+  );
   const goTo = useCallback((target) => {
     if (onNavigate) {
       onNavigate(target);
@@ -104,7 +124,7 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
     } else {
       params.delete('region');
     }
-    const newUrl = `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''} `;
+    const newUrl = `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`;
     window.history.replaceState({}, '', newUrl);
   }, [path]);
 
@@ -265,6 +285,15 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
   const handleReset = () => {
     setPath([]);
     setSelectedForCompare([]);
+  };
+
+  const handleSelectReport = (reportId) => {
+    if (!reportId) return;
+    if (onSelectReport) {
+      onSelectReport(reportId, currentCatalogPath);
+      return;
+    }
+    goTo(appendReturnTo(`/catalog/reports/${reportId}`, currentCatalogPath));
   };
 
   const handleDeleteReport = async (e, reportId) => {
@@ -498,11 +527,11 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
           <>
             <Button variant="secondary" icon={<AlertCircle size={16} />} onClick={() => {
               const regionParam = currentParentId ? `?region=${currentParentId}&name=${encodeURIComponent(currentRegion?.name || '')}` : '';
-              goTo(`/issues${regionParam}`);
+              goTo(appendReturnTo(`/issues${regionParam}`, currentCatalogPath));
             }}>
               问题清单
             </Button>
-            <Button variant="secondary" icon={<AlertCircle size={16} />} onClick={() => goTo('/report-maintenance')}>
+            <Button variant="secondary" icon={<AlertCircle size={16} />} onClick={() => goTo(appendReturnTo('/report-maintenance', currentCatalogPath))}>
               年报维护
             </Button>
             <Button variant="primary" icon={<Plus size={16} />} onClick={() => goTo('/upload')}>
@@ -625,7 +654,7 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
                   <div
                     key={r.report_id}
                     className={`report-card ${selectedForCompare.includes(r.report_id) ? 'selected' : ''}`}
-                    onClick={() => onSelectReport?.(r.report_id)}
+                    onClick={() => handleSelectReport(r.report_id)}
                   >
                     {/* ZONE 1: Header */}
                     <div className="report-card-header">
@@ -692,7 +721,7 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
                       <div className="footer-actions">
                         <button
                           className="action-btn-ghost blue"
-                          onClick={(e) => { e.stopPropagation(); onSelectReport?.(r.report_id); }}
+                          onClick={(e) => { e.stopPropagation(); handleSelectReport(r.report_id); }}
                           title="查看详情"
                         >
                           <Eye size={16} />

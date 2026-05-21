@@ -538,7 +538,7 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
                         />
                       )}
                       {/* Compact tables for view */}
-                      {row.oldSec.type === 'table_2' && row.oldSec.activeDisclosureData && <Table2View data={row.oldSec.activeDisclosureData} highlightCells={leftIssueHighlightCells} />}
+                      {row.oldSec.type === 'table_2' && row.oldSec.activeDisclosureData && <Table2View data={row.oldSec.activeDisclosureData} compact={true} highlightCells={leftIssueHighlightCells} />}
                       {row.oldSec.type === 'table_3' && row.oldSec.tableData && <Table3View data={row.oldSec.tableData} compact={true} highlightCells={leftIssueHighlightCells} />}
                       {row.oldSec.type === 'table_4' && row.oldSec.reviewLitigationData && <Table4View data={row.oldSec.reviewLitigationData} highlightCells={leftIssueHighlightCells} />}
                     </>
@@ -559,7 +559,7 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
                           highlightDiff={highlightDiff}
                         />
                       )}
-                      {row.newSec.type === 'table_2' && row.newSec.activeDisclosureData && <Table2View data={row.newSec.activeDisclosureData} />}
+                      {row.newSec.type === 'table_2' && row.newSec.activeDisclosureData && <Table2View data={row.newSec.activeDisclosureData} compact={true} />}
                       {row.newSec.type === 'table_3' && row.newSec.tableData && <Table3View data={row.newSec.tableData} compact={true} />}
                       {row.newSec.type === 'table_4' && row.newSec.reviewLitigationData && <Table4View data={row.newSec.reviewLitigationData} />}
                     </>

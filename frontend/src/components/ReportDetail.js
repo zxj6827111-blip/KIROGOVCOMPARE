@@ -17,6 +17,7 @@ import { useToast } from './common/ToastProvider';
 import { useConfirmDialog } from './common/ConfirmDialogProvider';
 import { useTaskDrawer } from './tasks/TaskDrawerProvider';
 import { resolveSafeReturnTo } from '../app/returnTo';
+import { appendReturnTo } from '../app/routeRegistry';
 
 const tryParseJsonText = (value) => {
   if (typeof value !== 'string') return { ok: false, value: null };
@@ -2592,7 +2593,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const handleFlowAction = async (action) => {
     if (!action) return;
     if (action.href) {
-      window.location.href = action.href;
+      window.location.href = appendReturnTo(action.href, window.location.pathname + window.location.search);
       return;
     }
     if (action.target === 'checks') {

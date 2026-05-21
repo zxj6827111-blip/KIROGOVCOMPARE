@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '../../apiClient';
 import { getAxiosFriendlyError, getRawErrorDetail, translateFailureReason, translateJobError } from '../../utils/errorTranslator';
+import { appendReturnTo } from '../../app/routeRegistry';
 import { useToast } from '../common/ToastProvider';
 import './TaskDrawerProvider.css';
 
@@ -269,7 +270,7 @@ function TaskDrawerItem({ task, onNavigate, onDownloadPdf, onRegeneratePdf }) {
           任务中心
         </button>
         {task.type === 'parse' && task.versionId && (
-          <button type="button" onClick={() => onNavigate(`/jobs/${task.versionId}`)}>
+          <button type="button" onClick={() => onNavigate(appendReturnTo(`/jobs/${task.versionId}`, window.location.pathname + window.location.search))}>
             <ChevronRight size={14} />
             详情
           </button>

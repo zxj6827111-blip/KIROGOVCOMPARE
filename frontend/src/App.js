@@ -42,12 +42,18 @@ function GovInsightPrintRoute() {
 }
 
 function DataCenterRoute({ navigate }) {
-  return <DataCenterReportsList onSelectReport={(reportId) => navigate(`/datacenter/reports/${reportId}`)} />;
+  return (
+    <DataCenterReportsList
+      onSelectReport={(reportId) => navigate(`/datacenter/reports/${reportId}`, { state: { returnTo: '/datacenter' } })}
+    />
+  );
 }
 
 function DataCenterReportRoute({ navigate }) {
   const { reportId } = useParams();
-  return <DataCenterReportDetail reportId={reportId} onBack={() => navigate('/datacenter')} />;
+  const location = useLocation();
+  const returnTo = resolveRouteReturnTo(location.search, location.pathname, '/datacenter', location.state);
+  return <DataCenterReportDetail reportId={reportId} onBack={() => navigate(returnTo)} />;
 }
 
 function JobDetailRoute({ navigate }) {
@@ -58,7 +64,7 @@ function JobDetailRoute({ navigate }) {
     return <Navigate to="/jobs" replace />;
   }
 
-  const returnTo = resolveRouteReturnTo(location.search, location.pathname, '/jobs');
+  const returnTo = resolveRouteReturnTo(location.search, location.pathname, '/jobs', location.state);
   return <JobDetail versionId={versionId} onBack={() => navigate(returnTo)} />;
 }
 
@@ -66,7 +72,7 @@ function CatalogRoute({ currentPath, navigate }) {
   return (
     <CityIndex
       onNavigate={navigate}
-      onSelectReport={(reportId) => navigate(appendReturnTo(`/catalog/reports/${reportId}`, currentPath))}
+      onSelectReport={(reportId, returnPath = currentPath) => navigate(appendReturnTo(`/catalog/reports/${reportId}`, returnPath))}
       onViewComparison={(comparisonId) => navigate(appendReturnTo(`/comparison/${comparisonId}`, '/history'))}
     />
   );
@@ -75,7 +81,7 @@ function CatalogRoute({ currentPath, navigate }) {
 function ReportDetailRoute({ navigate }) {
   const { reportId } = useParams();
   const location = useLocation();
-  const returnTo = resolveRouteReturnTo(location.search, location.pathname, '/catalog');
+  const returnTo = resolveRouteReturnTo(location.search, location.pathname, '/catalog', location.state);
   return <ReportDetail reportId={reportId} onBack={() => navigate(returnTo)} />;
 }
 
@@ -89,14 +95,16 @@ function IssueListRoute({ currentPath, navigate }) {
     <IssueList
       regionId={regionId}
       regionName={regionName}
-      onBack={() => navigate('/catalog')}
+      onBack={() => navigate(resolveRouteReturnTo(location.search, location.pathname, '/catalog', location.state))}
       onSelectReport={(reportId) => navigate(appendReturnTo(`/catalog/reports/${reportId}`, currentPath || '/catalog'))}
     />
   );
 }
 
 function ReportMaintenanceRoute({ navigate }) {
-  return <ReportMaintenance onBack={() => navigate('/catalog')} onNavigate={navigate} />;
+  const location = useLocation();
+  const returnTo = resolveRouteReturnTo(location.search, location.pathname, '/catalog', location.state);
+  return <ReportMaintenance onBack={() => navigate(returnTo)} onNavigate={navigate} />;
 }
 
 function ComparisonDetailRoute({ navigate }) {
@@ -104,7 +112,7 @@ function ComparisonDetailRoute({ navigate }) {
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
   const autoPrint = searchParams.get('autoPrint') === 'true';
-  const returnTo = resolveRouteReturnTo(location.search, location.pathname, '/history');
+  const returnTo = resolveRouteReturnTo(location.search, location.pathname, '/history', location.state);
 
   return (
     <ComparisonDetailView

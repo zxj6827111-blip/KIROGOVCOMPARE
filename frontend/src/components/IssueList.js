@@ -15,6 +15,7 @@ import { useToast } from './common/ToastProvider';
 import { useConfirmDialog } from './common/ConfirmDialogProvider';
 import Button from './common/Button';
 import PageHeader from './common/PageHeader';
+import { appendReturnTo } from '../app/routeRegistry';
 
 const EMPTY_ISSUES_DATA = { total_issues: 0, tree: [] };
 
@@ -219,7 +220,7 @@ function IssueList({ regionId, regionName, onBack, onSelectReport }) {
         if (onSelectReport) {
             onSelectReport(reportId);
         } else {
-            window.location.href = `/catalog/reports/${reportId}`;
+            window.location.href = appendReturnTo(`/catalog/reports/${reportId}`, window.location.pathname + window.location.search);
         }
     };
 

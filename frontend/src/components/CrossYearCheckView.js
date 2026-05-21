@@ -72,6 +72,115 @@ const parseLocationFromPath = (path) => {
     return normalizedPath;
 };
 
+const isTechnicalPath = (value) => {
+    const text = String(value || '').trim();
+    return /(^|\s)(hierarchy|tableData|activeDisclosureData|reviewLitigationData|sections\[|text\.content)\b/.test(text);
+};
+
+const formatDisplayNumber = (value) => {
+    if (value === null || value === undefined || value === '') return '-';
+    const number = Number(value);
+    if (!Number.isFinite(number)) return String(value);
+
+    const rounded = Math.round((number + Number.EPSILON) * 100) / 100;
+    return new Intl.NumberFormat('zh-CN', {
+        maximumFractionDigits: 2,
+        minimumFractionDigits: 0,
+        useGrouping: false,
+    }).format(Object.is(rounded, -0) ? 0 : rounded);
+};
+
+const formatDisplayFormula = (formula) => {
+    if (!formula) return '';
+    return String(formula).replace(/-?\d+(?:\.\d+)?/g, (match) => formatDisplayNumber(match));
+};
+
+const displayValue = (...values) => {
+    const value = values.find((candidate) => candidate !== null && candidate !== undefined && candidate !== '');
+    return formatDisplayNumber(value);
+};
+
+const getSourceLabel = (source, fallback) => {
+    if (!source || isTechnicalPath(source)) return fallback;
+    return source;
+};
+
+const asArray = (value) => (Array.isArray(value) ? value : []);
+
+const isHierarchyConsistencyIssue = (item, group = {}) => {
+    const evidence = item?.evidence || item?.evidence_json || {};
+    const groupKey = String(group.group_key || group.groupKey || item?.group_key || item?.groupKey || '').toLowerCase();
+    const checkKey = String(item?.check_key || item?.checkKey || '').toLowerCase();
+    const issueType = String(item?.issueType || item?.issue_type || '').toLowerCase();
+    const title = String(item?.title || item?.description || item?.rule_name || '');
+    const paths = [
+        ...asArray(evidence.paths),
+        ...asArray(evidence.leftPaths),
+        ...asArray(evidence.rightPaths),
+    ];
+
+    return (
+        groupKey === 'hierarchy' ||
+        checkKey.startsWith('hierarchy_') ||
+        checkKey.includes('hierarchy_sum') ||
+        issueType.includes('hierarchy') ||
+        title.includes('层级汇总一致性') ||
+        title.includes('层级一致性') ||
+        paths.some((path) => String(path || '').startsWith('hierarchy.'))
+    );
+};
+
+const shouldShowComparisonIssue = (item, group) => !isHierarchyConsistencyIssue(item, group);
+
+const collectComparisonIssues = (data) => {
+    let issues = [];
+    let hierarchyIssueCount = 0;
+
+    if (data && data.groups) {
+        data.groups.forEach(group => {
+            if (!group.items) return;
+
+            group.items
+                .filter(item =>
+                    (item.auto_status === 'FAIL' || item.auto_status === 'UNCERTAIN') &&
+                    item.human_status !== 'dismissed'
+                )
+                .forEach(item => {
+                    if (isHierarchyConsistencyIssue(item, group)) {
+                        hierarchyIssueCount += 1;
+                    } else {
+                        issues.push(item);
+                    }
+                });
+        });
+    }
+
+    return { issues, hierarchyIssueCount };
+};
+
+const renderIntraYearStatus = (loading, issues = [], hierarchyIssueCount = 0) => {
+    if (loading) {
+        return <span className="text-gray-400 text-sm">检查中...</span>;
+    }
+
+    if (issues.length === 0 && hierarchyIssueCount === 0) {
+        return <span className="status-valid"><CheckCircle2 size={15} /> 无问题</span>;
+    }
+
+    if (issues.length === 0 && hierarchyIssueCount > 0) {
+        return <span className="status-issue"><AlertCircle size={15} /> 层级汇总一致性存在问题，详见具体报告内</span>;
+    }
+
+    return (
+        <>
+            <span className="status-issue"><AlertCircle size={15} /> 发现 {issues.length} 个问题</span>
+            {hierarchyIssueCount > 0 && (
+                <span className="status-issue"><AlertCircle size={15} /> 层级汇总一致性存在问题，详见具体报告内</span>
+            )}
+        </>
+    );
+};
+
 // 提取详细位置信息
 const getLocationInfo = (item) => {
     if (!item.evidence) return null;
@@ -119,11 +228,10 @@ const renderIssueCard = (item) => {
     const details = getLocationInfo(item);
     const leftPaths = item.evidence?.leftPaths || [];
     const rightPaths = item.evidence?.rightPaths || [];
-    const fallbackPaths = item.evidence?.paths || [];
-    const tableLocations = [...leftPaths, ...rightPaths, ...fallbackPaths]
-        .map((path) => parseLocationFromPath(path))
-        .filter(Boolean);
-    const uniqueLocations = [...new Set(tableLocations)];
+    const values = item.evidence?.values || {};
+    const leftValue = displayValue(item.left_value, item.leftValue, values.leftValue, values.left);
+    const rightValue = displayValue(item.right_value, item.rightValue, values.rightValue, values.right);
+    const deltaValue = displayValue(item.delta, values.delta);
 
     return (
         <div key={item.id} className="issue-card">
@@ -131,21 +239,9 @@ const renderIssueCard = (item) => {
                 <span className="issue-title">{item.description || item.rule_name || item.title}</span>
                 <div className="issue-expr-row" style={{ display: 'none' }}>{item.expr}</div>
                 <div className="issue-values">
-                    左值: {item.left_value} | 右值: {item.right_value} | 差值: <span className="font-bold">{item.delta}</span>
+                    左值: {leftValue} | 右值: {rightValue} | 差值: <span className="font-bold">{deltaValue}</span>
                 </div>
             </div>
-
-            {uniqueLocations.length > 0 && (
-                <div className="issue-table-locations">
-                    <div className="ds-header"><MapPin size={14} className="inline-block" /> 表格具体位置</div>
-                    {uniqueLocations.slice(0, 8).map((location, index) => (
-                        <div key={`${item.id}-loc-${index}`} className="issue-location-line">{location}</div>
-                    ))}
-                    {uniqueLocations.length > 8 && (
-                        <div className="issue-location-more">另有 {uniqueLocations.length - 8} 处相关单元格已在表格中高亮</div>
-                    )}
-                </div>
-            )}
 
             {details && (
                 <div className="issue-detail">
@@ -154,17 +250,17 @@ const renderIssueCard = (item) => {
                         <div className="ds-body location-grid">
                             <div className="loc-box text-side">
                                 <div className="loc-title"><FileText size={14} className="inline-block" /> 左值来源</div>
-                                <div className="loc-content">{details.textSource || parseLocationFromPath(leftPaths[0]) || '未定位'}</div>
+                                <div className="loc-content">{getSourceLabel(details.textSource || parseLocationFromPath(leftPaths[0]), '左侧报告')}</div>
                                 <div className="loc-val">
-                                    <span className="val-tag">{item.left_value}</span>
+                                    <span className="val-tag">{leftValue}</span>
                                 </div>
                             </div>
                             <div className="arrow-divider">↔</div>
                             <div className="loc-box table-side">
                                 <div className="loc-title"><Table2 size={14} className="inline-block" /> 右值来源</div>
-                                <div className="loc-content">{details.tableSource || parseLocationFromPath(rightPaths[0]) || '未定位'}</div>
+                                <div className="loc-content">{getSourceLabel(details.tableSource || parseLocationFromPath(rightPaths[0]), '右侧报告')}</div>
                                 <div className="loc-val">
-                                    <span className="val-tag">{item.right_value}</span>
+                                    <span className="val-tag">{rightValue}</span>
                                 </div>
                             </div>
                         </div>
@@ -187,8 +283,8 @@ const renderIssueCard = (item) => {
 };
 
 const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightContent, yearA, yearB, onLeftIssuesChange, onReadyChange, authToken }) => {
-    const [leftIntraYearStatus, setLeftIntraYearStatus] = useState({ loading: true, issues: [], error: null });
-    const [intraYearStatus, setIntraYearStatus] = useState({ loading: true, issues: [], error: null });
+    const [leftIntraYearStatus, setLeftIntraYearStatus] = useState({ loading: true, issues: [], hierarchyIssueCount: 0, error: null });
+    const [intraYearStatus, setIntraYearStatus] = useState({ loading: true, issues: [], hierarchyIssueCount: 0, error: null });
     const [crossYearStatus, setCrossYearStatus] = useState({ loading: true, diff: null, values: {} });
     const [table2Status, setTable2Status] = useState({ loading: true, checks: [] });
     const authRequestConfig = useMemo(
@@ -199,7 +295,7 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
     // 1. 获取新报告的内部勾稽状态
     useEffect(() => {
         if (!rightReportId) {
-            setIntraYearStatus({ loading: false, issues: [], error: null });
+            setIntraYearStatus({ loading: false, issues: [], hierarchyIssueCount: 0, error: null });
             return;
         }
 
@@ -208,23 +304,12 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
                 const response = await apiClient.get(`/reports/${rightReportId}/checks`, authRequestConfig);
                 const data = response.data?.data || response.data;
 
-                let issues = [];
-                if (data && data.groups) {
-                    data.groups.forEach(group => {
-                        if (group.items) {
-                            const groupIssues = group.items.filter(item =>
-                                (item.auto_status === 'FAIL' || item.auto_status === 'UNCERTAIN') &&
-                                item.human_status !== 'dismissed'
-                            );
-                            issues = [...issues, ...groupIssues];
-                        }
-                    });
-                }
+                const { issues, hierarchyIssueCount } = collectComparisonIssues(data);
 
-                setIntraYearStatus({ loading: false, issues, error: null });
+                setIntraYearStatus({ loading: false, issues, hierarchyIssueCount, error: null });
             } catch (err) {
                 console.error('Failed to fetch checks', err);
-                setIntraYearStatus({ loading: false, issues: [], error: '无法获取勾稽结果' });
+                setIntraYearStatus({ loading: false, issues: [], hierarchyIssueCount: 0, error: '无法获取勾稽结果' });
             }
         };
 
@@ -234,7 +319,7 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
     // 1.5 获取旧报告的内部勾稽状态
     useEffect(() => {
         if (!leftReportId) {
-            setLeftIntraYearStatus({ loading: false, issues: [], error: null });
+            setLeftIntraYearStatus({ loading: false, issues: [], hierarchyIssueCount: 0, error: null });
             if (onLeftIssuesChange) onLeftIssuesChange([]);
             return;
         }
@@ -244,24 +329,13 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
                 const response = await apiClient.get(`/reports/${leftReportId}/checks`, authRequestConfig);
                 const data = response.data?.data || response.data;
 
-                let issues = [];
-                if (data && data.groups) {
-                    data.groups.forEach(group => {
-                        if (group.items) {
-                            const groupIssues = group.items.filter(item =>
-                                (item.auto_status === 'FAIL' || item.auto_status === 'UNCERTAIN') &&
-                                item.human_status !== 'dismissed'
-                            );
-                            issues = [...issues, ...groupIssues];
-                        }
-                    });
-                }
+                const { issues, hierarchyIssueCount } = collectComparisonIssues(data);
 
-                setLeftIntraYearStatus({ loading: false, issues, error: null });
+                setLeftIntraYearStatus({ loading: false, issues, hierarchyIssueCount, error: null });
                 if (onLeftIssuesChange) onLeftIssuesChange(issues);
             } catch (err) {
                 console.error('Failed to fetch left report checks', err);
-                setLeftIntraYearStatus({ loading: false, issues: [], error: '无法获取勾稽结果' });
+                setLeftIntraYearStatus({ loading: false, issues: [], hierarchyIssueCount: 0, error: '无法获取勾稽结果' });
                 if (onLeftIssuesChange) onLeftIssuesChange([]);
             }
         };
@@ -348,8 +422,8 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
         setTable2Status({ loading: false, checks });
     }, [leftContent, rightContent]);
 
-    const { loading: leftIntraLoading, issues: leftIntraIssues } = leftIntraYearStatus;
-    const { loading: intraLoading, issues: intraIssues } = intraYearStatus;
+    const { loading: leftIntraLoading, issues: leftIntraIssues, hierarchyIssueCount: leftHierarchyIssueCount = 0 } = leftIntraYearStatus;
+    const { loading: intraLoading, issues: intraIssues, hierarchyIssueCount = 0 } = intraYearStatus;
     const { values: crossValues, diff: crossDiff } = crossYearStatus;
     const { checks: table2Checks } = table2Status;
     const table2HasIssues = table2Checks.some(c => c.diff);
@@ -369,13 +443,7 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
             <div className="check-section">
                 <div className="section-title">
                     <span>1. {yearA} 年度内部勾稽关系检查</span>
-                    {leftIntraLoading ? (
-                        <span className="text-gray-400 text-sm">检查中...</span>
-                    ) : leftIntraIssues.length === 0 ? (
-                        <span className="status-valid"><CheckCircle2 size={15} /> 无问题</span>
-                    ) : (
-                        <span className="status-issue"><AlertCircle size={15} /> 发现 {leftIntraIssues.length} 个问题</span>
-                    )}
+                    {renderIntraYearStatus(leftIntraLoading, leftIntraIssues, leftHierarchyIssueCount)}
                 </div>
 
                 {!leftIntraLoading && leftIntraIssues.length > 0 && (
@@ -389,13 +457,7 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
             <div className="check-section">
                 <div className="section-title">
                     <span>2. {yearB} 年度内部勾稽关系检查</span>
-                    {intraLoading ? (
-                        <span className="text-gray-400 text-sm">检查中...</span>
-                    ) : intraIssues.length === 0 ? (
-                        <span className="status-valid"><CheckCircle2 size={15} /> 无问题</span>
-                    ) : (
-                        <span className="status-issue"><AlertCircle size={15} /> 发现 {intraIssues.length} 个问题</span>
-                    )}
+                    {renderIntraYearStatus(intraLoading, intraIssues, hierarchyIssueCount)}
                 </div>
 
                 {!intraLoading && intraIssues.length > 0 && (
@@ -423,7 +485,7 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
                     <div className="value-comparison">
                         <div className="val-box">
                             <span className="val-label">{yearA}年（旧）</span>
-                            <div className="val-num">{crossValues.oldVal ?? '-'}</div>
+                            <div className="val-num">{formatDisplayNumber(crossValues.oldVal)}</div>
                         </div>
 
                         <div className={`comparison-icon ${crossDiff ? 'error' : 'success'}`}>
@@ -432,12 +494,12 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
 
                         <div className="val-box">
                             <span className="val-label">{yearB}年（新）</span>
-                            <div className="val-num">{crossValues.newVal ?? '-'}</div>
+                            <div className="val-num">{formatDisplayNumber(crossValues.newVal)}</div>
                         </div>
                     </div>
                     {crossDiff && (
                         <div className="diff-msg error">
-                            差异值: {(crossValues.newVal || 0) - (crossValues.oldVal || 0)}
+                            差异值: {formatDisplayNumber((crossValues.newVal || 0) - (crossValues.oldVal || 0))}
                         </div>
                     )}
                 </div>
@@ -463,8 +525,8 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
                             <div className="value-comparison">
                                 <div className="val-box">
                                     <span className="val-label">计算值</span>
-                                    <div className="val-num">{check.expected}</div>
-                                    <div className="text-xs text-gray-500">{check.formula}</div>
+                                    <div className="val-num">{formatDisplayNumber(check.expected)}</div>
+                                    <div className="text-xs text-gray-500">{formatDisplayFormula(check.formula)}</div>
                                 </div>
 
                                 <div className={`comparison-icon ${check.diff ? 'error' : 'success'}`}>
@@ -473,13 +535,13 @@ const CrossYearCheckView = ({ leftReportId, rightReportId, leftContent, rightCon
 
                                 <div className="val-box">
                                     <span className="val-label">实际值</span>
-                                    <div className="val-num">{check.actual}</div>
+                                    <div className="val-num">{formatDisplayNumber(check.actual)}</div>
                                     <div className="text-xs text-gray-500">{yearB}年 现行有效件数</div>
                                 </div>
                             </div>
                             {check.diff && (
                                 <div className="diff-msg error">
-                                    差异值: {check.actual - check.expected}
+                                    差异值: {formatDisplayNumber(check.actual - check.expected)}
                                 </div>
                             )}
                         </div>

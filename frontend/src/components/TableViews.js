@@ -81,7 +81,7 @@ const renderCellContent = (value, correction) => {
 };
 
 // Table 2: Active Disclosure - Matched to PDF format
-const Table2View = ({ data, highlightCells = [], ocrCorrections = [], tableIssues = [] }) => {
+const Table2View = ({ data, highlightCells = [], ocrCorrections = [], tableIssues = [], compact = false }) => {
   if (!data) return null;
   const activeTable2Issues = tableIssues.filter((item) => item?.human_status !== 'dismissed');
 
@@ -171,7 +171,7 @@ const Table2View = ({ data, highlightCells = [], ocrCorrections = [], tableIssue
   };
 
   return (
-    <div className="comparison-table-container gov-table-card gov-table-card--table2">
+    <div className={cx('comparison-table-container gov-table-card gov-table-card--table2', compact && 'shadow-none gov-table-card--compact')}>
       {activeTable2Issues.length > 0 && (
         <div className="tis-panel tis-panel--table2">
           <div className="tis-hero">
@@ -215,7 +215,7 @@ const Table2View = ({ data, highlightCells = [], ocrCorrections = [], tableIssue
           </div>
         </div>
       )}
-      <div className="gov-table-scroll">
+      <div className={cx('gov-table-scroll', compact && 'gov-table-scroll--fit')}>
         <table className="comparison-table gov-data-table gov-data-table--table2">
         <thead>
           {/* Header 1 */}

@@ -1,9 +1,8 @@
 import { getRouteForPath } from './routeRegistry';
 
-export function resolveSafeReturnTo(search, fallback) {
+export function resolveSafeReturnPath(value, fallback) {
   const safeFallback = fallback || '/catalog';
-  const params = new URLSearchParams(search || '');
-  const raw = params.get('returnTo');
+  const raw = value;
 
   if (!raw) return safeFallback;
 
@@ -34,7 +33,19 @@ export function resolveSafeReturnTo(search, fallback) {
   return `${parsed.pathname}${parsed.search}${parsed.hash}`;
 }
 
-export function resolveRouteReturnTo(search, pathname, fallback) {
+export function resolveSafeReturnTo(search, fallback) {
+  const params = new URLSearchParams(search || '');
+  return resolveSafeReturnPath(params.get('returnTo'), fallback);
+}
+
+export function resolveRouteReturnTo(search, pathname, fallback, state) {
   const routeFallback = fallback || getRouteForPath(pathname)?.fallbackReturnTo || '/catalog';
-  return resolveSafeReturnTo(search, routeFallback);
+  const params = new URLSearchParams(search || '');
+  const queryReturnTo = params.get('returnTo');
+
+  if (queryReturnTo) {
+    return resolveSafeReturnPath(queryReturnTo, routeFallback);
+  }
+
+  return resolveSafeReturnPath(state?.returnTo || state?.from, routeFallback);
 }
