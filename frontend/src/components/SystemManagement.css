@@ -1,0 +1,19 @@
+.system-management {
+  padding: 0;
+}
+
+.system-management__tabs {
+  flex-wrap: nowrap;
+}
+
+.system-management__empty {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+@media (max-width: 760px) {
+  .system-management__tabs {
+    width: 100%;
+    overflow-x: auto;
+  }
+}

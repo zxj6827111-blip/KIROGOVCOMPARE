@@ -82,45 +82,35 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
         const reportsResultRes = await pool.query(reportsQuery, [regionIds]);
         const reportsResult = reportsResultRes.rows;
 
-        let itemsResult: any[] = [];
-        if (reportsResult.length > 0) {
-            // JS-BASED AGGREGATION: Fetch all items and count in memory
-            const versionIds = reportsResult.map((r: any) => r.version_id);
-
-            const itemsQuery = `
-                SELECT *
-                FROM report_consistency_items 
-                WHERE report_version_id = ANY($1::int[])
-            `;
-
-            const itemsResultRes = await pool.query(itemsQuery, [versionIds]);
-            itemsResult = itemsResultRes.rows;
-        }
-
-        // Perform counting in JS
         const issuesByVersion = new Map<string, number>();
         const issueBreakdown = new Map<string, { visual: number; structure: number; quality: number }>();
 
-        for (const item of itemsResult) {
-            const statusStr = (item.auto_status || item.status || '').toString().toUpperCase();
-            const isFail = statusStr.trim() === 'FAIL';
-            const isDismissed = (item.human_status === 'dismissed');
+        if (reportsResult.length > 0) {
+            const versionIds = reportsResult.map((r: any) => r.version_id);
 
-            if (isFail && !isDismissed) {
+            const itemsQuery = `
+                SELECT
+                  report_version_id,
+                  COUNT(*)::int AS total,
+                  COUNT(*) FILTER (WHERE group_key = 'visual')::int AS visual,
+                  COUNT(*) FILTER (WHERE group_key IN ('structure', 'table2', 'table3', 'table4', 'text'))::int AS structure,
+                  COUNT(*) FILTER (WHERE group_key NOT IN ('visual', 'structure', 'table2', 'table3', 'table4', 'text'))::int AS quality
+                FROM report_consistency_items
+                WHERE report_version_id = ANY($1::int[])
+                  AND auto_status = 'FAIL'
+                  AND COALESCE(human_status, 'pending') != 'dismissed'
+                GROUP BY report_version_id
+            `;
+
+            const itemsResultRes = await pool.query(itemsQuery, [versionIds]);
+            for (const item of itemsResultRes.rows) {
                 const vid = String(item.report_version_id);
-                issuesByVersion.set(vid, (issuesByVersion.get(vid) || 0) + 1);
-
-                // Update breakdown
-                if (!issueBreakdown.has(vid)) {
-                    issueBreakdown.set(vid, { visual: 0, structure: 0, quality: 0 });
-                }
-                const counts = issueBreakdown.get(vid)!;
-                // Handle category vs group_key
-                const cat = item.category || item.group_key;
-
-                if (cat === 'visual') counts.visual++;
-                else if (['structure', 'table2', 'table3', 'table4', 'text'].includes(cat) || cat === 'structure') counts.structure++;
-                else counts.quality++;
+                issuesByVersion.set(vid, Number(item.total) || 0);
+                issueBreakdown.set(vid, {
+                    visual: Number(item.visual) || 0,
+                    structure: Number(item.structure) || 0,
+                    quality: Number(item.quality) || 0
+                });
             }
         }
 

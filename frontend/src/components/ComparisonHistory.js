@@ -568,7 +568,7 @@ function ComparisonHistory() {
   }
 
   return (
-    <div className="comparison-history">
+    <div className="comparison-history kc-page kc-page--wide">
       <PageHeader
         title="比对历史"
         subtitle="按地区查看年报比对结果，集中创建 PDF 导出任务"
@@ -606,10 +606,10 @@ function ComparisonHistory() {
           </>
         )}
       />
-      <div className="history-header">
+      <div className="history-header kc-toolbar">
         <div className="comparison-filter-bar">
           <div className="comparison-filter-left">
-            <div className="input-with-icon">
+            <div className="input-with-icon kc-filter-field">
               <MapPin size={16} className="input-icon" />
               <input
                 type="text"
@@ -619,7 +619,7 @@ function ComparisonHistory() {
                 className="filter-input region-filter-input"
               />
             </div>
-            <div className="input-with-icon">
+            <div className="input-with-icon kc-filter-field">
               <Calendar size={16} className="input-icon" />
               <input
                 type="text"

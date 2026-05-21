@@ -1,12 +1,10 @@
 import React from 'react';
 import Logo from '../Logo';
-import { User } from 'lucide-react';
 import {
   getNavGroupForPath,
   getPrimaryNavTarget,
   getVisiblePrimaryNavItems,
   NAV_GROUP_LABELS,
-  NAV_GROUPS,
 } from '../../app/routeRegistry';
 import './AppShell.css';
 
@@ -27,18 +25,6 @@ function AppShell({
       <header className="app-shell__header">
         <Logo />
         <div className="app-shell__user">
-          {user?.permissions?.manage_users && (
-            <button
-              type="button"
-              onClick={() => navigate('/admin/users')}
-              className={`app-shell__user-nav ${activeNavGroup === NAV_GROUPS.ADMIN ? 'active' : ''}`}
-              title="用户管理"
-            >
-              <User size={18} />
-              <span>用户管理</span>
-            </button>
-          )}
-
           <span className="app-shell__identity">
             <span className="app-shell__avatar">
               {user?.displayName?.[0] || user?.username?.[0] || 'A'}

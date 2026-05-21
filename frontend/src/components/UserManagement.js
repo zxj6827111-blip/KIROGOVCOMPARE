@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import './JobCenter.css'; // Reuse existing styles
+import './UserManagement.css';
 import { apiClient } from '../apiClient';
 import { User, Plus, Edit, Trash2, X } from 'lucide-react';
 import { useToast } from './common/ToastProvider';
@@ -235,25 +235,25 @@ export default function UserManagement() {
     };
 
     return (
-        <div className="job-center-container">
-            <div className="job-header">
-                <div className="job-title-row">
-                    <div className="job-title-left">
-                        <User size={24} color="#1890ff" />
-                        <span className="job-title-text">用户权限管理</span>
+        <div className="user-management">
+            <div className="user-management__header kc-panel">
+                <div>
+                    <div className="user-management__title">
+                        <User size={22} />
+                        <span>用户权限管理</span>
                     </div>
-                    <button className="primary-btn" onClick={() => handleOpenModal()}>
-                        <Plus size={16} /> 新增用户
-                    </button>
+                    <div className="user-management__subtitle">管理系统用户、角色权限及数据范围</div>
                 </div>
-                <div className="job-subtitle">管理系统用户、角色权限及数据范围</div>
+                <button className="primary-btn" onClick={() => handleOpenModal()}>
+                    <Plus size={16} /> 新增用户
+                </button>
             </div>
 
-            <div className="job-list-card">
+            <div className="user-management__card">
                 {loading ? (
                     <div className="loading-state">加载中...</div>
                 ) : (
-                    <table className="job-table">
+                    <table className="user-table">
                         <thead>
                             <tr>
                                 <th>用户名</th>

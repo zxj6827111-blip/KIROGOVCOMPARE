@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './JobCenter.css';
 import { apiClient, API_BASE_URL } from '../apiClient';
-import { Trash2, RefreshCw, AlertTriangle, Ban, Eye, Download, RotateCw, Upload, FileDown } from 'lucide-react';
+import { Trash2, RefreshCw, AlertTriangle, Ban, Eye, Download, RotateCw, Upload, FileDown, FileText } from 'lucide-react';
 import { useToast } from './common/ToastProvider';
 import { useConfirmDialog } from './common/ConfirmDialogProvider';
 import Button from './common/Button';
@@ -18,6 +18,10 @@ const DOWNLOAD_POLL_ACTIVE_MS = 5000;
 const DOWNLOAD_POLL_IDLE_MS = 12000;
 const HIDDEN_POLL_MS = 30000;
 const BATCH_DELETE_CONCURRENCY = 6;
+
+export function buildReportDetailPath(reportId, returnPath) {
+    return appendReturnTo(`/catalog/reports/${reportId}`, returnPath);
+}
 
 async function runBatchWithConcurrency(items, worker, concurrency = BATCH_DELETE_CONCURRENCY) {
     let successCount = 0;
@@ -273,6 +277,11 @@ function JobCenter() {
 
     const handleViewDetail = (versionId) => {
         window.location.href = appendReturnTo(`/jobs/${versionId}`, window.location.pathname + window.location.search);
+    };
+
+    const handleViewReportDetail = (reportId) => {
+        if (!reportId) return;
+        window.location.href = buildReportDetailPath(reportId, window.location.pathname + window.location.search);
     };
 
     const getStatusBadge = (status) => {
@@ -624,7 +633,7 @@ function JobCenter() {
     };
 
     return (
-        <div className="job-center">
+        <div className="job-center kc-page kc-page--wide">
             <PageHeader
                 title="任务中心"
                 subtitle={activeTab === 'download' ? '查看 PDF 导出任务、下载文件和重新生成过期文件' : '查看上传解析任务和处理进度'}
@@ -660,46 +669,16 @@ function JobCenter() {
                 )}
             />
             {/* Tab Navigation */}
-            <div className="job-center-tabs" style={{
-                display: 'flex',
-                borderBottom: '2px solid #e5e7eb',
-                marginBottom: '16px'
-            }}>
+            <div className="job-center-tabs kc-segmented">
                 <button
                     className={`tab-btn ${activeTab === 'upload' ? 'active' : ''}`}
                     onClick={() => setActiveTab('upload')}
-                    style={{
-                        padding: '12px 24px',
-                        border: 'none',
-                        background: activeTab === 'upload' ? '#fff' : 'transparent',
-                        borderBottom: activeTab === 'upload' ? '2px solid #2563eb' : '2px solid transparent',
-                        marginBottom: '-2px',
-                        cursor: 'pointer',
-                        fontWeight: activeTab === 'upload' ? '600' : '400',
-                        color: activeTab === 'upload' ? '#2563eb' : '#6b7280',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px'
-                    }}
                 >
                     <Upload size={18} /> 上传任务
                 </button>
                 <button
                     className={`tab-btn ${activeTab === 'download' ? 'active' : ''}`}
                     onClick={() => setActiveTab('download')}
-                    style={{
-                        padding: '12px 24px',
-                        border: 'none',
-                        background: activeTab === 'download' ? '#fff' : 'transparent',
-                        borderBottom: activeTab === 'download' ? '2px solid #2563eb' : '2px solid transparent',
-                        marginBottom: '-2px',
-                        cursor: 'pointer',
-                        fontWeight: activeTab === 'download' ? '600' : '400',
-                        color: activeTab === 'download' ? '#2563eb' : '#6b7280',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px'
-                    }}
                 >
                     <FileDown size={18} /> 下载任务
                 </button>
@@ -854,6 +833,15 @@ function JobCenter() {
                                                     >
                                                         <Eye size={14} />
                                                         <span>查看</span>
+                                                    </button>
+                                                    <button
+                                                        className="icon-btn report"
+                                                        onClick={() => handleViewReportDetail(job.report_id)}
+                                                        title={job.report_id ? '进入报告详情页' : '报告详情暂不可用'}
+                                                        disabled={!job.report_id}
+                                                    >
+                                                        <FileText size={14} />
+                                                        <span>报告</span>
                                                     </button>
                                                     {(job.status === 'queued' || job.status === 'processing' || job.status === 'running') ? (
                                                         <button
