@@ -11,6 +11,18 @@ interface ParsedVersion {
   parsed_json: any;
 }
 
+type BatchRefreshMode = 'missing_only' | 'stale' | 'all';
+
+function resolveBatchRefreshMode(value: unknown): BatchRefreshMode {
+  if (value === true || value === 'true' || value === 'all' || value === 'recompare') {
+    return 'all';
+  }
+  if (value === 'stale' || value === 'changed') {
+    return 'stale';
+  }
+  return 'missing_only';
+}
+
 function parseJsonSafe(value: any): any {
   if (value === null || value === undefined) {
     return null;
@@ -71,6 +83,32 @@ async function fetchParsedVersion(reportId: number): Promise<ParsedVersion | und
     version_id: version.version_id,
     parsed_json: parseJsonSafe(version.parsed_json),
   };
+}
+
+async function ensureQueuedCompareJob(
+  comparisonId: number,
+  reportId: number,
+  versionId: number | null = null
+): Promise<{ jobId: number; reused: boolean }> {
+  const existingJobRes = await pool.query(`
+    SELECT id FROM jobs
+    WHERE comparison_id = $1 AND kind = 'compare' AND status IN ('queued', 'running')
+    ORDER BY id DESC
+    LIMIT 1;
+  `, [comparisonId]);
+  const existingJob = existingJobRes.rows[0];
+
+  if (existingJob?.id) {
+    return { jobId: Number(existingJob.id), reused: true };
+  }
+
+  const newJobRes = await pool.query(`
+    INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, comparison_id)
+    VALUES ($1, $2, 'compare', 'queued', 0, 'QUEUED', '等待处理', $3)
+    RETURNING id;
+  `, [reportId, versionId, comparisonId]);
+
+  return { jobId: Number(newJobRes.rows[0].id), reused: false };
 }
 
 function stringifyValue(value: unknown): string {
@@ -257,11 +295,13 @@ router.post('/comparisons', authMiddleware, async (req, res) => {
     const existingComparison = existingComparisonRes.rows[0];
 
     const comparisonRes = await pool.query(`
-      INSERT INTO comparisons (region_id, year_a, year_b, left_report_id, right_report_id)
-      VALUES ($1, $2, $3, $4, $5)
+      INSERT INTO comparisons (region_id, year_a, year_b, left_report_id, right_report_id, check_status)
+      VALUES ($1, $2, $3, $4, $5, 'pending')
       ON CONFLICT(region_id, year_a, year_b) DO UPDATE SET
         left_report_id = excluded.left_report_id,
-        right_report_id = excluded.right_report_id
+        right_report_id = excluded.right_report_id,
+        check_status = 'pending',
+        updated_at = NOW()
       RETURNING id;
     `, [regionId, yearA, yearB, leftReportId, rightReportId]);
     const comparison = comparisonRes.rows[0];
@@ -270,25 +310,11 @@ router.post('/comparisons', authMiddleware, async (req, res) => {
       return res.status(500).json({ error: 'comparison 创建失败' });
     }
 
-    const existingJobRes = await pool.query(`
-      SELECT id FROM jobs
-      WHERE comparison_id = $1 AND status IN ('queued', 'running')
-      ORDER BY id DESC
-      LIMIT 1;
-    `, [comparison.id]);
-    const existingJob = existingJobRes.rows[0];
-
-    let jobId: number;
-    if (existingJob?.id) {
-      jobId = existingJob.id;
-    } else {
-      const newJobRes = await pool.query(`
-        INSERT INTO jobs (report_id, kind, status, progress, comparison_id)
-        VALUES ($1, 'compare', 'queued', 0, $2)
-        RETURNING id;
-      `, [leftReportId, comparison.id]);
-      jobId = newJobRes.rows[0].id;
-    }
+    const { jobId } = await ensureQueuedCompareJob(
+      Number(comparison.id),
+      Number(leftReportId),
+      leftVersion?.version_id ? Number(leftVersion.version_id) : null
+    );
 
     return res.status(existingComparison ? 200 : 201).json({
       comparison_id: comparison.id,
@@ -302,11 +328,14 @@ router.post('/comparisons', authMiddleware, async (req, res) => {
 
 /**
  * POST /comparisons/batch-create - 批量创建比对任务
- * 为所有有连续两年年报但尚未创建比对任务的区域批量生成比对任务
+ * 为连续两年年报补齐比对任务，可按需刷新已过期的已有比对结果。
  */
 router.post('/comparisons/batch-create', authMiddleware, async (req, res) => {
   try {
     const user = (req as any).user;
+    const refreshMode = resolveBatchRefreshMode(
+      req.body?.refresh_existing ?? req.body?.recompare_existing ?? req.body?.recompare ?? req.body?.mode
+    );
 
     // 构建权限过滤条件
     let allowedRegionCondition = '';
@@ -340,15 +369,38 @@ router.post('/comparisons/batch-create', authMiddleware, async (req, res) => {
     // 查询所有符合条件的区域-年份对：
     // 1. 同一区域同时存在连续两年的报告
     // 2. 两份报告都已完成解析（有 active_version_id 且 parsed_json 不为空）
-    // 3. 尚未创建比对任务
+    // 3. 默认仅创建缺失任务；刷新模式下只重排已过期或指定的已有比对。
+    const candidateFilter = (() => {
+      if (refreshMode === 'all') {
+        return '';
+      }
+      if (refreshMode === 'stale') {
+        return `
+      WHERE c.id IS NULL
+         OR c.left_report_id IS DISTINCT FROM cr.left_report_id
+         OR c.right_report_id IS DISTINCT FROM cr.right_report_id
+         OR result.created_at IS NULL
+         OR result.created_at < cr.source_updated_at`;
+      }
+      return 'WHERE c.id IS NULL';
+    })();
+
     const candidatesQuery = `
       WITH consecutive_reports AS (
         SELECT 
           r1.region_id,
           r1.year as year_a,
           r1.id as left_report_id,
+          r1.active_version_id as left_version_id,
           r2.year as year_b, 
-          r2.id as right_report_id
+          r2.id as right_report_id,
+          r2.active_version_id as right_version_id,
+          GREATEST(
+            COALESCE(r1.updated_at, '-infinity'::timestamptz),
+            COALESCE(r2.updated_at, '-infinity'::timestamptz),
+            COALESCE(rv1.updated_at, rv1.created_at, '-infinity'::timestamptz),
+            COALESCE(rv2.updated_at, rv2.created_at, '-infinity'::timestamptz)
+          ) as source_updated_at
         FROM reports r1
         JOIN reports r2 ON r1.region_id = r2.region_id AND r2.year = r1.year + 1
         JOIN report_versions rv1 ON rv1.id = r1.active_version_id
@@ -359,11 +411,29 @@ router.post('/comparisons/batch-create', authMiddleware, async (req, res) => {
           AND jsonb_typeof(rv2.parsed_json) = 'object'
           ${allowedRegionCondition}
       )
-      SELECT cr.region_id, cr.year_a, cr.year_b, cr.left_report_id, cr.right_report_id
+      SELECT
+        cr.region_id,
+        cr.year_a,
+        cr.year_b,
+        cr.left_report_id,
+        cr.left_version_id,
+        cr.right_report_id,
+        cr.right_version_id,
+        cr.source_updated_at,
+        c.id AS existing_comparison_id,
+        c.left_report_id AS existing_left_report_id,
+        c.right_report_id AS existing_right_report_id,
+        result.created_at AS result_created_at
       FROM consecutive_reports cr
       LEFT JOIN comparisons c ON c.region_id = cr.region_id 
         AND c.year_a = cr.year_a AND c.year_b = cr.year_b
-      WHERE c.id IS NULL
+      LEFT JOIN LATERAL (
+        SELECT crs.created_at
+        FROM comparison_results crs
+        WHERE crs.comparison_id = c.id
+        LIMIT 1
+      ) result ON TRUE
+      ${candidateFilter}
       ORDER BY cr.region_id, cr.year_a;
     `;
 
@@ -374,16 +444,21 @@ router.post('/comparisons/batch-create', authMiddleware, async (req, res) => {
       return res.json({
         success: true,
         created_count: 0,
+        requeued_count: 0,
         skipped_count: 0,
-        message: '没有符合条件的待比对区域（所有有连续年报的区域都已创建比对任务）'
+        refresh_mode: refreshMode,
+        message: refreshMode === 'missing_only'
+          ? '没有符合条件的待比对区域（所有有连续年报的区域都已创建比对任务）'
+          : '没有需要创建或刷新的比对任务（已有比对结果已是最新）'
       });
     }
 
     let createdCount = 0;
+    let requeuedCount = 0;
     let skippedCount = 0;
     const errors: string[] = [];
 
-    // 批量创建比对任务
+    // 批量创建或刷新比对任务。正式比对只读取 active_version_id，待复核草稿不会进入结果。
     for (const candidate of candidates) {
       if (candidate.year_a === candidate.year_b) {
         console.log(`[BatchCreate] Skipping invalid same-year candidate:`, candidate);
@@ -392,23 +467,51 @@ router.post('/comparisons/batch-create', authMiddleware, async (req, res) => {
       }
 
       try {
+        const existingComparisonId = candidate.existing_comparison_id
+          ? Number(candidate.existing_comparison_id)
+          : null;
+
+        if (existingComparisonId) {
+          const updateRes = await pool.query(`
+            UPDATE comparisons
+            SET left_report_id = $2,
+                right_report_id = $3,
+                check_status = 'pending',
+                updated_at = NOW()
+            WHERE id = $1
+            RETURNING id;
+          `, [existingComparisonId, candidate.left_report_id, candidate.right_report_id]);
+
+          const comparisonId = Number(updateRes.rows[0]?.id || existingComparisonId);
+          const queued = await ensureQueuedCompareJob(
+            comparisonId,
+            Number(candidate.left_report_id),
+            candidate.left_version_id ? Number(candidate.left_version_id) : null
+          );
+
+          if (queued.reused) {
+            skippedCount++;
+          } else {
+            requeuedCount++;
+          }
+          continue;
+        }
+
         // 创建 comparison 记录
         const comparisonRes = await pool.query(`
-          INSERT INTO comparisons (region_id, year_a, year_b, left_report_id, right_report_id)
-          VALUES ($1, $2, $3, $4, $5)
+          INSERT INTO comparisons (region_id, year_a, year_b, left_report_id, right_report_id, check_status)
+          VALUES ($1, $2, $3, $4, $5, 'pending')
           ON CONFLICT(region_id, year_a, year_b) DO NOTHING
           RETURNING id;
         `, [candidate.region_id, candidate.year_a, candidate.year_b, candidate.left_report_id, candidate.right_report_id]);
 
         if (comparisonRes.rows.length > 0) {
-          const comparisonId = comparisonRes.rows[0].id;
-
-          // 创建 job 记录
-          await pool.query(`
-            INSERT INTO jobs (report_id, kind, status, progress, comparison_id)
-            VALUES ($1, 'compare', 'queued', 0, $2);
-          `, [candidate.left_report_id, comparisonId]);
-
+          const comparisonId = Number(comparisonRes.rows[0].id);
+          await ensureQueuedCompareJob(
+            comparisonId,
+            Number(candidate.left_report_id),
+            candidate.left_version_id ? Number(candidate.left_version_id) : null
+          );
           createdCount++;
         } else {
           // ON CONFLICT 触发，说明已存在
@@ -421,12 +524,19 @@ router.post('/comparisons/batch-create', authMiddleware, async (req, res) => {
       }
     }
 
+    const queuedCount = createdCount + requeuedCount;
+    const message = queuedCount > 0
+      ? `成功提交 ${queuedCount} 个比对任务（新增 ${createdCount} 个，刷新 ${requeuedCount} 个）${skippedCount > 0 ? `，跳过 ${skippedCount} 个已在队列或处理中` : ''}`
+      : `没有创建新的比对任务${skippedCount > 0 ? `，${skippedCount} 个已有任务正在队列或处理中` : ''}`;
+
     return res.json({
       success: true,
       created_count: createdCount,
+      requeued_count: requeuedCount,
       skipped_count: skippedCount,
       total_candidates: candidates.length,
-      message: `成功创建 ${createdCount} 个比对任务${skippedCount > 0 ? `，跳过 ${skippedCount} 个` : ''}`,
+      refresh_mode: refreshMode,
+      message,
       errors: errors.length > 0 ? errors : undefined
     });
 
