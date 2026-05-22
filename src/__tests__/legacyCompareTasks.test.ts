@@ -243,6 +243,67 @@ describe('Legacy compare task routes', () => {
     });
   });
 
+  it('requeues stale existing comparisons from batch create instead of reporting no new tasks', async () => {
+    const app = buildCompareApp();
+
+    mockedQuery.mockImplementation(async (sql: unknown) => {
+      const text = String(sql);
+
+      if (text.includes('WITH consecutive_reports') && text.includes('LEFT JOIN LATERAL')) {
+        return {
+          rows: [{
+            region_id: 10,
+            year_a: 2024,
+            year_b: 2025,
+            left_report_id: 101,
+            left_version_id: 1001,
+            right_report_id: 102,
+            right_version_id: 1002,
+            existing_comparison_id: 501,
+            result_created_at: new Date('2026-01-01T00:00:00Z'),
+            source_updated_at: new Date('2026-01-02T00:00:00Z'),
+          }],
+        };
+      }
+
+      if (text.includes('UPDATE comparisons') && text.includes("check_status = 'pending'")) {
+        return { rows: [{ id: 501 }] };
+      }
+
+      if (text.includes('FROM jobs') && text.includes("kind = 'compare'") && text.includes("status IN ('queued', 'running')")) {
+        return { rows: [] };
+      }
+
+      if (text.includes('INSERT INTO jobs') && text.includes("kind, status, progress, step_code, step_name, comparison_id")) {
+        return { rows: [{ id: 9002 }] };
+      }
+
+      return { rows: [] };
+    });
+
+    const response = await request(app)
+      .post('/api/comparisons/batch-create')
+      .send({ refresh_existing: 'stale' });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      success: true,
+      created_count: 0,
+      requeued_count: 1,
+      skipped_count: 0,
+      refresh_mode: 'stale',
+    });
+    expect(response.body.message).toContain('刷新 1 个');
+    expect(mockedQuery).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE comparisons'),
+      [501, 101, 102]
+    );
+    expect(mockedQuery).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO jobs'),
+      [101, 1001, 501]
+    );
+  });
+
   it('keeps legacy EJS PDF export compatible and reuses a valid request trace id', async () => {
     const app = buildCompareApp();
     const traceId = 'REQ-123.alpha_1:ok';

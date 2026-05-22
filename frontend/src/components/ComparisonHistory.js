@@ -395,12 +395,12 @@ function ComparisonHistory() {
     toast.success('批量删除完成', `已删除 ${successCount} 条记录，失败 ${failedCount} 条。`);
   };
 
-  // 一键比对：批量创建比对任务
+  // 一键比对：补齐缺失任务，并刷新正文发布后已过期的已有结果。
   const handleBatchCreate = async () => {
     const shouldCreate = await confirmAction({
-      title: '批量生成比对任务',
-      message: '将为所有有连续两年年报但尚未创建比对任务的区域批量生成比对任务，确定继续？',
-      confirmText: '开始生成',
+      title: '批量生成/刷新比对任务',
+      message: '将为连续两年年报补齐缺失比对任务，并重新生成正文已更新的已有比对结果，确定继续？',
+      confirmText: '开始处理',
       cancelText: '取消',
     });
     if (!shouldCreate) {
@@ -409,22 +409,25 @@ function ComparisonHistory() {
 
     setBatchCreating(true);
     try {
-      const resp = await apiClient.post('/comparisons/batch-create');
+      const resp = await apiClient.post('/comparisons/batch-create', {
+        refresh_existing: 'stale',
+      });
       const data = resp.data;
+      const submittedCount = Number(data.created_count || 0) + Number(data.requeued_count || 0);
 
       if (data.success) {
-        if (data.created_count > 0) {
-          toast.success('批量创建完成', `${data.message}`);
+        if (submittedCount > 0) {
+          toast.success('批量比对任务已提交', `${data.message}`);
           fetchTree();
         } else {
-          toast.info('没有新增任务', data.message || '没有符合条件的待比对区域');
+          toast.info('没有需要更新的任务', data.message || '没有符合条件的待比对区域');
         }
       } else {
-        toast.error('批量创建失败', data.error || '未知错误');
+        toast.error('批量比对失败', data.error || '未知错误');
       }
     } catch (err) {
-      const message = err.response?.data?.error || err.message || '批量创建失败';
-      toast.error('批量创建失败', message);
+      const message = err.response?.data?.error || err.message || '批量比对失败';
+      toast.error('批量比对失败', message);
     } finally {
       setBatchCreating(false);
     }
