@@ -395,6 +395,7 @@ function ReportMaintenance({ onBack, onNavigate }) {
     const [drawer, setDrawer] = useState({ type: '', row: null });
     const [actionMessage, setActionMessage] = useState('');
     const [reparseBusyKey, setReparseBusyKey] = useState('');
+    const [batchReparseBusy, setBatchReparseBusy] = useState(false);
 
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
@@ -680,6 +681,72 @@ function ReportMaintenance({ onBack, onNavigate }) {
     const canBatchReparse = selectedRows.some((row) => row.report_id);
     const canBatchExportAbnormal = selectedRows.some((row) => row.compare_status === 'abnormal' || row.parse_status === 'failed');
 
+    const handleBatchReparse = async () => {
+        const targetRows = selectedRows.filter((row) => row.report_id);
+        if (targetRows.length === 0) {
+            setActionMessage('请先选择已上传年报的单位。');
+            toast.warning('无法批量重新解析', '请先选择已上传年报的单位。');
+            return;
+        }
+
+        const confirmed = await confirmAction({
+            title: '批量重新解析年报',
+            message: `确认提交 ${targetRows.length} 个年报重新解析任务吗？未上传的单位会自动跳过。`,
+            confirmText: '批量重新解析',
+            tone: 'default',
+        });
+        if (!confirmed) return;
+
+        setBatchReparseBusy(true);
+        try {
+            const reportIds = Array.from(new Set(targetRows.map((row) => Number(row.report_id)).filter(Boolean)));
+            const resp = await apiClient.post('/reports/batch-parse', {
+                report_ids: reportIds,
+                force: true,
+            });
+            const payload = resp.data || {};
+            const results = Array.isArray(payload.results) ? payload.results : [];
+            const successResults = results.filter((item) => item.job_id);
+            const failedResults = results.filter((item) => !item.job_id);
+            const rowByReportId = new Map(targetRows.map((row) => [Number(row.report_id), row]));
+
+            successResults.forEach((item) => {
+                const sourceRow = rowByReportId.get(Number(item.report_id));
+                taskDrawer.trackParseJob({
+                    job_id: item.job_id,
+                    report_id: item.report_id,
+                    version_id: item.version_id || sourceRow?.effective_version_id,
+                    status: item.status || 'queued',
+                    progress: 0,
+                    step_name: item.reused ? '重新解析任务已存在' : '重新解析已提交',
+                    file_name: sourceRow?.file_name || sourceRow?.unit_name || sourceRow?.region_name,
+                });
+            });
+            if (successResults.length > 0) {
+                taskDrawer.openDrawer();
+            }
+
+            const submitted = Number(payload.submitted || 0);
+            const reused = Number(payload.reused || 0);
+            const failed = Number(payload.failed || failedResults.length || 0);
+            const summaryText = `批量重新解析已处理：新提交 ${submitted} 个，复用进行中任务 ${reused} 个，失败 ${failed} 个。`;
+            setActionMessage(summaryText);
+            if (failed > 0) {
+                const firstError = failedResults[0]?.message || failedResults[0]?.error || '部分年报未能提交。';
+                toast.warning('批量重新解析部分失败', `${summaryText} 首个失败原因：${firstError}`);
+            } else {
+                toast.success('批量重新解析已提交', summaryText);
+            }
+            fetchData();
+        } catch (err) {
+            const message = err.response?.data?.message || err.response?.data?.error || err.message || '批量重新解析失败';
+            setActionMessage(`批量重新解析失败：${message}`);
+            toast.error('批量重新解析失败', message);
+        } finally {
+            setBatchReparseBusy(false);
+        }
+    };
+
     const batchPlaceholder = (label) => {
         if (selectedRows.length === 0) {
             setActionMessage('请先选择需要处理的单位。');
@@ -932,9 +999,9 @@ function ReportMaintenance({ onBack, onNavigate }) {
                         <span>共 {formatNumber(filteredRows.length)} 条，已选 {formatNumber(selectedKeys.length)} 条</span>
                     </div>
                     <div className="batch-actions">
-                        <button className="secondary-btn" onClick={() => batchPlaceholder('批量重新解析')} disabled={!canBatchReparse}>
-                            <RefreshCw size={15} />
-                            批量重新解析
+                        <button className="secondary-btn" onClick={handleBatchReparse} disabled={!canBatchReparse || batchReparseBusy}>
+                            <RefreshCw size={15} className={batchReparseBusy ? 'spin' : ''} />
+                            {batchReparseBusy ? '提交中...' : '批量重新解析'}
                         </button>
                         <button className="secondary-btn" onClick={() => batchPlaceholder('批量导出异常')} disabled={!canBatchExportAbnormal}>
                             <Download size={15} />
