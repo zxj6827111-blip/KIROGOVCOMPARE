@@ -374,6 +374,214 @@ async function ensureMaterializeJob(
   return { jobId: Number(insertRes.rows[0].id), status: 'queued', reused: false };
 }
 
+type ParseJobSubmitResult =
+  | {
+    ok: true;
+    reportId: number;
+    versionId: number;
+    jobId: number;
+    status: 'queued' | 'running' | string;
+    reused: boolean;
+    reason?: string;
+  }
+  | {
+    ok: false;
+    statusCode: number;
+    error: string;
+    message?: string;
+    storagePath?: string | null;
+    resolvedPath?: string | null;
+    fixedStaleJobId?: number;
+  };
+
+async function enqueueReportParseJob(input: {
+  reportId: number;
+  allowedRegionIds: number[] | null;
+  requestedVersionId?: number | null;
+  forceParse?: boolean;
+}): Promise<ParseJobSubmitResult> {
+  const { reportId, allowedRegionIds, requestedVersionId = null, forceParse = false } = input;
+
+  if (!reportId || Number.isNaN(reportId) || !Number.isInteger(reportId) || reportId < 1) {
+    return { ok: false, statusCode: 400, error: 'report_id 无效' };
+  }
+
+  if (allowedRegionIds && allowedRegionIds.length === 0) {
+    return { ok: false, statusCode: 403, error: 'forbidden' };
+  }
+
+  const reportRes = await pool.query(
+    `SELECT r.id, r.region_id, r.active_version_id
+     FROM reports r
+     WHERE r.id = $1
+     LIMIT 1`,
+    [reportId]
+  );
+  const report = reportRes.rows[0];
+  if (!report) {
+    return { ok: false, statusCode: 404, error: 'report not found' };
+  }
+
+  if (allowedRegionIds && !allowedRegionIds.includes(Number(report.region_id))) {
+    return { ok: false, statusCode: 403, error: 'forbidden' };
+  }
+
+  let versionId = report.active_version_id as number | null;
+  if (requestedVersionId && Number.isInteger(requestedVersionId) && requestedVersionId > 0) {
+    const explicitVersion = await loadReportVersion(reportId, requestedVersionId);
+    if (!explicitVersion) {
+      return { ok: false, statusCode: 404, error: 'target version not found' };
+    }
+    versionId = requestedVersionId;
+  } else {
+    versionId = await resolvePreferredVersionId(reportId);
+    if (!versionId) {
+      const latestRes = await pool.query(
+        `SELECT id FROM report_versions
+         WHERE report_id = $1
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [reportId]
+      );
+      versionId = latestRes.rows?.[0]?.id ?? null;
+    }
+  }
+
+  if (!versionId) {
+    return { ok: false, statusCode: 404, error: 'report_version not found' };
+  }
+
+  const versionRes = await pool.query(
+    `SELECT provider, model, ingestion_batch_id, parsed_json, storage_path
+     FROM report_versions
+     WHERE id = $1
+     LIMIT 1`,
+    [versionId]
+  );
+  const versionRow = versionRes.rows?.[0];
+  if (!versionRow) {
+    return { ok: false, statusCode: 404, error: 'report_version not found' };
+  }
+  const sourceCheck = checkStoragePathExists(versionRow.storage_path ?? null);
+
+  const existingJobRes = await pool.query(
+    `SELECT id, status FROM jobs
+     WHERE report_id = $1
+       AND version_id = $2
+       AND kind = 'parse'
+       AND status IN ('queued', 'running')
+     ORDER BY id DESC
+     LIMIT 1`,
+    [reportId, versionId]
+  );
+  const existingJob = existingJobRes.rows?.[0];
+  if (existingJob?.id) {
+    if (existingJob.status === 'queued' && !sourceCheck.ok) {
+      await pool.query(
+        `UPDATE jobs
+         SET status = 'failed',
+             error_code = 'SOURCE_FILE_MISSING',
+             error_message = $2,
+             progress = 100,
+             step_code = 'DONE',
+             step_name = 'Failed',
+             finished_at = NOW()
+         WHERE id = $1
+           AND status = 'queued'`,
+        [existingJob.id, sourceCheck.errorMessage || 'source file missing']
+      );
+      return {
+        ok: false,
+        statusCode: 422,
+        error: 'SOURCE_FILE_MISSING',
+        message: sourceCheck.errorMessage || 'source file missing',
+        storagePath: sourceCheck.storagePath,
+        resolvedPath: sourceCheck.resolvedPath,
+        fixedStaleJobId: Number(existingJob.id),
+      };
+    }
+    return {
+      ok: true,
+      reportId,
+      versionId: Number(versionId),
+      jobId: Number(existingJob.id),
+      status: existingJob.status,
+      reused: true,
+    };
+  }
+
+  if (!forceParse && hasParsedContent(versionRow.parsed_json)) {
+    const hasFacts = await hasAnyFactsForVersion(reportId, Number(versionId));
+    if (!hasFacts) {
+      const materializeJob = await ensureMaterializeJob(
+        reportId,
+        Number(versionId),
+        versionRow.ingestion_batch_id ?? null
+      );
+      return {
+        ok: true,
+        reportId,
+        versionId: Number(versionId),
+        jobId: materializeJob.jobId,
+        status: materializeJob.status,
+        reused: materializeJob.reused,
+        reason: 'parsed_missing_facts_materialize',
+      };
+    }
+
+    const latestParseJobRes = await pool.query(
+      `SELECT id, status
+       FROM jobs
+       WHERE report_id = $1
+         AND version_id = $2
+         AND kind = 'parse'
+       ORDER BY id DESC
+       LIMIT 1`,
+      [reportId, versionId]
+    );
+    const latestParseJob = latestParseJobRes.rows?.[0];
+    if (latestParseJob?.id) {
+      return {
+        ok: true,
+        reportId,
+        versionId: Number(versionId),
+        jobId: Number(latestParseJob.id),
+        status: latestParseJob.status,
+        reused: true,
+        reason: 'already_parsed',
+      };
+    }
+  }
+
+  if (!sourceCheck.ok) {
+    return {
+      ok: false,
+      statusCode: 422,
+      error: 'SOURCE_FILE_MISSING',
+      message: sourceCheck.errorMessage || 'source file missing',
+      storagePath: sourceCheck.storagePath,
+      resolvedPath: sourceCheck.resolvedPath,
+    };
+  }
+
+  const jobRes = await pool.query(
+    `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model, ingestion_batch_id)
+     VALUES ($1, $2, 'parse', 'queued', 0, $3, $4, $5)
+     RETURNING id`,
+    [reportId, versionId, versionRow.provider ?? null, versionRow.model ?? null, versionRow.ingestion_batch_id ?? null]
+  );
+  const jobId = jobRes.rows[0]?.id;
+
+  return {
+    ok: true,
+    reportId,
+    versionId: Number(versionId),
+    jobId: Number(jobId),
+    status: 'queued',
+    reused: false,
+  };
+}
+
 async function rebuildSourceTextFromStorage(storagePath: string, reportId: number): Promise<{ text: string; sourceType: string }> {
   let absolutePath = storagePath;
   if (!path.isAbsolute(absolutePath)) {
@@ -599,167 +807,111 @@ router.post('/reports/:id/parse', authMiddleware, requirePermission('upload_repo
     const forceParse = typeof forceRaw === 'string'
       ? ['1', 'true', 'yes', 'on'].includes(forceRaw.trim().toLowerCase())
       : false;
-    if (!reportId || Number.isNaN(reportId) || !Number.isInteger(reportId) || reportId < 1) {
-      return res.status(400).json({ error: 'report_id 无效' });
-    }
 
-    // Data scope check
     const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
-    if (allowedRegionIds) {
-      if (allowedRegionIds.length === 0) {
-        return res.status(403).json({ error: 'forbidden' });
-      }
+    const result = await enqueueReportParseJob({
+      reportId,
+      allowedRegionIds,
+      requestedVersionId,
+      forceParse,
+    });
+
+    if (!result.ok) {
+      const payload: Record<string, unknown> = {
+        error: result.error,
+      };
+      if (result.message) payload.message = result.message;
+      if (result.storagePath !== undefined) payload.storage_path = result.storagePath;
+      if (result.resolvedPath !== undefined) payload.resolved_path = result.resolvedPath;
+      if (result.fixedStaleJobId !== undefined) payload.fixed_stale_job_id = result.fixedStaleJobId;
+      return res.status(result.statusCode).json(payload);
     }
 
-    const reportRes = await pool.query(
-      `SELECT r.id, r.region_id, r.active_version_id
-       FROM reports r
-       WHERE r.id = $1
-       LIMIT 1`,
-      [reportId]
-    );
-    const report = reportRes.rows[0];
-    if (!report) {
-      return res.status(404).json({ error: 'report not found' });
-    }
-
-    if (allowedRegionIds && !allowedRegionIds.includes(report.region_id)) {
-      return res.status(403).json({ error: 'forbidden' });
-    }
-
-    let versionId = report.active_version_id as number | null;
-    if (requestedVersionId && Number.isInteger(requestedVersionId) && requestedVersionId > 0) {
-      const explicitVersion = await loadReportVersion(reportId, requestedVersionId);
-      if (!explicitVersion) {
-        return res.status(404).json({ error: 'target version not found' });
-      }
-      versionId = requestedVersionId;
-    } else {
-      versionId = await resolvePreferredVersionId(reportId);
-      if (!versionId) {
-        const latestRes = await pool.query(
-          `SELECT id FROM report_versions
-           WHERE report_id = $1
-           ORDER BY created_at DESC
-           LIMIT 1`,
-          [reportId]
-        );
-        versionId = latestRes.rows?.[0]?.id ?? null;
-      }
-    }
-
-    if (!versionId) {
-      return res.status(404).json({ error: 'report_version not found' });
-    }
-
-    const versionRes = await pool.query(
-      `SELECT provider, model, ingestion_batch_id, parsed_json, storage_path
-       FROM report_versions
-       WHERE id = $1
-       LIMIT 1`,
-      [versionId]
-    );
-    const versionRow = versionRes.rows?.[0];
-    if (!versionRow) {
-      return res.status(404).json({ error: 'report_version not found' });
-    }
-    const sourceCheck = checkStoragePathExists(versionRow.storage_path ?? null);
-
-    // If a parse job is already queued/running, return it
-    const existingJobRes = await pool.query(
-      `SELECT id, status FROM jobs
-       WHERE report_id = $1
-         AND version_id = $2
-         AND kind = 'parse'
-         AND status IN ('queued', 'running')
-       ORDER BY id DESC
-       LIMIT 1`,
-      [reportId, versionId]
-    );
-    const existingJob = existingJobRes.rows?.[0];
-    if (existingJob?.id) {
-      if (existingJob.status === 'queued' && !sourceCheck.ok) {
-        await pool.query(
-          `UPDATE jobs
-           SET status = 'failed',
-               error_code = 'SOURCE_FILE_MISSING',
-               error_message = $2,
-               progress = 100,
-               step_code = 'DONE',
-               step_name = 'Failed',
-               finished_at = NOW()
-           WHERE id = $1
-             AND status = 'queued'`,
-          [existingJob.id, sourceCheck.errorMessage || 'source file missing']
-        );
-        return res.status(422).json({
-          error: 'SOURCE_FILE_MISSING',
-          message: sourceCheck.errorMessage || 'source file missing',
-          storage_path: sourceCheck.storagePath,
-          resolved_path: sourceCheck.resolvedPath,
-          fixed_stale_job_id: existingJob.id,
-        });
-      }
-      return res.json({ job_id: existingJob.id, status: existingJob.status, reused: true });
-    }
-
-    if (!forceParse && hasParsedContent(versionRow.parsed_json)) {
-      const hasFacts = await hasAnyFactsForVersion(reportId, versionId);
-      if (!hasFacts) {
-        const materializeJob = await ensureMaterializeJob(
-          reportId,
-          versionId,
-          versionRow.ingestion_batch_id ?? null
-        );
-        return res.json({
-          job_id: materializeJob.jobId,
-          status: materializeJob.status,
-          reused: materializeJob.reused,
-          reason: 'parsed_missing_facts_materialize',
-        });
-      }
-
-      const latestParseJobRes = await pool.query(
-        `SELECT id, status
-         FROM jobs
-         WHERE report_id = $1
-           AND version_id = $2
-           AND kind = 'parse'
-         ORDER BY id DESC
-         LIMIT 1`,
-        [reportId, versionId]
-      );
-      const latestParseJob = latestParseJobRes.rows?.[0];
-      if (latestParseJob?.id) {
-        return res.json({
-          job_id: latestParseJob.id,
-          status: latestParseJob.status,
-          reused: true,
-          reason: 'already_parsed',
-        });
-      }
-    }
-
-    if (!sourceCheck.ok) {
-      return res.status(422).json({
-        error: 'SOURCE_FILE_MISSING',
-        message: sourceCheck.errorMessage || 'source file missing',
-        storage_path: sourceCheck.storagePath,
-        resolved_path: sourceCheck.resolvedPath,
-      });
-    }
-
-    const jobRes = await pool.query(
-      `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model, ingestion_batch_id)
-       VALUES ($1, $2, 'parse', 'queued', 0, $3, $4, $5)
-       RETURNING id`,
-      [reportId, versionId, versionRow.provider ?? null, versionRow.model ?? null, versionRow.ingestion_batch_id ?? null]
-    );
-    const jobId = jobRes.rows[0]?.id;
-
-    return res.json({ job_id: jobId, status: 'queued' });
+    return res.json({
+      job_id: result.jobId,
+      status: result.status,
+      reused: result.reused,
+      reason: result.reason,
+    });
   } catch (error) {
     console.error('Error re-parsing report:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/reports/batch-parse', authMiddleware, requirePermission('upload_reports'), async (req: AuthRequest, res) => {
+  try {
+    const reportIdsRaw = req.body?.report_ids;
+    if (!Array.isArray(reportIdsRaw) || reportIdsRaw.length === 0) {
+      return res.status(400).json({ error: 'report_ids is required' });
+    }
+
+    const reportIds = Array.from(
+      new Set(
+        reportIdsRaw
+          .map((id: any) => Number(id))
+          .filter((id: number) => Number.isInteger(id) && id > 0)
+      )
+    );
+    if (reportIds.length === 0) {
+      return res.status(400).json({ error: 'report_ids is invalid' });
+    }
+    if (reportIds.length > 200) {
+      return res.status(400).json({ error: 'report_ids exceeds limit', limit: 200 });
+    }
+
+    const forceParse = req.body?.force === true || req.body?.force === 'true' || req.body?.force === 1 || req.body?.force === '1';
+    const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
+    const results = [];
+
+    for (const reportId of reportIds) {
+      try {
+        const result = await enqueueReportParseJob({
+          reportId,
+          allowedRegionIds,
+          forceParse,
+        });
+
+        if (result.ok) {
+          results.push({
+            report_id: result.reportId,
+            version_id: result.versionId,
+            job_id: result.jobId,
+            status: result.status,
+            reused: result.reused,
+            reason: result.reason,
+          });
+        } else {
+          results.push({
+            report_id: reportId,
+            status: 'failed',
+            error: result.error,
+            message: result.message,
+          });
+        }
+      } catch (error: any) {
+        results.push({
+          report_id: reportId,
+          status: 'failed',
+          error: 'internal_server_error',
+          message: error?.message || 'parse enqueue failed',
+        });
+      }
+    }
+
+    const submitted = results.filter((item: any) => item.job_id && !item.reused).length;
+    const reused = results.filter((item: any) => item.job_id && item.reused).length;
+    const failed = results.filter((item: any) => !item.job_id).length;
+
+    return res.json({
+      requested: reportIds.length,
+      submitted,
+      reused,
+      failed,
+      results,
+    });
+  } catch (error) {
+    console.error('Error batch re-parsing reports:', error);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

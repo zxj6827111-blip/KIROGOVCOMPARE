@@ -378,10 +378,10 @@ const mapParseStatus = (report: any, legacyStatus: string | null): string => {
     if (parseRunStatus === 'running') return 'running';
     if (parseRunStatus === 'created') return 'pending';
     if (['failed', 'gate_failed', 'finalize_failed'].includes(parseRunStatus)) return 'failed';
+    if (legacyStatus === 'empty' || legacyStatus === 'text_empty') return 'failed';
     if (parseRunStatus === 'accepted') return 'success';
 
     if (jobKind === 'parse' && jobStatus === 'failed') return 'failed';
-    if (legacyStatus === 'empty' || legacyStatus === 'text_empty') return 'failed';
 
     const parsed = parseDbJson(report.parsed_json);
     if (hasParsedContentForMaintenance(parsed)) return 'success';
