@@ -57,11 +57,11 @@ const comparisonData = {
   },
   section_metrics: {
     text: [
-      { title: '一、总体情况', similarity: 42, oldLength: 1081, newLength: 506 },
-      { title: '五、存在的主要问题及改进情况', similarity: 38, oldLength: 294, newLength: 155 },
-      { title: '六、其他需要报告的事项', similarity: 100, oldLength: 23, newLength: 23 },
+      { title: '一、总体情况', similarity: 65, oldLength: 919, newLength: 909 },
+      { title: '五、存在的主要问题及改进情况', similarity: 33, oldLength: 213, newLength: 374 },
+      { title: '六、其他需要报告的事项', similarity: 54, oldLength: 163, newLength: 119 },
     ],
-    average: 60,
+    average: 51,
     method: 'simple_average_text_sections',
   },
   left_content: {
@@ -108,11 +108,14 @@ describe('comparison similarity display', () => {
     expect(screen.getByText('正文章节重复率明细')).toBeInTheDocument();
     expect(screen.getByText('顶部数值为下列正文 text 章节的简单平均')).toBeInTheDocument();
     expect(detailMetrics).toHaveTextContent('一、总体情况');
-    expect(detailMetrics).toHaveTextContent('42%');
+    expect(detailMetrics).toHaveTextContent('65%');
     expect(detailMetrics).toHaveTextContent('五、存在的主要问题及改进情况');
-    expect(detailMetrics).toHaveTextContent('38%');
+    expect(detailMetrics).toHaveTextContent('33%');
     expect(detailMetrics).toHaveTextContent('六、其他需要报告的事项');
-    expect(detailMetrics).toHaveTextContent('100%');
+    expect(detailMetrics).toHaveTextContent('54%');
+    expect(screen.getByText('五、存在的主要问题及改进情况：正文重复率 33%，文字变化较大，建议重点复核。')).toBeInTheDocument();
+    expect(screen.getByText('六、其他需要报告的事项：正文重复率 54%，低于 60% 参考线，建议关注新增或改写内容。')).toBeInTheDocument();
+    expect(screen.queryByText('暂无结构化差异摘要。')).not.toBeInTheDocument();
   });
 
   test('print page uses API similarity and shows text section metrics', async () => {
@@ -136,6 +139,8 @@ describe('comparison similarity display', () => {
     const printMetrics = screen.getByLabelText('正文章节重复率明细');
     expect(screen.getByText('正文章节重复率明细')).toBeInTheDocument();
     expect(printMetrics).toHaveTextContent('一、总体情况');
-    expect(printMetrics).toHaveTextContent('42%');
+    expect(printMetrics).toHaveTextContent('65%');
+    expect(screen.getByText('五、存在的主要问题及改进情况：正文重复率 33%，文字变化较大，建议重点复核。')).toBeInTheDocument();
+    expect(screen.getByText('六、其他需要报告的事项：正文重复率 54%，低于 60% 参考线，建议关注新增或改写内容。')).toBeInTheDocument();
   });
 });

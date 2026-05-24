@@ -13,6 +13,7 @@ import CrossYearCheckView from '../CrossYearCheckView';
 
 import { normalizeTablePath } from '../../utils/tableRowColMapping';
 import { translateFailureReason, getRawErrorDetail } from '../../utils/errorTranslator';
+import { buildComparisonFindingItems } from '../../utils/comparisonFindings';
 
 const readPath = (obj, path) => {
     if (!obj || !path) return undefined;
@@ -291,8 +292,8 @@ function ComparisonPrintView({ comparisonId }) {
 
 
     // Aligned Sections and Summary calculation
-    const { alignedSections, summary, textSectionMetrics } = useMemo(() => {
-        if (!data) return { alignedSections: [], summary: {}, textSectionMetrics: [] };
+    const { alignedSections, summary, textSectionMetrics, findingItems } = useMemo(() => {
+        if (!data) return { alignedSections: [], summary: {}, textSectionMetrics: [], findingItems: [] };
 
         const sections = [];
         const leftSections = data.left_content?.sections || [];
@@ -347,6 +348,11 @@ function ComparisonPrintView({ comparisonId }) {
 
         const summaryItems = data.diff_json?.summary?.items || [];
         const textRepetition = data.similarity ?? data.diff_json?.summary?.textRepetition ?? null;
+        const textSectionMetrics = getTextSectionMetrics(data);
+        const findingItems = buildComparisonFindingItems({
+            summaryItems,
+            textSectionMetrics,
+        });
 
         return {
             alignedSections: sections,
@@ -355,7 +361,8 @@ function ComparisonPrintView({ comparisonId }) {
                 textRepetition,
                 items: summaryItems,
             },
-            textSectionMetrics: getTextSectionMetrics(data),
+            textSectionMetrics,
+            findingItems,
         };
     }, [data]);
 
@@ -511,11 +518,7 @@ function ComparisonPrintView({ comparisonId }) {
                     <div className="comparison-print-findings break-inside-avoid">
                         <h3>发现问题</h3>
                         <ul>
-                            {summary.items && summary.items.length > 0 ? (
-                                summary.items.map((item, idx) => <li key={idx}>{item}</li>)
-                            ) : (
-                                <li>暂无结构化差异摘要。</li>
-                            )}
+                            {findingItems.map((item, idx) => <li key={idx}>{item}</li>)}
                         </ul>
                     </div>
 
