@@ -735,7 +735,7 @@ function ComparisonHistory() {
                 <th>年份A</th>
                 <th>年份B</th>
                 <th>创建时间</th>
-                <th>文字重复率</th>
+                <th>正文文字重复率</th>
                 <th>数据勾稽问题</th>
                 <th style={{ minWidth: '220px' }}>操作</th>
               </tr>

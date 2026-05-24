@@ -16,20 +16,6 @@ import { getAxiosFriendlyError } from '../utils/errorTranslator';
 import { buildComparisonEvidenceSummary } from '../utils/evidenceViewModel';
 import { resolveSafeReturnTo } from '../app/returnTo';
 
-// ---- Tokenization & Similarity Algorithm (Ported) ----
-const tokenizeText = (text) => {
-  if (!text) return [];
-  const regex = /(\d+)|([a-zA-Z]+)|([\u4e00-\u9fff]+)|([\s\S])/g;
-  const tokens = [];
-  let match;
-  while ((match = regex.exec(text)) !== null) {
-    tokens.push(match[0]);
-  }
-  return tokens;
-};
-
-const isPunctuation = (str) => /[-，。、；：？！“”‘’（）《》【】—….,;:?!'"()[\]\s]/.test(str);
-
 const isTableHighlightPath = (path) =>
   path &&
   (path.startsWith('tableData.') ||
@@ -70,26 +56,6 @@ const buildIssueHighlightCells = (issues = []) => {
 
   return cells;
 };
-
-function calculateTextSimilarity(text1, text2) {
-  if (!text1 && !text2) return 100;
-  if (!text1 || !text2) return 0;
-
-  const t1 = tokenizeText(text1).filter(t => !isPunctuation(t));
-  const t2 = tokenizeText(text2).filter(t => !isPunctuation(t));
-
-  if (t1.length === 0 && t2.length === 0) return 100;
-  if (t1.length === 0 || t2.length === 0) return 0;
-
-  // Simple intersection for speed in JS if Diff isn't fully available or too slow
-  // But preferably use Diff.diffArrays if available
-  // Fallback to simple set intersection if Diff lib heavy
-  const set2 = new Set(t2);
-  let intersection = 0;
-  t1.forEach(t => { if (set2.has(t)) intersection++; });
-  const union = t1.length + t2.length;
-  return Math.round((2 * intersection / union) * 100);
-}
 
 // Helper for Table 3 Rows (Ported)
 const getTable3Rows = (data) => {
@@ -216,58 +182,16 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
       return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB);
     });
 
-    // Calculate Summary Stats (Locally)
-    let totalTextSim = 0;
-    let textSectionsCount = 0;
-    let totalTableSim = 0;
-    let tableSectionsCount = 0;
-    const summaryItems = [];
-
-    sections.forEach(sec => {
-      // Skip title section from statistics
-      if (sec.title === '标题' || sec.title?.includes('年度报告')) return;
-
-      // Text Comparison
-      if (sec.oldSec?.type === 'text' && sec.newSec?.type === 'text') {
-        const sim = calculateTextSimilarity(sec.oldSec.content || '', sec.newSec.content || '');
-        totalTextSim += sim;
-        textSectionsCount++;
-
-        if (sim < 60) {
-          summaryItems.push(`${sec.title.split('、')[1] || sec.title}章节的文字变化较大，重复率约 ${Math.round(sim)}% （低于 60% 阈值）`);
-        }
-      }
-      // Table Comparison
-      else if (['table_2', 'table_3', 'table_4'].includes(sec.newSec?.type || '')) {
-        let identical = false;
-        // Simple data presence check for diffs
-        if (sec.newSec?.type === 'table_2') identical = JSON.stringify(sec.oldSec?.activeDisclosureData) === JSON.stringify(sec.newSec?.activeDisclosureData);
-        else if (sec.newSec?.type === 'table_3') identical = JSON.stringify(sec.oldSec?.tableData) === JSON.stringify(sec.newSec?.tableData);
-        else if (sec.newSec?.type === 'table_4') identical = JSON.stringify(sec.oldSec?.reviewLitigationData) === JSON.stringify(sec.newSec?.reviewLitigationData);
-
-        if (identical) {
-          totalTableSim += 100;
-          tableSectionsCount++;
-        } else {
-          summaryItems.push(`${sec.title.split('、')[1] || sec.title}的表格重复率约 0%，存在明显数据差异`);
-        }
-      }
-    });
-
-    const avgTextRep = (data.similarity != null) ? data.similarity : (textSectionsCount > 0 ? Math.round(totalTextSim / textSectionsCount) : 0);
-    const avgTableRep = tableSectionsCount > 0 ? Math.round(totalTableSim / tableSectionsCount) : 0;
-    const overallRep = Math.round((avgTextRep + avgTableRep) / 2);
+    const summaryItems = data.diff_json?.summary?.items || [];
+    const textRepetition = data.similarity ?? data.diff_json?.summary?.textRepetition ?? null;
 
     return {
       alignedSections: sections,
-      summary: (data.diff_json?.summary && data.diff_json.summary.items && data.diff_json.summary.items.length > 0)
-        ? data.diff_json.summary
-        : {
-          textRepetition: avgTextRep,
-          tableRepetition: avgTableRep,
-          overallRepetition: overallRep,
-          items: summaryItems
-        }
+      summary: {
+        ...(data.diff_json?.summary || {}),
+        textRepetition,
+        items: summaryItems,
+      },
     };
   }, [data]);
 
@@ -427,7 +351,7 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
               <StatusBadge tone={data.check_status && data.check_status !== '正常' ? 'warning' : 'success'}>
                 {data.check_status || '已比对'}
               </StatusBadge>
-              {data.similarity != null && <StatusBadge tone="info">重复率 {data.similarity}%</StatusBadge>}
+              {data.similarity != null && <StatusBadge tone="info">正文文字重复率 {data.similarity}%</StatusBadge>}
             </>
           )}
           actions={(
@@ -453,10 +377,13 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
               <span className="text-gray-500">年份:</span> <span className="font-bold">{data.year_a} vs {data.year_b}</span>
             </div>
             <div>
-              <span className="text-gray-500">文字重复率:</span>
+              <span className="text-gray-500">正文文字重复率:</span>
               <span className="font-bold ml-1">{summary.textRepetition ?? '-'}%</span>
             </div>
           </div>
+          <p className="comparison-repetition-note">
+            该指标来自后端比对结果，仅统计正文 text 章节；黄底只标记两版中的相同文本片段，不等同于总重复率。
+          </p>
 
           <div className="bg-white border border-gray-200 rounded p-4">
             <h3 className="font-bold text-gray-900 mb-2">发现问题</h3>
@@ -464,7 +391,7 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
               {summary.items && summary.items.length > 0 ? (
                 summary.items.map((item, idx) => <li key={idx}>{item}</li>)
               ) : (
-                <li>未检测到显著差异。</li>
+                <li>暂无结构化差异摘要。</li>
               )}
             </ul>
           </div>
@@ -496,6 +423,9 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
               <span className="text-sm text-gray-700">差异部分 (红色)</span>
               <span className="inline-block w-4 h-4 bg-red-200 border border-red-300 ml-1 rounded-sm"></span>
             </label>
+          </div>
+          <div className="comparison-highlight-note">
+            黄底表示相同文本片段；正文文字重复率以顶部指标为准。
           </div>
 
         </div>
