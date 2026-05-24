@@ -12,6 +12,20 @@
     box-sizing: border-box;
 }
 
+.comparison-repetition-note,
+.comparison-highlight-note,
+.comparison-print-repetition-note {
+    margin: 8px 0 0;
+    color: #475569;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.comparison-highlight-note {
+    flex: 1 1 260px;
+    text-align: right;
+}
+
 .comparison-grid--balanced {
     align-items: stretch;
 }

@@ -14,39 +14,6 @@ import CrossYearCheckView from '../CrossYearCheckView';
 import { normalizeTablePath } from '../../utils/tableRowColMapping';
 import { translateFailureReason, getRawErrorDetail } from '../../utils/errorTranslator';
 
-// ---- Tokenization & Similarity Algorithm (Same as ComparisonDetailView) ----
-const tokenizeText = (text) => {
-    if (!text) return [];
-    const regex = /(\d+)|([a-zA-Z]+)|([\u4e00-\u9fff]+)|([\s\S])/g;
-    const tokens = [];
-    let match;
-    while ((match = regex.exec(text)) !== null) {
-        tokens.push(match[0]);
-    }
-    return tokens;
-};
-
-const isPunctuation = (str) => {
-    return /[-,.;:?!'"()[\]\s，。；：？！、“”‘’（）【】《》]/.test(str);
-};
-
-function calculateTextSimilarity(text1, text2) {
-    if (!text1 && !text2) return 100;
-    if (!text1 || !text2) return 0;
-
-    const t1 = tokenizeText(text1).filter(t => !isPunctuation(t));
-    const t2 = tokenizeText(text2).filter(t => !isPunctuation(t));
-
-    if (t1.length === 0 && t2.length === 0) return 100;
-    if (t1.length === 0 || t2.length === 0) return 0;
-
-    const set2 = new Set(t2);
-    let intersection = 0;
-    t1.forEach(t => { if (set2.has(t)) intersection++; });
-    const union = t1.length + t2.length;
-    return Math.round((2 * intersection / union) * 100);
-}
-
 const readPath = (obj, path) => {
     if (!obj || !path) return undefined;
     return path.split('.').reduce((acc, key) => (acc == null ? undefined : acc[key]), obj);
@@ -209,42 +176,6 @@ function ComparisonPrintView({ comparisonId }) {
         setLeftIssueHighlightCells(buildIssueHighlightCells(issues));
     }, []);
 
-    const buildSummaryItems = useCallback((sections) => {
-        const items = [];
-
-        sections.forEach((section) => {
-            const title = section.title || '';
-            if (title === '标题' || title.includes('年度报告')) return;
-
-            if (section.type === 'text' && section.left && section.right) {
-                const sim = calculateTextSimilarity(section.left.content || '', section.right.content || '');
-                if (sim < 60) {
-                    items.push(`${title.split('、')[1] || title}章节的文字变化较大，重复率约 ${Math.round(sim)}% （低于 60% 阈值）`);
-                }
-                return;
-            }
-
-            if (section.type === 'table_2') {
-                const identical = JSON.stringify(section.left?.activeDisclosureData || null) === JSON.stringify(section.right?.activeDisclosureData || null);
-                if (!identical) items.push(`${title.split('、')[1] || title}的表格重复率约 0%，存在明显数据差异`);
-                return;
-            }
-
-            if (section.type === 'table_3') {
-                const identical = JSON.stringify(section.left?.tableData || null) === JSON.stringify(section.right?.tableData || null);
-                if (!identical) items.push(`${title.split('、')[1] || title}的表格重复率约 0%，存在明显数据差异`);
-                return;
-            }
-
-            if (section.type === 'table_4') {
-                const identical = JSON.stringify(section.left?.reviewLitigationData || null) === JSON.stringify(section.right?.reviewLitigationData || null);
-                if (!identical) items.push(`${title.split('、')[1] || title}的表格重复率约 0%，存在明显数据差异`);
-            }
-        });
-
-        return items;
-    }, []);
-
     useEffect(() => {
         const url = new URL(window.location.href);
         if (url.searchParams.has('service_token')) {
@@ -362,9 +293,7 @@ function ComparisonPrintView({ comparisonId }) {
         const leftSections = data.left_content?.sections || [];
         const rightSections = data.right_content?.sections || [];
 
-        let textSim = [], tableSim = [];
-
-        const typeTitles = {
+        const typeTitles = {
             text: '正文',
             table_2: '表二：主动公开',
             table_3: '表三：依申请公开',
@@ -393,17 +322,13 @@ function ComparisonPrintView({ comparisonId }) {
                 usedRightIndices.add(rightSections.indexOf(rs));
             }
 
-            if (ls.type === 'text' && rs) {
-                const sim = calculateTextSimilarity(ls.content, rs.content);
-                textSim.push(sim);
-                sections.push({ type: ls.type, title, left: ls, right: rs, similarity: sim });
-            } else if (ls.type.startsWith('table_')) {
-                const sim = calculateTextSimilarity(JSON.stringify(ls), JSON.stringify(rs || {}));
-                tableSim.push(sim);
-                sections.push({ type: ls.type, title, left: ls, right: rs || null, similarity: sim });
-            } else {
-                sections.push({ type: ls.type, title, left: ls, right: rs || null });
-            }
+            if (ls.type === 'text' && rs) {
+                sections.push({ type: ls.type, title, left: ls, right: rs });
+            } else if (ls.type.startsWith('table_')) {
+                sections.push({ type: ls.type, title, left: ls, right: rs || null });
+            } else {
+                sections.push({ type: ls.type, title, left: ls, right: rs || null });
+            }
         });
 
         // Add remaining Right Sections
@@ -415,17 +340,18 @@ function ComparisonPrintView({ comparisonId }) {
             }
         });
 
-        const avgText = textSim.length ? Math.round(textSim.reduce((a, b) => a + b, 0) / textSim.length) : null;
-        const avgTable = tableSim.length ? Math.round(tableSim.reduce((a, b) => a + b, 0) / tableSim.length) : null;
-        const overall = (avgText !== null && avgTable !== null) ? Math.round((avgText + avgTable) / 2) : avgText || avgTable;
-
-        return {
-            alignedSections: sections,
-            summary: (data.diff_json?.summary && data.diff_json.summary.items && data.diff_json.summary.items.length > 0)
-                ? data.diff_json.summary
-                : { textRepetition: avgText, tableRepetition: avgTable, overallRepetition: overall, items: buildSummaryItems(sections) }
-        };
-    }, [buildSummaryItems, data]);
+        const summaryItems = data.diff_json?.summary?.items || [];
+        const textRepetition = data.similarity ?? data.diff_json?.summary?.textRepetition ?? null;
+
+        return {
+            alignedSections: sections,
+            summary: {
+                ...(data.diff_json?.summary || {}),
+                textRepetition,
+                items: summaryItems,
+            }
+        };
+    }, [data]);
 
     // Render Table Diff
     const renderSectionDiff = (section) => {
@@ -550,11 +476,14 @@ function ComparisonPrintView({ comparisonId }) {
                                 <span className="text-gray-500">年份:</span> <span className="font-bold">{data.year_a} vs {data.year_b}</span>
                             </div>
                             <div>
-                                <span className="text-gray-500">文字重复率:</span>
-                                <span className="font-bold ml-1">{summary.textRepetition ?? '-'}%</span>
-                            </div>
-                        </div>
-                    </div>
+                                <span className="text-gray-500">正文文字重复率:</span>
+                                <span className="font-bold ml-1">{summary.textRepetition ?? '-'}%</span>
+                            </div>
+                        </div>
+                        <p className="comparison-print-repetition-note">
+                            该指标来自后端比对结果，仅统计正文 text 章节；黄底只标记两版中的相同文本片段，不等同于总重复率。
+                        </p>
+                    </div>
 
                     <div className="comparison-print-findings break-inside-avoid">
                         <h3>发现问题</h3>
@@ -562,7 +491,7 @@ function ComparisonPrintView({ comparisonId }) {
                             {summary.items && summary.items.length > 0 ? (
                                 summary.items.map((item, idx) => <li key={idx}>{item}</li>)
                             ) : (
-                                <li>未检测到显著差异。</li>
+                                <li>暂无结构化差异摘要。</li>
                             )}
                         </ul>
                     </div>

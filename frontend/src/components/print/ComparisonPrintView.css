@@ -42,6 +42,13 @@
   font-size: 13px;
 }
 
+.comparison-print-repetition-note {
+  margin: 10px 0 0;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .comparison-print-findings {
   margin: -16px 0 28px;
   padding: 18px 22px;
