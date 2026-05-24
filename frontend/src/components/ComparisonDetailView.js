@@ -15,6 +15,7 @@ import StatusBadge from './common/StatusBadge';
 import { getAxiosFriendlyError } from '../utils/errorTranslator';
 import { buildComparisonEvidenceSummary } from '../utils/evidenceViewModel';
 import { resolveSafeReturnTo } from '../app/returnTo';
+import { buildComparisonFindingItems } from '../utils/comparisonFindings';
 
 const isTableHighlightPath = (path) =>
   path &&
@@ -158,8 +159,8 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
   }, [data]);
 
   // Aligned Sections Calculation (Ported Logic)
-  const { alignedSections, summary, textSectionMetrics } = useMemo(() => {
-    if (!data) return { alignedSections: [], summary: {}, textSectionMetrics: [] };
+  const { alignedSections, summary, textSectionMetrics, findingItems } = useMemo(() => {
+    if (!data) return { alignedSections: [], summary: {}, textSectionMetrics: [], findingItems: [] };
 
     const sections = [];
 
@@ -190,6 +191,12 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
     const summaryItems = data.diff_json?.summary?.items || [];
     const textRepetition = data.similarity ?? data.diff_json?.summary?.textRepetition ?? null;
 
+    const textSectionMetrics = getTextSectionMetrics(data);
+    const findingItems = buildComparisonFindingItems({
+      summaryItems,
+      textSectionMetrics,
+    });
+
     return {
       alignedSections: sections,
       summary: {
@@ -197,7 +204,8 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
         textRepetition,
         items: summaryItems,
       },
-      textSectionMetrics: getTextSectionMetrics(data),
+      textSectionMetrics,
+      findingItems,
     };
   }, [data]);
 
@@ -411,11 +419,7 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
           <div className="bg-white border border-gray-200 rounded p-4">
             <h3 className="font-bold text-gray-900 mb-2">发现问题</h3>
             <ul className="list-disc list-inside space-y-1 text-sm text-gray-700 font-serif-sc">
-              {summary.items && summary.items.length > 0 ? (
-                summary.items.map((item, idx) => <li key={idx}>{item}</li>)
-              ) : (
-                <li>暂无结构化差异摘要。</li>
-              )}
+              {findingItems.map((item, idx) => <li key={idx}>{item}</li>)}
             </ul>
           </div>
         </div>
