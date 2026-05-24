@@ -62,6 +62,11 @@ const buildIssueHighlightCells = (issues = []) => {
     return cells;
 };
 
+const getTextSectionMetrics = (data) => {
+    const metrics = data?.section_metrics?.text;
+    return Array.isArray(metrics) ? metrics : [];
+};
+
 // Helper for Table 3 Rows
 const getTable3Rows = (data) => {
     if (!data || !data.total || !data.total.results) return [];
@@ -286,8 +291,8 @@ function ComparisonPrintView({ comparisonId }) {
 
 
     // Aligned Sections and Summary calculation
-    const { alignedSections, summary } = useMemo(() => {
-        if (!data) return { alignedSections: [], summary: {} };
+    const { alignedSections, summary, textSectionMetrics } = useMemo(() => {
+        if (!data) return { alignedSections: [], summary: {}, textSectionMetrics: [] };
 
         const sections = [];
         const leftSections = data.left_content?.sections || [];
@@ -349,7 +354,8 @@ function ComparisonPrintView({ comparisonId }) {
                 ...(data.diff_json?.summary || {}),
                 textRepetition,
                 items: summaryItems,
-            }
+            },
+            textSectionMetrics: getTextSectionMetrics(data),
         };
     }, [data]);
 
@@ -484,7 +490,24 @@ function ComparisonPrintView({ comparisonId }) {
                             该指标来自后端比对结果，仅统计正文 text 章节；黄底只标记两版中的相同文本片段，不等同于总重复率。
                         </p>
                     </div>
-
+
+                    {textSectionMetrics.length > 0 && (
+                        <div className="comparison-print-section-metrics break-inside-avoid" aria-label="正文章节重复率明细">
+                            <div className="comparison-print-section-metrics__header">
+                                <h3>正文章节重复率明细</h3>
+                                <span>顶部数值为下列正文 text 章节的简单平均</span>
+                            </div>
+                            <div className="comparison-print-section-metrics__grid">
+                                {textSectionMetrics.map((metric, idx) => (
+                                    <div className="comparison-print-section-metric" key={`${metric.title || 'section'}-${idx}`}>
+                                        <span>{metric.title || `正文 ${idx + 1}`}</span>
+                                        <strong>{metric.similarity ?? '-'}%</strong>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
                     <div className="comparison-print-findings break-inside-avoid">
                         <h3>发现问题</h3>
                         <ul>

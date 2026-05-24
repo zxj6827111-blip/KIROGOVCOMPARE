@@ -57,6 +57,11 @@ const buildIssueHighlightCells = (issues = []) => {
   return cells;
 };
 
+const getTextSectionMetrics = (data) => {
+  const metrics = data?.section_metrics?.text;
+  return Array.isArray(metrics) ? metrics : [];
+};
+
 // Helper for Table 3 Rows (Ported)
 const getTable3Rows = (data) => {
   if (!data || !data.total || !data.total.results) return [];
@@ -153,8 +158,8 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
   }, [data]);
 
   // Aligned Sections Calculation (Ported Logic)
-  const { alignedSections, summary } = useMemo(() => {
-    if (!data) return { alignedSections: [], summary: {} };
+  const { alignedSections, summary, textSectionMetrics } = useMemo(() => {
+    if (!data) return { alignedSections: [], summary: {}, textSectionMetrics: [] };
 
     const sections = [];
 
@@ -192,6 +197,7 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
         textRepetition,
         items: summaryItems,
       },
+      textSectionMetrics: getTextSectionMetrics(data),
     };
   }, [data]);
 
@@ -384,6 +390,23 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
           <p className="comparison-repetition-note">
             该指标来自后端比对结果，仅统计正文 text 章节；黄底只标记两版中的相同文本片段，不等同于总重复率。
           </p>
+
+          {textSectionMetrics.length > 0 && (
+            <div className="comparison-section-metrics" aria-label="正文章节重复率明细">
+              <div className="comparison-section-metrics__header">
+                <h3>正文章节重复率明细</h3>
+                <span>顶部数值为下列正文 text 章节的简单平均</span>
+              </div>
+              <div className="comparison-section-metrics__grid">
+                {textSectionMetrics.map((metric, idx) => (
+                  <div className="comparison-section-metric" key={`${metric.title || 'section'}-${idx}`}>
+                    <span className="comparison-section-metric__title">{metric.title || `正文 ${idx + 1}`}</span>
+                    <strong>{metric.similarity ?? '-'}%</strong>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="bg-white border border-gray-200 rounded p-4">
             <h3 className="font-bold text-gray-900 mb-2">发现问题</h3>

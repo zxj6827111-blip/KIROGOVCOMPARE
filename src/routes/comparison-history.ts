@@ -977,6 +977,7 @@ router.get('/:id/result', authMiddleware, async (req: AuthRequest, res: Response
     const leftContent = leftReport!.parsedJson;
     const rightContent = rightReport!.parsedJson;
     const diffJson = parseDbJson(resultsRes.rows[0]?.diff_json);
+    const metrics = calculateReportMetrics(leftContent, rightContent);
 
     res.json({
       id: comparison.id,
@@ -989,6 +990,11 @@ router.get('/:id/result', authMiddleware, async (req: AuthRequest, res: Response
       right_content: rightContent,
       diff_json: diffJson,
       similarity: comparison.similarity,
+      section_metrics: {
+        text: metrics.textSectionMetrics,
+        average: metrics.similarity,
+        method: metrics.method,
+      },
       check_status: comparison.check_status,
       created_at: comparison.created_at,
     });

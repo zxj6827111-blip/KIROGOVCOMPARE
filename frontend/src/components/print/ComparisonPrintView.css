@@ -49,6 +49,63 @@
   line-height: 1.6;
 }
 
+.comparison-print-section-metrics {
+  margin: -12px 0 24px;
+  padding: 14px 18px;
+  border: 1px solid #dbeafe;
+  background: #f8fbff;
+}
+
+.comparison-print-section-metrics__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.comparison-print-section-metrics__header h3 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 16px;
+}
+
+.comparison-print-section-metrics__header span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.comparison-print-section-metrics__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.comparison-print-section-metric {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  font-size: 12px;
+}
+
+.comparison-print-section-metric span {
+  min-width: 0;
+  overflow: hidden;
+  color: #334155;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.comparison-print-section-metric strong {
+  flex: 0 0 auto;
+  color: #1d4ed8;
+  font-size: 14px;
+}
+
 .comparison-print-findings {
   margin: -16px 0 28px;
   padding: 18px 22px;
