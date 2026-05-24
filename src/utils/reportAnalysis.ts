@@ -11,7 +11,26 @@ interface ReportData {
     sections: Section[];
 }
 
-export const calculateReportMetrics = (leftData: any, rightData: any): { similarity: number, checkStatus: string | null } => {
+export interface TextSectionMetric {
+    title: string;
+    similarity: number;
+    oldLength: number;
+    newLength: number;
+}
+
+export interface ReportMetrics {
+    similarity: number;
+    checkStatus: string | null;
+    textSectionMetrics: TextSectionMetric[];
+    method: 'simple_average_text_sections';
+}
+
+const isNonReportTextSection = (title?: string): boolean => {
+    if (!title) return true;
+    return title !== '标题' && !title.includes('年度报告');
+};
+
+export const calculateReportMetrics = (leftData: any, rightData: any): ReportMetrics => {
     // 1. Align Sections (Logic from ComparisonDetailView.js)
     const sections: { title: string, oldSec?: Section, newSec?: Section }[] = [];
     const leftSections: Section[] = leftData?.sections || [];
@@ -28,14 +47,23 @@ export const calculateReportMetrics = (leftData: any, rightData: any): { similar
     // 2. Similarity Average (Logic from ComparisonDetailView.js)
     let totalTextSim = 0;
     let textSectionsCount = 0;
+    const textSectionMetrics: TextSectionMetric[] = [];
 
     sections.forEach(sec => {
-        if (sec.title === '标题' || sec.title?.includes('年度报告')) return;
+        if (!isNonReportTextSection(sec.title)) return;
 
         if (sec.oldSec?.type === 'text' && sec.newSec?.type === 'text') {
-            const sim = calculateTextSimilarity(sec.oldSec.content || '', sec.newSec.content || '');
+            const oldText = sec.oldSec.content || '';
+            const newText = sec.newSec.content || '';
+            const sim = calculateTextSimilarity(oldText, newText);
             totalTextSim += sim;
             textSectionsCount++;
+            textSectionMetrics.push({
+                title: sec.title,
+                similarity: sim,
+                oldLength: oldText.length,
+                newLength: newText.length,
+            });
         }
     });
 
@@ -111,5 +139,10 @@ export const calculateReportMetrics = (leftData: any, rightData: any): { similar
     }
     // If no tables found, checkStatus remains null
 
-    return { similarity: avgTextRep, checkStatus };
+    return {
+        similarity: avgTextRep,
+        checkStatus,
+        textSectionMetrics,
+        method: 'simple_average_text_sections',
+    };
 };
