@@ -21,6 +21,44 @@ describe('section alignment', () => {
     }));
   });
 
+  test('normalizes overall-summary title aliases', () => {
+    expect(normalizeComparisonSectionTitle('一、总体情况', 'text')).toBe(
+      normalizeComparisonSectionTitle('一、总体工作情况', 'text')
+    );
+    expect(normalizeComparisonSectionTitle('一、总体情况', 'text')).toBe(
+      normalizeComparisonSectionTitle('总体情况', 'text')
+    );
+    expect(normalizeComparisonSectionTitle('一、总体情况', 'text')).toBe(
+      normalizeComparisonSectionTitle('政府信息公开工作总体情况', 'text')
+    );
+  });
+
+  test('aligns overall-summary aliases into one row', () => {
+    const rows = alignComparisonSections(
+      [{ type: 'text', title: '一、总体情况', content: '2024 总体情况' }],
+      [{ type: 'text', title: '一、总体工作情况', content: '2025 总体工作情况' }]
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toEqual(expect.objectContaining({
+      oldSec: expect.objectContaining({ content: '2024 总体情况' }),
+      newSec: expect.objectContaining({ content: '2025 总体工作情况' }),
+    }));
+  });
+
+  test('aligns unnumbered overall-summary sections with numbered first sections', () => {
+    const rows = alignComparisonSections(
+      [{ type: 'text', title: '总体情况', content: '无序号总体情况' }],
+      [{ type: 'text', title: '一、总体情况', content: '有序号总体情况' }]
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toEqual(expect.objectContaining({
+      oldSec: expect.objectContaining({ content: '无序号总体情况' }),
+      newSec: expect.objectContaining({ content: '有序号总体情况' }),
+    }));
+  });
+
   test('ignores parenthetical title annotations when aligning sections', () => {
     expect(normalizeComparisonSectionTitle('三、收到和处理政府信息公开申请情况（数据准确、要素齐全）', 'table_3')).toBe(
       normalizeComparisonSectionTitle('三、收到和处理政府信息公开申请情况', 'table_3')

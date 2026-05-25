@@ -22,24 +22,31 @@ const getTitleParts = (title) => {
   return { compact, ordinal, body };
 };
 
+const normalizeTitleBody = (body) =>
+  String(body || '')
+    .replace(/存在的主要问题[及和]改进情况/g, '存在的主要问题改进情况')
+    .replace(/^(?:政府信息公开)?(?:工作)?总体(?:工作)?情况$/g, '总体情况');
+
 export const normalizeComparisonSectionTitle = (title, type = '') => {
   const { compact, ordinal, body } = getTitleParts(title);
   if (!compact) return `${type || 'section'}:empty`;
   if (compact === '标题' || compact.includes('年度报告')) return `title:${compact}`;
 
-  const normalizedBody = body
-    .replace(/存在的主要问题[及和]改进情况/g, '存在的主要问题改进情况');
+  const normalizedBody = normalizeTitleBody(body);
   if (/^table_[234]$/.test(type || '')) {
     return `${type}:${normalizedBody || body || compact}`;
   }
 
-  return [type || 'section', ordinal, normalizedBody || compact].join(':');
+  const normalizedOrdinal = ordinal || (normalizedBody === '总体情况' ? '一' : '');
+  return [type || 'section', normalizedOrdinal, normalizedBody || compact].join(':');
 };
 
 const getSectionOrder = (title) => {
-  const { compact, ordinal } = getTitleParts(title);
+  const { compact, ordinal, body } = getTitleParts(title);
   if (compact === '标题' || compact.includes('年度报告')) return -1;
-  const index = CHINESE_NUMERAL_ORDER.indexOf(ordinal);
+  const normalizedBody = normalizeTitleBody(body);
+  const normalizedOrdinal = ordinal || (normalizedBody === '总体情况' ? '一' : '');
+  const index = CHINESE_NUMERAL_ORDER.indexOf(normalizedOrdinal);
   return index >= 0 ? index + 1 : 99;
 };
 
