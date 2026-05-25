@@ -7,7 +7,13 @@ import { ComparisonReportData } from '../services/PdfExportService';
 import { calculateDiffs, renderDiffHtml } from '../utils/diffRenderer';
 import { compareRegionsByCityManagementOrder } from '../utils/regionSort';
 import { hasParsedContent } from '../utils/parsedContent';
-import { alignComparisonSections, normalizeComparisonSectionTitle } from '../utils/sectionAlignment';
+import {
+  alignComparisonSections,
+  getComparisonSectionAlignmentKey,
+  normalizeComparisonSectionTitle,
+  SectionAlignmentRule,
+} from '../utils/sectionAlignment';
+import { buildSectionAlignmentSuggestions } from '../utils/sectionAlignmentSuggestions';
 
 const router = express.Router();
 
@@ -83,6 +89,32 @@ interface ActiveParsedReport {
   notReadyReason: string | null;
 }
 
+interface ComparisonRow {
+  id: number;
+  region_id: number;
+  region_name?: string;
+  year_a: number;
+  year_b: number;
+  left_report_id: number;
+  right_report_id: number;
+  similarity?: number | null;
+  check_status?: string | null;
+  created_at?: string;
+}
+
+interface SectionAlignmentRuleRow {
+  id: number;
+  section_type: string;
+  left_key: string;
+  right_key: string;
+  canonical_key: string;
+  left_title: string | null;
+  right_title: string | null;
+  reason: string | null;
+  confidence: number;
+  enabled: boolean;
+}
+
 async function fetchActiveParsedReport(reportId: number): Promise<ActiveParsedReport | null> {
   const result = await pool.query(
     `SELECT
@@ -123,6 +155,76 @@ async function fetchActiveParsedReport(reportId: number): Promise<ActiveParsedRe
     ready,
     notReadyReason,
   };
+}
+
+async function fetchComparisonById(comparisonId: number): Promise<ComparisonRow | null> {
+  const comparisonsRes = await pool.query(`
+    SELECT c.*, r.name as region_name
+    FROM comparisons c
+    LEFT JOIN regions r ON c.region_id = r.id
+    WHERE c.id = $1
+  `, [comparisonId]);
+  return comparisonsRes.rows[0] || null;
+}
+
+async function assertComparisonAccess(req: AuthRequest, comparison: ComparisonRow): Promise<boolean> {
+  const user = req.user;
+  if (!user || !user.dataScope || !Array.isArray(user.dataScope.regions) || user.dataScope.regions.length === 0) {
+    return true;
+  }
+
+  const scopeNames = user.dataScope.regions;
+  const scopeIdsQuery = `
+    WITH RECURSIVE allowed_ids AS (
+        SELECT id FROM regions WHERE name = ANY($1::text[])
+        UNION ALL
+        SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
+    )
+    SELECT id FROM allowed_ids
+  `;
+  const allowedRowsRes = await pool.query(scopeIdsQuery, [scopeNames]);
+  const allowedIds = allowedRowsRes.rows.map((row: any) => Number(row.id));
+  return allowedIds.includes(Number(comparison.region_id));
+}
+
+function canManageSectionAlignmentRules(req: AuthRequest): boolean {
+  const permissions = req.user?.permissions || {};
+  return permissions.system_admin === true || permissions.manage_jobs === true || permissions.upload_reports === true;
+}
+
+function serializeSectionAlignmentRule(row: SectionAlignmentRuleRow): SectionAlignmentRule & Record<string, any> {
+  return {
+    id: Number(row.id),
+    sectionType: row.section_type,
+    leftKey: row.left_key,
+    rightKey: row.right_key,
+    canonicalKey: row.canonical_key,
+    leftTitle: row.left_title,
+    rightTitle: row.right_title,
+    reason: row.reason,
+    confidence: Number(row.confidence || 0),
+    enabled: row.enabled,
+  };
+}
+
+async function fetchEnabledSectionAlignmentRules(): Promise<Array<SectionAlignmentRule & Record<string, any>>> {
+  const result = await pool.query(`
+    SELECT
+      id,
+      section_type,
+      left_key,
+      right_key,
+      canonical_key,
+      left_title,
+      right_title,
+      reason,
+      confidence,
+      enabled
+    FROM section_alignment_rules
+    WHERE enabled = TRUE
+    ORDER BY id ASC
+  `);
+  return result.rows.map(serializeSectionAlignmentRule);
 }
 
 function collectNotReadySides(
@@ -841,7 +943,8 @@ router.post('/create', authMiddleware, async (req: AuthRequest, res: Response) =
       });
     }
 
-    const metrics = calculateReportMetrics(leftReport.parsedJson, rightReport.parsedJson);
+    const alignmentRules = await fetchEnabledSectionAlignmentRules();
+    const metrics = calculateReportMetrics(leftReport.parsedJson, rightReport.parsedJson, alignmentRules);
     const similarity = metrics.similarity;
     let checkStatus: string | null = metrics.checkStatus;
 
@@ -921,40 +1024,19 @@ router.get('/:id/result', authMiddleware, async (req: AuthRequest, res: Response
     }
 
     // Get comparison info
-    const comparisonsRes = await pool.query(`
-      SELECT c.*, r.name as region_name
-      FROM comparisons c
-      LEFT JOIN regions r ON c.region_id = r.id
-      WHERE c.id = $1
-    `, [comparisonId]);
-    const comparison = comparisonsRes.rows[0];
+    const comparison = await fetchComparisonById(comparisonId);
 
     if (!comparison) {
       return res.status(404).json({ error: '比较不存在' });
     }
 
     // DATA SCOPE CHECK
-    const user = req.user;
-    if (user && user.dataScope && Array.isArray(user.dataScope.regions) && user.dataScope.regions.length > 0) {
-      const scopeNames = user.dataScope.regions;
-      const scopeIdsQuery = `
-        WITH RECURSIVE allowed_ids AS (
-            SELECT id FROM regions WHERE name = ANY($1::text[])
-            UNION ALL
-            SELECT r.id FROM regions r JOIN allowed_ids p ON r.parent_id = p.id
-        )
-        SELECT id FROM allowed_ids
-      `;
-      try {
-        const allowedRowsRes = await pool.query(scopeIdsQuery, [scopeNames]);
-        const allowedIds = allowedRowsRes.rows.map((row: any) => row.id);
-        if (!allowedIds.includes(Number(comparison.region_id))) {
-          return res.status(403).json({ error: '无权限访问该地区' });
-        }
-      } catch (e) {
-        console.error('Error calculating scope IDs in comparison result:', e);
-        return res.status(403).json({ error: '无权限访问该地区' });
-      }
+    try {
+      const hasAccess = await assertComparisonAccess(req, comparison);
+      if (!hasAccess) return res.status(403).json({ error: '无权限访问该地区' });
+    } catch (e) {
+      console.error('Error calculating scope IDs in comparison result:', e);
+      return res.status(403).json({ error: '无权限访问该地区' });
     }
 
     // Get content from published active versions only.
@@ -978,7 +1060,8 @@ router.get('/:id/result', authMiddleware, async (req: AuthRequest, res: Response
     const leftContent = leftReport!.parsedJson;
     const rightContent = rightReport!.parsedJson;
     const diffJson = parseDbJson(resultsRes.rows[0]?.diff_json);
-    const metrics = calculateReportMetrics(leftContent, rightContent);
+    const alignmentRules = await fetchEnabledSectionAlignmentRules();
+    const metrics = calculateReportMetrics(leftContent, rightContent, alignmentRules);
 
     res.json({
       id: comparison.id,
@@ -989,8 +1072,10 @@ router.get('/:id/result', authMiddleware, async (req: AuthRequest, res: Response
       right_report_id: comparison.right_report_id,
       left_content: leftContent,
       right_content: rightContent,
+      alignment_rules: alignmentRules,
       diff_json: diffJson,
-      similarity: comparison.similarity,
+      similarity: metrics.similarity,
+      stored_similarity: comparison.similarity,
       section_metrics: {
         text: metrics.textSectionMetrics,
         average: metrics.similarity,
@@ -1002,6 +1087,154 @@ router.get('/:id/result', authMiddleware, async (req: AuthRequest, res: Response
   } catch (error) {
     console.error('Error fetching comparison result:', error);
     res.status(500).json({ error: '获取比对结果失败' });
+  }
+});
+
+/**
+ * GET /api/comparisons/:id/alignment-suggestions
+ * Generate safe title-alignment candidates from currently unpaired sections.
+ */
+router.get('/:id/alignment-suggestions', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const comparisonId = Number(req.params.id);
+    if (!comparisonId || Number.isNaN(comparisonId)) {
+      return res.status(400).json({ error: '无效的比对ID' });
+    }
+    if (!canManageSectionAlignmentRules(req)) {
+      return res.status(403).json({ error: '权限不足，无法保存智能对齐规则' });
+    }
+
+    const comparison = await fetchComparisonById(comparisonId);
+    if (!comparison) {
+      return res.status(404).json({ error: '比较不存在' });
+    }
+
+    try {
+      const hasAccess = await assertComparisonAccess(req, comparison);
+      if (!hasAccess) return res.status(403).json({ error: '无权限访问该地区' });
+    } catch (e) {
+      console.error('Error calculating scope IDs in comparison alignment suggestions:', e);
+      return res.status(403).json({ error: '无权限访问该地区' });
+    }
+
+    const leftReport = await fetchActiveParsedReport(Number(comparison.left_report_id));
+    const rightReport = await fetchActiveParsedReport(Number(comparison.right_report_id));
+    const notReadySides = collectNotReadySides(leftReport, rightReport);
+    if (notReadySides.length > 0) {
+      return res.status(409).json({
+        error: '比对内容尚未就绪：报告未发布或解析内容为空',
+        error_code: 'COMPARISON_CONTENT_NOT_READY',
+        details: { not_ready_sides: notReadySides },
+      });
+    }
+
+    const alignmentRules = await fetchEnabledSectionAlignmentRules();
+    const suggestions = buildSectionAlignmentSuggestions(
+      leftReport!.parsedJson?.sections || [],
+      rightReport!.parsedJson?.sections || [],
+      alignmentRules
+    );
+
+    res.json({
+      comparison_id: comparisonId,
+      suggestions,
+      active_rule_count: alignmentRules.length,
+    });
+  } catch (error) {
+    console.error('Error building section alignment suggestions:', error);
+    res.status(500).json({ error: '生成智能对齐建议失败' });
+  }
+});
+
+/**
+ * POST /api/comparisons/:id/alignment-rules
+ * Persist confirmed title-alignment rules for future comparisons.
+ */
+router.post('/:id/alignment-rules', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const comparisonId = Number(req.params.id);
+    if (!comparisonId || Number.isNaN(comparisonId)) {
+      return res.status(400).json({ error: '无效的比对ID' });
+    }
+
+    const comparison = await fetchComparisonById(comparisonId);
+    if (!comparison) {
+      return res.status(404).json({ error: '比较不存在' });
+    }
+
+    try {
+      const hasAccess = await assertComparisonAccess(req, comparison);
+      if (!hasAccess) return res.status(403).json({ error: '无权限访问该地区' });
+    } catch (e) {
+      console.error('Error calculating scope IDs in comparison alignment rules:', e);
+      return res.status(403).json({ error: '无权限访问该地区' });
+    }
+
+    const rawSuggestions = Array.isArray(req.body?.suggestions) ? req.body.suggestions.slice(0, 50) : [];
+    if (rawSuggestions.length === 0) {
+      return res.status(400).json({ error: '没有可保存的对齐建议' });
+    }
+
+    let savedCount = 0;
+    for (const item of rawSuggestions) {
+      const sectionType = String(item?.sectionType || item?.section_type || '').trim();
+      const leftKey = String(item?.leftKey || item?.left_key || '').trim();
+      const rightKey = String(item?.rightKey || item?.right_key || '').trim();
+      const canonicalKey = String(item?.canonicalKey || item?.canonical_key || '').trim();
+      if (!sectionType || !leftKey || !rightKey || !canonicalKey || leftKey === rightKey) continue;
+
+      const orderedKeys = [leftKey, rightKey].sort();
+      const confidence = Math.max(0, Math.min(100, Number(item?.confidence || 80)));
+      await pool.query(`
+        INSERT INTO section_alignment_rules (
+          section_type,
+          left_key,
+          right_key,
+          canonical_key,
+          left_title,
+          right_title,
+          reason,
+          confidence,
+          source_comparison_id,
+          created_by,
+          enabled,
+          created_at,
+          updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE, NOW(), NOW())
+        ON CONFLICT (section_type, left_key, right_key)
+        DO UPDATE SET
+          canonical_key = EXCLUDED.canonical_key,
+          left_title = EXCLUDED.left_title,
+          right_title = EXCLUDED.right_title,
+          reason = EXCLUDED.reason,
+          confidence = EXCLUDED.confidence,
+          source_comparison_id = EXCLUDED.source_comparison_id,
+          enabled = TRUE,
+          updated_at = NOW()
+      `, [
+        sectionType,
+        orderedKeys[0],
+        orderedKeys[1],
+        canonicalKey,
+        String(item?.leftTitle || item?.left_title || '').slice(0, 500),
+        String(item?.rightTitle || item?.right_title || '').slice(0, 500),
+        String(item?.reason || '页面智能对齐确认').slice(0, 500),
+        confidence,
+        comparisonId,
+        req.user?.id || null,
+      ]);
+      savedCount++;
+    }
+
+    res.json({
+      success: true,
+      saved_count: savedCount,
+      alignment_rules: await fetchEnabledSectionAlignmentRules(),
+    });
+  } catch (error) {
+    console.error('Error saving section alignment rules:', error);
+    res.status(500).json({ error: '保存智能对齐规则失败' });
   }
 });
 
@@ -1122,7 +1355,8 @@ router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Res
 
     const [olderReport, newerReport] = (comparison.year_a || 0) < (comparison.year_b || 0) ? [reportA, reportB] : [reportB, reportA];
 
-    const sections: any[] = alignComparisonSections(olderReport.data.sections, newerReport.data.sections);
+    const alignmentRules = await fetchEnabledSectionAlignmentRules();
+    const sections: any[] = alignComparisonSections(olderReport.data.sections, newerReport.data.sections, alignmentRules);
 
     sections.forEach(sec => {
       if (sec.oldSec?.type === 'text' && sec.newSec?.type === 'text') {
@@ -1138,9 +1372,13 @@ router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Res
         if (diffData.summary) summary = diffData.summary;
         if (diffData.sections) {
           sections.forEach(sec => {
-            const sectionKey = normalizeComparisonSectionTitle(sec.title, sec.oldSec?.type || sec.newSec?.type);
+            const sectionKey = getComparisonSectionAlignmentKey(
+              sec.title,
+              sec.oldSec?.type || sec.newSec?.type,
+              alignmentRules
+            );
             const ds = diffData.sections.find((d: any) =>
-              normalizeComparisonSectionTitle(d.title, d.type || sec.oldSec?.type || sec.newSec?.type) === sectionKey
+              getComparisonSectionAlignmentKey(d.title, d.type || sec.oldSec?.type || sec.newSec?.type, alignmentRules) === sectionKey
             );
             if (ds?.diffTable) sec.diffTable = ds.diffTable;
           });

@@ -1,5 +1,5 @@
 import { calculateTextSimilarity } from './diffRenderer';
-import { alignComparisonSections } from './sectionAlignment';
+import { alignComparisonSections, SectionAlignmentRule } from './sectionAlignment';
 
 interface Section {
     title: string;
@@ -31,11 +31,15 @@ const isNonReportTextSection = (title?: string): boolean => {
     return title !== '标题' && !title.includes('年度报告');
 };
 
-export const calculateReportMetrics = (leftData: any, rightData: any): ReportMetrics => {
+export const calculateReportMetrics = (
+    leftData: any,
+    rightData: any,
+    alignmentRules: SectionAlignmentRule[] = []
+): ReportMetrics => {
     // 1. Align Sections (Logic from ComparisonDetailView.js)
     const leftSections: Section[] = leftData?.sections || [];
     const rightSections: Section[] = rightData?.sections || [];
-    const sections = alignComparisonSections(leftSections, rightSections);
+    const sections = alignComparisonSections(leftSections, rightSections, alignmentRules);
 
     // 2. Similarity Average (Logic from ComparisonDetailView.js)
     let totalTextSim = 0;

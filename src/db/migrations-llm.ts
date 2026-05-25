@@ -118,6 +118,27 @@ CREATE TABLE IF NOT EXISTS comparison_results (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS section_alignment_rules (
+  id BIGSERIAL PRIMARY KEY,
+  section_type VARCHAR(50) NOT NULL,
+  left_key TEXT NOT NULL,
+  right_key TEXT NOT NULL,
+  canonical_key TEXT NOT NULL,
+  left_title TEXT,
+  right_title TEXT,
+  reason TEXT,
+  confidence INTEGER NOT NULL DEFAULT 80,
+  source_comparison_id BIGINT REFERENCES comparisons(id) ON DELETE SET NULL,
+  created_by BIGINT,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(section_type, left_key, right_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_section_alignment_rules_enabled
+  ON section_alignment_rules(enabled, section_type);
+
 CREATE TABLE IF NOT EXISTS jobs (
   id BIGSERIAL PRIMARY KEY,
   report_id BIGINT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
