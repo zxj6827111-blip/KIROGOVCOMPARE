@@ -76,10 +76,22 @@ describe('comparison section alignment', () => {
       normalizeComparisonSectionTitle('五、政府信息公开工作存在的主要问题及改进情况', 'text')
     );
     expect(normalizeComparisonSectionTitle('五、存在的主要问题及改进情况', 'text')).toBe(
+      normalizeComparisonSectionTitle('六、存在的问题及改进情况', 'text')
+    );
+    expect(normalizeComparisonSectionTitle('五、存在的主要问题及改进情况', 'text')).toBe(
       normalizeComparisonSectionTitle('五、存在问题与改进方向', 'text')
     );
     expect(normalizeComparisonSectionTitle('五、存在的主要问题及改进情况', 'text')).toBe(
+      normalizeComparisonSectionTitle('五、存在的主要问题及改进思路', 'text')
+    );
+    expect(normalizeComparisonSectionTitle('五、存在的主要问题及改进情况', 'text')).toBe(
+      normalizeComparisonSectionTitle('五、存在主要问题及改进情况', 'text')
+    );
+    expect(normalizeComparisonSectionTitle('五、存在的主要问题及改进情况', 'text')).toBe(
       normalizeComparisonSectionTitle('五、信息公开工作存在的主要问题及改进措施', 'text')
+    );
+    expect(normalizeComparisonSectionTitle('五、存在的主要问题及改进情况', 'text')).toBe(
+      normalizeComparisonSectionTitle('五、政务信息工作存在主要问题和改进情况', 'text')
     );
   });
 
@@ -90,14 +102,26 @@ describe('comparison section alignment', () => {
     expect(normalizeComparisonSectionTitle('二、主动公开政府信息情况', 'table_2')).toBe(
       normalizeComparisonSectionTitle('二、本年度主动公开政府信息情况', 'table_2')
     );
+    expect(normalizeComparisonSectionTitle('二、主动公开政府信息情况', 'table_2')).toBe(
+      normalizeComparisonSectionTitle('二、主动公开政务信息情况', 'table_2')
+    );
+    expect(normalizeComparisonSectionTitle('二、主动公开政府信息情况', 'table_2')).toBe(
+      normalizeComparisonSectionTitle('二、主动公开政府信息的情况', 'table_2')
+    );
     expect(normalizeComparisonSectionTitle('三、收到和处理政府信息公开申请情况', 'table_3')).toBe(
       normalizeComparisonSectionTitle('三、行政机关收到和处理信息公开申请情况', 'table_3')
+    );
+    expect(normalizeComparisonSectionTitle('三、收到和处理政府信息公开申请情况', 'table_3')).toBe(
+      normalizeComparisonSectionTitle('三、收到和处理政府信息公开申请情况统计表', 'table_3')
     );
     expect(normalizeComparisonSectionTitle('四、政府信息公开行政复议、行政诉讼情况', 'table_4')).toBe(
       normalizeComparisonSectionTitle('四、因政府信息公开工作被行政复议、提起行政诉讼情况', 'table_4')
     );
     expect(normalizeComparisonSectionTitle('四、政府信息公开行政复议、行政诉讼情况', 'table_4')).toBe(
       normalizeComparisonSectionTitle('四、政府信息公开工作行政复议、行政诉讼情况', 'table_4')
+    );
+    expect(normalizeComparisonSectionTitle('四、政府信息公开行政复议、行政诉讼情况', 'table_4')).toBe(
+      normalizeComparisonSectionTitle('四、被申请行政复议、提起行政诉讼情况', 'table_4')
     );
   });
 
