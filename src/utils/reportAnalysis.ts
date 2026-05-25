@@ -1,4 +1,5 @@
 import { calculateTextSimilarity } from './diffRenderer';
+import { alignComparisonSections } from './sectionAlignment';
 
 interface Section {
     title: string;
@@ -32,17 +33,9 @@ const isNonReportTextSection = (title?: string): boolean => {
 
 export const calculateReportMetrics = (leftData: any, rightData: any): ReportMetrics => {
     // 1. Align Sections (Logic from ComparisonDetailView.js)
-    const sections: { title: string, oldSec?: Section, newSec?: Section }[] = [];
     const leftSections: Section[] = leftData?.sections || [];
     const rightSections: Section[] = rightData?.sections || [];
-
-    leftSections.forEach(s => sections.push({ title: s.title, oldSec: s }));
-
-    rightSections.forEach(s => {
-        const existing = sections.find(a => a.title === s.title);
-        if (existing) existing.newSec = s;
-        else sections.push({ title: s.title, newSec: s });
-    });
+    const sections = alignComparisonSections(leftSections, rightSections);
 
     // 2. Similarity Average (Logic from ComparisonDetailView.js)
     let totalTextSim = 0;

@@ -16,6 +16,7 @@ import { getAxiosFriendlyError } from '../utils/errorTranslator';
 import { buildComparisonEvidenceSummary } from '../utils/evidenceViewModel';
 import { resolveSafeReturnTo } from '../app/returnTo';
 import { buildComparisonFindingItems } from '../utils/comparisonFindings';
+import { alignComparisonSections } from '../utils/comparisonSectionAlignment';
 
 const isTableHighlightPath = (path) =>
   path &&
@@ -162,32 +163,9 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
   const { alignedSections, summary, textSectionMetrics, findingItems } = useMemo(() => {
     if (!data) return { alignedSections: [], summary: {}, textSectionMetrics: [], findingItems: [] };
 
-    const sections = [];
-
-    // Process Left (Old)
     const leftSections = data.left_content?.sections || [];
-    leftSections.forEach(s => sections.push({ title: s.title, oldSec: s }));
-
-    // Process Right (New)
     const rightSections = data.right_content?.sections || [];
-    rightSections.forEach(s => {
-      const existing = sections.find(a => a.title === s.title);
-      if (existing) existing.newSec = s;
-      else sections.push({ title: s.title, newSec: s });
-    });
-
-    // Sort Logic
-    const numerals = ['一', '二', '三', '四', '五', '六', '七', '八'];
-    sections.sort((a, b) => {
-      const isTitleA = a.title === '标题' || a.title?.includes('年度报告');
-      const isTitleB = b.title === '标题' || b.title?.includes('年度报告');
-      if (isTitleA && !isTitleB) return -1;
-      if (!isTitleA && isTitleB) return 1;
-      const idxA = numerals.findIndex(n => a.title?.includes(n));
-      const idxB = numerals.findIndex(n => b.title?.includes(n));
-      return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB);
-    });
-
+    const sections = alignComparisonSections(leftSections, rightSections);
     const summaryItems = data.diff_json?.summary?.items || [];
     const textRepetition = data.similarity ?? data.diff_json?.summary?.textRepetition ?? null;
 
