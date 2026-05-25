@@ -1,7 +1,11 @@
 const CHINESE_NUMERAL_ORDER = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+const TOP_LEVEL_HEADING_PATTERN = /(^|\r?\n)\s*([一二三四五六七八九十]+)[、.．]\s*([^\r\n]{2,80})\s*(?=\r?\n|$)/g;
+
+const stripParentheticalAnnotations = (title) =>
+  String(title || '').replace(/[（(][^）)]*[）)]/g, '');
 
 const normalizeTitleText = (title) =>
-  String(title || '')
+  stripParentheticalAnnotations(title)
     .normalize('NFKC')
     .replace(/[\u200b-\u200d\ufeff]/g, '')
     .replace(/\s+/g, '')
@@ -25,6 +29,9 @@ export const normalizeComparisonSectionTitle = (title, type = '') => {
 
   const normalizedBody = body
     .replace(/存在的主要问题[及和]改进情况/g, '存在的主要问题改进情况');
+  if (/^table_[234]$/.test(type || '')) {
+    return `${type}:${normalizedBody || body || compact}`;
+  }
 
   return [type || 'section', ordinal, normalizedBody || compact].join(':');
 };
@@ -34,6 +41,67 @@ const getSectionOrder = (title) => {
   if (compact === '标题' || compact.includes('年度报告')) return -1;
   const index = CHINESE_NUMERAL_ORDER.indexOf(ordinal);
   return index >= 0 ? index + 1 : 99;
+};
+
+const isExpandableTextSection = (section) => {
+  if (!section || (section.type && section.type !== 'text')) return false;
+  const { compact, ordinal } = getTitleParts(section.title);
+  return !ordinal || compact === '标题' || compact.includes('年度报告');
+};
+
+const findEmbeddedHeadings = (content) => {
+  const text = String(content || '');
+  const headings = [];
+  let match;
+  TOP_LEVEL_HEADING_PATTERN.lastIndex = 0;
+
+  while ((match = TOP_LEVEL_HEADING_PATTERN.exec(text))) {
+    const headingStart = match.index + match[1].length;
+    headings.push({
+      title: `${match[2]}、${match[3].trim()}`,
+      headingStart,
+      bodyStart: match.index + match[0].length,
+    });
+  }
+
+  return headings;
+};
+
+const expandEmbeddedTextSections = (sections = []) => {
+  const expanded = [];
+
+  sections.forEach((section) => {
+    const content = String(section?.content || '');
+    const headings = isExpandableTextSection(section) ? findEmbeddedHeadings(content) : [];
+
+    if (headings.length === 0) {
+      expanded.push(section);
+      return;
+    }
+
+    const preface = content.slice(0, headings[0].headingStart).trim();
+    if (preface) {
+      expanded.push({
+        ...section,
+        content: preface,
+      });
+    }
+
+    headings.forEach((heading, headingIndex) => {
+      const nextHeading = headings[headingIndex + 1];
+      const sectionContent = content
+        .slice(heading.bodyStart, nextHeading ? nextHeading.headingStart : content.length)
+        .trim();
+
+      expanded.push({
+        ...section,
+        title: heading.title,
+        content: sectionContent,
+      });
+    });
+  });
+
+  return expanded;
 };
 
 const createRow = (section, side, index) => {
@@ -57,6 +125,8 @@ const createRow = (section, side, index) => {
 };
 
 export const alignComparisonSections = (leftSections = [], rightSections = []) => {
+  const normalizedLeftSections = expandEmbeddedTextSections(leftSections);
+  const normalizedRightSections = expandEmbeddedTextSections(rightSections);
   const rows = [];
   const rowsByKey = new Map();
 
@@ -66,14 +136,14 @@ export const alignComparisonSections = (leftSections = [], rightSections = []) =
     rowsByKey.set(key, existingRows);
   };
 
-  leftSections.forEach((section, index) => {
+  normalizedLeftSections.forEach((section, index) => {
     const key = normalizeComparisonSectionTitle(section?.title, section?.type);
     const row = createRow(section, 'left', index);
     rows.push(row);
     rememberRow(key, row);
   });
 
-  rightSections.forEach((section, index) => {
+  normalizedRightSections.forEach((section, index) => {
     const key = normalizeComparisonSectionTitle(section?.title, section?.type);
     const matchingRow = (rowsByKey.get(key) || []).find((row) => !row.newSec);
 
