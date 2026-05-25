@@ -166,7 +166,14 @@ export async function authMiddleware(req: AuthRequest, res: Response, next: Next
     req.user = {
       id: 1,
       username: 'ci-test-user',
-      permissions: { upload_reports: true, view_reports: true, manage_users: true, manage_regions: true, manage_jobs: true },
+      permissions: {
+        upload_reports: true,
+        view_reports: true,
+        manage_users: true,
+        manage_regions: true,
+        manage_jobs: true,
+        delete_reports: true,
+      },
       dataScope: {}
     };
     next();

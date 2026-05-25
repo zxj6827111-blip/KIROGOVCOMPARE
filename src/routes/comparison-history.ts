@@ -7,6 +7,7 @@ import { ComparisonReportData } from '../services/PdfExportService';
 import { calculateDiffs, renderDiffHtml } from '../utils/diffRenderer';
 import { compareRegionsByCityManagementOrder } from '../utils/regionSort';
 import { hasParsedContent } from '../utils/parsedContent';
+import { alignComparisonSections, normalizeComparisonSectionTitle } from '../utils/sectionAlignment';
 
 const router = express.Router();
 
@@ -1121,25 +1122,7 @@ router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Res
 
     const [olderReport, newerReport] = (comparison.year_a || 0) < (comparison.year_b || 0) ? [reportA, reportB] : [reportB, reportA];
 
-    const sections: any[] = [];
-    olderReport.data.sections.forEach((s: any) => sections.push({ title: s.title, oldSec: s }));
-    newerReport.data.sections.forEach((s: any) => {
-      const existing = sections.find(a => a.title === s.title);
-      if (existing) existing.newSec = s;
-      else sections.push({ title: s.title, newSec: s });
-    });
-
-    // Sort
-    const numerals = ['一', '二', '三', '四', '五', '六', '七', '八'];
-    sections.sort((a, b) => {
-      const isTitleA = a.title === '标题' || a.title.includes('年度报告');
-      const isTitleB = b.title === '标题' || b.title.includes('年度报告');
-      if (isTitleA && !isTitleB) return -1;
-      if (!isTitleA && isTitleB) return 1;
-      const idxA = numerals.findIndex(n => a.title.includes(n));
-      const idxB = numerals.findIndex(n => b.title.includes(n));
-      return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB);
-    });
+    const sections: any[] = alignComparisonSections(olderReport.data.sections, newerReport.data.sections);
 
     sections.forEach(sec => {
       if (sec.oldSec?.type === 'text' && sec.newSec?.type === 'text') {
@@ -1155,7 +1138,10 @@ router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Res
         if (diffData.summary) summary = diffData.summary;
         if (diffData.sections) {
           sections.forEach(sec => {
-            const ds = diffData.sections.find((d: any) => d.title === sec.title);
+            const sectionKey = normalizeComparisonSectionTitle(sec.title, sec.oldSec?.type || sec.newSec?.type);
+            const ds = diffData.sections.find((d: any) =>
+              normalizeComparisonSectionTitle(d.title, d.type || sec.oldSec?.type || sec.newSec?.type) === sectionKey
+            );
             if (ds?.diffTable) sec.diffTable = ds.diffTable;
           });
         }

@@ -40,4 +40,28 @@ describe('calculateReportMetrics', () => {
       })
     );
   });
+
+  test('calculates fifth-section metrics when titles use 及 and 和 variants', () => {
+    const left = {
+      sections: [
+        { title: '五、存在的主要问题及改进情况', type: 'text', content: '旧正文内容' },
+      ],
+    };
+    const right = {
+      sections: [
+        { title: '五、存在的主要问题和改进情况', type: 'text', content: '新正文内容' },
+      ],
+    };
+
+    const metrics = calculateReportMetrics(left, right);
+
+    expect(metrics.textSectionMetrics).toHaveLength(1);
+    expect(metrics.textSectionMetrics[0]).toEqual(
+      expect.objectContaining({
+        title: '五、存在的主要问题及改进情况',
+        oldLength: 5,
+        newLength: 5,
+      })
+    );
+  });
 });

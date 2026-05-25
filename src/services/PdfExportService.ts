@@ -68,7 +68,7 @@ class PdfExportService {
 
       // 2. Set Content
       await page.setContent(htmlContent, {
-        waitUntil: 'networkidle0',
+        waitUntil: 'load',
         timeout: 60000
       });
       await page.emulateMediaType('print');

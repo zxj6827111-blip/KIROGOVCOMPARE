@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import './ReportsList.css';
-import { apiClient } from '../apiClient';
+import { apiClient, getCurrentUser } from '../apiClient';
 import { useToast } from './common/ToastProvider';
 import { useConfirmDialog } from './common/ConfirmDialogProvider';
 
 function ReportsList({ onSelectReport }) {
   const toast = useToast();
   const confirmAction = useConfirmDialog();
+  const currentUser = getCurrentUser();
+  const canDeleteReports = Boolean(currentUser?.permissions?.delete_reports);
   const [filters, setFilters] = useState({ regionId: '', year: '' });
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -145,9 +147,11 @@ function ReportsList({ onSelectReport }) {
                 <button className="link-btn" onClick={() => onSelectReport(report)}>
                   查看详情 →
                 </button>
-                <button className="link-btn" onClick={() => handleDeleteReport(report.report_id)}>
-                  删除报告
-                </button>
+                {canDeleteReports && (
+                  <button className="link-btn" onClick={() => handleDeleteReport(report.report_id)}>
+                    删除报告
+                  </button>
+                )}
               </div>
             </div>
           ))}

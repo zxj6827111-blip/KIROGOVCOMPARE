@@ -14,6 +14,7 @@ import CrossYearCheckView from '../CrossYearCheckView';
 import { normalizeTablePath } from '../../utils/tableRowColMapping';
 import { translateFailureReason, getRawErrorDetail } from '../../utils/errorTranslator';
 import { buildComparisonFindingItems } from '../../utils/comparisonFindings';
+import { alignComparisonSections } from '../../utils/comparisonSectionAlignment';
 
 const readPath = (obj, path) => {
     if (!obj || !path) return undefined;
@@ -295,57 +296,7 @@ function ComparisonPrintView({ comparisonId }) {
     const { alignedSections, summary, textSectionMetrics, findingItems } = useMemo(() => {
         if (!data) return { alignedSections: [], summary: {}, textSectionMetrics: [], findingItems: [] };
 
-        const sections = [];
-        const leftSections = data.left_content?.sections || [];
-        const rightSections = data.right_content?.sections || [];
-
-        const typeTitles = {
-            text: '正文',
-            table_2: '表二：主动公开',
-            table_3: '表三：依申请公开',
-            table_4: '表四：复议诉讼',
-        };
-
-        // Helper to get all sections of a specific type
-        const getSectionsByType = (list, type) => list.filter(s => s.type === type);
-
-        // Track used right sections to avoid duplicates/misses
-        const usedRightIndices = new Set();
-
-        // Process Left Sections
-        leftSections.forEach((ls) => {
-            // Find ALL right sections of this type
-            const rightCandidates = getSectionsByType(rightSections, ls.type);
-
-            // Find the corresponding right section by index within that type
-            const leftTypeIndex = getSectionsByType(leftSections.slice(0, leftSections.indexOf(ls) + 1), ls.type).length - 1;
-            const rs = rightCandidates[leftTypeIndex];
-
-            // Title Logic: Prioritize specific section title, fallback to generic type title
-            const title = ls.title || typeTitles[ls.type] || ls.type;
-
-            if (rs) {
-                usedRightIndices.add(rightSections.indexOf(rs));
-            }
-
-            if (ls.type === 'text' && rs) {
-                sections.push({ type: ls.type, title, left: ls, right: rs });
-            } else if (ls.type.startsWith('table_')) {
-                sections.push({ type: ls.type, title, left: ls, right: rs || null });
-            } else {
-                sections.push({ type: ls.type, title, left: ls, right: rs || null });
-            }
-        });
-
-        // Add remaining Right Sections
-        rightSections.forEach((rs, index) => {
-            if (!usedRightIndices.has(index)) {
-                // If this type wasn't in left at all, or we have extra right sections
-                const title = rs.title || typeTitles[rs.type] || rs.type;
-                sections.push({ type: rs.type, title, left: null, right: rs });
-            }
-        });
-
+        const sections = alignComparisonSections(data.left_content?.sections || [], data.right_content?.sections || []);
         const summaryItems = data.diff_json?.summary?.items || [];
         const textRepetition = data.similarity ?? data.diff_json?.summary?.textRepetition ?? null;
         const textSectionMetrics = getTextSectionMetrics(data);

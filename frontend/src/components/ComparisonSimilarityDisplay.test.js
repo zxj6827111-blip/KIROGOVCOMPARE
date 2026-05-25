@@ -84,6 +84,30 @@ const comparisonData = {
   },
 };
 
+const misalignedFifthSectionData = {
+  ...comparisonData,
+  similarity: 42,
+  section_metrics: { text: [], average: 42, method: 'simple_average_text_sections' },
+  left_content: {
+    sections: [
+      {
+        type: 'text',
+        title: '五、存在的主要问题及改进情况',
+        content: '旧版主要问题正文',
+      },
+    ],
+  },
+  right_content: {
+    sections: [
+      {
+        type: 'text',
+        title: '五、存在的主要问题和改进情况',
+        content: '新版整改措施正文',
+      },
+    ],
+  },
+};
+
 describe('comparison similarity display', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -118,6 +142,22 @@ describe('comparison similarity display', () => {
     expect(screen.queryByText('暂无结构化差异摘要。')).not.toBeInTheDocument();
   });
 
+  test('detail page aligns fifth-section title variants into one comparison row', async () => {
+    apiClient.get.mockResolvedValue({ data: misalignedFifthSectionData });
+
+    render(<ComparisonDetailView comparisonId={158} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('旧版主要问题正文')).toBeInTheDocument();
+    });
+
+    const sectionCard = screen.getByText('五、存在的主要问题及改进情况').closest('.bg-white');
+    expect(screen.getByText('新版整改措施正文')).toBeInTheDocument();
+    expect(sectionCard).toHaveTextContent('旧版主要问题正文');
+    expect(sectionCard).toHaveTextContent('新版整改措施正文');
+    expect(screen.queryByText('五、存在的主要问题和改进情况')).not.toBeInTheDocument();
+  });
+
   test('print page uses API similarity and shows text section metrics', async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
@@ -133,7 +173,9 @@ describe('comparison similarity display', () => {
       );
     });
 
-    expect(screen.getByText('60%')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('60%')).toBeInTheDocument();
+    });
     expect(screen.queryByText('21%')).not.toBeInTheDocument();
     expect(screen.getByText(/仅统计正文 text 章节/)).toBeInTheDocument();
     const printMetrics = screen.getByLabelText('正文章节重复率明细');
@@ -142,5 +184,22 @@ describe('comparison similarity display', () => {
     expect(printMetrics).toHaveTextContent('65%');
     expect(screen.getByText('五、存在的主要问题及改进情况：正文重复率 33%，文字变化较大，建议重点复核。')).toBeInTheDocument();
     expect(screen.getByText('六、其他需要报告的事项：正文重复率 54%，低于 60% 参考线，建议关注新增或改写内容。')).toBeInTheDocument();
+  });
+
+  test('print page aligns fifth-section title variants into one comparison row', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => misalignedFifthSectionData,
+    });
+
+    render(<ComparisonPrintView comparisonId={158} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('旧版主要问题正文')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('新版整改措施正文')).toBeInTheDocument();
+    expect(screen.getAllByText('五、存在的主要问题及改进情况')).toHaveLength(1);
+    expect(screen.queryByText('五、存在的主要问题和改进情况')).not.toBeInTheDocument();
   });
 });
