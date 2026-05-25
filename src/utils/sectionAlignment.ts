@@ -12,6 +12,18 @@ export type AlignedSection<T extends SectionLike = SectionLike> = {
   newSec?: T;
 };
 
+export type SectionAlignmentRule = {
+  sectionType?: string | null;
+  section_type?: string | null;
+  leftKey?: string | null;
+  left_key?: string | null;
+  rightKey?: string | null;
+  right_key?: string | null;
+  canonicalKey?: string | null;
+  canonical_key?: string | null;
+  enabled?: boolean | null;
+};
+
 const CHINESE_NUMERAL_ORDER = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
 const TOP_LEVEL_HEADING_PATTERN = /(^|\r?\n)\s*([一二三四五六七八九十]+)[、.．]\s*([^\r\n]{2,80})\s*(?=\r?\n|$)/g;
 
@@ -101,6 +113,36 @@ export const normalizeComparisonSectionTitle = (title?: string, type = ''): stri
   return [type || 'section', alignmentOrdinal, normalizedBody || compact].join(':');
 };
 
+const getRuleValue = (rule: SectionAlignmentRule, camelKey: keyof SectionAlignmentRule, snakeKey: keyof SectionAlignmentRule): string =>
+  String(rule[camelKey] || rule[snakeKey] || '').trim();
+
+const applySectionAlignmentRules = (key: string, type = '', rules: SectionAlignmentRule[] = []): string => {
+  if (!Array.isArray(rules) || rules.length === 0) return key;
+
+  for (const rule of rules) {
+    if (!rule || rule.enabled === false) continue;
+    const sectionType = getRuleValue(rule, 'sectionType', 'section_type');
+    if (sectionType && sectionType !== type) continue;
+
+    const leftKey = getRuleValue(rule, 'leftKey', 'left_key');
+    const rightKey = getRuleValue(rule, 'rightKey', 'right_key');
+    const canonicalKey = getRuleValue(rule, 'canonicalKey', 'canonical_key');
+    if (!canonicalKey) continue;
+
+    if (key === leftKey || key === rightKey || key === canonicalKey) {
+      return canonicalKey;
+    }
+  }
+
+  return key;
+};
+
+export const getComparisonSectionAlignmentKey = (
+  title?: string,
+  type = '',
+  rules: SectionAlignmentRule[] = []
+): string => applySectionAlignmentRules(normalizeComparisonSectionTitle(title, type), type, rules);
+
 const getSectionOrder = (title?: string): number => {
   const { compact, ordinal, body } = getTitleParts(title);
   if (compact === '标题' || compact.includes('年度报告')) return -1;
@@ -173,7 +215,8 @@ const expandEmbeddedTextSections = <T extends SectionLike>(sections: T[] = []): 
 
 export const alignComparisonSections = <T extends SectionLike>(
   leftSections: T[] = [],
-  rightSections: T[] = []
+  rightSections: T[] = [],
+  rules: SectionAlignmentRule[] = []
 ): Array<AlignedSection<T>> => {
   type InternalRow = AlignedSection<T> & {
     __leftIndex: number;
@@ -192,7 +235,7 @@ export const alignComparisonSections = <T extends SectionLike>(
   };
 
   normalizedLeftSections.forEach((section, index) => {
-    const key = normalizeComparisonSectionTitle(section?.title, section?.type);
+    const key = getComparisonSectionAlignmentKey(section?.title, section?.type, rules);
     const row: InternalRow = {
       title: section?.title || section?.type || '未命名章节',
       type: section?.type,
@@ -205,7 +248,7 @@ export const alignComparisonSections = <T extends SectionLike>(
   });
 
   normalizedRightSections.forEach((section, index) => {
-    const key = normalizeComparisonSectionTitle(section?.title, section?.type);
+    const key = getComparisonSectionAlignmentKey(section?.title, section?.type, rules);
     const matchingRow = (rowsByKey.get(key) || []).find((row) => !row.newSec);
 
     if (matchingRow) {

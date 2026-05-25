@@ -149,6 +149,31 @@ describe('comparison section alignment', () => {
     expect(rows.some((row) => !row.oldSec && row.newSec)).toBe(true);
   });
 
+  test('applies saved alignment rules without changing base normalization', () => {
+    const leftTitle = '七、专项整改落实情况';
+    const rightTitle = '五、专项整改情况';
+    const leftKey = normalizeComparisonSectionTitle(leftTitle, 'text');
+    const rightKey = normalizeComparisonSectionTitle(rightTitle, 'text');
+    expect(leftKey).not.toBe(rightKey);
+
+    const rows = alignComparisonSections(
+      [{ type: 'text', title: leftTitle, content: '旧专项整改' }],
+      [{ type: 'text', title: rightTitle, content: '新专项整改' }],
+      [{
+        sectionType: 'text',
+        leftKey,
+        rightKey,
+        canonicalKey: 'custom:text:专项整改',
+      }]
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toEqual(expect.objectContaining({
+      oldSec: expect.objectContaining({ content: '旧专项整改' }),
+      newSec: expect.objectContaining({ content: '新专项整改' }),
+    }));
+  });
+
   test('aligns structured tables by table type and title body when numbering differs', () => {
     const rows = alignComparisonSections(
       [{ type: 'table_3', title: '三、收到和处理政府信息公开申请情况（数据准确、要素齐全）', tableData: { old: true } }],

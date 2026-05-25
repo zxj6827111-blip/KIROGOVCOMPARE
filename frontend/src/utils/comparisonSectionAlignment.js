@@ -87,6 +87,33 @@ export const normalizeComparisonSectionTitle = (title, type = '') => {
   return [type || 'section', alignmentOrdinal, normalizedBody || compact].join(':');
 };
 
+const getRuleValue = (rule, camelKey, snakeKey) =>
+  String(rule?.[camelKey] || rule?.[snakeKey] || '').trim();
+
+const applySectionAlignmentRules = (key, type = '', rules = []) => {
+  if (!Array.isArray(rules) || rules.length === 0) return key;
+
+  for (const rule of rules) {
+    if (!rule || rule.enabled === false) continue;
+    const sectionType = getRuleValue(rule, 'sectionType', 'section_type');
+    if (sectionType && sectionType !== type) continue;
+
+    const leftKey = getRuleValue(rule, 'leftKey', 'left_key');
+    const rightKey = getRuleValue(rule, 'rightKey', 'right_key');
+    const canonicalKey = getRuleValue(rule, 'canonicalKey', 'canonical_key');
+    if (!canonicalKey) continue;
+
+    if (key === leftKey || key === rightKey || key === canonicalKey) {
+      return canonicalKey;
+    }
+  }
+
+  return key;
+};
+
+export const getComparisonSectionAlignmentKey = (title, type = '', rules = []) =>
+  applySectionAlignmentRules(normalizeComparisonSectionTitle(title, type), type, rules);
+
 const getSectionOrder = (title) => {
   const { compact, ordinal, body } = getTitleParts(title);
   if (compact === '标题' || compact.includes('年度报告')) return -1;
@@ -177,7 +204,7 @@ const createRow = (section, side, index) => {
   return row;
 };
 
-export const alignComparisonSections = (leftSections = [], rightSections = []) => {
+export const alignComparisonSections = (leftSections = [], rightSections = [], rules = []) => {
   const normalizedLeftSections = expandEmbeddedTextSections(leftSections);
   const normalizedRightSections = expandEmbeddedTextSections(rightSections);
   const rows = [];
@@ -190,14 +217,14 @@ export const alignComparisonSections = (leftSections = [], rightSections = []) =
   };
 
   normalizedLeftSections.forEach((section, index) => {
-    const key = normalizeComparisonSectionTitle(section?.title, section?.type);
+    const key = getComparisonSectionAlignmentKey(section?.title, section?.type, rules);
     const row = createRow(section, 'left', index);
     rows.push(row);
     rememberRow(key, row);
   });
 
   normalizedRightSections.forEach((section, index) => {
-    const key = normalizeComparisonSectionTitle(section?.title, section?.type);
+    const key = getComparisonSectionAlignmentKey(section?.title, section?.type, rules);
     const matchingRow = (rowsByKey.get(key) || []).find((row) => !row.newSec);
 
     if (matchingRow) {

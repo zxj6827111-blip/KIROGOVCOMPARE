@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import './ComparisonDetailView.css';
 import { apiClient } from '../apiClient';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Wand2 } from 'lucide-react';
 import { Table2View, Table3View, Table4View, SimpleDiffTable } from './TableViews';
 import DiffText from './DiffText';
 import CrossYearCheckView from './CrossYearCheckView';
@@ -105,6 +105,12 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
   const [leftIssueHighlightCells, setLeftIssueHighlightCells] = useState([]);
+  const [alignmentToolsOpen, setAlignmentToolsOpen] = useState(false);
+  const [alignmentPanelOpen, setAlignmentPanelOpen] = useState(false);
+  const [alignmentSuggestions, setAlignmentSuggestions] = useState([]);
+  const [selectedAlignmentIds, setSelectedAlignmentIds] = useState([]);
+  const [alignmentLoading, setAlignmentLoading] = useState(false);
+  const [alignmentSaving, setAlignmentSaving] = useState(false);
   const handleBack = useCallback(() => {
     if (onBack) return onBack();
     window.location.href = resolveSafeReturnTo(window.location.search, '/history');
@@ -165,7 +171,7 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
 
     const leftSections = data.left_content?.sections || [];
     const rightSections = data.right_content?.sections || [];
-    const sections = alignComparisonSections(leftSections, rightSections);
+    const sections = alignComparisonSections(leftSections, rightSections, data.alignment_rules || []);
     const summaryItems = data.diff_json?.summary?.items || [];
     const textRepetition = data.similarity ?? data.diff_json?.summary?.textRepetition ?? null;
 
@@ -321,6 +327,54 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
     window.open(`/print/comparison/${comparisonId}?${params.toString()}`, '_blank', 'noopener,noreferrer');
   };
 
+  const handleLoadAlignmentSuggestions = async () => {
+    setAlignmentLoading(true);
+    try {
+      const resp = await apiClient.get(`/comparisons/${comparisonId}/alignment-suggestions`);
+      const suggestions = resp.data?.suggestions || [];
+      setAlignmentSuggestions(suggestions);
+      setSelectedAlignmentIds(suggestions.map((item) => item.id));
+      setAlignmentPanelOpen(true);
+      if (suggestions.length === 0) {
+        toast.info('暂无可智能对齐的章节', '当前未发现高置信度的左右空缺章节候选。');
+      } else {
+        toast.success('已生成智能对齐建议', `发现 ${suggestions.length} 条候选，请确认后保存。`);
+      }
+    } catch (error) {
+      const friendly = getAxiosFriendlyError(error, '生成智能对齐建议失败，请稍后重试。');
+      toast.error('智能对齐失败', friendly.message, { detail: friendly.detail });
+    } finally {
+      setAlignmentLoading(false);
+    }
+  };
+
+  const toggleAlignmentSuggestion = (id) => {
+    setSelectedAlignmentIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+    );
+  };
+
+  const handleSaveAlignmentRules = async () => {
+    const selected = alignmentSuggestions.filter((item) => selectedAlignmentIds.includes(item.id));
+    if (selected.length === 0) {
+      toast.warning('未选择对齐规则', '请至少选择一条建议后再保存。');
+      return;
+    }
+
+    setAlignmentSaving(true);
+    try {
+      const resp = await apiClient.post(`/comparisons/${comparisonId}/alignment-rules`, { suggestions: selected });
+      await fetchData();
+      setAlignmentPanelOpen(false);
+      toast.success('智能对齐规则已保存', `已保存 ${resp.data?.saved_count ?? selected.length} 条规则，详情页已重新加载。`);
+    } catch (error) {
+      const friendly = getAxiosFriendlyError(error, '保存智能对齐规则失败，请稍后重试。');
+      toast.error('保存失败', friendly.message, { detail: friendly.detail });
+    } finally {
+      setAlignmentSaving(false);
+    }
+  };
+
   if (loading) return <div className="p-8 text-center text-gray-500">加载中...</div>;
   if (error) return <div className="p-8 text-center text-red-500">{error}</div>;
   if (!data) return <div className="p-8 text-center">无数据</div>;
@@ -433,6 +487,124 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
             黄底表示相同文本片段；正文文字重复率以顶部指标为准。
           </div>
 
+        </div>
+
+        <div className="mb-6 no-print">
+          <button
+            type="button"
+            onClick={() => setAlignmentToolsOpen((open) => !open)}
+            className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 shadow-sm hover:border-blue-200 hover:text-blue-700"
+          >
+            <Wand2 size={15} />
+            {alignmentToolsOpen ? '收起对齐工具' : '对齐工具'}
+          </button>
+
+          {alignmentToolsOpen && (
+            <div className="mt-3 bg-white p-4 rounded-lg shadow-sm border border-blue-100">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="font-bold text-gray-800">章节智能对齐</div>
+                  <div className="text-sm text-gray-500 mt-1">
+                    用于处理标题写法不同导致的左右空缺；保存后会自动用于详情页、打印页和重复率明细。
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleLoadAlignmentSuggestions}
+                  disabled={alignmentLoading || alignmentSaving}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <Wand2 size={16} />
+                  {alignmentLoading ? '扫描中...' : '智能对齐'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {alignmentToolsOpen && alignmentPanelOpen && (
+            <div className="mt-4 border border-blue-100 rounded-lg bg-blue-50/40 p-3">
+              {alignmentSuggestions.length === 0 ? (
+                <div className="text-sm text-gray-600">没有发现高置信度候选。若页面仍有错位，通常需要检查解析结果或手动补充规则。</div>
+              ) : (
+                <>
+                  <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                    <div className="text-sm text-gray-700">
+                      发现 {alignmentSuggestions.length} 条候选，默认全选。请确认左右标题确实属于同一章节后保存。
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        className="px-3 py-1.5 rounded border border-gray-300 bg-white text-sm text-gray-700 hover:bg-gray-50"
+                        onClick={() => setSelectedAlignmentIds(alignmentSuggestions.map((item) => item.id))}
+                      >
+                        全选
+                      </button>
+                      <button
+                        type="button"
+                        className="px-3 py-1.5 rounded border border-gray-300 bg-white text-sm text-gray-700 hover:bg-gray-50"
+                        onClick={() => setSelectedAlignmentIds([])}
+                      >
+                        清空
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    {alignmentSuggestions.map((item) => (
+                      <label
+                        key={item.id}
+                        className="block cursor-pointer rounded-md border border-gray-200 bg-white p-3 hover:border-blue-300"
+                      >
+                        <div className="flex items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedAlignmentIds.includes(item.id)}
+                            onChange={() => toggleAlignmentSuggestion(item.id)}
+                            className="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap gap-2 text-xs text-gray-500 mb-2">
+                              <span className="rounded bg-blue-100 px-2 py-0.5 text-blue-700">{item.sectionType}</span>
+                              <span>置信度 {item.confidence}%</span>
+                              <span>{item.reason}</span>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-gray-800">
+                              <div className="rounded border border-gray-100 bg-gray-50 p-2">
+                                <span className="text-gray-500 mr-1">{data.year_a}：</span>{item.leftTitle}
+                                <span className="ml-2 text-xs text-gray-400">{item.leftContentLength} 字</span>
+                              </div>
+                              <div className="rounded border border-gray-100 bg-gray-50 p-2">
+                                <span className="text-gray-500 mr-1">{data.year_b}：</span>{item.rightTitle}
+                                <span className="ml-2 text-xs text-gray-400">{item.rightContentLength} 字</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className="flex justify-end gap-2 mt-4">
+                    <button
+                      type="button"
+                      className="px-4 py-2 rounded-md border border-gray-300 bg-white text-sm text-gray-700 hover:bg-gray-50"
+                      onClick={() => setAlignmentPanelOpen(false)}
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveAlignmentRules}
+                      disabled={alignmentSaving || selectedAlignmentIds.length === 0}
+                      className="px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      {alignmentSaving ? '保存中...' : `保存 ${selectedAlignmentIds.length} 条规则`}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Header Row */}

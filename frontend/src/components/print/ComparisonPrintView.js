@@ -296,7 +296,11 @@ function ComparisonPrintView({ comparisonId }) {
     const { alignedSections, summary, textSectionMetrics, findingItems } = useMemo(() => {
         if (!data) return { alignedSections: [], summary: {}, textSectionMetrics: [], findingItems: [] };
 
-        const sections = alignComparisonSections(data.left_content?.sections || [], data.right_content?.sections || []);
+        const sections = alignComparisonSections(
+            data.left_content?.sections || [],
+            data.right_content?.sections || [],
+            data.alignment_rules || []
+        );
         const summaryItems = data.diff_json?.summary?.items || [];
         const textRepetition = data.similarity ?? data.diff_json?.summary?.textRepetition ?? null;
         const textSectionMetrics = getTextSectionMetrics(data);
