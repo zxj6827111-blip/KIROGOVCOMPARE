@@ -37,10 +37,10 @@ const getTitleParts = (title?: string) => {
 };
 
 const normalizeProblemSectionBody = (body: string): string =>
-  [body, body.replace(/^(?:政府信息公开工作|政务公开工作|信息公开工作)/g, '')]
+  [body, body.replace(/^(?:政府信息公开工作|政务公开工作|政务信息工作|信息公开工作)/g, '')]
     .map((value) =>
       value.replace(
-        /^(?:存在的主要问题|存在的问题|存在问题)(?:及|和|与)?(?:改进情况|改进措施|改进方向)$/g,
+        /^(?:存在的主要问题|存在的?问题|存在主要问题|存在问题)(?:及|和|与)?(?:改进情况|改进措施|改进方向|改进思路)$/g,
         '存在的主要问题改进情况'
       )
     )
@@ -49,13 +49,13 @@ const normalizeProblemSectionBody = (body: string): string =>
 const normalizeTableTitleBody = (body: string, type = ''): string => {
   if (type === 'table_2') {
     const normalized = body.replace(/^(?:行政机关|本年度|本年)/g, '');
-    if (/^主动公开(?:政府)?信息情况$/.test(normalized)) return '主动公开政府信息情况';
+    if (/^主动公开(?:政府|政务)?信息的?情况$/.test(normalized)) return '主动公开政府信息情况';
     return normalized;
   }
 
   if (type === 'table_3') {
     const normalized = body.replace(/^行政机关/g, '');
-    if (/^收到和处理(?:政府)?信息公开申请情况$/.test(normalized)) {
+    if (/^收到和处理(?:政府)?信息公开申请情况(?:统计表)?$/.test(normalized)) {
       return '收到和处理政府信息公开申请情况';
     }
     return normalized;
@@ -68,7 +68,7 @@ const normalizeTableTitleBody = (body: string, type = ''): string => {
       .replace(/工作/g, '')
       .replace(/被/g, '')
       .replace(/提起/g, '');
-    if (normalized.includes('信息公开') && normalized.includes('行政复议') && normalized.includes('行政诉讼')) {
+    if (normalized.includes('行政复议') && normalized.includes('行政诉讼')) {
       return '政府信息公开行政复议行政诉讼情况';
     }
     return normalized;
@@ -79,7 +79,7 @@ const normalizeTableTitleBody = (body: string, type = ''): string => {
 
 const normalizeTitleBody = (body?: string, type = ''): string => {
   const withoutReportWorkPrefix = normalizeProblemSectionBody(String(body || ''))
-    .replace(/^(?:\d{4}年)?(?:(?:政府信息公开|政务公开|信息公开)(?:工作)?)?(?:工作)?总体(?:工作)?情况$/g, '总体情况');
+    .replace(/^(?:\d{4}年)?(?:(?:政府信息公开|政务公开|信息公开)(?:工作)?)?(?:工作)?总体(?:工作|落实)?情况$/g, '总体情况');
 
   return normalizeTableTitleBody(withoutReportWorkPrefix, type);
 };
@@ -95,7 +95,10 @@ export const normalizeComparisonSectionTitle = (title?: string, type = ''): stri
   }
 
   const normalizedOrdinal = ordinal || (normalizedBody === '总体情况' ? '一' : normalizedBody === '其他需要报告的事项' ? '六' : '');
-  return [type || 'section', normalizedOrdinal, normalizedBody || compact].join(':');
+  const alignmentOrdinal = normalizedBody === '存在的主要问题改进情况' && body !== '存在的主要问题及改进情况' && body !== '存在的主要问题和改进情况'
+    ? '五'
+    : normalizedOrdinal;
+  return [type || 'section', alignmentOrdinal, normalizedBody || compact].join(':');
 };
 
 const getSectionOrder = (title?: string): number => {
