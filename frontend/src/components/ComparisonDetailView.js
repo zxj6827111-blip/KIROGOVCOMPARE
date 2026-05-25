@@ -105,6 +105,7 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
   const [leftIssueHighlightCells, setLeftIssueHighlightCells] = useState([]);
+  const [alignmentToolsOpen, setAlignmentToolsOpen] = useState(false);
   const [alignmentPanelOpen, setAlignmentPanelOpen] = useState(false);
   const [alignmentSuggestions, setAlignmentSuggestions] = useState([]);
   const [selectedAlignmentIds, setSelectedAlignmentIds] = useState([]);
@@ -488,26 +489,39 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
 
         </div>
 
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-blue-100 mb-6 no-print">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="font-bold text-gray-800">章节智能对齐</div>
-              <div className="text-sm text-gray-500 mt-1">
-                用于处理标题写法不同导致的左右空缺；保存后会自动用于详情页、打印页和重复率明细。
+        <div className="mb-6 no-print">
+          <button
+            type="button"
+            onClick={() => setAlignmentToolsOpen((open) => !open)}
+            className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 shadow-sm hover:border-blue-200 hover:text-blue-700"
+          >
+            <Wand2 size={15} />
+            {alignmentToolsOpen ? '收起对齐工具' : '对齐工具'}
+          </button>
+
+          {alignmentToolsOpen && (
+            <div className="mt-3 bg-white p-4 rounded-lg shadow-sm border border-blue-100">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="font-bold text-gray-800">章节智能对齐</div>
+                  <div className="text-sm text-gray-500 mt-1">
+                    用于处理标题写法不同导致的左右空缺；保存后会自动用于详情页、打印页和重复率明细。
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleLoadAlignmentSuggestions}
+                  disabled={alignmentLoading || alignmentSaving}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <Wand2 size={16} />
+                  {alignmentLoading ? '扫描中...' : '智能对齐'}
+                </button>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={handleLoadAlignmentSuggestions}
-              disabled={alignmentLoading || alignmentSaving}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              <Wand2 size={16} />
-              {alignmentLoading ? '扫描中...' : '智能对齐'}
-            </button>
-          </div>
+          )}
 
-          {alignmentPanelOpen && (
+          {alignmentToolsOpen && alignmentPanelOpen && (
             <div className="mt-4 border border-blue-100 rounded-lg bg-blue-50/40 p-3">
               {alignmentSuggestions.length === 0 ? (
                 <div className="text-sm text-gray-600">没有发现高置信度候选。若页面仍有错位，通常需要检查解析结果或手动补充规则。</div>
