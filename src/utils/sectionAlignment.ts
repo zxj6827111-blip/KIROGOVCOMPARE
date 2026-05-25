@@ -36,22 +36,65 @@ const getTitleParts = (title?: string) => {
   return { compact, ordinal, body };
 };
 
-const normalizeTitleBody = (body?: string): string =>
-  String(body || '')
-    .replace(/存在的主要问题[及和]改进情况/g, '存在的主要问题改进情况')
-    .replace(/^(?:政府信息公开)?(?:工作)?总体(?:工作)?情况$/g, '总体情况');
+const normalizeProblemSectionBody = (body: string): string =>
+  [body, body.replace(/^(?:政府信息公开工作|政务公开工作|信息公开工作)/g, '')]
+    .map((value) =>
+      value.replace(
+        /^(?:存在的主要问题|存在的问题|存在问题)(?:及|和|与)?(?:改进情况|改进措施|改进方向)$/g,
+        '存在的主要问题改进情况'
+      )
+    )
+    .find((value) => value === '存在的主要问题改进情况') || body;
+
+const normalizeTableTitleBody = (body: string, type = ''): string => {
+  if (type === 'table_2') {
+    const normalized = body.replace(/^(?:行政机关|本年度|本年)/g, '');
+    if (/^主动公开(?:政府)?信息情况$/.test(normalized)) return '主动公开政府信息情况';
+    return normalized;
+  }
+
+  if (type === 'table_3') {
+    const normalized = body.replace(/^行政机关/g, '');
+    if (/^收到和处理(?:政府)?信息公开申请情况$/.test(normalized)) {
+      return '收到和处理政府信息公开申请情况';
+    }
+    return normalized;
+  }
+
+  if (type === 'table_4') {
+    const normalized = body
+      .replace(/^行政机关/g, '')
+      .replace(/^因/g, '')
+      .replace(/工作/g, '')
+      .replace(/被/g, '')
+      .replace(/提起/g, '');
+    if (normalized.includes('信息公开') && normalized.includes('行政复议') && normalized.includes('行政诉讼')) {
+      return '政府信息公开行政复议行政诉讼情况';
+    }
+    return normalized;
+  }
+
+  return body;
+};
+
+const normalizeTitleBody = (body?: string, type = ''): string => {
+  const withoutReportWorkPrefix = normalizeProblemSectionBody(String(body || ''))
+    .replace(/^(?:\d{4}年)?(?:(?:政府信息公开|政务公开|信息公开)(?:工作)?)?(?:工作)?总体(?:工作)?情况$/g, '总体情况');
+
+  return normalizeTableTitleBody(withoutReportWorkPrefix, type);
+};
 
 export const normalizeComparisonSectionTitle = (title?: string, type = ''): string => {
   const { compact, ordinal, body } = getTitleParts(title);
   if (!compact) return `${type || 'section'}:empty`;
   if (compact === '标题' || compact.includes('年度报告')) return `title:${compact}`;
 
-  const normalizedBody = normalizeTitleBody(body);
+  const normalizedBody = normalizeTitleBody(body, type);
   if (/^table_[234]$/.test(type || '')) {
     return `${type}:${normalizedBody || body || compact}`;
   }
 
-  const normalizedOrdinal = ordinal || (normalizedBody === '总体情况' ? '一' : '');
+  const normalizedOrdinal = ordinal || (normalizedBody === '总体情况' ? '一' : normalizedBody === '其他需要报告的事项' ? '六' : '');
   return [type || 'section', normalizedOrdinal, normalizedBody || compact].join(':');
 };
 
@@ -59,7 +102,7 @@ const getSectionOrder = (title?: string): number => {
   const { compact, ordinal, body } = getTitleParts(title);
   if (compact === '标题' || compact.includes('年度报告')) return -1;
   const normalizedBody = normalizeTitleBody(body);
-  const normalizedOrdinal = ordinal || (normalizedBody === '总体情况' ? '一' : '');
+  const normalizedOrdinal = ordinal || (normalizedBody === '总体情况' ? '一' : normalizedBody === '其他需要报告的事项' ? '六' : '');
   const index = CHINESE_NUMERAL_ORDER.indexOf(normalizedOrdinal);
   return index >= 0 ? index + 1 : 99;
 };
