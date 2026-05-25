@@ -5,6 +5,16 @@ import { User, Plus, Edit, Trash2, X } from 'lucide-react';
 import { useToast } from './common/ToastProvider';
 import { useConfirmDialog } from './common/ConfirmDialogProvider';
 
+const DEFAULT_PERMISSIONS = {
+    manage_users: false,
+    manage_regions: false,
+    manage_jobs: false,
+    view_reports: false,
+    upload_reports: false,
+    compare_reports: false,
+    delete_reports: false,
+};
+
 export default function UserManagement() {
     const toast = useToast();
     const confirmAction = useConfirmDialog();
@@ -18,12 +28,7 @@ export default function UserManagement() {
         username: '',
         password: '',
         displayName: '',
-        permissions: {
-            manage_users: false,
-            manage_regions: false,
-            upload_reports: false,
-            compare_reports: false,
-        },
+        permissions: { ...DEFAULT_PERMISSIONS },
         dataScope: {
             regions: [], // Empty means all
         }
@@ -143,12 +148,14 @@ export default function UserManagement() {
                 password: '',
                 displayName: user.displayName || '',
                 permissions: {
+                    ...(user.permissions || {}),
                     manage_users: user.permissions?.manage_users || false,
                     manage_regions: user.permissions?.manage_regions || false,
                     manage_jobs: user.permissions?.manage_jobs || false,
                     view_reports: user.permissions?.view_reports || false,
                     upload_reports: user.permissions?.upload_reports || false,
                     compare_reports: user.permissions?.compare_reports || false,
+                    delete_reports: user.permissions?.delete_reports || false,
                 },
                 dataScope: {
                     regions: user.dataScope?.regions || [],
@@ -161,10 +168,12 @@ export default function UserManagement() {
                 password: '',
                 displayName: '',
                 permissions: {
+                    ...DEFAULT_PERMISSIONS,
                     manage_users: false,
                     manage_regions: false,
                     upload_reports: true,
                     compare_reports: true,
+                    delete_reports: false,
                 },
                 dataScope: {
                     regions: [],
@@ -276,6 +285,7 @@ export default function UserManagement() {
                                             {user.permissions?.view_reports && <span className="tag-cyan">查看</span>}
                                             {user.permissions?.upload_reports && <span className="tag-orange">上传</span>}
                                             {user.permissions?.compare_reports && <span className="tag-purple">比对</span>}
+                                            {user.permissions?.delete_reports && <span className="tag-rose">删除</span>}
                                             {user.permissions?.manage_jobs && <span className="tag-red">任务</span>}
                                             {Object.keys(user.permissions || {}).every(k => !user.permissions[k]) && <span className="text-gray-400 text-sm">无特殊权限</span>}
                                         </div>
@@ -356,6 +366,7 @@ export default function UserManagement() {
                                 <label className="checkbox-label"><input type="checkbox" checked={formData.permissions.view_reports} onChange={() => togglePermission('view_reports')} /> 查看报告</label>
                                 <label className="checkbox-label"><input type="checkbox" checked={formData.permissions.upload_reports} onChange={() => togglePermission('upload_reports')} /> 上传报告</label>
                                 <label className="checkbox-label"><input type="checkbox" checked={formData.permissions.compare_reports} onChange={() => togglePermission('compare_reports')} /> 比对报告</label>
+                                <label className="checkbox-label"><input type="checkbox" checked={formData.permissions.delete_reports} onChange={() => togglePermission('delete_reports')} /> 删除报告</label>
                                 <label className="checkbox-label"><input type="checkbox" checked={formData.permissions.manage_jobs} onChange={() => togglePermission('manage_jobs')} /> 任务管理</label>
                             </div>
 
@@ -403,12 +414,13 @@ export default function UserManagement() {
                 </div>
             )}
 
-            <style jsx>{`
+            <style>{`
         .tag-blue { background: #e6f7ff; color: #1890ff; padding: 2px 8px; border-radius: 4px; font-size: 12px; border: 1px solid #91d5ff; }
         .tag-green { background: #f6ffed; color: #52c41a; padding: 2px 8px; border-radius: 4px; font-size: 12px; border: 1px solid #b7eb8f; }
         .tag-orange { background: #fff7e6; color: #fa8c16; padding: 2px 8px; border-radius: 4px; font-size: 12px; border: 1px solid #ffd591; }
         .tag-purple { background: #f9f0ff; color: #722ed1; padding: 2px 8px; border-radius: 4px; font-size: 12px; border: 1px solid #d3adf7; }
         .tag-cyan { background: #e6fffb; color: #13c2c2; padding: 2px 8px; border-radius: 4px; font-size: 12px; border: 1px solid #87e8de; }
+        .tag-rose { background: #fff1f2; color: #e11d48; padding: 2px 8px; border-radius: 4px; font-size: 12px; border: 1px solid #fecdd3; }
         .tag-red { background: #fff1f0; color: #f5222d; padding: 2px 8px; border-radius: 4px; font-size: 12px; border: 1px solid #ffa39e; }
         
         .modal-overlay {

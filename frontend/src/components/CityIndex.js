@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import './CityIndex.css';
-import { apiClient } from '../apiClient';
+import { apiClient, getCurrentUser } from '../apiClient';
 import {
   Search,
   CheckCircle,
@@ -44,6 +44,8 @@ export function buildCatalogReturnPath(path = [], search = '') {
 function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
   const toast = useToast();
   const confirmAction = useConfirmDialog();
+  const currentUser = getCurrentUser();
+  const canDeleteReports = Boolean(currentUser?.permissions?.delete_reports);
   // Initialize from cache if available
   const [regions, setRegions] = useState(() => globalCache.regions || []);
   const [reports, setReports] = useState(() => globalCache.reports || []);
@@ -727,14 +729,16 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
                           <Eye size={16} />
                           <span>查看</span>
                         </button>
-                        <button
-                          className="action-btn-ghost red"
-                          onClick={(e) => handleDeleteReport(e, r.report_id)}
-                          title="删除报告"
-                        >
-                          <Trash2 size={16} />
-                          <span>删除</span>
-                        </button>
+                        {canDeleteReports && (
+                          <button
+                            className="action-btn-ghost red"
+                            onClick={(e) => handleDeleteReport(e, r.report_id)}
+                            title="删除报告"
+                          >
+                            <Trash2 size={16} />
+                            <span>删除</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>

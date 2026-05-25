@@ -228,6 +228,9 @@ const getUserCanMaintainReports = (user) =>
         user.permissions?.manage_jobs)
   );
 
+const getUserCanDeleteReports = (user) =>
+  Boolean(user?.permissions?.delete_reports);
+
 const stripLeadingSectionTitle = (content, title) => {
   if (typeof content !== 'string') return content;
   const normalizedTitle = String(title || '').trim();
@@ -1083,6 +1086,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const reportId = propReportId || window.location.pathname.split('/').pop();
   const currentUser = getCurrentUser();
   const canMaintainReports = getUserCanMaintainReports(currentUser);
+  const canDeleteReports = getUserCanDeleteReports(currentUser);
   const isDevDebugEnv = process.env.NODE_ENV !== 'production';
   // Technical diagnostics stay opt-in via URL so the formal report view is clean by default.
   const technicalModeEnabled =
@@ -2657,6 +2661,9 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                 <>
                   <Button onClick={refresh} disabled={loading}>刷新</Button>
                   <Button onClick={handleReparse} disabled={loading}>自动解析</Button>
+                </>
+              )}
+              {canDeleteReports && (
                   <Button
                     variant="danger"
                     className="report-danger-action"
@@ -2665,7 +2672,6 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                   >
                     删除报告
                   </Button>
-                </>
               )}
               <Button onClick={handleBack}>返回上一层</Button>
             </>
@@ -2694,6 +2700,10 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                 <button className="action-btn" onClick={handleReparse} disabled={loading}>
                   自动解析
                 </button>
+              </div>
+            )}
+            {canDeleteReports && (
+              <div className="report-admin-actions">
                 <button
                   className="action-btn danger report-danger-action"
                   onClick={handleDelete}

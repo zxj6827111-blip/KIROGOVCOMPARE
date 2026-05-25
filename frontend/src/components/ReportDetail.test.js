@@ -183,4 +183,22 @@ describe('ReportDetail vision review integration', () => {
     expect(screen.getByText('tableData.total.newReceived')).toBeInTheDocument();
     expect(screen.getByText('217')).toBeInTheDocument();
   });
+
+  test('hides delete report action when current user lacks delete_reports', async () => {
+    getCurrentUser.mockReturnValue({
+      username: 'uploader',
+      permissions: {
+        upload_reports: true,
+        manage_jobs: true,
+      },
+    });
+
+    render(<ReportDetail reportId="123" />);
+
+    await screen.findByText('报告详情');
+
+    expect(screen.getByRole('button', { name: '刷新' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '自动解析' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '删除报告' })).not.toBeInTheDocument();
+  });
 });
