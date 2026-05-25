@@ -13,9 +13,13 @@ export type AlignedSection<T extends SectionLike = SectionLike> = {
 };
 
 const CHINESE_NUMERAL_ORDER = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+const TOP_LEVEL_HEADING_PATTERN = /(^|\r?\n)\s*([一二三四五六七八九十]+)[、.．]\s*([^\r\n]{2,80})\s*(?=\r?\n|$)/g;
+
+const stripParentheticalAnnotations = (title?: string): string =>
+  String(title || '').replace(/[（(][^）)]*[）)]/g, '');
 
 const normalizeTitleText = (title?: string): string =>
-  String(title || '')
+  stripParentheticalAnnotations(title)
     .normalize('NFKC')
     .replace(/[\u200b-\u200d\ufeff]/g, '')
     .replace(/\s+/g, '')
@@ -38,6 +42,9 @@ export const normalizeComparisonSectionTitle = (title?: string, type = ''): stri
   if (compact === '标题' || compact.includes('年度报告')) return `title:${compact}`;
 
   const normalizedBody = body.replace(/存在的主要问题[及和]改进情况/g, '存在的主要问题改进情况');
+  if (/^table_[234]$/.test(type || '')) {
+    return `${type}:${normalizedBody || body || compact}`;
+  }
 
   return [type || 'section', ordinal, normalizedBody || compact].join(':');
 };
@@ -49,6 +56,67 @@ const getSectionOrder = (title?: string): number => {
   return index >= 0 ? index + 1 : 99;
 };
 
+const isExpandableTextSection = (section?: SectionLike): boolean => {
+  if (!section || (section.type && section.type !== 'text')) return false;
+  const { compact, ordinal } = getTitleParts(section.title);
+  return !ordinal || compact === '标题' || compact.includes('年度报告');
+};
+
+const findEmbeddedHeadings = (content?: string) => {
+  const text = String(content || '');
+  const headings: Array<{ title: string; headingStart: number; bodyStart: number }> = [];
+  let match: RegExpExecArray | null;
+  TOP_LEVEL_HEADING_PATTERN.lastIndex = 0;
+
+  while ((match = TOP_LEVEL_HEADING_PATTERN.exec(text))) {
+    const headingStart = match.index + match[1].length;
+    headings.push({
+      title: `${match[2]}、${match[3].trim()}`,
+      headingStart,
+      bodyStart: match.index + match[0].length,
+    });
+  }
+
+  return headings;
+};
+
+const expandEmbeddedTextSections = <T extends SectionLike>(sections: T[] = []): T[] => {
+  const expanded: T[] = [];
+
+  sections.forEach((section) => {
+    const content = String(section?.content || '');
+    const headings = isExpandableTextSection(section) ? findEmbeddedHeadings(content) : [];
+
+    if (headings.length === 0) {
+      expanded.push(section);
+      return;
+    }
+
+    const preface = content.slice(0, headings[0].headingStart).trim();
+    if (preface) {
+      expanded.push({
+        ...section,
+        content: preface,
+      });
+    }
+
+    headings.forEach((heading, headingIndex) => {
+      const nextHeading = headings[headingIndex + 1];
+      const sectionContent = content
+        .slice(heading.bodyStart, nextHeading ? nextHeading.headingStart : content.length)
+        .trim();
+
+      expanded.push({
+        ...section,
+        title: heading.title,
+        content: sectionContent,
+      });
+    });
+  });
+
+  return expanded;
+};
+
 export const alignComparisonSections = <T extends SectionLike>(
   leftSections: T[] = [],
   rightSections: T[] = []
@@ -58,6 +126,8 @@ export const alignComparisonSections = <T extends SectionLike>(
     __rightIndex: number;
   };
 
+  const normalizedLeftSections = expandEmbeddedTextSections(leftSections);
+  const normalizedRightSections = expandEmbeddedTextSections(rightSections);
   const rows: InternalRow[] = [];
   const rowsByKey = new Map<string, InternalRow[]>();
 
@@ -67,7 +137,7 @@ export const alignComparisonSections = <T extends SectionLike>(
     rowsByKey.set(key, existingRows);
   };
 
-  leftSections.forEach((section, index) => {
+  normalizedLeftSections.forEach((section, index) => {
     const key = normalizeComparisonSectionTitle(section?.title, section?.type);
     const row: InternalRow = {
       title: section?.title || section?.type || '未命名章节',
@@ -80,7 +150,7 @@ export const alignComparisonSections = <T extends SectionLike>(
     rememberRow(key, row);
   });
 
-  rightSections.forEach((section, index) => {
+  normalizedRightSections.forEach((section, index) => {
     const key = normalizeComparisonSectionTitle(section?.title, section?.type);
     const matchingRow = (rowsByKey.get(key) || []).find((row) => !row.newSec);
 
