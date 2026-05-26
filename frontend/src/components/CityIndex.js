@@ -62,6 +62,23 @@ const getIssueBreakdown = (checkStatus) => {
   ].filter((item) => item.count > 0);
 };
 
+const getObservationBreakdown = (checkStatus) => {
+  if (!checkStatus || typeof checkStatus !== 'object') return [];
+
+  return [
+    {
+      key: 'confirmed-abnormal',
+      label: '已确认异常',
+      count: toPositiveCount(checkStatus.confirmed_abnormal ?? checkStatus.confirmedAbnormal),
+    },
+    {
+      key: 'hierarchy-delta',
+      label: '层级差额',
+      count: toPositiveCount(checkStatus.hierarchy_delta ?? checkStatus.hierarchyDelta),
+    },
+  ].filter((item) => item.count > 0);
+};
+
 export function buildCatalogReturnPath(path = [], search = '') {
   const params = new URLSearchParams(search || '');
   const normalizedPath = path.map((id) => String(id)).filter(Boolean);
@@ -723,27 +740,56 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
                           return <span className="status-pill gray">⚪ 未校验</span>;
                         }
 
-                        if (checkStatus.total === 0) {
+                        const issueBreakdown = getIssueBreakdown(checkStatus);
+                        const observationBreakdown = getObservationBreakdown(checkStatus);
+
+                        if (checkStatus.total === 0 && observationBreakdown.length === 0) {
                           return (
                             <span className="status-pill green">
                               <CheckCircle size={14} />
-                              <span>无问题发现</span>
+                              <span>无待复核项</span>
                             </span>
                           );
                         }
 
-                        const issueBreakdown = getIssueBreakdown(checkStatus);
+                        if (checkStatus.total === 0) {
+                          const primaryObservation = observationBreakdown[0];
+                          const remainingObservations = observationBreakdown.slice(1);
+
+                          return (
+                            <div className="report-card-status-stack">
+                              <span className="status-pill amber">
+                                <AlertCircle size={14} />
+                                <span>{primaryObservation.label} {primaryObservation.count}</span>
+                              </span>
+                              {remainingObservations.length > 0 && (
+                                <div className="status-breakdown" aria-label="已确认状态">
+                                  {remainingObservations.map((item) => (
+                                    <span key={item.key} className="status-mini-pill neutral">
+                                      {item.label} {item.count}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
 
                         return (
                           <div className="report-card-status-stack">
                             <span className="status-pill red">
                               <AlertCircle size={14} />
-                              <span>发现 {checkStatus.total} 个问题</span>
+                              <span>待复核 {checkStatus.total}</span>
                             </span>
-                            {issueBreakdown.length > 0 && (
-                              <div className="status-breakdown" aria-label="问题来源">
+                            {(issueBreakdown.length > 0 || observationBreakdown.length > 0) && (
+                              <div className="status-breakdown" aria-label="状态明细">
                                 {issueBreakdown.map((item) => (
-                                  <span key={item.key} className="status-mini-pill">
+                                  <span key={item.key} className="status-mini-pill danger">
+                                    {item.label} {item.count}
+                                  </span>
+                                ))}
+                                {observationBreakdown.map((item) => (
+                                  <span key={item.key} className="status-mini-pill neutral">
                                     {item.label} {item.count}
                                   </span>
                                 ))}

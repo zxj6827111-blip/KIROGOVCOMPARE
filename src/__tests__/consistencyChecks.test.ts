@@ -1245,7 +1245,17 @@ describe('ConsistencyCheckService', () => {
             mockedQuery
                 .mockResolvedValueOnce({ rows: [{ year: 2024 }] })
                 .mockResolvedValueOnce({ rows: [{ id: 9001 }] })
-                .mockResolvedValue({ rows: [] });
+                .mockImplementation(async (sql: unknown) => {
+                    const text = String(sql);
+                    if (
+                        text.includes('FROM report_consistency_items') &&
+                        text.includes('AS total') &&
+                        text.includes("COALESCE(human_status, 'pending') = 'pending'")
+                    ) {
+                        return { rows: [{ total: '2', visual: '0', structure: '2', quality: '0' }] };
+                    }
+                    return { rows: [] };
+                });
 
             const makeItem = (autoStatus: 'PASS' | 'FAIL' | 'UNCERTAIN') => ({
                 groupKey: 'table2' as const,
@@ -1296,6 +1306,79 @@ describe('ConsistencyCheckService', () => {
                 String(sql).includes('SET check_total = $2')
             );
             expect(cacheUpdateCall?.[1]).toEqual([1000, 2, 0, 2, 0]);
+            expect(String(cacheUpdateCall?.[0])).toContain('checks_updated_at = NOW()');
+        });
+
+        it('preserves reviewed abnormal items and writes only persisted pending items into cached counts', async () => {
+            mockedQuery
+                .mockResolvedValueOnce({ rows: [{ year: 2024 }] })
+                .mockResolvedValueOnce({ rows: [{ id: 9001 }] })
+                .mockImplementation(async (sql: unknown) => {
+                    const text = String(sql);
+                    if (
+                        text.includes('FROM report_consistency_items') &&
+                        text.includes('AS total') &&
+                        text.includes("COALESCE(human_status, 'pending') = 'pending'")
+                    ) {
+                        return { rows: [{ total: '1', visual: '0', structure: '1', quality: '0' }] };
+                    }
+                    return { rows: [] };
+                });
+
+            jest.spyOn(service, 'runChecks').mockReturnValue([
+                {
+                    groupKey: 'table2' as const,
+                    checkKey: 'pending_fail',
+                    fingerprint: 'pending-fail',
+                    title: 'pending fail',
+                    expr: 'left = right',
+                    leftValue: 1,
+                    rightValue: 0,
+                    delta: 1,
+                    tolerance: 0,
+                    autoStatus: 'FAIL',
+                    evidenceJson: { paths: [], values: {} },
+                },
+                {
+                    groupKey: 'table3' as const,
+                    checkKey: 'confirmed_pass',
+                    fingerprint: 'confirmed-pass',
+                    title: 'confirmed pass',
+                    expr: 'left = right',
+                    leftValue: 0,
+                    rightValue: 0,
+                    delta: 0,
+                    tolerance: 0,
+                    autoStatus: 'PASS',
+                    evidenceJson: { paths: [], values: {} },
+                },
+                {
+                    groupKey: 'structure' as const,
+                    checkKey: 'not_assessable',
+                    fingerprint: 'not-assessable',
+                    title: 'not assessable',
+                    expr: 'left = right',
+                    leftValue: null,
+                    rightValue: null,
+                    delta: null,
+                    tolerance: 0,
+                    autoStatus: 'NOT_ASSESSABLE',
+                    evidenceJson: { paths: [], values: {} },
+                },
+            ]);
+            jest.spyOn(service as any, 'generateHierarchyItems').mockResolvedValue([]);
+
+            await service.runAndPersist(1000, { sections: [] });
+
+            const upsertCall = mockedQuery.mock.calls.find(([sql]) =>
+                String(sql).includes('ON CONFLICT(report_version_id, fingerprint) DO UPDATE')
+            );
+            expect(String(upsertCall?.[0])).toContain("report_consistency_items.human_status IN ('confirmed', 'dismissed')");
+
+            const cacheUpdateCall = mockedQuery.mock.calls.find(([sql]) =>
+                String(sql).includes('SET check_total = $2')
+            );
+            expect(cacheUpdateCall?.[1]).toEqual([1000, 1, 0, 1, 0]);
         });
     });
 });

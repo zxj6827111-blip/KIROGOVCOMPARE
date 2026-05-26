@@ -2303,8 +2303,20 @@ export class ConsistencyCheckService {
           tolerance = excluded.tolerance,
           auto_status = excluded.auto_status,
           evidence_json = excluded.evidence_json,
-          human_status = excluded.human_status,
-          human_comment = NULL,
+          human_status = CASE
+            WHEN report_consistency_items.auto_status IN ('FAIL', 'UNCERTAIN')
+              AND excluded.auto_status IN ('FAIL', 'UNCERTAIN')
+              AND report_consistency_items.human_status IN ('confirmed', 'dismissed')
+            THEN report_consistency_items.human_status
+            ELSE excluded.human_status
+          END,
+          human_comment = CASE
+            WHEN report_consistency_items.auto_status IN ('FAIL', 'UNCERTAIN')
+              AND excluded.auto_status IN ('FAIL', 'UNCERTAIN')
+              AND report_consistency_items.human_status IN ('confirmed', 'dismissed')
+            THEN report_consistency_items.human_comment
+            ELSE NULL
+          END,
           updated_at = NOW();
       `, [
                 runId, reportVersionId, item.groupKey, item.checkKey, item.fingerprint,
@@ -2330,12 +2342,36 @@ export class ConsistencyCheckService {
       WHERE id = $2;
     `, [JSON.stringify(summary), runId]);
 
-        // Cache aggregated counts on report_versions for fast lookup
-        const abnormalItems = items.filter(i => i.autoStatus === 'FAIL' || i.autoStatus === 'UNCERTAIN');
-        const visualCount = abnormalItems.filter(i => i.groupKey === 'visual').length;
-        const qualityCount = abnormalItems.filter(i => i.groupKey === 'quality').length;
-        const structureCount = abnormalItems.filter(i => ['structure', 'table2', 'table3', 'table4', 'text', 'hierarchy'].includes(i.groupKey)).length;
-        const totalCount = abnormalItems.length;
+        // Cache pending review counts from persisted rows, so preserved human confirmations do not leak back into list-card totals.
+        const countsRes = await pool.query(`
+          SELECT
+            COUNT(*) FILTER (
+              WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+                AND COALESCE(human_status, 'pending') = 'pending'
+            ) AS total,
+            COUNT(*) FILTER (
+              WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+                AND group_key = 'visual'
+                AND COALESCE(human_status, 'pending') = 'pending'
+            ) AS visual,
+            COUNT(*) FILTER (
+              WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+                AND group_key = 'quality'
+                AND COALESCE(human_status, 'pending') = 'pending'
+            ) AS quality,
+            COUNT(*) FILTER (
+              WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+                AND group_key IN ('structure','table2','table3','table4','text','hierarchy')
+                AND COALESCE(human_status, 'pending') = 'pending'
+            ) AS structure
+          FROM report_consistency_items
+          WHERE report_version_id = $1;
+        `, [reportVersionId]);
+        const countRow = countsRes.rows?.[0] || {};
+        const totalCount = Number(countRow.total || 0);
+        const visualCount = Number(countRow.visual || 0);
+        const structureCount = Number(countRow.structure || 0);
+        const qualityCount = Number(countRow.quality || 0);
 
         await pool.query(`
       UPDATE report_versions

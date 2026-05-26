@@ -83,17 +83,17 @@ describe('CityIndex report actions', () => {
     });
   });
 
-  test('shows issue source hints on report cards', async () => {
+  test('shows pending review source hints on report cards', async () => {
     apiClient.post.mockImplementation((url) => {
       if (url === '/reports/batch-check-status') {
         return Promise.resolve({
           data: {
             123: {
               checked: true,
-              total: 3,
+              total: 109,
               has_content: true,
-              consistency: 1,
-              quality_review: 2,
+              consistency: 109,
+              hierarchy_delta: 63,
             },
           },
         });
@@ -103,9 +103,36 @@ describe('CityIndex report actions', () => {
 
     render(<CityIndex />);
 
-    expect(await screen.findByText('发现 3 个问题')).toBeInTheDocument();
-    expect(screen.getByText('勾稽 1')).toBeInTheDocument();
-    expect(screen.getByText('质量 2')).toBeInTheDocument();
+    expect(await screen.findByText('待复核 109')).toBeInTheDocument();
+    expect(screen.getByText('勾稽 109')).toBeInTheDocument();
+    expect(screen.getByText('层级差额 63')).toBeInTheDocument();
+    expect(screen.queryByText('发现 109 个问题')).not.toBeInTheDocument();
+  });
+
+  test('shows confirmed abnormalities without labeling them as pending problems', async () => {
+    apiClient.post.mockImplementation((url) => {
+      if (url === '/reports/batch-check-status') {
+        return Promise.resolve({
+          data: {
+            123: {
+              checked: true,
+              total: 0,
+              has_content: true,
+              confirmed_abnormal: 200,
+              hierarchy_delta: 81,
+            },
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected POST ${url}`));
+    });
+
+    render(<CityIndex />);
+
+    expect(await screen.findByText('已确认异常 200')).toBeInTheDocument();
+    expect(screen.getByText('层级差额 81')).toBeInTheDocument();
+    expect(screen.queryByText('发现 200 个问题')).not.toBeInTheDocument();
+    expect(screen.queryByText('无待复核项')).not.toBeInTheDocument();
   });
 });
 

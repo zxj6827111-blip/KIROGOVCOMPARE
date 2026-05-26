@@ -204,3 +204,105 @@ describe('Report batch parse route', () => {
     expect(mockedQuery).not.toHaveBeenCalled();
   });
 });
+
+describe('Report batch check status route', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockedGetAllowedRegionIds.mockResolvedValue(null);
+  });
+
+  it('keeps confirmed abnormal items out of pending totals and exposes them separately', async () => {
+    mockedQuery
+      .mockResolvedValueOnce({
+        rows: [{
+          report_id: 4763,
+          version_id: 4477,
+          review_status: 'published',
+          has_content_db: true,
+          check_total: 0,
+          check_visual: 0,
+          check_structure: 0,
+          check_quality: 0,
+          checks_updated_at: '2026-05-21T15:47:02.000Z',
+          parsed_json: { sections: [] },
+          section_title_active_issue_count: 0,
+        }],
+      })
+      .mockResolvedValueOnce({
+        rows: [{
+          report_version_id: 4477,
+          total: '0',
+          consistency: '0',
+          visual: '0',
+          quality: '0',
+          quality_review: '0',
+          structure: '0',
+          confirmed_abnormal: '200',
+          hierarchy_delta: '81',
+        }],
+      });
+
+    const response = await request(buildApp())
+      .post('/api/reports/batch-check-status')
+      .send({ report_ids: [4763] });
+
+    expect(response.status).toBe(200);
+    expect(response.body['4763']).toMatchObject({
+      checked: true,
+      total: 0,
+      consistency: 0,
+      structure: 0,
+      confirmed_abnormal: 200,
+      hierarchy_delta: 81,
+    });
+    expect(mockedQuery.mock.calls[1][0]).toContain("COALESCE(human_status, 'pending') = 'pending'");
+    expect(mockedQuery.mock.calls[1][0]).toContain('confirmed_abnormal');
+    expect(mockedQuery.mock.calls[1][0]).toContain('hierarchy_delta');
+  });
+
+  it('keeps pending FAIL and UNCERTAIN in pending totals and reports hierarchy delta separately', async () => {
+    mockedQuery
+      .mockResolvedValueOnce({
+        rows: [{
+          report_id: 4762,
+          version_id: 4451,
+          review_status: 'published',
+          has_content_db: true,
+          check_total: 109,
+          check_visual: 0,
+          check_structure: 109,
+          check_quality: 0,
+          checks_updated_at: '2026-05-26T16:26:41.000Z',
+          parsed_json: { sections: [] },
+          section_title_active_issue_count: 0,
+        }],
+      })
+      .mockResolvedValueOnce({
+        rows: [{
+          report_version_id: 4451,
+          total: '109',
+          consistency: '109',
+          visual: '0',
+          quality: '0',
+          quality_review: '0',
+          structure: '109',
+          confirmed_abnormal: '0',
+          hierarchy_delta: '63',
+        }],
+      });
+
+    const response = await request(buildApp())
+      .post('/api/reports/batch-check-status')
+      .send({ report_ids: [4762] });
+
+    expect(response.status).toBe(200);
+    expect(response.body['4762']).toMatchObject({
+      checked: true,
+      total: 109,
+      consistency: 109,
+      structure: 109,
+      confirmed_abnormal: 0,
+      hierarchy_delta: 63,
+    });
+  });
+});

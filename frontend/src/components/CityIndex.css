@@ -522,6 +522,13 @@
   border: 1px solid #f87171;
 }
 
+.status-pill.amber {
+  background: #fef3c7;
+  color: #92400e;
+  font-weight: 600;
+  border: 1px solid #f59e0b;
+}
+
 .status-pill.gray {
   background: #f3f4f6;
   color: #6b7280;
@@ -551,6 +558,18 @@
   font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
+}
+
+.status-mini-pill.danger {
+  border-color: #fecaca;
+  background: #fff7f7;
+  color: #b91c1c;
+}
+
+.status-mini-pill.neutral {
+  border-color: #fed7aa;
+  background: #fff7ed;
+  color: #9a3412;
 }
 
 .report-card-footer {
