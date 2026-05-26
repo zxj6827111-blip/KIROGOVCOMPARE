@@ -159,6 +159,86 @@
     /* Removed margin-left: auto to allow it to sit on the left */
 }
 
+.issue-card--title {
+    border-color: #fed7aa;
+}
+
+.issue-card--title:hover {
+    box-shadow: 0 4px 12px rgba(234, 88, 12, 0.12);
+}
+
+.issue-header--title {
+    background: #fff7ed;
+    border-bottom-color: #fed7aa;
+}
+
+.issue-title-note {
+    color: #9a3412;
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.section-title-comparison {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: stretch;
+    gap: 16px;
+}
+
+.section-title-box {
+    border-radius: var(--radius-md);
+    padding: 16px;
+    border: 1px solid #fed7aa;
+    background: #fff;
+    min-width: 0;
+}
+
+.section-title-box--raw {
+    background: #fff7ed;
+}
+
+.section-title-box--normalized {
+    background: #f0fdf4;
+    border-color: #bbf7d0;
+}
+
+.section-title-label {
+    display: block;
+    margin-bottom: 8px;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.section-title-box strong {
+    color: #111827;
+    font-size: 15px;
+    line-height: 1.55;
+    word-break: break-word;
+}
+
+.section-title-arrow {
+    align-self: center;
+    color: #ea580c;
+    font-weight: 700;
+}
+
+.section-title-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+    color: #9a3412;
+    font-size: 12px;
+}
+
+.section-title-meta span {
+    border-radius: 999px;
+    background: #fff7ed;
+    border: 1px solid #fed7aa;
+    padding: 4px 10px;
+}
+
 /* Detail Blocks */
 .issue-detail {
     padding: 24px;

@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import pool from '../config/database-llm';
+import { buildSectionTitleQualityItems } from '../utils/sectionTitleQuality';
 
 // Types for parsed JSON structure
 interface EntityResults {
@@ -2184,6 +2185,7 @@ export class ConsistencyCheckService {
         items.push(...this.generateVisualAuditItems(visualAudit));
         items.push(...this.generateParseRuleGateItems(parsed?.parse_rule_gate || visualAudit?.parse_rule_gate));
         items.push(...this.generateStructureAuditItems(sections));
+        items.push(...buildSectionTitleQualityItems(sections, this.generateFingerprint.bind(this)));
         items.push(...this.generateSection5GapItems(sections));
         items.push(...this.generateSection6LogicItems(sections));
 

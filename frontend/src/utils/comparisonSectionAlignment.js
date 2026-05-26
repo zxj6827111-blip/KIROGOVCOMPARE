@@ -27,11 +27,16 @@ const normalizeProblemSectionBody = (body) =>
   [body, body.replace(/^(?:政府信息公开工作|政务公开工作|政务信息工作|信息公开工作)/g, '')]
     .map((value) =>
       value.replace(
-        /^(?:存在的主要问题|存在的?问题|存在主要问题|存在问题)(?:及|和|与)?(?:改进情况|改进措施|改进方向|改进思路)$/g,
+        /^(?:存在的主要问题|存在的?问题|存在主要问题|存在问题)(?:及|和|与)?(?:改进情况|改进措施|改进方向|改进思路|整改情况|整改措施|整改方向|下步打算|下一步打算|下步工作|下一步工作|下步计划|下一步计划)$/g,
         '存在的主要问题改进情况'
       )
     )
     .find((value) => value === '存在的主要问题改进情况') || body;
+
+const isNeutralProblemSectionAlias = (body) => {
+  const withoutPrefix = String(body || '').replace(/^(?:政府信息公开工作|政务公开工作|政务信息工作|信息公开工作)/g, '');
+  return /^存在的主要问题(?:及|和)改进情况$/.test(withoutPrefix);
+};
 
 const normalizeTableTitleBody = (body, type = '') => {
   if (type === 'table_2') {
@@ -71,6 +76,36 @@ const normalizeTitleBody = (body, type = '') => {
   return normalizeTableTitleBody(withoutReportWorkPrefix, type);
 };
 
+const getStandardSectionTitle = (normalizedBody, type = '') => {
+  if (type === 'table_2' && normalizedBody === '主动公开政府信息情况') {
+    return { expectedOrdinal: '二', normalizedTitle: '二、主动公开政府信息情况' };
+  }
+
+  if (type === 'table_3' && normalizedBody === '收到和处理政府信息公开申请情况') {
+    return { expectedOrdinal: '三', normalizedTitle: '三、收到和处理政府信息公开申请情况' };
+  }
+
+  if (type === 'table_4' && normalizedBody === '政府信息公开行政复议行政诉讼情况') {
+    return { expectedOrdinal: '四', normalizedTitle: '四、政府信息公开行政复议、行政诉讼情况' };
+  }
+
+  if (/^table_[234]$/.test(type || '')) return null;
+
+  if (normalizedBody === '总体情况') {
+    return { expectedOrdinal: '一', normalizedTitle: '一、总体情况' };
+  }
+
+  if (normalizedBody === '存在的主要问题改进情况') {
+    return { expectedOrdinal: '五', normalizedTitle: '五、存在的主要问题及改进情况' };
+  }
+
+  if (normalizedBody === '其他需要报告的事项') {
+    return { expectedOrdinal: '六', normalizedTitle: '六、其他需要报告的事项' };
+  }
+
+  return null;
+};
+
 export const normalizeComparisonSectionTitle = (title, type = '') => {
   const { compact, ordinal, body } = getTitleParts(title);
   if (!compact) return `${type || 'section'}:empty`;
@@ -92,30 +127,24 @@ export const normalizeComparisonSectionTitle = (title, type = '') => {
 };
 
 export const getComparisonSectionTitleIssue = (title, type = '') => {
-  if ((type || 'text') !== 'text') return null;
   const rawTitle = String(title || '').trim();
   if (!rawTitle) return null;
 
   const { ordinal, body } = getTitleParts(rawTitle);
   const normalizedBody = normalizeTitleBody(body, type);
-  const expectedOrdinal = normalizedBody === '存在的主要问题改进情况'
-    ? '五'
-    : normalizedBody === '其他需要报告的事项'
-      ? '六'
-      : '';
-  if (!expectedOrdinal) return null;
+  const standardTitle = getStandardSectionTitle(normalizedBody, type);
+  if (!standardTitle) return null;
 
-  const normalizedTitle = `${expectedOrdinal}、${
-    normalizedBody === '存在的主要问题改进情况' ? '存在的主要问题及改进情况' : normalizedBody
-  }`;
   const hasDirtyPrefix = /^[|｜丨lLiI1]+\s*[一二三四五六七八九十]/.test(rawTitle.normalize('NFKC'));
-  const hasOrdinalMismatch = Boolean(ordinal) && ordinal !== expectedOrdinal;
-  if (!hasDirtyPrefix && !hasOrdinalMismatch) return null;
+  const hasOrdinalMismatch = Boolean(ordinal) && ordinal !== standardTitle.expectedOrdinal;
+  const hasNonstandardProblemAlias =
+    normalizedBody === '存在的主要问题改进情况' && !isNeutralProblemSectionAlias(body);
+  if (!hasDirtyPrefix && !hasOrdinalMismatch && !hasNonstandardProblemAlias) return null;
 
   return {
     title: rawTitle,
-    normalizedTitle,
-    expectedOrdinal,
+    normalizedTitle: standardTitle.normalizedTitle,
+    expectedOrdinal: standardTitle.expectedOrdinal,
     actualOrdinal: ordinal || '',
     reason: '原报告章节标题序号或前缀异常，系统已按标准章节语义归位。',
   };

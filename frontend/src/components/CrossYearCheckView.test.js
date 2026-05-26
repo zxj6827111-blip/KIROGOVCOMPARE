@@ -73,6 +73,26 @@ const normalIssue = {
   },
 };
 
+const sectionTitleIssue = {
+  id: 'title-issue-1',
+  title: '章节标题疑似有误：“三、主动公开政府信息情况”应按“二、主动公开政府信息情况”理解',
+  check_key: 'section_title_misnumbered',
+  group_key: 'quality',
+  auto_status: 'FAIL',
+  human_status: 'pending',
+  evidence: {
+    paths: ['sections[1].title'],
+    values: {
+      title: '三、主动公开政府信息情况',
+      normalizedTitle: '二、主动公开政府信息情况',
+      expectedOrdinal: '二',
+      actualOrdinal: '三',
+      sectionIndex: 1,
+      reason: '原报告章节标题序号或前缀异常，系统已按标准章节语义归位。',
+    },
+  },
+};
+
 describe('CrossYearCheckView', () => {
   beforeEach(() => {
     apiClient.get.mockReset();
@@ -160,5 +180,26 @@ describe('CrossYearCheckView', () => {
 
     expect(await screen.findAllByText('表三勾稽问题')).not.toHaveLength(0);
     expect(screen.getAllByText(/左值: 15/)).not.toHaveLength(0);
+  });
+
+  test('shows section title quality issues in the comparison issue list', async () => {
+    apiClient.get.mockResolvedValue(buildChecksResponse(sectionTitleIssue, { group_key: 'quality' }));
+
+    render(
+      <CrossYearCheckView
+        leftReportId={721}
+        rightReportId={784}
+        leftContent={{ sections: [] }}
+        rightContent={{ sections: [] }}
+        yearA={2024}
+        yearB={2025}
+      />
+    );
+
+    expect(await screen.findAllByText('发现 1 个问题')).toHaveLength(2);
+    expect(screen.getAllByText('章节标题疑似有误')).not.toHaveLength(0);
+    expect(screen.getAllByText('三、主动公开政府信息情况')).not.toHaveLength(0);
+    expect(screen.getAllByText('二、主动公开政府信息情况')).not.toHaveLength(0);
+    expect(screen.queryByText(/左值:/)).not.toBeInTheDocument();
   });
 });
