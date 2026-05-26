@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
-import CityIndex, { buildCatalogReturnPath } from './CityIndex';
+import userEvent from '@testing-library/user-event';
+import CityIndex, { __resetCityIndexCacheForTests, buildCatalogReturnPath } from './CityIndex';
 import { apiClient, getCurrentUser } from '../apiClient';
 
 jest.mock('../apiClient', () => ({
@@ -29,6 +30,7 @@ describe('buildCatalogReturnPath', () => {
 describe('CityIndex report actions', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    __resetCityIndexCacheForTests();
     getCurrentUser.mockReturnValue({
       username: 'viewer',
       permissions: { view_reports: true },
@@ -79,5 +81,80 @@ describe('CityIndex report actions', () => {
     await waitFor(() => {
       expect(screen.queryByTitle('删除报告')).not.toBeInTheDocument();
     });
+  });
+
+  test('shows issue source hints on report cards', async () => {
+    apiClient.post.mockImplementation((url) => {
+      if (url === '/reports/batch-check-status') {
+        return Promise.resolve({
+          data: {
+            123: {
+              checked: true,
+              total: 3,
+              has_content: true,
+              consistency: 1,
+              quality_review: 2,
+            },
+          },
+        });
+      }
+      return Promise.reject(new Error(`Unexpected POST ${url}`));
+    });
+
+    render(<CityIndex />);
+
+    expect(await screen.findByText('发现 3 个问题')).toBeInTheDocument();
+    expect(screen.getByText('勾稽 1')).toBeInTheDocument();
+    expect(screen.getByText('质量 2')).toBeInTheDocument();
+  });
+});
+
+describe('CityIndex child search', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    __resetCityIndexCacheForTests();
+    getCurrentUser.mockReturnValue({
+      username: 'viewer',
+      permissions: { view_reports: true },
+    });
+
+    window.history.replaceState({}, '', '/catalog?region=715');
+
+    apiClient.get.mockImplementation((url) => {
+      if (url === '/regions') {
+        return Promise.resolve({
+          data: [
+            { id: 715, name: '淮安市', parent_id: null, level: 2 },
+            { id: 721, name: '教育局', parent_id: 715, level: 4 },
+            { id: 801, name: '南通市教育局', parent_id: 800, level: 4 },
+            { id: 802, name: '区教育局', parent_id: 803, level: 4 },
+          ],
+        });
+      }
+      if (url === '/reports') {
+        return Promise.resolve({ data: [] });
+      }
+      return Promise.reject(new Error(`Unexpected GET ${url}`));
+    });
+
+    apiClient.post.mockImplementation((url) => {
+      if (url === '/reports/batch-check-status') {
+        return Promise.resolve({ data: {} });
+      }
+      return Promise.reject(new Error(`Unexpected POST ${url}`));
+    });
+  });
+
+  test('filters only the current hierarchy children instead of searching all regions', async () => {
+    const user = userEvent.setup();
+    render(<CityIndex />);
+
+    await screen.findByText('教育局');
+
+    await user.type(screen.getByPlaceholderText('搜索名称...'), '教育局');
+
+    expect(screen.getByText('教育局')).toBeInTheDocument();
+    expect(screen.queryByText('南通市教育局')).not.toBeInTheDocument();
+    expect(screen.queryByText('区教育局')).not.toBeInTheDocument();
   });
 });
