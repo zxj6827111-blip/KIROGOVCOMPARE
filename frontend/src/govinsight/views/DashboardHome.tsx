@@ -10,9 +10,14 @@ import {
 } from 'recharts';
 import { Layers, HelpCircle, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { isDistrictLikeGovInsightEntity } from '../utils/entityClassification';
-import type { EntityProfile } from '../types';
+import type { AnnualData, EntityProfile } from '../types';
 
 const isDistrictLikeChild = (child: EntityProfile) => isDistrictLikeGovInsightEntity(child);
+
+interface HeatMapRankItem {
+  child: EntityProfile;
+  data: AnnualData;
+}
 
 export const DashboardHome: React.FC = () => {
   const { entity, setEntity } = useContext(EntityContext);
@@ -163,15 +168,19 @@ export const DashboardHome: React.FC = () => {
   };
 
   const sortedDistricts = entity.children ? [...entity.children]
-    .filter(child => {
+    .map((child) => ({
+      child,
+      data: child.data.find(x => x.year === currentYear),
+    }))
+    .filter((item): item is HeatMapRankItem => {
+      const { child, data } = item;
+      if (!data) return false;
         if (heatMapFilter === 'district') return isDistrictLikeChild(child);
         if (heatMapFilter === 'department') return !isDistrictLikeChild(child);
       return true;
     })
     .sort((a, b) => {
-      const da = a.data.find(x => x.year === currentYear);
-      const db = b.data.find(x => x.year === currentYear);
-      return (db?.applications.newReceived || 0) - (da?.applications.newReceived || 0);
+      return (b.data?.applications.newReceived || 0) - (a.data?.applications.newReceived || 0);
     }) : [];
 
   return (
@@ -289,9 +298,7 @@ export const DashboardHome: React.FC = () => {
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto pr-2 space-y-2">
-                {sortedDistricts.map((dist, idx) => {
-                  const d = dist.data.find(x => x.year === currentYear);
-                  if (!d) return null;
+                {sortedDistricts.map(({ child: dist, data: d }, idx) => {
                   const percent = (d.applications.newReceived / currentData.applications.newReceived * 100).toFixed(1);
                   return (
                     <div
