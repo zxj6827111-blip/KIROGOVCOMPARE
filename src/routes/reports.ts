@@ -1594,6 +1594,52 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
     }
   }
 
+  const exactCountsMap = new Map<number, any>();
+  const allVersionIds = versionRows
+    .map((row: any) => Number(row.version_id))
+    .filter((id: number) => Number.isFinite(id) && id > 0);
+  if (allVersionIds.length > 0) {
+    const exactCountsRes = await pool.query(`
+      SELECT
+        report_version_id,
+        COUNT(*) FILTER (
+          WHERE auto_status = 'FAIL'
+            AND (human_status != 'dismissed' OR human_status IS NULL)
+        ) AS total,
+        COUNT(*) FILTER (
+          WHERE auto_status = 'FAIL'
+            AND group_key IN ('table2','table3','table4','text','hierarchy')
+            AND (human_status != 'dismissed' OR human_status IS NULL)
+        ) AS consistency,
+        COUNT(*) FILTER (
+          WHERE auto_status = 'FAIL'
+            AND group_key = 'visual'
+            AND (human_status != 'dismissed' OR human_status IS NULL)
+        ) AS visual,
+        COUNT(*) FILTER (
+          WHERE auto_status = 'FAIL'
+            AND group_key = 'quality'
+            AND (human_status != 'dismissed' OR human_status IS NULL)
+        ) AS quality,
+        COUNT(*) FILTER (
+          WHERE auto_status = 'FAIL'
+            AND group_key IN ('visual','structure','quality')
+            AND (human_status != 'dismissed' OR human_status IS NULL)
+        ) AS quality_review,
+        COUNT(*) FILTER (
+          WHERE auto_status = 'FAIL'
+            AND group_key IN ('structure','table2','table3','table4','text','hierarchy')
+            AND (human_status != 'dismissed' OR human_status IS NULL)
+        ) AS structure
+      FROM report_consistency_items
+      WHERE report_version_id = ANY($1::int[])
+      GROUP BY report_version_id
+    `, [allVersionIds]);
+    for (const row of exactCountsRes.rows || []) {
+      exactCountsMap.set(Number(row.report_version_id), row);
+    }
+  }
+
   const result: Record<string, any> = {};
 
   const missingVersionIds: number[] = [];
@@ -1601,8 +1647,13 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
     const reportId = Number(row.report_id);
     const versionId = Number(row.version_id);
     const checked = Boolean(versionId) && !!row.checks_updated_at;
-    const qualityCount = Number(row.check_quality || 0);
     const sectionTitleIssueCount = countDynamicSectionTitleIssues(row.parsed_json, Number(row.section_title_issue_count || 0));
+    const exactCounts = exactCountsMap.get(versionId);
+    const baseTotal = Number(exactCounts?.total ?? row.check_total ?? 0);
+    const baseQuality = Number(exactCounts?.quality ?? row.check_quality ?? 0);
+    const baseQualityReview = Number(
+      exactCounts?.quality_review ?? (Number(row.check_visual || 0) + Number(row.check_quality || 0))
+    );
     if (versionId && !checked) {
       missingVersionIds.push(versionId);
     }
@@ -1611,10 +1662,12 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
       version_id: Number.isFinite(versionId) && versionId > 0 ? versionId : null,
       review_status: row.review_status || null,
       checked: checked || sectionTitleIssueCount > 0,
-      total: checked ? Number(row.check_total || 0) + sectionTitleIssueCount : (sectionTitleIssueCount > 0 ? sectionTitleIssueCount : null),
-      visual: checked ? Number(row.check_visual || 0) : null,
-      structure: checked ? Number(row.check_structure || 0) : null,
-      quality: checked ? qualityCount + sectionTitleIssueCount : (sectionTitleIssueCount > 0 ? sectionTitleIssueCount : null)
+      total: checked ? baseTotal + sectionTitleIssueCount : (sectionTitleIssueCount > 0 ? sectionTitleIssueCount : null),
+      visual: checked ? Number(exactCounts?.visual ?? row.check_visual ?? 0) : null,
+      structure: checked ? Number(exactCounts?.structure ?? row.check_structure ?? 0) : null,
+      quality: checked ? baseQuality + sectionTitleIssueCount : (sectionTitleIssueCount > 0 ? sectionTitleIssueCount : null),
+      consistency: checked ? Number(exactCounts?.consistency ?? row.check_structure ?? 0) : null,
+      quality_review: checked ? baseQualityReview + sectionTitleIssueCount : (sectionTitleIssueCount > 0 ? sectionTitleIssueCount : null)
     };
   }
 
@@ -1630,6 +1683,11 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
           ) AS total,
           COUNT(*) FILTER (
             WHERE auto_status = 'FAIL'
+              AND group_key IN ('table2','table3','table4','text','hierarchy')
+              AND (human_status != 'dismissed' OR human_status IS NULL)
+          ) AS consistency,
+          COUNT(*) FILTER (
+            WHERE auto_status = 'FAIL'
               AND group_key = 'visual'
               AND (human_status != 'dismissed' OR human_status IS NULL)
           ) AS visual,
@@ -1638,6 +1696,11 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
               AND group_key = 'quality'
               AND (human_status != 'dismissed' OR human_status IS NULL)
           ) AS quality,
+          COUNT(*) FILTER (
+            WHERE auto_status = 'FAIL'
+              AND group_key IN ('visual','structure','quality')
+              AND (human_status != 'dismissed' OR human_status IS NULL)
+          ) AS quality_review,
           COUNT(*) FILTER (
             WHERE auto_status = 'FAIL'
               AND group_key IN ('structure','table2','table3','table4','text','hierarchy')
@@ -1669,18 +1732,24 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
       if (!row.checks_updated_at && countsMap.has(versionId)) {
         const counts = countsMap.get(versionId);
         const total = Number(counts.total || 0);
+        const consistency = Number(counts.consistency || 0);
         const visual = Number(counts.visual || 0);
         const structure = Number(counts.structure || 0);
         const quality = Number(counts.quality || 0);
-        const sectionTitleIssueCount = countDynamicSectionTitleIssues(row.parsed_json, quality);
+        const qualityReview = Number(counts.quality_review || 0);
+        const sectionTitleIssueCount = countDynamicSectionTitleIssues(row.parsed_json, Number(row.section_title_issue_count || 0));
 
         result[String(reportId)] = {
           has_content: contentMap.get(reportId) ?? false,
+          version_id: Number.isFinite(versionId) && versionId > 0 ? versionId : null,
+          review_status: row.review_status || null,
           checked: true,
           total: total + sectionTitleIssueCount,
           visual,
           structure,
-          quality: quality + sectionTitleIssueCount
+          quality: quality + sectionTitleIssueCount,
+          consistency,
+          quality_review: qualityReview + sectionTitleIssueCount
         };
       }
     }

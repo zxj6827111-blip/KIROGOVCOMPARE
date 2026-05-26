@@ -184,6 +184,81 @@ describe('ReportDetail vision review integration', () => {
     expect(screen.getByText('217')).toBeInTheDocument();
   });
 
+  test('shows issue badges on the detail tabs', async () => {
+    apiClient.get.mockImplementation((url) => {
+      switch (url) {
+        case '/reports/123':
+          return Promise.resolve({ data: { data: reportPayload } });
+        case '/v2/reports/123/facts/active_disclosure':
+        case '/v2/reports/123/facts/application':
+        case '/v2/reports/123/facts/legal_proceeding':
+          return Promise.resolve({ data: { data: [] } });
+        case '/reports/123/checks':
+          return Promise.resolve({
+            data: {
+              data: {
+                groups: [
+                  {
+                    group_key: 'table3',
+                    items: [
+                      {
+                        id: 1,
+                        check_key: 't3_identity',
+                        auto_status: 'FAIL',
+                        human_status: 'pending',
+                        title: '表三勾稽异常',
+                        evidence: {},
+                      },
+                    ],
+                  },
+                  {
+                    group_key: 'quality',
+                    items: [
+                      {
+                        id: 2,
+                        check_key: 'narrative_sec5_gap',
+                        auto_status: 'FAIL',
+                        human_status: 'pending',
+                        title: '第五部分缺少说明',
+                        evidence: {},
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          });
+        case '/reports/123/vision-review':
+          return Promise.resolve({
+            data: {
+              data: {
+                reviews: [{ id: 1, tableId: 'table_2', conclusion: 'source_table_anomaly' }],
+                corrections: [{ id: 1, tableId: 'table_2', status: 'pending' }],
+              },
+            },
+          });
+        default:
+          return Promise.reject(new Error(`Unexpected GET ${url}`));
+      }
+    });
+
+    render(<ReportDetail reportId="123" />);
+
+    await screen.findByText('报告详情');
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /勾稽关系校验\s*1/ })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /数据质量审计\s*1/ })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /视觉复核\s*2/ })
+      ).toBeInTheDocument();
+    });
+  });
+
   test('hides delete report action when current user lacks delete_reports', async () => {
     getCurrentUser.mockReturnValue({
       username: 'uploader',

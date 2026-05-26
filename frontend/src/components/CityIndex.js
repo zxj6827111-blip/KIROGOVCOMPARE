@@ -26,6 +26,42 @@ const globalCache = {
   lastFetch: 0,
 };
 
+export function __resetCityIndexCacheForTests() {
+  globalCache.regions = null;
+  globalCache.reports = null;
+  globalCache.checkStatusMap = null;
+  globalCache.lastFetch = 0;
+}
+
+const toPositiveCount = (value) => {
+  const count = Number(value);
+  return Number.isFinite(count) && count > 0 ? count : 0;
+};
+
+const getIssueBreakdown = (checkStatus) => {
+  if (!checkStatus || typeof checkStatus !== 'object') return [];
+
+  const hasDedicatedIssueBreakdown =
+    checkStatus.consistency !== undefined ||
+    checkStatus.quality_review !== undefined ||
+    checkStatus.qualityReview !== undefined;
+  const consistency = toPositiveCount(
+    checkStatus.consistency ?? (hasDedicatedIssueBreakdown ? 0 : checkStatus.structure)
+  );
+  const qualityReview = toPositiveCount(
+    checkStatus.quality_review ??
+      checkStatus.qualityReview ??
+      (toPositiveCount(checkStatus.visual) + toPositiveCount(checkStatus.quality))
+  );
+  const visionReview = toPositiveCount(checkStatus.vision_review ?? checkStatus.visionReview);
+
+  return [
+    { key: 'consistency', label: '勾稽', count: consistency },
+    { key: 'quality', label: '质量', count: qualityReview },
+    { key: 'vision', label: '复核', count: visionReview },
+  ].filter((item) => item.count > 0);
+};
+
 export function buildCatalogReturnPath(path = [], search = '') {
   const params = new URLSearchParams(search || '');
   const normalizedPath = path.map((id) => String(id)).filter(Boolean);
@@ -405,26 +441,14 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
   const allCards = childrenOf(currentParentId);
 
   const filteredCards = useMemo(() => {
-    // 如果有搜索词，进行全局搜索（搜索所有区域）
-    if (searchTerm && searchTerm.trim()) {
-      const term = searchTerm.trim().toLowerCase();
-      return regions.filter(r => {
-        // 名称包含搜索词
-        if (!r.name.toLowerCase().includes(term)) return false;
+    const term = searchTerm.trim().toLowerCase();
 
-        // Tab Filter
-        if (activeTab === 'all') return true;
-        const type = getRegionType(r.name);
-        if (activeTab === 'district') {
-          return type === 'district' || type === 'town';
-        }
-        if (activeTab === 'department') return type === 'department';
-        return true;
-      });
-    }
-
-    // 无搜索词时，只显示当前层级子节点
+    // 只在当前层级的下级节点内过滤，避免跨区域全站命中。
     return allCards.filter(c => {
+      if (term && !String(c.name || '').toLowerCase().includes(term)) {
+        return false;
+      }
+
       // Tab Filter
       if (activeTab === 'all') return true;
       const type = getRegionType(c.name);
@@ -437,7 +461,7 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
       if (activeTab === 'department') return type === 'department';
       return true;
     });
-  }, [allCards, regions, searchTerm, activeTab]);
+  }, [allCards, searchTerm, activeTab]);
 
   const currentReports = useMemo(() => {
     if (!currentParentId) return [];
@@ -708,11 +732,24 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
                           );
                         }
 
+                        const issueBreakdown = getIssueBreakdown(checkStatus);
+
                         return (
-                          <span className="status-pill red">
-                            <AlertCircle size={14} />
-                            <span>发现 {checkStatus.total} 个问题</span>
-                          </span>
+                          <div className="report-card-status-stack">
+                            <span className="status-pill red">
+                              <AlertCircle size={14} />
+                              <span>发现 {checkStatus.total} 个问题</span>
+                            </span>
+                            {issueBreakdown.length > 0 && (
+                              <div className="status-breakdown" aria-label="问题来源">
+                                {issueBreakdown.map((item) => (
+                                  <span key={item.key} className="status-mini-pill">
+                                    {item.label} {item.count}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         );
                       })()}
                     </div>

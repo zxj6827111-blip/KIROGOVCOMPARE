@@ -117,6 +117,11 @@ const EMPTY_SOURCE_TABLE_NOTICE =
 const NO_VALID_CONTENT_NOTICE =
   '\u5f53\u524d\u62a5\u544a\u6ca1\u6709\u53ef\u5c55\u793a\u7684\u6b63\u6587\u6216\u8868\u683c\u6570\u636e\uff0c\u8bf7\u68c0\u67e5\u539f\u59cb\u6587\u4ef6\u540e\u91cd\u65b0\u4e0a\u4f20\u3002';
 
+const toPositiveCount = (value) => {
+  const count = Number(value);
+  return Number.isFinite(count) && count > 0 ? count : 0;
+};
+
 const isMeaningfulDisplayTableValue = (value) => {
   if (value === null || value === undefined) return false;
   if (typeof value === 'number') return Number.isFinite(value) && value !== 0;
@@ -1105,6 +1110,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const [highlightCells, setHighlightCells] = useState([]); // 勾稽问题单元格路径
   const [visionReviews, setVisionReviews] = useState([]);
   const [ocrCorrections, setOcrCorrections] = useState([]);
+  const [tabIssueCounts, setTabIssueCounts] = useState({ checks: 0, quality: 0, visionReview: 0 });
   const [highlightTexts, setHighlightTexts] = useState([]); // 勾稽问题文本
   const [focusedCheck, setFocusedCheck] = useState(null); // 当前定位的勾稽问题
   const [focusedCells, setFocusedCells] = useState([]); // 定位模式下的单元格路径
@@ -1315,9 +1321,19 @@ function ReportDetail({ reportId: propReportId, onBack }) {
       const t4Issues = (aggregation.issuesByGroupKey.table4 || []).filter(
         (item) => item.autoStatus === 'FAIL' && item.humanStatus !== 'dismissed'
       ); // 表四勾稽问题
+      const nextTabIssueCounts = { checks: 0, quality: 0 };
 
       groups.forEach((group) => {
+        const groupKey = group.groupKey || group.group_key;
         (group.items || []).forEach((item) => {
+          if (item.human_status !== 'dismissed' && item.auto_status === 'FAIL') {
+            if (['visual', 'structure', 'quality'].includes(groupKey)) {
+              nextTabIssueCounts.quality += 1;
+            } else {
+              nextTabIssueCounts.checks += 1;
+            }
+          }
+
           // dismissed 直接跳过；confirmed 保留用于视觉降噪展示
           if (item.human_status === 'dismissed') return;
           if (
@@ -1325,7 +1341,6 @@ function ReportDetail({ reportId: propReportId, onBack }) {
             item.auto_status === 'UNCERTAIN' ||
             item.human_status === 'confirmed'
           ) {
-            const groupKey = group.groupKey || group.group_key;
             const isConfirmedItem = item.human_status === 'confirmed';
 
             // 提取质量审计问题（Section 5/6）
@@ -1394,6 +1409,11 @@ function ReportDetail({ reportId: propReportId, onBack }) {
       setTable2Issues(t2Issues);
       setTable3Issues(t3Issues);
       setTable4Issues(t4Issues);
+      setTabIssueCounts((prev) => ({
+        ...prev,
+        checks: nextTabIssueCounts.checks,
+        quality: nextTabIssueCounts.quality,
+      }));
     } catch (err) {
       console.error('Failed to fetch highlights:', err);
     }
@@ -1806,6 +1826,8 @@ function ReportDetail({ reportId: propReportId, onBack }) {
   const confirmedOcrCorrections = ocrCorrections.filter((item) => item.status === 'confirmed');
   const sourceTableAnomalyReviews = visionReviews.filter((item) => item.conclusion === 'source_table_anomaly');
   const inconclusiveVisionReviews = visionReviews.filter((item) => item.conclusion === 'inconclusive');
+  const visionReviewIssueCount =
+    pendingOcrCorrections.length + sourceTableAnomalyReviews.length + inconclusiveVisionReviews.length;
   const displayParsedJson = applyPendingOcrCorrections(mergedDisplay.parsed, pendingOcrCorrections);
   const usingFactsSource = mergedDisplay.usingFactsSource;
   const traceView = traceData
@@ -1818,6 +1840,24 @@ function ReportDetail({ reportId: propReportId, onBack }) {
         usingFactsSource,
       })
     : null;
+
+  useEffect(() => {
+    setTabIssueCounts((prev) => {
+      const nextVisionCount = toPositiveCount(visionReviewIssueCount);
+      if (prev.visionReview === nextVisionCount) return prev;
+      return { ...prev, visionReview: nextVisionCount };
+    });
+  }, [visionReviewIssueCount]);
+
+  const renderTabIssueBadge = (count) => {
+    const safeCount = toPositiveCount(count);
+    if (safeCount === 0) return null;
+    return (
+      <span className="tab-issue-badge" aria-label={`${safeCount} 个问题`}>
+        {safeCount}
+      </span>
+    );
+  };
 
   const renderParsedContent = (parsed) => {
     const normalized = normalizeParsedPayload(parsed);
@@ -2893,19 +2933,22 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                   className={`tab ${activeTab === 'checks' ? 'active' : ''}`}
                   onClick={() => setActiveTab('checks')}
                 >
-                  勾稽关系校验
+                  <span>勾稽关系校验</span>
+                  {renderTabIssueBadge(tabIssueCounts.checks)}
                 </button>
                 <button
                   className={`tab ${activeTab === 'quality' ? 'active' : ''}`}
                   onClick={() => setActiveTab('quality')}
                 >
-                  数据质量审计
+                  <span>数据质量审计</span>
+                  {renderTabIssueBadge(tabIssueCounts.quality)}
                 </button>
                 <button
                   className={`tab ${activeTab === 'visionReview' ? 'active' : ''}`}
                   onClick={() => setActiveTab('visionReview')}
                 >
-                  视觉复核
+                  <span>视觉复核</span>
+                  {renderTabIssueBadge(tabIssueCounts.visionReview)}
                 </button>
               </div>
             </div>
