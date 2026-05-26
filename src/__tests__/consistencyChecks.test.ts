@@ -108,6 +108,63 @@ describe('ConsistencyCheckService', () => {
         });
     });
 
+    describe('section title quality checks', () => {
+        it('flags dirty and misnumbered standard annual report text titles', () => {
+            const items = service.runChecks({
+                sections: [
+                    { type: 'text', title: '一、总体情况', content: '总体情况内容' },
+                    { type: 'table_2', title: '二、主动公开政府信息情况', activeDisclosureData: {} },
+                    { type: 'table_3', title: '三、收到和处理政府信息公开申请情况', tableData: {} },
+                    { type: 'table_4', title: '四、政府信息公开行政复议、行政诉讼情况', reviewLitigationData: {} },
+                    { type: 'text', title: 'l六、存在的主要问题及改进情况', content: '问题和改进内容' },
+                    { type: 'text', title: '七、其他需要报告的事项', content: '其他事项内容' },
+                ],
+            });
+
+            const titleIssues = items.filter((item) => item.checkKey === 'section_title_misnumbered');
+            expect(titleIssues).toHaveLength(2);
+            expect(titleIssues).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    groupKey: 'quality',
+                    autoStatus: 'FAIL',
+                    title: '章节标题疑似有误：“l六、存在的主要问题及改进情况”应按“五、存在的主要问题及改进情况”理解',
+                    evidenceJson: expect.objectContaining({
+                        paths: ['sections[4].title'],
+                        values: expect.objectContaining({
+                            normalizedTitle: '五、存在的主要问题及改进情况',
+                            actualOrdinal: '六',
+                            expectedOrdinal: '五',
+                        }),
+                    }),
+                }),
+                expect.objectContaining({
+                    groupKey: 'quality',
+                    autoStatus: 'FAIL',
+                    title: '章节标题疑似有误：“七、其他需要报告的事项”应按“六、其他需要报告的事项”理解',
+                    evidenceJson: expect.objectContaining({
+                        paths: ['sections[5].title'],
+                        values: expect.objectContaining({
+                            normalizedTitle: '六、其他需要报告的事项',
+                            actualOrdinal: '七',
+                            expectedOrdinal: '六',
+                        }),
+                    }),
+                }),
+            ]));
+        });
+
+        it('does not flag accepted wording variants when ordinal is already correct', () => {
+            const items = service.runChecks({
+                sections: [
+                    { type: 'text', title: '五、存在的主要问题和改进情况', content: '问题和改进内容' },
+                    { type: 'text', title: '六、其他需要报告的事项', content: '其他事项内容' },
+                ],
+            });
+
+            expect(items.filter((item) => item.checkKey === 'section_title_misnumbered')).toHaveLength(0);
+        });
+    });
+
     describe('classifyConsistencyIssueType', () => {
         it('classifies text items as consistency_text', () => {
             expect(classifyConsistencyIssueType({ group_key: 'text', check_key: 'text_vs_table3_totalProcessed' }))

@@ -18,6 +18,7 @@ import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 import { checkStoragePathExists } from '../services/SourceFileGuardService';
 import { hasParsedContent } from '../utils/parsedContent';
 import { getReportContentQuality } from '../utils/reportMaintenance';
+import { collectReportSectionTitleIssues } from '../utils/sectionTitleQuality';
 
 const router = express.Router();
 
@@ -32,6 +33,12 @@ const REPORT_UPLOAD_MAX_BYTES =
   Number.isFinite(configuredReportUploadMaxBytes) && configuredReportUploadMaxBytes > 0
     ? configuredReportUploadMaxBytes
     : DEFAULT_REPORT_UPLOAD_MAX_BYTES;
+
+const countDynamicSectionTitleIssues = (parsedJson: any, persistedSectionTitleIssueCount = 0): number => {
+  const count = collectReportSectionTitleIssues(parsedJson?.sections || []).length;
+  if (count === 0) return 0;
+  return persistedSectionTitleIssueCount > 0 ? 0 : count;
+};
 
 function sanitizeUploadFileName(originalName: string): string {
   const baseName = path.basename(originalName || 'report');
@@ -1538,7 +1545,9 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
         COALESCE(pending_rv.check_visual, active_rv.check_visual) as check_visual,
         COALESCE(pending_rv.check_structure, active_rv.check_structure) as check_structure,
         COALESCE(pending_rv.check_quality, active_rv.check_quality) as check_quality,
-        COALESCE(pending_rv.checks_updated_at, active_rv.checks_updated_at) as checks_updated_at
+        COALESCE(pending_rv.checks_updated_at, active_rv.checks_updated_at) as checks_updated_at,
+        COALESCE(pending_rv.parsed_json, active_rv.parsed_json) as parsed_json,
+        COALESCE(section_title_issues.count, 0) as section_title_issue_count
       FROM reports r
       LEFT JOIN report_versions active_rv ON active_rv.id = r.active_version_id
       LEFT JOIN LATERAL (
@@ -1557,6 +1566,15 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
         ORDER BY rv.created_at DESC, rv.id DESC
         LIMIT 1
       ) pending_rv ON true
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*) AS count
+        FROM report_consistency_items rci
+        WHERE rci.report_version_id = COALESCE(pending_rv.id, active_rv.id)
+          AND rci.group_key = 'quality'
+          AND rci.check_key = 'section_title_misnumbered'
+          AND rci.auto_status = 'FAIL'
+          AND COALESCE(rci.human_status, 'pending') != 'dismissed'
+      ) section_title_issues ON true
       WHERE r.id = ANY($1::int[])
     `, [filteredIds]);
 
@@ -1583,6 +1601,8 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
     const reportId = Number(row.report_id);
     const versionId = Number(row.version_id);
     const checked = Boolean(versionId) && !!row.checks_updated_at;
+    const qualityCount = Number(row.check_quality || 0);
+    const sectionTitleIssueCount = countDynamicSectionTitleIssues(row.parsed_json, Number(row.section_title_issue_count || 0));
     if (versionId && !checked) {
       missingVersionIds.push(versionId);
     }
@@ -1590,11 +1610,11 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
       has_content: contentMap.get(reportId) ?? false,
       version_id: Number.isFinite(versionId) && versionId > 0 ? versionId : null,
       review_status: row.review_status || null,
-      checked,
-      total: checked ? Number(row.check_total || 0) : null,
+      checked: checked || sectionTitleIssueCount > 0,
+      total: checked ? Number(row.check_total || 0) + sectionTitleIssueCount : (sectionTitleIssueCount > 0 ? sectionTitleIssueCount : null),
       visual: checked ? Number(row.check_visual || 0) : null,
       structure: checked ? Number(row.check_structure || 0) : null,
-      quality: checked ? Number(row.check_quality || 0) : null
+      quality: checked ? qualityCount + sectionTitleIssueCount : (sectionTitleIssueCount > 0 ? sectionTitleIssueCount : null)
     };
   }
 
@@ -1652,14 +1672,15 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
         const visual = Number(counts.visual || 0);
         const structure = Number(counts.structure || 0);
         const quality = Number(counts.quality || 0);
+        const sectionTitleIssueCount = countDynamicSectionTitleIssues(row.parsed_json, quality);
 
         result[String(reportId)] = {
           has_content: contentMap.get(reportId) ?? false,
           checked: true,
-          total,
+          total: total + sectionTitleIssueCount,
           visual,
           structure,
-          quality
+          quality: quality + sectionTitleIssueCount
         };
       }
     }

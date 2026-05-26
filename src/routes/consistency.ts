@@ -1,4 +1,5 @@
 import express from 'express';
+import crypto from 'crypto';
 import pool from '../config/database-llm';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { consistencyCheckService } from '../services/ConsistencyCheckService';
@@ -6,10 +7,14 @@ import { visionReviewService } from '../services/VisionReviewService';
 import { ocrCorrectionService } from '../services/OcrCorrectionService';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 import { classifyConsistencyIssueType } from '../utils/consistencyIssueType';
+import { buildSectionTitleQualityItems } from '../utils/sectionTitleQuality';
 
 const router = express.Router();
 
 router.use(authMiddleware);
+
+const generateRouteFingerprint = (groupKey: string, checkKey: string, expr: string): string =>
+  crypto.createHash('sha256').update(`${groupKey}:${checkKey}:${expr}`).digest('hex').substring(0, 16);
 
 function isPositiveInteger(value: number): boolean {
   return Number.isInteger(value) && value > 0;
@@ -241,6 +246,16 @@ router.get('/reports/:id/checks', async (req: AuthRequest, res) => {
       ORDER BY id ASC
     `, [versionId]);
     const itemsRows = itemsRes.rows;
+    const versionRes = await pool.query(`
+      SELECT parsed_json
+      FROM report_versions
+      WHERE id = $1
+      LIMIT 1
+    `, [versionId]);
+    let parsedJson = versionRes.rows[0]?.parsed_json;
+    if (typeof parsedJson === 'string') {
+      try { parsedJson = JSON.parse(parsedJson); } catch { parsedJson = null; }
+    }
 
     const items = itemsRows.map((item: any) => {
       let evidence = item.evidence_json;
@@ -261,6 +276,34 @@ router.get('/reports/:id/checks', async (req: AuthRequest, res) => {
         tolerance: Number(item.tolerance)
       };
     });
+    const existingFingerprints = new Set(items.map((item: any) => String(item.fingerprint || '')).filter(Boolean));
+    const dynamicTitleItems = buildSectionTitleQualityItems(parsedJson?.sections || [], generateRouteFingerprint)
+      .filter((item) => !existingFingerprints.has(item.fingerprint))
+      .map((item) => ({
+        id: null,
+        run_id: latestRun?.id || null,
+        report_version_id: versionId,
+        group_key: item.groupKey,
+        check_key: item.checkKey,
+        fingerprint: item.fingerprint,
+        title: item.title,
+        expr: item.expr,
+        left_value: item.leftValue,
+        right_value: item.rightValue,
+        delta: item.delta,
+        tolerance: item.tolerance,
+        auto_status: item.autoStatus,
+        human_status: 'pending',
+        evidence: item.evidenceJson,
+        issueType: classifyConsistencyIssueType({
+          group_key: item.groupKey,
+          check_key: item.checkKey,
+          title: item.title,
+          expr: item.expr,
+          evidence: item.evidenceJson,
+        }),
+      }));
+    items.push(...dynamicTitleItems);
 
     // 4. Group items
     const groupDefs: Record<string, string> = {
