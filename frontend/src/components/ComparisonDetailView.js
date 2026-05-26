@@ -408,8 +408,10 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
               exportLabel="生成 PDF"
               isCreating={downloading}
               onCreatePdfJob={handleDownloadPDF}
+              onOpenAlignmentTools={() => setAlignmentToolsOpen((open) => !open)}
               onOpenJobs={() => { window.location.href = '/jobs?tab=download'; }}
               onPrintPreview={handlePrint}
+              alignmentToolsLabel={alignmentToolsOpen ? '收起对齐工具' : '对齐工具'}
             />
           )}
         />
@@ -490,16 +492,8 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
 
         </div>
 
+        {alignmentToolsOpen && (
         <div className="mb-6 no-print">
-          <button
-            type="button"
-            onClick={() => setAlignmentToolsOpen((open) => !open)}
-            className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 shadow-sm hover:border-blue-200 hover:text-blue-700"
-          >
-            <Wand2 size={15} />
-            {alignmentToolsOpen ? '收起对齐工具' : '对齐工具'}
-          </button>
-
           {alignmentToolsOpen && (
             <div className="mt-3 bg-white p-4 rounded-lg shadow-sm border border-blue-100">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -607,6 +601,7 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
             </div>
           )}
         </div>
+        )}
 
         {/* Header Row */}
         <div className="comparison-grid sticky-header grid grid-cols-2 gap-4 sticky top-0 z-30 bg-gray-100 pt-4 pb-2 border-b border-gray-300 break-inside-avoid shadow-sm">

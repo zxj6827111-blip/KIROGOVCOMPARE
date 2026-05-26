@@ -1,5 +1,5 @@
 import React from 'react';
-import { Download, ExternalLink, FileDown, Printer } from 'lucide-react';
+import { Download, ExternalLink, FileDown, Printer, Wand2 } from 'lucide-react';
 import Button from './common/Button';
 import StatusBadge from './common/StatusBadge';
 import './ExportPanel.css';
@@ -10,9 +10,11 @@ function ExportPanel({
   exportLabel = '生成 PDF',
   isCreating = false,
   onCreatePdfJob,
+  onOpenAlignmentTools,
   onOpenJobs,
   onPrintPreview,
   printLabel = '打印预览',
+  alignmentToolsLabel = '对齐工具',
   statusText = '异步导出',
 }) {
   return (
@@ -45,6 +47,17 @@ function ExportPanel({
             disabled={disabled}
           >
             {printLabel}
+          </Button>
+        )}
+        {onOpenAlignmentTools && (
+          <Button
+            size={compact ? 'sm' : 'md'}
+            variant="secondary"
+            icon={<Wand2 size={16} />}
+            onClick={onOpenAlignmentTools}
+            disabled={disabled}
+          >
+            {alignmentToolsLabel}
           </Button>
         )}
         {onOpenJobs && (

@@ -94,6 +94,32 @@ describe('comparison section alignment', () => {
     expect(normalizeComparisonSectionTitle('五、存在的主要问题及改进情况', 'text')).toBe(
       normalizeComparisonSectionTitle('五、政务信息工作存在主要问题和改进情况', 'text')
     );
+    expect(normalizeComparisonSectionTitle('五、存在的主要问题及改进情况', 'text')).toBe(
+      normalizeComparisonSectionTitle('五、存在的问题及下步打算', 'text')
+    );
+    expect(normalizeComparisonSectionTitle('五、存在的主要问题及改进情况', 'text')).toBe(
+      normalizeComparisonSectionTitle('五、存在的问题及下一步工作', 'text')
+    );
+  });
+
+  test('aligns nonstandard fifth-section problem-plan aliases and reports title issue', () => {
+    const rows = alignComparisonSections(
+      [{ type: 'text', title: '五、存在的主要问题及改进情况', content: '2024 第五章正文' }],
+      [{ type: 'text', title: '五、存在的问题及下步打算', content: '2025 第五章正文' }]
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toEqual(expect.objectContaining({
+      title: '五、存在的主要问题及改进情况',
+      oldSec: expect.objectContaining({ content: '2024 第五章正文' }),
+      newSec: expect.objectContaining({ content: '2025 第五章正文' }),
+    }));
+    expect(getComparisonSectionTitleIssue('五、存在的问题及下步打算', 'text')).toEqual(expect.objectContaining({
+      title: '五、存在的问题及下步打算',
+      normalizedTitle: '五、存在的主要问题及改进情况',
+      expectedOrdinal: '五',
+      actualOrdinal: '五',
+    }));
   });
 
   test('normalizes dirty and misnumbered standard text section titles by semantic body', () => {

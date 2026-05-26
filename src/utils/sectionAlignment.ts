@@ -61,11 +61,16 @@ const normalizeProblemSectionBody = (body: string): string =>
   [body, body.replace(/^(?:政府信息公开工作|政务公开工作|政务信息工作|信息公开工作)/g, '')]
     .map((value) =>
       value.replace(
-        /^(?:存在的主要问题|存在的?问题|存在主要问题|存在问题)(?:及|和|与)?(?:改进情况|改进措施|改进方向|改进思路)$/g,
+        /^(?:存在的主要问题|存在的?问题|存在主要问题|存在问题)(?:及|和|与)?(?:改进情况|改进措施|改进方向|改进思路|整改情况|整改措施|整改方向|下步打算|下一步打算|下步工作|下一步工作|下步计划|下一步计划)$/g,
         '存在的主要问题改进情况'
       )
     )
     .find((value) => value === '存在的主要问题改进情况') || body;
+
+const isNeutralProblemSectionAlias = (body: string): boolean => {
+  const withoutPrefix = String(body || '').replace(/^(?:政府信息公开工作|政务公开工作|政务信息工作|信息公开工作)/g, '');
+  return /^存在的主要问题(?:及|和)改进情况$/.test(withoutPrefix);
+};
 
 const normalizeTableTitleBody = (body: string, type = ''): string => {
   if (type === 'table_2') {
@@ -166,7 +171,9 @@ export const getComparisonSectionTitleIssue = (title?: string, type = ''): Secti
 
   const hasDirtyPrefix = /^[|｜丨lLiI1]+\s*[一二三四五六七八九十]/.test(rawTitle.normalize('NFKC'));
   const hasOrdinalMismatch = Boolean(ordinal) && ordinal !== standardTitle.expectedOrdinal;
-  if (!hasDirtyPrefix && !hasOrdinalMismatch) return null;
+  const hasNonstandardProblemAlias =
+    normalizedBody === '存在的主要问题改进情况' && !isNeutralProblemSectionAlias(body);
+  if (!hasDirtyPrefix && !hasOrdinalMismatch && !hasNonstandardProblemAlias) return null;
 
   return {
     title: rawTitle,
