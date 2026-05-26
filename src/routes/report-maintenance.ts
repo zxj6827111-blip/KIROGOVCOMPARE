@@ -395,14 +395,13 @@ const mapCompareStatus = (report: any, abnormalCount: number | null): string => 
     return Number(abnormalCount || 0) > 0 ? 'abnormal' : 'normal';
 };
 
-const mapReviewStatus = (report: any, abnormalCount: number | null, parseStatus: string): string => {
+const mapReviewStatus = (report: any, pendingIssueCount: number | null, parseStatus: string): string => {
     if (!report?.effective_version_id) return 'none';
-    if (parseStatus === 'failed' || Number(abnormalCount || 0) > 0) return 'pending_review';
+    if (parseStatus === 'failed' || Number(pendingIssueCount || 0) > 0) return 'pending_review';
     const versionStatus = String(report.version_review_status || '');
     if (versionStatus === 'published') return 'archived';
     if (versionStatus === 'pending_review') return 'pending_review';
     if (versionStatus === 'history') return 'returned';
-    if (Number(abnormalCount || 0) > 0) return 'pending_review';
     return 'passed';
 };
 
@@ -436,9 +435,12 @@ const buildMaintenanceRows = async (regions: RegionRow[], year: number): Promise
         const abnormalCount = report?.effective_version_id && hasCompareEvidence
             ? toInteger(report.open_issue_count ?? report.cached_check_total, 0)
             : null;
+        const pendingIssueCount = report?.effective_version_id && hasCompareEvidence
+            ? toInteger(report.pending_issue_count, 0)
+            : null;
         const parseStatus = mapParseStatus(report, legacyStatus);
         const compareStatus = mapCompareStatus(report, abnormalCount);
-        const reviewStatus = mapReviewStatus(report, abnormalCount, parseStatus);
+        const reviewStatus = mapReviewStatus(report, pendingIssueCount, parseStatus);
         const maintenanceStatus = mapMaintenanceStatus(uploadStatus, parseStatus, compareStatus, reviewStatus);
         const abnormalTypes = Array.isArray(report?.abnormal_types)
             ? report.abnormal_types.filter(Boolean).map(String)
