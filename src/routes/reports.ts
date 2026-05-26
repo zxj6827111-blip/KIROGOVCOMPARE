@@ -1572,7 +1572,7 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
         WHERE rci.report_version_id = COALESCE(pending_rv.id, active_rv.id)
           AND rci.group_key = 'quality'
           AND rci.check_key = 'section_title_misnumbered'
-          AND rci.auto_status = 'FAIL'
+          AND rci.auto_status IN ('FAIL', 'UNCERTAIN')
           AND COALESCE(rci.human_status, 'pending') != 'dismissed'
       ) section_title_issues ON true
       WHERE r.id = ANY($1::int[])
@@ -1603,31 +1603,31 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
       SELECT
         report_version_id,
         COUNT(*) FILTER (
-          WHERE auto_status = 'FAIL'
+          WHERE auto_status IN ('FAIL', 'UNCERTAIN')
             AND (human_status != 'dismissed' OR human_status IS NULL)
         ) AS total,
         COUNT(*) FILTER (
-          WHERE auto_status = 'FAIL'
+          WHERE auto_status IN ('FAIL', 'UNCERTAIN')
             AND group_key IN ('table2','table3','table4','text','hierarchy')
             AND (human_status != 'dismissed' OR human_status IS NULL)
         ) AS consistency,
         COUNT(*) FILTER (
-          WHERE auto_status = 'FAIL'
+          WHERE auto_status IN ('FAIL', 'UNCERTAIN')
             AND group_key = 'visual'
             AND (human_status != 'dismissed' OR human_status IS NULL)
         ) AS visual,
         COUNT(*) FILTER (
-          WHERE auto_status = 'FAIL'
+          WHERE auto_status IN ('FAIL', 'UNCERTAIN')
             AND group_key = 'quality'
             AND (human_status != 'dismissed' OR human_status IS NULL)
         ) AS quality,
         COUNT(*) FILTER (
-          WHERE auto_status = 'FAIL'
+          WHERE auto_status IN ('FAIL', 'UNCERTAIN')
             AND group_key IN ('visual','structure','quality')
             AND (human_status != 'dismissed' OR human_status IS NULL)
         ) AS quality_review,
         COUNT(*) FILTER (
-          WHERE auto_status = 'FAIL'
+          WHERE auto_status IN ('FAIL', 'UNCERTAIN')
             AND group_key IN ('structure','table2','table3','table4','text','hierarchy')
             AND (human_status != 'dismissed' OR human_status IS NULL)
         ) AS structure
@@ -1678,31 +1678,31 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
         SELECT
           report_version_id,
           COUNT(*) FILTER (
-            WHERE auto_status = 'FAIL'
+            WHERE auto_status IN ('FAIL', 'UNCERTAIN')
               AND (human_status != 'dismissed' OR human_status IS NULL)
           ) AS total,
           COUNT(*) FILTER (
-            WHERE auto_status = 'FAIL'
+            WHERE auto_status IN ('FAIL', 'UNCERTAIN')
               AND group_key IN ('table2','table3','table4','text','hierarchy')
               AND (human_status != 'dismissed' OR human_status IS NULL)
           ) AS consistency,
           COUNT(*) FILTER (
-            WHERE auto_status = 'FAIL'
+            WHERE auto_status IN ('FAIL', 'UNCERTAIN')
               AND group_key = 'visual'
               AND (human_status != 'dismissed' OR human_status IS NULL)
           ) AS visual,
           COUNT(*) FILTER (
-            WHERE auto_status = 'FAIL'
+            WHERE auto_status IN ('FAIL', 'UNCERTAIN')
               AND group_key = 'quality'
               AND (human_status != 'dismissed' OR human_status IS NULL)
           ) AS quality,
           COUNT(*) FILTER (
-            WHERE auto_status = 'FAIL'
+            WHERE auto_status IN ('FAIL', 'UNCERTAIN')
               AND group_key IN ('visual','structure','quality')
               AND (human_status != 'dismissed' OR human_status IS NULL)
           ) AS quality_review,
           COUNT(*) FILTER (
-            WHERE auto_status = 'FAIL'
+            WHERE auto_status IN ('FAIL', 'UNCERTAIN')
               AND group_key IN ('structure','table2','table3','table4','text','hierarchy')
               AND (human_status != 'dismissed' OR human_status IS NULL)
           ) AS structure

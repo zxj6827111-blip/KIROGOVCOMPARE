@@ -200,8 +200,86 @@ describe('Report maintenance route', () => {
     expect(response.body.data.regions[0]).toMatchObject({
       compare_status: 'abnormal',
       review_status: 'archived',
-      maintenance_status: 'compare_abnormal',
+      archive_status: 'archived',
+      maintenance_status: 'completed',
       abnormal_count: 1,
+    });
+  });
+
+  it('treats compatible passed review status as completed in the summary', async () => {
+    mockedQuery
+      .mockResolvedValueOnce({
+        rows: [{ id: 103, name: 'passed-unit', parent_id: null, level: 4, code: '103' }],
+      })
+      .mockResolvedValueOnce({
+        rows: [{
+          report_id: 503,
+          region_id: 103,
+          year: 2025,
+          unit_name: 'passed-unit',
+          report_created_at: '2026-05-22T02:33:11.000Z',
+          report_updated_at: '2026-05-22T02:33:11.000Z',
+          effective_version_id: 703,
+          file_name: 'passed-review.pdf',
+          file_size: 2048,
+          version_created_at: '2026-05-22T02:33:11.000Z',
+          version_updated_at: '2026-05-22T02:33:11.000Z',
+          parsed_json: {
+            sections: [
+              { type: 'text', title: 'section', content: 'content ready' },
+              { type: 'table_2', activeDisclosureData: { regulations: { made: 1, repealed: 0, valid: 1 } } },
+            ],
+          },
+          raw_text: 'content ready '.repeat(20),
+          version_review_status: 'passed',
+          version_state: 'passed',
+          approved_at: '2026-05-22T03:00:00.000Z',
+          cached_check_total: 0,
+          cached_check_visual: 0,
+          cached_check_structure: 0,
+          cached_check_quality: 0,
+          cached_checks_updated_at: '2026-05-22T02:40:00.000Z',
+          parse_run_id: 803,
+          parse_run_status: 'accepted',
+          parse_created_at: '2026-05-22T02:33:00.000Z',
+          parse_started_at: '2026-05-22T02:33:00.000Z',
+          parse_finished_at: '2026-05-22T02:33:11.000Z',
+          parse_accepted_at: '2026-05-22T02:33:11.000Z',
+          parse_error_code: null,
+          parse_error_message: null,
+          latest_job_id: 903,
+          latest_job_kind: 'checks',
+          latest_job_status: 'succeeded',
+          latest_job_progress: 100,
+          latest_job_error_code: null,
+          latest_job_error_message: null,
+          latest_job_updated_at: '2026-05-22T02:40:00.000Z',
+          open_issue_count: 0,
+          pending_issue_count: 0,
+          confirmed_issue_count: 0,
+          dismissed_issue_count: 0,
+          table2_issue_count: 0,
+          table3_issue_count: 0,
+          table4_issue_count: 0,
+          structure_issue_count: 0,
+          visual_issue_count: 0,
+          quality_issue_count: 0,
+          text_issue_count: 0,
+          abnormal_types: [],
+        }],
+      });
+
+    const response = await request(buildApp()).get('/api/report-maintenance?year=2025');
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.summary).toMatchObject({
+      pending_review_count: 0,
+      archived_count: 1,
+    });
+    expect(response.body.data.regions[0]).toMatchObject({
+      review_status: 'passed',
+      archive_status: 'archived',
+      maintenance_status: 'completed',
     });
   });
 });

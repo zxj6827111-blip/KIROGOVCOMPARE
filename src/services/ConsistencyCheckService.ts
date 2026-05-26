@@ -2331,11 +2331,11 @@ export class ConsistencyCheckService {
     `, [JSON.stringify(summary), runId]);
 
         // Cache aggregated counts on report_versions for fast lookup
-        const failItems = items.filter(i => i.autoStatus === 'FAIL');
-        const visualCount = failItems.filter(i => i.groupKey === 'visual').length;
-        const qualityCount = failItems.filter(i => i.groupKey === 'quality').length;
-        const structureCount = failItems.filter(i => ['structure', 'table2', 'table3', 'table4', 'text', 'hierarchy'].includes(i.groupKey)).length;
-        const totalCount = failItems.length;
+        const abnormalItems = items.filter(i => i.autoStatus === 'FAIL' || i.autoStatus === 'UNCERTAIN');
+        const visualCount = abnormalItems.filter(i => i.groupKey === 'visual').length;
+        const qualityCount = abnormalItems.filter(i => i.groupKey === 'quality').length;
+        const structureCount = abnormalItems.filter(i => ['structure', 'table2', 'table3', 'table4', 'text', 'hierarchy'].includes(i.groupKey)).length;
+        const totalCount = abnormalItems.length;
 
         await pool.query(`
       UPDATE report_versions

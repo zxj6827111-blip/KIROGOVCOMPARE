@@ -1291,6 +1291,11 @@ describe('ConsistencyCheckService', () => {
             expect(statusByAutoStatus.get('PASS')).toEqual(new Set(['confirmed']));
             expect(statusByAutoStatus.get('FAIL')).toEqual(new Set(['pending']));
             expect(statusByAutoStatus.get('UNCERTAIN')).toEqual(new Set(['pending']));
+
+            const cacheUpdateCall = mockedQuery.mock.calls.find(([sql]) =>
+                String(sql).includes('SET check_total = $2')
+            );
+            expect(cacheUpdateCall?.[1]).toEqual([1000, 2, 0, 2, 0]);
         });
     });
 });

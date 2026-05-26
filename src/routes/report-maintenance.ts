@@ -413,9 +413,9 @@ const mapMaintenanceStatus = (
 ): string => {
     if (uploadStatus === 'not_uploaded') return 'not_uploaded';
     if (parseStatus === 'failed') return 'parse_failed';
-    if (compareStatus === 'abnormal') return 'compare_abnormal';
     if (reviewStatus === 'pending_review') return 'pending_review';
-    if (reviewStatus === 'archived') return 'completed';
+    if (reviewStatus === 'archived' || reviewStatus === 'passed') return 'completed';
+    if (compareStatus === 'abnormal') return 'compare_abnormal';
     return 'in_progress';
 };
 
@@ -464,7 +464,7 @@ const buildMaintenanceRows = async (regions: RegionRow[], year: number): Promise
             abnormal_count: abnormalCount,
             abnormal_types: abnormalTypes,
             review_status: reviewStatus,
-            archive_status: reviewStatus === 'archived' ? 'archived' : 'not_archived',
+            archive_status: reviewStatus === 'archived' || reviewStatus === 'passed' ? 'archived' : 'not_archived',
             maintenance_status: maintenanceStatus,
             file_name: report?.file_name || null,
             file_size: report?.file_size ? Number(report.file_size) : null,
@@ -491,8 +491,8 @@ const buildMaintenanceRows = async (regions: RegionRow[], year: number): Promise
     rows.sort((a, b) => {
         const priority: Record<string, number> = {
             parse_failed: 0,
-            compare_abnormal: 1,
-            pending_review: 2,
+            pending_review: 1,
+            compare_abnormal: 2,
             not_uploaded: 3,
             in_progress: 4,
             completed: 5,
@@ -514,7 +514,7 @@ const summarizeRows = (rows: MaintenanceDetailRow[]) => {
     const parseFailed = rows.filter((row) => row.parse_status === 'failed').length;
     const compareAbnormal = rows.filter((row) => row.compare_status === 'abnormal').length;
     const pendingReview = rows.filter((row) => row.review_status === 'pending_review').length;
-    const archived = rows.filter((row) => row.review_status === 'archived').length;
+    const archived = rows.filter((row) => row.review_status === 'archived' || row.review_status === 'passed').length;
     const notUploaded = total - uploaded;
 
     return {

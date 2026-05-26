@@ -4,7 +4,7 @@ import { apiClient, getCurrentUser } from '../apiClient';
 import { Table2View, Table3View, Table4View } from './TableViews';
 import { normalizeTablePath } from '../utils/tableRowColMapping';
 import { buildTable3TraceModel } from '../utils/reportTrace';
-import { normalizeConsistencyGroups } from '../utils/consistencyDisplay';
+import { QUALITY_AUDIT_GROUP_KEYS, normalizeConsistencyGroups } from '../utils/consistencyDisplay';
 import { buildEvidenceViewModel } from '../utils/evidenceViewModel';
 import { aggregateIssuesFromChecks } from '../utils/issueAggregation';
 import ParsedDataEditor from './ParsedDataEditor';
@@ -1326,8 +1326,10 @@ function ReportDetail({ reportId: propReportId, onBack }) {
       groups.forEach((group) => {
         const groupKey = group.groupKey || group.group_key;
         (group.items || []).forEach((item) => {
-          if (item.human_status !== 'dismissed' && item.auto_status === 'FAIL') {
-            if (['visual', 'structure', 'quality'].includes(groupKey)) {
+          const autoStatus = String(item.auto_status || item.autoStatus || '').toUpperCase();
+          const humanStatus = item.human_status || item.humanStatus || 'pending';
+          if (humanStatus === 'pending' && (autoStatus === 'FAIL' || autoStatus === 'UNCERTAIN')) {
+            if (QUALITY_AUDIT_GROUP_KEYS.includes(groupKey)) {
               nextTabIssueCounts.quality += 1;
             } else {
               nextTabIssueCounts.checks += 1;
@@ -1335,12 +1337,12 @@ function ReportDetail({ reportId: propReportId, onBack }) {
           }
 
           // dismissed 直接跳过；confirmed 保留用于视觉降噪展示
-          if (item.human_status === 'dismissed') return;
+          if (humanStatus === 'dismissed') return;
           if (
-            item.auto_status === 'FAIL' ||
-            item.auto_status === 'UNCERTAIN'
+            autoStatus === 'FAIL' ||
+            autoStatus === 'UNCERTAIN'
           ) {
-            const isConfirmedItem = item.auto_status === 'FAIL' && item.human_status === 'confirmed';
+            const isConfirmedItem = humanStatus === 'confirmed';
 
             // 提取质量审计问题（Section 5/6）
             if (groupKey === 'quality') {
@@ -2882,7 +2884,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                                 }}
                               >
                                 <span>状态：{formatReviewStatusLabel(v.review_status)}</span>
-                                <span>问题项：{Number(v.open_issue_count || 0)}</span>
+                                <span>待复核项：{Number(v.open_issue_count || 0)}</span>
                                 {v.approved_at && (
                                   <span>发布时间：{new Date(v.approved_at).toLocaleString()}</span>
                                 )}

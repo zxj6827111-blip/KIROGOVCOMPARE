@@ -78,6 +78,27 @@ describe('Table2View', () => {
     expect(regulationsCell.querySelector('.issue-badge')).not.toBeNull();
   });
 
+  test('keeps confirmed highlight metadata for confirmed uncertain table2 cells', () => {
+    const { container } = render(
+      <Table2View
+        data={baseData}
+        tableIssues={[
+          {
+            ...tableIssues[1],
+            human_status: 'confirmed',
+          },
+        ]}
+        highlightCells={[
+          { path: 'activeDisclosureData.licensing.processed', type: 'diff', confirmed: true },
+        ]}
+      />
+    );
+
+    const licensingCell = container.querySelector('[data-cell-path="activeDisclosureData.licensing.processed"]');
+    expect(licensingCell).not.toBeNull();
+    expect(licensingCell.className).toContain('cell-issue-confirmed');
+  });
+
   test('does not count confirmed UNCERTAIN rows as pending review in table2 summary', () => {
     render(
       <Table2View

@@ -167,21 +167,21 @@ async function refreshCachedStatsForVersion(reportVersionId: number): Promise<vo
   const countsRes = await pool.query(`
     SELECT
       COUNT(*) FILTER (
-        WHERE auto_status = 'FAIL'
+        WHERE auto_status IN ('FAIL', 'UNCERTAIN')
           AND (human_status != 'dismissed' OR human_status IS NULL)
       ) AS total,
       COUNT(*) FILTER (
-        WHERE auto_status = 'FAIL'
+        WHERE auto_status IN ('FAIL', 'UNCERTAIN')
           AND group_key = 'visual'
           AND (human_status != 'dismissed' OR human_status IS NULL)
       ) AS visual,
       COUNT(*) FILTER (
-        WHERE auto_status = 'FAIL'
+        WHERE auto_status IN ('FAIL', 'UNCERTAIN')
           AND group_key = 'quality'
           AND (human_status != 'dismissed' OR human_status IS NULL)
       ) AS quality,
       COUNT(*) FILTER (
-        WHERE auto_status = 'FAIL'
+        WHERE auto_status IN ('FAIL', 'UNCERTAIN')
           AND group_key IN ('structure','table2','table3','table4','text','hierarchy')
           AND (human_status != 'dismissed' OR human_status IS NULL)
       ) AS structure
