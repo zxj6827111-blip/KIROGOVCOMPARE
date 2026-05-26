@@ -1,5 +1,6 @@
 import {
   alignComparisonSections,
+  getComparisonSectionTitleIssue,
   normalizeComparisonSectionTitle,
 } from '../utils/sectionAlignment';
 
@@ -95,6 +96,40 @@ describe('section alignment', () => {
     );
   });
 
+  test('normalizes dirty and misnumbered standard text section titles by semantic body', () => {
+    expect(normalizeComparisonSectionTitle('|六、存在的主要问题及改进情况', 'text')).toBe(
+      normalizeComparisonSectionTitle('五、存在的主要问题及改进情况', 'text')
+    );
+    expect(normalizeComparisonSectionTitle('l六、存在的主要问题及改进情况', 'text')).toBe(
+      normalizeComparisonSectionTitle('五、存在的主要问题及改进情况', 'text')
+    );
+    expect(normalizeComparisonSectionTitle('七、其他需要报告的事项', 'text')).toBe(
+      normalizeComparisonSectionTitle('六、其他需要报告的事项', 'text')
+    );
+  });
+
+  test('reports dirty and misnumbered standard text section titles', () => {
+    expect(getComparisonSectionTitleIssue('|六、存在的主要问题及改进情况', 'text')).toEqual(expect.objectContaining({
+      title: '|六、存在的主要问题及改进情况',
+      normalizedTitle: '五、存在的主要问题及改进情况',
+      expectedOrdinal: '五',
+      actualOrdinal: '六',
+    }));
+    expect(getComparisonSectionTitleIssue('l六、存在的主要问题及改进情况', 'text')).toEqual(expect.objectContaining({
+      title: 'l六、存在的主要问题及改进情况',
+      normalizedTitle: '五、存在的主要问题及改进情况',
+      expectedOrdinal: '五',
+      actualOrdinal: '六',
+    }));
+    expect(getComparisonSectionTitleIssue('七、其他需要报告的事项', 'text')).toEqual(expect.objectContaining({
+      title: '七、其他需要报告的事项',
+      normalizedTitle: '六、其他需要报告的事项',
+      expectedOrdinal: '六',
+      actualOrdinal: '七',
+    }));
+    expect(getComparisonSectionTitleIssue('五、存在的主要问题和改进情况', 'text')).toBeNull();
+  });
+
   test('normalizes table title prefixes by table type', () => {
     expect(normalizeComparisonSectionTitle('二、主动公开政府信息情况', 'table_2')).toBe(
       normalizeComparisonSectionTitle('二、行政机关主动公开政府信息情况', 'table_2')
@@ -138,10 +173,24 @@ describe('section alignment', () => {
     }));
   });
 
-  test('does not align same-title-body sections when both sides use different ordinals', () => {
+  test('aligns misnumbered standard sections by semantic body', () => {
     const rows = alignComparisonSections(
       [{ type: 'text', title: '五、存在的主要问题及改进情况', content: '第五章' }],
       [{ type: 'text', title: '七、存在的主要问题及改进情况', content: '第七章' }]
+    );
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toEqual(expect.objectContaining({
+      title: '五、存在的主要问题及改进情况',
+      oldSec: expect.objectContaining({ content: '第五章' }),
+      newSec: expect.objectContaining({ content: '第七章' }),
+    }));
+  });
+
+  test('does not align nonstandard same-title-body sections when both sides use different ordinals', () => {
+    const rows = alignComparisonSections(
+      [{ type: 'text', title: '五、专项整改情况', content: '第五章' }],
+      [{ type: 'text', title: '七、专项整改情况', content: '第七章' }]
     );
 
     expect(rows).toHaveLength(2);
