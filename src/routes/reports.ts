@@ -1547,7 +1547,8 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
         COALESCE(pending_rv.check_quality, active_rv.check_quality) as check_quality,
         COALESCE(pending_rv.checks_updated_at, active_rv.checks_updated_at) as checks_updated_at,
         COALESCE(pending_rv.parsed_json, active_rv.parsed_json) as parsed_json,
-        COALESCE(section_title_issues.count, 0) as section_title_issue_count
+        COALESCE(section_title_issues.pending_count, 0) as section_title_pending_issue_count,
+        COALESCE(section_title_issues.active_count, 0) as section_title_active_issue_count
       FROM reports r
       LEFT JOIN report_versions active_rv ON active_rv.id = r.active_version_id
       LEFT JOIN LATERAL (
@@ -1567,13 +1568,19 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
         LIMIT 1
       ) pending_rv ON true
       LEFT JOIN LATERAL (
-        SELECT COUNT(*) AS count
+        SELECT
+          COUNT(*) FILTER (
+            WHERE rci.auto_status IN ('FAIL', 'UNCERTAIN')
+              AND COALESCE(rci.human_status, 'pending') = 'pending'
+          ) AS pending_count,
+          COUNT(*) FILTER (
+            WHERE rci.auto_status IN ('FAIL', 'UNCERTAIN')
+              AND COALESCE(rci.human_status, 'pending') != 'dismissed'
+          ) AS active_count
         FROM report_consistency_items rci
         WHERE rci.report_version_id = COALESCE(pending_rv.id, active_rv.id)
           AND rci.group_key = 'quality'
           AND rci.check_key = 'section_title_misnumbered'
-          AND rci.auto_status IN ('FAIL', 'UNCERTAIN')
-          AND COALESCE(rci.human_status, 'pending') != 'dismissed'
       ) section_title_issues ON true
       WHERE r.id = ANY($1::int[])
     `, [filteredIds]);
@@ -1604,33 +1611,41 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
         report_version_id,
         COUNT(*) FILTER (
           WHERE auto_status IN ('FAIL', 'UNCERTAIN')
-            AND (human_status != 'dismissed' OR human_status IS NULL)
+            AND COALESCE(human_status, 'pending') = 'pending'
         ) AS total,
         COUNT(*) FILTER (
           WHERE auto_status IN ('FAIL', 'UNCERTAIN')
             AND group_key IN ('table2','table3','table4','text','hierarchy')
-            AND (human_status != 'dismissed' OR human_status IS NULL)
+            AND COALESCE(human_status, 'pending') = 'pending'
         ) AS consistency,
         COUNT(*) FILTER (
           WHERE auto_status IN ('FAIL', 'UNCERTAIN')
             AND group_key = 'visual'
-            AND (human_status != 'dismissed' OR human_status IS NULL)
+            AND COALESCE(human_status, 'pending') = 'pending'
         ) AS visual,
         COUNT(*) FILTER (
           WHERE auto_status IN ('FAIL', 'UNCERTAIN')
             AND group_key = 'quality'
-            AND (human_status != 'dismissed' OR human_status IS NULL)
+            AND COALESCE(human_status, 'pending') = 'pending'
         ) AS quality,
         COUNT(*) FILTER (
           WHERE auto_status IN ('FAIL', 'UNCERTAIN')
             AND group_key IN ('visual','structure','quality')
-            AND (human_status != 'dismissed' OR human_status IS NULL)
+            AND COALESCE(human_status, 'pending') = 'pending'
         ) AS quality_review,
         COUNT(*) FILTER (
           WHERE auto_status IN ('FAIL', 'UNCERTAIN')
             AND group_key IN ('structure','table2','table3','table4','text','hierarchy')
-            AND (human_status != 'dismissed' OR human_status IS NULL)
-        ) AS structure
+            AND COALESCE(human_status, 'pending') = 'pending'
+        ) AS structure,
+        COUNT(*) FILTER (
+          WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+            AND COALESCE(human_status, 'pending') = 'confirmed'
+        ) AS confirmed_abnormal,
+        COUNT(*) FILTER (
+          WHERE group_key = 'hierarchy'
+            AND ABS(COALESCE(delta, 0)) > COALESCE(tolerance, 0)
+        ) AS hierarchy_delta
       FROM report_consistency_items
       WHERE report_version_id = ANY($1::int[])
       GROUP BY report_version_id
@@ -1647,13 +1662,15 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
     const reportId = Number(row.report_id);
     const versionId = Number(row.version_id);
     const checked = Boolean(versionId) && !!row.checks_updated_at;
-    const sectionTitleIssueCount = countDynamicSectionTitleIssues(row.parsed_json, Number(row.section_title_issue_count || 0));
+    const sectionTitleIssueCount = countDynamicSectionTitleIssues(row.parsed_json, Number(row.section_title_active_issue_count || 0));
     const exactCounts = exactCountsMap.get(versionId);
     const baseTotal = Number(exactCounts?.total ?? row.check_total ?? 0);
     const baseQuality = Number(exactCounts?.quality ?? row.check_quality ?? 0);
     const baseQualityReview = Number(
       exactCounts?.quality_review ?? (Number(row.check_visual || 0) + Number(row.check_quality || 0))
     );
+    const confirmedAbnormal = Number(exactCounts?.confirmed_abnormal ?? 0);
+    const hierarchyDelta = Number(exactCounts?.hierarchy_delta ?? 0);
     if (versionId && !checked) {
       missingVersionIds.push(versionId);
     }
@@ -1667,7 +1684,9 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
       structure: checked ? Number(exactCounts?.structure ?? row.check_structure ?? 0) : null,
       quality: checked ? baseQuality + sectionTitleIssueCount : (sectionTitleIssueCount > 0 ? sectionTitleIssueCount : null),
       consistency: checked ? Number(exactCounts?.consistency ?? row.check_structure ?? 0) : null,
-      quality_review: checked ? baseQualityReview + sectionTitleIssueCount : (sectionTitleIssueCount > 0 ? sectionTitleIssueCount : null)
+      quality_review: checked ? baseQualityReview + sectionTitleIssueCount : (sectionTitleIssueCount > 0 ? sectionTitleIssueCount : null),
+      confirmed_abnormal: checked ? confirmedAbnormal : 0,
+      hierarchy_delta: checked ? hierarchyDelta : 0
     };
   }
 
@@ -1679,33 +1698,41 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
           report_version_id,
           COUNT(*) FILTER (
             WHERE auto_status IN ('FAIL', 'UNCERTAIN')
-              AND (human_status != 'dismissed' OR human_status IS NULL)
+              AND COALESCE(human_status, 'pending') = 'pending'
           ) AS total,
           COUNT(*) FILTER (
             WHERE auto_status IN ('FAIL', 'UNCERTAIN')
               AND group_key IN ('table2','table3','table4','text','hierarchy')
-              AND (human_status != 'dismissed' OR human_status IS NULL)
+              AND COALESCE(human_status, 'pending') = 'pending'
           ) AS consistency,
           COUNT(*) FILTER (
             WHERE auto_status IN ('FAIL', 'UNCERTAIN')
               AND group_key = 'visual'
-              AND (human_status != 'dismissed' OR human_status IS NULL)
+              AND COALESCE(human_status, 'pending') = 'pending'
           ) AS visual,
           COUNT(*) FILTER (
             WHERE auto_status IN ('FAIL', 'UNCERTAIN')
               AND group_key = 'quality'
-              AND (human_status != 'dismissed' OR human_status IS NULL)
+              AND COALESCE(human_status, 'pending') = 'pending'
           ) AS quality,
           COUNT(*) FILTER (
             WHERE auto_status IN ('FAIL', 'UNCERTAIN')
               AND group_key IN ('visual','structure','quality')
-              AND (human_status != 'dismissed' OR human_status IS NULL)
+              AND COALESCE(human_status, 'pending') = 'pending'
           ) AS quality_review,
           COUNT(*) FILTER (
             WHERE auto_status IN ('FAIL', 'UNCERTAIN')
               AND group_key IN ('structure','table2','table3','table4','text','hierarchy')
-              AND (human_status != 'dismissed' OR human_status IS NULL)
-          ) AS structure
+              AND COALESCE(human_status, 'pending') = 'pending'
+          ) AS structure,
+          COUNT(*) FILTER (
+            WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+              AND COALESCE(human_status, 'pending') = 'confirmed'
+          ) AS confirmed_abnormal,
+          COUNT(*) FILTER (
+            WHERE group_key = 'hierarchy'
+              AND ABS(COALESCE(delta, 0)) > COALESCE(tolerance, 0)
+          ) AS hierarchy_delta
         FROM report_consistency_items
         WHERE report_version_id = ANY($1::int[])
         GROUP BY report_version_id
@@ -1737,7 +1764,9 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
         const structure = Number(counts.structure || 0);
         const quality = Number(counts.quality || 0);
         const qualityReview = Number(counts.quality_review || 0);
-        const sectionTitleIssueCount = countDynamicSectionTitleIssues(row.parsed_json, Number(row.section_title_issue_count || 0));
+        const confirmedAbnormal = Number(counts.confirmed_abnormal || 0);
+        const hierarchyDelta = Number(counts.hierarchy_delta || 0);
+        const sectionTitleIssueCount = countDynamicSectionTitleIssues(row.parsed_json, Number(row.section_title_active_issue_count || 0));
 
         result[String(reportId)] = {
           has_content: contentMap.get(reportId) ?? false,
@@ -1749,7 +1778,9 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
           structure,
           quality: quality + sectionTitleIssueCount,
           consistency,
-          quality_review: qualityReview + sectionTitleIssueCount
+          quality_review: qualityReview + sectionTitleIssueCount,
+          confirmed_abnormal: confirmedAbnormal,
+          hierarchy_delta: hierarchyDelta
         };
       }
     }

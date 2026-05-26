@@ -168,22 +168,22 @@ async function refreshCachedStatsForVersion(reportVersionId: number): Promise<vo
     SELECT
       COUNT(*) FILTER (
         WHERE auto_status IN ('FAIL', 'UNCERTAIN')
-          AND (human_status != 'dismissed' OR human_status IS NULL)
+          AND COALESCE(human_status, 'pending') = 'pending'
       ) AS total,
       COUNT(*) FILTER (
         WHERE auto_status IN ('FAIL', 'UNCERTAIN')
           AND group_key = 'visual'
-          AND (human_status != 'dismissed' OR human_status IS NULL)
+          AND COALESCE(human_status, 'pending') = 'pending'
       ) AS visual,
       COUNT(*) FILTER (
         WHERE auto_status IN ('FAIL', 'UNCERTAIN')
           AND group_key = 'quality'
-          AND (human_status != 'dismissed' OR human_status IS NULL)
+          AND COALESCE(human_status, 'pending') = 'pending'
       ) AS quality,
       COUNT(*) FILTER (
         WHERE auto_status IN ('FAIL', 'UNCERTAIN')
           AND group_key IN ('structure','table2','table3','table4','text','hierarchy')
-          AND (human_status != 'dismissed' OR human_status IS NULL)
+          AND COALESCE(human_status, 'pending') = 'pending'
       ) AS structure
     FROM report_consistency_items
     WHERE report_version_id = $1
