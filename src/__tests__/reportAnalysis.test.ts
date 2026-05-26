@@ -64,4 +64,36 @@ describe('calculateReportMetrics', () => {
       })
     );
   });
+
+  test('reports section title issues while keeping aligned metrics clean', () => {
+    const metrics = calculateReportMetrics(
+      {
+        sections: [
+          { type: 'text', title: '五、存在的主要问题及改进情况', content: '旧问题改进' },
+          { type: 'text', title: '六、其他需要报告的事项', content: '旧其他事项' },
+        ],
+      },
+      {
+        sections: [
+          { type: 'text', title: 'l六、存在的主要问题及改进情况', content: '新问题改进' },
+          { type: 'text', title: '七、其他需要报告的事项', content: '新其他事项' },
+        ],
+      }
+    );
+
+    expect(metrics.textSectionMetrics.map((item) => item.title)).toEqual([
+      '五、存在的主要问题及改进情况',
+      '六、其他需要报告的事项',
+    ]);
+    expect(metrics.titleIssues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        title: 'l六、存在的主要问题及改进情况',
+        normalizedTitle: '五、存在的主要问题及改进情况',
+      }),
+      expect.objectContaining({
+        title: '七、其他需要报告的事项',
+        normalizedTitle: '六、其他需要报告的事项',
+      }),
+    ]));
+  });
 });

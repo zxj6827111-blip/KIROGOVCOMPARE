@@ -13,6 +13,18 @@ const normalizeSummaryItems = (items) => {
     .filter(Boolean);
 };
 
+const normalizeTitleIssues = (issues) => {
+  if (!Array.isArray(issues)) return [];
+  return issues
+    .map((issue) => {
+      const title = String(issue?.title || '').trim();
+      const normalizedTitle = String(issue?.normalizedTitle || issue?.normalized_title || '').trim();
+      if (!title || !normalizedTitle || title === normalizedTitle) return null;
+      return `原报告章节标题疑似有误：“${title}”已按“${normalizedTitle}”参与比对。`;
+    })
+    .filter(Boolean);
+};
+
 const buildSectionFinding = (metric, referenceThreshold, majorChangeThreshold) => {
   const similarity = toValidPercent(metric?.similarity);
   if (similarity == null || similarity >= referenceThreshold) return null;
@@ -28,17 +40,19 @@ const buildSectionFinding = (metric, referenceThreshold, majorChangeThreshold) =
 export const buildComparisonFindingItems = ({
   summaryItems,
   textSectionMetrics,
+  titleIssues,
   referenceThreshold = DEFAULT_REFERENCE_THRESHOLD,
   majorChangeThreshold = DEFAULT_MAJOR_CHANGE_THRESHOLD,
 } = {}) => {
   const items = normalizeSummaryItems(summaryItems);
+  const titleIssueItems = normalizeTitleIssues(titleIssues);
   const metrics = Array.isArray(textSectionMetrics) ? textSectionMetrics : [];
 
   const sectionFindings = metrics
     .map((metric) => buildSectionFinding(metric, referenceThreshold, majorChangeThreshold))
     .filter(Boolean);
 
-  const merged = [...items, ...sectionFindings];
+  const merged = [...items, ...titleIssueItems, ...sectionFindings];
   if (merged.length > 0) return merged;
 
   if (metrics.length > 0) {

@@ -179,6 +179,7 @@ const ComparisonDetailView = ({ comparisonId, onBack, autoPrint = false }) => {
     const findingItems = buildComparisonFindingItems({
       summaryItems,
       textSectionMetrics,
+      titleIssues: data.section_metrics?.title_issues,
     });
 
     return {

@@ -1,5 +1,10 @@
 import { calculateTextSimilarity } from './diffRenderer';
-import { alignComparisonSections, SectionAlignmentRule } from './sectionAlignment';
+import {
+    alignComparisonSections,
+    getComparisonSectionTitleIssue,
+    SectionAlignmentRule,
+    SectionTitleIssue,
+} from './sectionAlignment';
 
 interface Section {
     title: string;
@@ -23,12 +28,32 @@ export interface ReportMetrics {
     similarity: number;
     checkStatus: string | null;
     textSectionMetrics: TextSectionMetric[];
+    titleIssues: SectionTitleIssue[];
     method: 'simple_average_text_sections';
 }
 
 const isNonReportTextSection = (title?: string): boolean => {
     if (!title) return true;
     return title !== '标题' && !title.includes('年度报告');
+};
+
+const collectSectionTitleIssues = (...reportDataItems: any[]): SectionTitleIssue[] => {
+    const seen = new Set<string>();
+    const issues: SectionTitleIssue[] = [];
+
+    reportDataItems.forEach((reportData) => {
+        const sections: Section[] = reportData?.sections || [];
+        sections.forEach((section) => {
+            const issue = getComparisonSectionTitleIssue(section?.title, section?.type || 'text');
+            if (!issue) return;
+            const key = `${issue.title}->${issue.normalizedTitle}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            issues.push(issue);
+        });
+    });
+
+    return issues;
 };
 
 export const calculateReportMetrics = (
@@ -140,6 +165,7 @@ export const calculateReportMetrics = (
         similarity: avgTextRep,
         checkStatus,
         textSectionMetrics,
+        titleIssues: collectSectionTitleIssues(leftData, rightData),
         method: 'simple_average_text_sections',
     };
 };

@@ -12,6 +12,14 @@ export type AlignedSection<T extends SectionLike = SectionLike> = {
   newSec?: T;
 };
 
+export type SectionTitleIssue = {
+  title: string;
+  normalizedTitle: string;
+  expectedOrdinal: string;
+  actualOrdinal: string;
+  reason: string;
+};
+
 export type SectionAlignmentRule = {
   sectionType?: string | null;
   section_type?: string | null;
@@ -35,6 +43,7 @@ const normalizeTitleText = (title?: string): string =>
     .normalize('NFKC')
     .replace(/[\u200b-\u200d\ufeff]/g, '')
     .replace(/\s+/g, '')
+    .replace(/^[|｜丨lLiI1]+(?=[一二三四五六七八九十])/g, '')
     .replace(/[，,。、.．：:；;！!？?（）()【】\[\]《》<>“”"‘’'·]/g, '');
 
 const getTitleParts = (title?: string) => {
@@ -107,10 +116,43 @@ export const normalizeComparisonSectionTitle = (title?: string, type = ''): stri
   }
 
   const normalizedOrdinal = ordinal || (normalizedBody === '总体情况' ? '一' : normalizedBody === '其他需要报告的事项' ? '六' : '');
-  const alignmentOrdinal = normalizedBody === '存在的主要问题改进情况' && body !== '存在的主要问题及改进情况' && body !== '存在的主要问题和改进情况'
+  const semanticOrdinal = normalizedBody === '存在的主要问题改进情况'
     ? '五'
-    : normalizedOrdinal;
+    : normalizedBody === '其他需要报告的事项'
+      ? '六'
+      : '';
+  const alignmentOrdinal = semanticOrdinal || normalizedOrdinal;
   return [type || 'section', alignmentOrdinal, normalizedBody || compact].join(':');
+};
+
+export const getComparisonSectionTitleIssue = (title?: string, type = ''): SectionTitleIssue | null => {
+  if ((type || 'text') !== 'text') return null;
+  const rawTitle = String(title || '').trim();
+  if (!rawTitle) return null;
+
+  const { ordinal, body } = getTitleParts(rawTitle);
+  const normalizedBody = normalizeTitleBody(body, type);
+  const expectedOrdinal = normalizedBody === '存在的主要问题改进情况'
+    ? '五'
+    : normalizedBody === '其他需要报告的事项'
+      ? '六'
+      : '';
+  if (!expectedOrdinal) return null;
+
+  const normalizedTitle = `${expectedOrdinal}、${
+    normalizedBody === '存在的主要问题改进情况' ? '存在的主要问题及改进情况' : normalizedBody
+  }`;
+  const hasDirtyPrefix = /^[|｜丨lLiI1]+\s*[一二三四五六七八九十]/.test(rawTitle.normalize('NFKC'));
+  const hasOrdinalMismatch = Boolean(ordinal) && ordinal !== expectedOrdinal;
+  if (!hasDirtyPrefix && !hasOrdinalMismatch) return null;
+
+  return {
+    title: rawTitle,
+    normalizedTitle,
+    expectedOrdinal,
+    actualOrdinal: ordinal || '',
+    reason: '原报告章节标题序号或前缀异常，系统已按标准章节语义归位。',
+  };
 };
 
 const getRuleValue = (rule: SectionAlignmentRule, camelKey: keyof SectionAlignmentRule, snakeKey: keyof SectionAlignmentRule): string =>
@@ -142,6 +184,9 @@ export const getComparisonSectionAlignmentKey = (
   type = '',
   rules: SectionAlignmentRule[] = []
 ): string => applySectionAlignmentRules(normalizeComparisonSectionTitle(title, type), type, rules);
+
+const getDisplaySectionTitle = (title?: string, type = ''): string =>
+  getComparisonSectionTitleIssue(title, type)?.normalizedTitle || title || type || '未命名章节';
 
 const getSectionOrder = (title?: string): number => {
   const { compact, ordinal, body } = getTitleParts(title);
@@ -237,7 +282,7 @@ export const alignComparisonSections = <T extends SectionLike>(
   normalizedLeftSections.forEach((section, index) => {
     const key = getComparisonSectionAlignmentKey(section?.title, section?.type, rules);
     const row: InternalRow = {
-      title: section?.title || section?.type || '未命名章节',
+      title: getDisplaySectionTitle(section?.title, section?.type),
       type: section?.type,
       oldSec: section,
       __leftIndex: index,
@@ -259,7 +304,7 @@ export const alignComparisonSections = <T extends SectionLike>(
     }
 
     const row: InternalRow = {
-      title: section?.title || section?.type || '未命名章节',
+      title: getDisplaySectionTitle(section?.title, section?.type),
       type: section?.type,
       newSec: section,
       __leftIndex: Number.POSITIVE_INFINITY,

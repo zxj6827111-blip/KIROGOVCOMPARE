@@ -1078,6 +1078,7 @@ router.get('/:id/result', authMiddleware, async (req: AuthRequest, res: Response
       stored_similarity: comparison.similarity,
       section_metrics: {
         text: metrics.textSectionMetrics,
+        title_issues: metrics.titleIssues,
         average: metrics.similarity,
         method: metrics.method,
       },
