@@ -33,6 +33,12 @@ interface QueuedJob {
   ingestion_batch_id?: number | null;
 }
 
+interface ActiveCompareVersion {
+  versionId: number;
+  reportYear: number | null;
+  parsedJson: any;
+}
+
 // 5-step progress tracking (Chinese)
 const STEPS = {
   RECEIVED: { code: 'RECEIVED', name: '已接收并保存文件', progress: 10 },
@@ -44,6 +50,30 @@ const STEPS = {
   QUEUED: { code: 'QUEUED', name: '等待处理', progress: 0 },
   CANCELLED: { code: 'CANCELLED', name: 'Cancelled', progress: 100 },
 };
+
+function buildConsistencyIssueStatusPart(year: number | null, count: number): string | null {
+  if (count <= 0) {
+    return null;
+  }
+  return year ? `${year}年校验${count}项` : `校验${count}项`;
+}
+
+function mergeCheckStatusWithConsistencyIssues(
+  currentStatus: string | null,
+  issueParts: Array<string | null>
+): string {
+  const parts = issueParts.filter((part): part is string => Boolean(part));
+  if (currentStatus && currentStatus.startsWith('异常')) {
+    const existing = currentStatus.replace('异常(', '').replace(')', '');
+    if (existing) {
+      parts.unshift(existing);
+    }
+  }
+  if (parts.length > 0) {
+    return `异常(${parts.join('|')})`;
+  }
+  return currentStatus || '正常';
+}
 
 const POLL_INTERVAL_MS = 5000; // 5秒轮询间隔，避免API速率限制
 const POST_JOB_COOLDOWN_MS = Number(process.env.LLM_POST_JOB_COOLDOWN_MS || 10000); // Cooldown after parse jobs (default 10s) to avoid API rate limits.
@@ -1019,7 +1049,12 @@ export class LlmJobRunner {
     // 2. Calculate text similarity and data linkage check status using proper text analysis
     const metrics = calculateReportMetrics(leftJson, rightJson);
     const similarity = metrics.similarity;
-    const checkStatus = metrics.checkStatus || '正常';
+    const leftIssueCount = await this.countActiveConsistencyIssues(leftVersion.versionId);
+    const rightIssueCount = await this.countActiveConsistencyIssues(rightVersion.versionId);
+    const checkStatus = mergeCheckStatusWithConsistencyIssues(metrics.checkStatus || null, [
+      buildConsistencyIssueStatusPart(leftVersion.reportYear, leftIssueCount),
+      buildConsistencyIssueStatusPart(rightVersion.reportYear, rightIssueCount),
+    ]);
 
     // 3. Save Results
     await pool.query(
@@ -1060,9 +1095,9 @@ export class LlmJobRunner {
   private async loadActiveParsedVersionForCompare(
     reportId: number,
     side: 'left' | 'right'
-  ): Promise<{ versionId: number; parsedJson: any }> {
+  ): Promise<ActiveCompareVersion> {
     const versionRes = await pool.query(
-      `SELECT rv.id AS version_id, rv.parsed_json
+      `SELECT rv.id AS version_id, rv.parsed_json, r.year AS report_year
        FROM reports r
        JOIN report_versions rv ON rv.id = r.active_version_id
        WHERE r.id = $1
@@ -1088,6 +1123,7 @@ export class LlmJobRunner {
 
     return {
       versionId: Number(version.version_id),
+      reportYear: version.report_year ? Number(version.report_year) : null,
       parsedJson,
     };
   }
@@ -1239,6 +1275,18 @@ export class LlmJobRunner {
   }
 
   private async countOpenReviewIssues(versionId: number): Promise<number> {
+    const result = await pool.query(
+      `SELECT COUNT(*) AS count
+       FROM report_consistency_items
+       WHERE report_version_id = $1
+         AND auto_status IN ('FAIL', 'UNCERTAIN')
+         AND COALESCE(human_status, 'pending') = 'pending'`,
+      [versionId]
+    );
+    return Number(result.rows[0]?.count || 0);
+  }
+
+  private async countActiveConsistencyIssues(versionId: number): Promise<number> {
     const result = await pool.query(
       `SELECT COUNT(*) AS count
        FROM report_consistency_items

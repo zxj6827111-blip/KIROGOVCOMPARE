@@ -2,6 +2,7 @@ import {
   QUALITY_AUDIT_GROUP_KEYS,
   getEffectiveConsistencyHumanStatus,
   getConsistencyGroupKey,
+  isReviewableConsistencyItem,
   sortConsistencyItems,
 } from './consistencyDisplay';
 import {
@@ -74,6 +75,9 @@ const resolveDisplayScopeKey = (groupKey, scope) => {
 
 const isRawFailItem = (item) => getAutoStatus(item) === 'FAIL';
 
+const isReviewableItem = (item) =>
+  getAutoStatus(item) === 'FAIL' || getAutoStatus(item) === 'UNCERTAIN';
+
 const isActiveProblemItem = (item) =>
   getAutoStatus(item) === 'FAIL' && getHumanStatus(item) !== 'dismissed';
 
@@ -116,7 +120,7 @@ const buildStatsFromIssues = (issues = []) => {
       stats.reviewCount += 1;
     }
 
-    if (humanStatus === 'confirmed') {
+    if (humanStatus === 'confirmed' && isReviewableItem(issue)) {
       stats.confirmedCount += 1;
     }
 
@@ -230,10 +234,10 @@ export const aggregateIssuesFromChecks = (groupsOrConfig = [], maybeOptions = {}
   });
 
   const issues = normalized.issues;
-  const activeIssues = issues.filter((issue) => issue?.autoStatus === 'FAIL' && getHumanStatus(issue) !== 'dismissed');
+  const activeIssues = issues.filter((issue) => isActiveProblemItem(issue));
   const reviewIssues = issues.filter(isPendingReviewItem);
   const dismissedIssues = issues.filter((issue) => getHumanStatus(issue) === 'dismissed');
-  const confirmedIssues = issues.filter((issue) => getHumanStatus(issue) === 'confirmed');
+  const confirmedIssues = issues.filter((issue) => isReviewableItem(issue) && getHumanStatus(issue) === 'confirmed');
   const issuesByGroupKey = normalized.issuesByGroupKey;
   const issuesByTableId = issues.reduce((acc, issue) => {
     const tableId = issue?.tableId || '__none__';
@@ -302,7 +306,7 @@ export const aggregateQualityIssuesFromChecks = (groupsOrConfig = [], maybeOptio
       reviewCount: groupIssues.filter((issue) => {
         return isPendingReviewItem(issue);
       }).length,
-      resolvedCount: groupIssues.filter((issue) => getHumanStatus(issue).toLowerCase() === 'confirmed').length,
+      resolvedCount: groupIssues.filter((issue) => isReviewableConsistencyItem(issue) && getHumanStatus(issue).toLowerCase() === 'confirmed').length,
       dismissedCount: groupIssues.filter((issue) => getHumanStatus(issue).toLowerCase() === 'dismissed').length,
       notAssessableCount: groupIssues.filter((issue) => String(issue?.autoStatus || issue?.auto_status || '').toUpperCase() === 'NOT_ASSESSABLE').length,
     };

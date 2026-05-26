@@ -122,6 +122,27 @@ describe('consistency summary semantics', () => {
     });
   });
 
+  test('legacy PASS pending is not counted as a confirmed problem', () => {
+    const group = makeGroup([
+      makeItem({ autoStatus: 'PASS', humanStatus: 'pending' }),
+      makeItem({ autoStatus: 'PASS', humanStatus: 'confirmed' }),
+    ]);
+    const summary = summarizeConsistencyGroups([group]);
+
+    expect(group.stats).toMatchObject({
+      ruleCount: 2,
+      problemCount: 0,
+      pendingCount: 0,
+      confirmedCount: 0,
+    });
+    expect(summary).toMatchObject({
+      ruleCount: 2,
+      problemCount: 0,
+      pendingCount: 0,
+      confirmedCount: 0,
+    });
+  });
+
   test('1 confirmed FAIL => problemCount stays 5, pendingCount 4, confirmedCount 1', () => {
     const items = [
       makeItem({ humanStatus: 'confirmed' }),

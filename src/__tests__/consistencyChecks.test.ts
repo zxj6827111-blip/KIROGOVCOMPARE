@@ -106,6 +106,27 @@ describe('ConsistencyCheckService', () => {
                 reviewCount: 1,
             });
         });
+
+        it('treats PASS as reviewed without making it pending review', () => {
+            const summary = buildConsistencyRunSummary([
+                { groupKey: 'table3', autoStatus: 'PASS', humanStatus: 'pending' },
+                { groupKey: 'table3', autoStatus: 'PASS', humanStatus: 'confirmed' },
+                { groupKey: 'table3', autoStatus: 'UNCERTAIN', humanStatus: 'confirmed' },
+            ]);
+
+            expect(summary.human).toMatchObject({
+                pending: 0,
+                confirmed: 3,
+                dismissed: 0,
+            });
+            expect(summary.byGroupKey.table3).toMatchObject({
+                total: 3,
+                pass: 2,
+                uncertain: 1,
+                confirmed: 3,
+                reviewCount: 0,
+            });
+        });
     });
 
     describe('section title quality checks', () => {

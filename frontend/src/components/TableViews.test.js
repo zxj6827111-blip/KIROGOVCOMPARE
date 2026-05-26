@@ -77,6 +77,26 @@ describe('Table2View', () => {
     expect(regulationsCell.className).toContain('cell-issue-confirmed');
     expect(regulationsCell.querySelector('.issue-badge')).not.toBeNull();
   });
+
+  test('does not count confirmed UNCERTAIN rows as pending review in table2 summary', () => {
+    render(
+      <Table2View
+        data={baseData}
+        tableIssues={[
+          {
+            ...tableIssues[1],
+            id: 3,
+            stableIssueId: 'id:3',
+            displayNo: null,
+            human_status: 'confirmed',
+          },
+        ]}
+      />
+    );
+
+    expect(screen.getByText('待复核 0')).toBeInTheDocument();
+    expect(screen.getByText('已确认提示：不计入问题数。')).toBeInTheDocument();
+  });
 });
 
 describe('Table3View', () => {

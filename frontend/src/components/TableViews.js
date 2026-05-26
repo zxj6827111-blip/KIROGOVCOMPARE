@@ -2,7 +2,7 @@ import React from 'react';
 import { TrendingUp } from 'lucide-react';
 import { analyzeTable3Diagnostics, getTable3SuspiciousCell } from '../utils/table3Diagnostics';
 import { Table3IssueSummary, Table4IssueSummary, toCircledNumber } from './TableIssueSummary';
-import { classifyTable3Issue } from '../utils/consistencyDisplay';
+import { classifyTable3Issue, getEffectiveConsistencyHumanStatus } from '../utils/consistencyDisplay';
 import './GovDataTable.css';
 
 const cx = (...classes) => classes.filter(Boolean).join(' ');
@@ -84,6 +84,11 @@ const renderCellContent = (value, correction) => {
 const Table2View = ({ data, highlightCells = [], ocrCorrections = [], tableIssues = [], compact = false }) => {
   if (!data) return null;
   const activeTable2Issues = tableIssues.filter((item) => item?.human_status !== 'dismissed');
+  const pendingTable2Issues = activeTable2Issues.filter(
+    (item) =>
+      item?.auto_status === 'UNCERTAIN' &&
+      getEffectiveConsistencyHumanStatus(item) === 'pending'
+  );
 
   const getTable2CellMeta = (fullPath) => {
     const matches = activeTable2Issues
@@ -180,14 +185,15 @@ const Table2View = ({ data, highlightCells = [], ocrCorrections = [], tableIssue
               <div className="tis-hero-title">表二发现 {activeTable2Issues.length} 条需处理提示</div>
               <div className="tis-hero-chips">
                 <span className="tis-chip tis-chip--table4">问题 {activeTable2Issues.filter((item) => item.auto_status === 'FAIL').length}</span>
-                <span className="tis-chip tis-chip--other">待复核 {activeTable2Issues.filter((item) => item.auto_status === 'UNCERTAIN').length}</span>
+                <span className="tis-chip tis-chip--other">待复核 {pendingTable2Issues.length}</span>
               </div>
             </div>
           </div>
           <div className="tis-cards">
             {activeTable2Issues.map((item, index) => {
               const displayNo = item?.displayNo ?? index + 1;
-              const isConfirmed = item?.human_status === 'confirmed';
+              const effectiveHumanStatus = getEffectiveConsistencyHumanStatus(item);
+              const isConfirmed = effectiveHumanStatus === 'confirmed';
               return (
                 <div
                   key={item?.stableIssueId || item?.id || `${item?.check_key || 'table2'}-${index}`}
@@ -206,7 +212,11 @@ const Table2View = ({ data, highlightCells = [], ocrCorrections = [], tableIssue
                       {isConfirmed && <span className="tis-confirmed-tag">已确认</span>}
                     </span>
                     <span className="tis-card-formula">
-                      {item?.auto_status === 'FAIL' ? '问题项：仍计入问题数。' : '待复核项：不计入问题数。'}
+                      {item?.auto_status === 'FAIL'
+                        ? '问题项：仍计入问题数。'
+                        : isConfirmed
+                          ? '已确认提示：不计入问题数。'
+                          : '待复核项：不计入问题数。'}
                     </span>
                   </div>
                 </div>

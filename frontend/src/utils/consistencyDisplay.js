@@ -89,6 +89,12 @@ export const getEffectiveConsistencyHumanStatus = (item) => {
 export const isProblemConsistencyItem = (item) =>
   item?.auto_status === 'FAIL' && !isDismissedConsistencyItem(item);
 
+export const isReviewableConsistencyItem = (item) =>
+  item?.auto_status === 'FAIL' ||
+  item?.auto_status === 'UNCERTAIN' ||
+  item?.autoStatus === 'FAIL' ||
+  item?.autoStatus === 'UNCERTAIN';
+
 export const isNumberedConsistencyItem = (item) =>
   isProblemConsistencyItem(item) && !isDismissedConsistencyItem(item);
 
@@ -220,7 +226,7 @@ export const normalizeConsistencyGroup = (group) => {
     problemCount: items.filter((item) => isProblemConsistencyItem(item)).length,
     pendingCount: items.filter((item) => isPendingReviewConsistencyItem(item)).length,
     pendingCountRaw: items.filter((item) => isPendingReviewConsistencyItem(item)).length,
-    confirmedCount: items.filter((item) => getEffectiveConsistencyHumanStatus(item) === 'confirmed' && item.auto_status !== 'NOT_ASSESSABLE').length,
+    confirmedCount: items.filter((item) => isReviewableConsistencyItem(item) && getEffectiveConsistencyHumanStatus(item) === 'confirmed').length,
     dismissedCount: items.filter((item) => getEffectiveConsistencyHumanStatus(item) === 'dismissed').length,
     notAssessableCount: items.filter((item) => item.auto_status === 'NOT_ASSESSABLE').length,
   };
