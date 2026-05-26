@@ -109,21 +109,60 @@ describe('ConsistencyCheckService', () => {
     });
 
     describe('section title quality checks', () => {
-        it('flags dirty and misnumbered standard annual report text titles', () => {
+        it('flags dirty and misnumbered standard annual report section titles', () => {
             const items = service.runChecks({
                 sections: [
                     { type: 'text', title: '一、总体情况', content: '总体情况内容' },
-                    { type: 'table_2', title: '二、主动公开政府信息情况', activeDisclosureData: {} },
-                    { type: 'table_3', title: '三、收到和处理政府信息公开申请情况', tableData: {} },
-                    { type: 'table_4', title: '四、政府信息公开行政复议、行政诉讼情况', reviewLitigationData: {} },
+                    { type: 'table_2', title: '三、主动公开政府信息情况', activeDisclosureData: {} },
+                    { type: 'table_3', title: '四、收到和处理政府信息公开申请情况', tableData: {} },
+                    { type: 'table_4', title: '五、政府信息公开行政复议、行政诉讼情况', reviewLitigationData: {} },
                     { type: 'text', title: 'l六、存在的主要问题及改进情况', content: '问题和改进内容' },
                     { type: 'text', title: '七、其他需要报告的事项', content: '其他事项内容' },
                 ],
             });
 
             const titleIssues = items.filter((item) => item.checkKey === 'section_title_misnumbered');
-            expect(titleIssues).toHaveLength(2);
+            expect(titleIssues).toHaveLength(5);
             expect(titleIssues).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    groupKey: 'quality',
+                    autoStatus: 'FAIL',
+                    title: '章节标题疑似有误：“三、主动公开政府信息情况”应按“二、主动公开政府信息情况”理解',
+                    evidenceJson: expect.objectContaining({
+                        paths: ['sections[1].title'],
+                        values: expect.objectContaining({
+                            normalizedTitle: '二、主动公开政府信息情况',
+                            actualOrdinal: '三',
+                            expectedOrdinal: '二',
+                        }),
+                    }),
+                }),
+                expect.objectContaining({
+                    groupKey: 'quality',
+                    autoStatus: 'FAIL',
+                    title: '章节标题疑似有误：“四、收到和处理政府信息公开申请情况”应按“三、收到和处理政府信息公开申请情况”理解',
+                    evidenceJson: expect.objectContaining({
+                        paths: ['sections[2].title'],
+                        values: expect.objectContaining({
+                            normalizedTitle: '三、收到和处理政府信息公开申请情况',
+                            actualOrdinal: '四',
+                            expectedOrdinal: '三',
+                        }),
+                    }),
+                }),
+                expect.objectContaining({
+                    groupKey: 'quality',
+                    autoStatus: 'FAIL',
+                    title: '章节标题疑似有误：“五、政府信息公开行政复议、行政诉讼情况”应按“四、政府信息公开行政复议、行政诉讼情况”理解',
+                    evidenceJson: expect.objectContaining({
+                        paths: ['sections[3].title'],
+                        values: expect.objectContaining({
+                            normalizedTitle: '四、政府信息公开行政复议、行政诉讼情况',
+                            actualOrdinal: '五',
+                            expectedOrdinal: '四',
+                        }),
+                    }),
+                }),
                 expect.objectContaining({
                     groupKey: 'quality',
                     autoStatus: 'FAIL',

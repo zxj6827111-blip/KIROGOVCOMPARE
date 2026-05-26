@@ -130,6 +130,30 @@ describe('comparison section alignment', () => {
     expect(getComparisonSectionTitleIssue('五、存在的主要问题和改进情况', 'text')).toBeNull();
   });
 
+  test('reports misnumbered standard table section titles', () => {
+    expect(getComparisonSectionTitleIssue('三、主动公开政府信息情况', 'table_2')).toEqual(expect.objectContaining({
+      title: '三、主动公开政府信息情况',
+      normalizedTitle: '二、主动公开政府信息情况',
+      expectedOrdinal: '二',
+      actualOrdinal: '三',
+    }));
+    expect(getComparisonSectionTitleIssue('四、收到和处理政府信息公开申请情况', 'table_3')).toEqual(expect.objectContaining({
+      title: '四、收到和处理政府信息公开申请情况',
+      normalizedTitle: '三、收到和处理政府信息公开申请情况',
+      expectedOrdinal: '三',
+      actualOrdinal: '四',
+    }));
+    expect(getComparisonSectionTitleIssue('五、政府信息公开行政复议、行政诉讼情况', 'table_4')).toEqual(expect.objectContaining({
+      title: '五、政府信息公开行政复议、行政诉讼情况',
+      normalizedTitle: '四、政府信息公开行政复议、行政诉讼情况',
+      expectedOrdinal: '四',
+      actualOrdinal: '五',
+    }));
+    expect(getComparisonSectionTitleIssue('二、主动公开政府信息情况', 'table_2')).toBeNull();
+    expect(getComparisonSectionTitleIssue('三、收到和处理政府信息公开申请情况', 'table_3')).toBeNull();
+    expect(getComparisonSectionTitleIssue('四、政府信息公开行政复议、行政诉讼情况', 'table_4')).toBeNull();
+  });
+
   test('normalizes table title prefixes by table type', () => {
     expect(normalizeComparisonSectionTitle('二、主动公开政府信息情况', 'table_2')).toBe(
       normalizeComparisonSectionTitle('二、行政机关主动公开政府信息情况', 'table_2')
