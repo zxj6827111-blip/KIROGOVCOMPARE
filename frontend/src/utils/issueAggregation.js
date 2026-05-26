@@ -1,5 +1,6 @@
 import {
   QUALITY_AUDIT_GROUP_KEYS,
+  getEffectiveConsistencyHumanStatus,
   getConsistencyGroupKey,
   sortConsistencyItems,
 } from './consistencyDisplay';
@@ -25,7 +26,7 @@ const safeArray = (value) => (Array.isArray(value) ? value.filter(Boolean) : [])
 
 const getAutoStatus = (item) => String(item?.auto_status || item?.autoStatus || '').toUpperCase();
 
-const getHumanStatus = (item) => String(item?.human_status || item?.humanStatus || 'pending');
+const getHumanStatus = (item) => String(getEffectiveConsistencyHumanStatus(item));
 
 const isQualityGroupKey = (groupKey) => QUALITY_AUDIT_GROUP_KEYS.includes(groupKey);
 
@@ -77,7 +78,7 @@ const isActiveProblemItem = (item) =>
   getAutoStatus(item) === 'FAIL' && getHumanStatus(item) !== 'dismissed';
 
 const isPendingReviewItem = (item) =>
-  getHumanStatus(item) === 'pending' && getAutoStatus(item) !== 'NOT_ASSESSABLE';
+  getHumanStatus(item) === 'pending' && (getAutoStatus(item) === 'FAIL' || getAutoStatus(item) === 'UNCERTAIN');
 
 const buildStatsFromIssues = (issues = []) => {
   const stats = {
@@ -94,7 +95,7 @@ const buildStatsFromIssues = (issues = []) => {
 
   issues.forEach((issue) => {
     const autoStatus = String(issue?.autoStatus || '').toUpperCase();
-    const humanStatus = String(issue?.humanStatus || 'pending');
+    const humanStatus = getHumanStatus(issue);
 
     if (autoStatus !== 'NOT_ASSESSABLE') {
       stats.ruleCount += 1;
@@ -109,7 +110,7 @@ const buildStatsFromIssues = (issues = []) => {
       }
     }
 
-    if (humanStatus === 'pending' && autoStatus !== 'NOT_ASSESSABLE') {
+    if (isPendingReviewItem(issue)) {
       stats.pendingCount += 1;
       stats.pendingCountRaw += 1;
       stats.reviewCount += 1;
@@ -181,7 +182,7 @@ export const collectPendingItemIdsFromIssues = (issues = []) =>
       displayNo: issue?.displayNo,
     }))
   )
-    .filter((item) => item?.human_status === 'pending' && item?.auto_status !== 'NOT_ASSESSABLE' && item?.id)
+    .filter((item) => isPendingReviewItem(item) && item?.id)
     .map((item) => item.id)
     .filter((id) => id !== null && id !== undefined);
 
@@ -229,12 +230,10 @@ export const aggregateIssuesFromChecks = (groupsOrConfig = [], maybeOptions = {}
   });
 
   const issues = normalized.issues;
-  const activeIssues = issues.filter((issue) => issue?.autoStatus === 'FAIL' && issue?.humanStatus !== 'dismissed');
-  const reviewIssues = issues.filter(
-    (issue) => issue?.humanStatus === 'pending' && issue?.autoStatus !== 'NOT_ASSESSABLE'
-  );
-  const dismissedIssues = issues.filter((issue) => issue?.humanStatus === 'dismissed');
-  const confirmedIssues = issues.filter((issue) => issue?.humanStatus === 'confirmed');
+  const activeIssues = issues.filter((issue) => issue?.autoStatus === 'FAIL' && getHumanStatus(issue) !== 'dismissed');
+  const reviewIssues = issues.filter(isPendingReviewItem);
+  const dismissedIssues = issues.filter((issue) => getHumanStatus(issue) === 'dismissed');
+  const confirmedIssues = issues.filter((issue) => getHumanStatus(issue) === 'confirmed');
   const issuesByGroupKey = normalized.issuesByGroupKey;
   const issuesByTableId = issues.reduce((acc, issue) => {
     const tableId = issue?.tableId || '__none__';
@@ -297,16 +296,14 @@ export const aggregateQualityIssuesFromChecks = (groupsOrConfig = [], maybeOptio
       itemCount: groupIssues.length,
       riskCount: groupIssues.filter((issue) => {
         const autoStatus = String(issue?.autoStatus || issue?.auto_status || '').toUpperCase();
-        const humanStatus = String(issue?.humanStatus || issue?.human_status || 'pending').toLowerCase();
+        const humanStatus = getHumanStatus(issue).toLowerCase();
         return (autoStatus === 'FAIL' || autoStatus === 'UNCERTAIN') && humanStatus !== 'dismissed';
       }).length,
       reviewCount: groupIssues.filter((issue) => {
-        const autoStatus = String(issue?.autoStatus || issue?.auto_status || '').toUpperCase();
-        const humanStatus = String(issue?.humanStatus || issue?.human_status || 'pending').toLowerCase();
-        return humanStatus === 'pending' && autoStatus !== 'NOT_ASSESSABLE';
+        return isPendingReviewItem(issue);
       }).length,
-      resolvedCount: groupIssues.filter((issue) => String(issue?.humanStatus || issue?.human_status || '').toLowerCase() === 'confirmed').length,
-      dismissedCount: groupIssues.filter((issue) => String(issue?.humanStatus || issue?.human_status || '').toLowerCase() === 'dismissed').length,
+      resolvedCount: groupIssues.filter((issue) => getHumanStatus(issue).toLowerCase() === 'confirmed').length,
+      dismissedCount: groupIssues.filter((issue) => getHumanStatus(issue).toLowerCase() === 'dismissed').length,
       notAssessableCount: groupIssues.filter((issue) => String(issue?.autoStatus || issue?.auto_status || '').toUpperCase() === 'NOT_ASSESSABLE').length,
     };
     return acc;

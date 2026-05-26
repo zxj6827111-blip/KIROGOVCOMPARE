@@ -34,7 +34,7 @@ describe('buildTable3CategoryStats', () => {
     expect(bucket).toMatchObject({
       ruleCount: 3,
       problemCount: 1,
-      pendingCount: 1,
+      pendingCount: 0,
     });
   });
 
@@ -47,7 +47,7 @@ describe('buildTable3CategoryStats', () => {
     expect(bucket).toMatchObject({
       ruleCount: 2,
       problemCount: 1,
-      pendingCount: 1,
+      pendingCount: 0,
     });
   });
 
@@ -60,7 +60,7 @@ describe('buildTable3CategoryStats', () => {
     expect(bucket).toMatchObject({
       ruleCount: 2,
       problemCount: 0,
-      pendingCount: 1,
+      pendingCount: 0,
     });
   });
 
@@ -73,7 +73,7 @@ describe('buildTable3CategoryStats', () => {
     expect(bucket).toMatchObject({
       ruleCount: 2,
       problemCount: 1,
-      pendingCount: 1,
+      pendingCount: 0,
     });
   });
 
@@ -89,7 +89,7 @@ describe('buildTable3CategoryStats', () => {
     expect(group.stats).toMatchObject({
       ruleCount: 2,
       problemCount: 0,
-      pendingCount: 1,
+      pendingCount: 0,
       dismissedCount: 1,
     });
   });

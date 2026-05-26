@@ -45,14 +45,14 @@ describe('ConsistencyCheckService', () => {
                     notAssessable: 1,
                 },
                 human: {
-                    pending: 4,
-                    confirmed: 1,
+                    pending: 3,
+                    confirmed: 2,
                     dismissed: 1,
                 },
                 active: {
                     rawFailCount: 3,
                     activeProblemCount: 2,
-                    reviewCount: 3,
+                    reviewCount: 2,
                 },
             });
         });
@@ -1216,6 +1216,60 @@ describe('ConsistencyCheckService', () => {
             expect(newReceived?.evidenceJson.values.missingReports).toEqual([
                 { regionId: 12, regionName: '清江浦区' },
             ]);
+        });
+    });
+
+    describe('runAndPersist human review defaults', () => {
+        it('persists PASS as confirmed and keeps FAIL/UNCERTAIN in pending review', async () => {
+            mockedQuery
+                .mockResolvedValueOnce({ rows: [{ year: 2024 }] })
+                .mockResolvedValueOnce({ rows: [{ id: 9001 }] })
+                .mockResolvedValue({ rows: [] });
+
+            const makeItem = (autoStatus: 'PASS' | 'FAIL' | 'UNCERTAIN') => ({
+                groupKey: 'table2' as const,
+                checkKey: `default_${autoStatus}`,
+                fingerprint: `default-${autoStatus}`,
+                title: `default ${autoStatus}`,
+                expr: 'left = right',
+                leftValue: autoStatus === 'FAIL' ? 1 : 0,
+                rightValue: 0,
+                delta: autoStatus === 'FAIL' ? 1 : 0,
+                tolerance: 0,
+                autoStatus,
+                evidenceJson: {
+                    paths: [],
+                    values: {},
+                },
+            });
+            jest.spyOn(service, 'runChecks').mockReturnValue([
+                makeItem('PASS'),
+                makeItem('FAIL'),
+                makeItem('UNCERTAIN'),
+            ]);
+            jest.spyOn(service as any, 'generateHierarchyItems').mockResolvedValue([]);
+
+            await service.runAndPersist(1000, { sections: [] });
+
+            const persistCalls = mockedQuery.mock.calls.filter(([sql]) =>
+                String(sql).includes('INSERT INTO report_consistency_items')
+            );
+            expect(persistCalls.length).toBeGreaterThan(0);
+
+            const statusByAutoStatus = new Map<string, Set<string>>();
+            for (const call of persistCalls) {
+                const params = call[1] as any[];
+                const autoStatus = params[11];
+                const humanStatus = params[13];
+                if (!statusByAutoStatus.has(autoStatus)) {
+                    statusByAutoStatus.set(autoStatus, new Set());
+                }
+                statusByAutoStatus.get(autoStatus)?.add(humanStatus);
+            }
+
+            expect(statusByAutoStatus.get('PASS')).toEqual(new Set(['confirmed']));
+            expect(statusByAutoStatus.get('FAIL')).toEqual(new Set(['pending']));
+            expect(statusByAutoStatus.get('UNCERTAIN')).toEqual(new Set(['pending']));
         });
     });
 });

@@ -6,6 +6,7 @@ import {
   buildQualityAuditGroups,
   collectPendingConsistencyItemIds,
   getConsistencyAutoStatusLabel,
+  getEffectiveConsistencyHumanStatus,
   getConsistencyHumanStatusLabel,
   getQualityAuditAutoStatusLabel,
   getQualityAuditHumanStatusLabel,
@@ -77,9 +78,10 @@ const getHierarchyDisplayStats = (items = []) => {
     if (hasHierarchyDelta(item)) stats.deltaCount += 1;
     if (item.auto_status === 'FAIL') stats.failCount += 1;
     if (item.auto_status === 'PASS') stats.passCount += 1;
-    if (item.human_status === 'confirmed') stats.confirmedCount += 1;
+    const effectiveHumanStatus = getEffectiveConsistencyHumanStatus(item);
+    if (effectiveHumanStatus === 'confirmed' && item.auto_status !== 'NOT_ASSESSABLE') stats.confirmedCount += 1;
     if (item.auto_status === 'NOT_ASSESSABLE') stats.notAssessableCount += 1;
-    if (item.human_status === 'pending' && item.auto_status !== 'PASS' && item.auto_status !== 'NOT_ASSESSABLE') {
+    if (effectiveHumanStatus === 'pending' && (item.auto_status === 'FAIL' || item.auto_status === 'UNCERTAIN')) {
       stats.reviewCount += 1;
     }
     if (hasIncompleteInputs) stats.incompleteCount += 1;
@@ -635,31 +637,35 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
     }));
   };
 
-  const renderHierarchyActions = (item) => (
-    <div className="hierarchy-row-actions">
-      {item.human_status !== 'confirmed' && item.id ? (
-        <button
-          className="btn-confirm"
-          onClick={() => handleUpdateStatus(item.id, 'confirmed', '层级汇总差额已人工确认')}
-        >
-          确认
-        </button>
-      ) : null}
-      {item.human_status !== 'dismissed' && item.id ? (
-        <button
-          className="btn-dismiss"
-          onClick={() => handleUpdateStatus(item.id, 'dismissed', '经核查无需处理')}
-        >
-          忽略
-        </button>
-      ) : null}
-      {item.human_status !== 'pending' && item.id ? (
-        <button className="btn-pending" onClick={() => handleUpdateStatus(item.id, 'pending', null)}>
-          恢复待核查
-        </button>
-      ) : null}
-    </div>
-  );
+  const renderHierarchyActions = (item) => {
+    const effectiveHumanStatus = getEffectiveConsistencyHumanStatus(item);
+
+    return (
+      <div className="hierarchy-row-actions">
+        {effectiveHumanStatus !== 'confirmed' && item.id ? (
+          <button
+            className="btn-confirm"
+            onClick={() => handleUpdateStatus(item.id, 'confirmed', '层级汇总差额已人工确认')}
+          >
+            确认
+          </button>
+        ) : null}
+        {effectiveHumanStatus !== 'dismissed' && item.id ? (
+          <button
+            className="btn-dismiss"
+            onClick={() => handleUpdateStatus(item.id, 'dismissed', '经核查无需处理')}
+          >
+            忽略
+          </button>
+        ) : null}
+        {effectiveHumanStatus !== 'pending' && item.id && item.auto_status !== 'PASS' ? (
+          <button className="btn-pending" onClick={() => handleUpdateStatus(item.id, 'pending', null)}>
+            恢复待核查
+          </button>
+        ) : null}
+      </div>
+    );
+  };
 
   const renderNamePreview = (items, emptyText) => {
     const names = asArray(items)
@@ -736,6 +742,7 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
                     const childReportCount = values.childReportCount ?? 0;
                     const childCount = values.childCount ?? 0;
                     const childMetricCount = values.childMetricCount ?? 0;
+                    const effectiveHumanStatus = getEffectiveConsistencyHumanStatus(item);
 
                     return (
                       <div
@@ -746,7 +753,7 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
                           <span className="hierarchy-row-table">{tableLabel}</span>
                           <div className="hierarchy-row-title">
                             <strong>{metricTitle}</strong>
-                            <span>人工状态：{getConsistencyHumanStatusLabel(item.human_status)}</span>
+                            <span>人工状态：{getConsistencyHumanStatusLabel(effectiveHumanStatus)}</span>
                           </div>
                           <span className={`hierarchy-row-status${hasDelta ? ' hierarchy-row-status--danger' : ''}`}>
                             {statusLabel}
@@ -939,9 +946,10 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
                       const autoStatusLabel = modeMeta.isQualityMode
                         ? getQualityAuditAutoStatusLabel(item.auto_status)
                         : getConsistencyAutoStatusLabel(item.auto_status);
+                      const effectiveHumanStatus = getEffectiveConsistencyHumanStatus(item);
                       const humanStatusLabel = modeMeta.isQualityMode
-                        ? getQualityAuditHumanStatusLabel(item.human_status)
-                        : getConsistencyHumanStatusLabel(item.human_status);
+                        ? getQualityAuditHumanStatusLabel(effectiveHumanStatus)
+                        : getConsistencyHumanStatusLabel(effectiveHumanStatus);
                       const locateTitle = itemNo
                         ? `${modeMeta.isQualityMode ? '提示' : '问题'} ${itemNo}｜${item.title}`
                         : item.title;
@@ -1065,7 +1073,7 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
                                   {modeMeta.isQualityMode ? '定位到表格/原文' : '定位到表格'}
                                 </button>
                               ) : null}
-                              {item.human_status !== 'confirmed' && item.id ? (
+                              {effectiveHumanStatus !== 'confirmed' && item.id ? (
                                 <button
                                   className={`btn-confirm${modeMeta.isQualityMode ? ' btn-confirm--quality' : ''}`}
                                   onClick={() =>
@@ -1079,7 +1087,7 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
                                   {modeMeta.isQualityMode ? '标记已处理' : '确认问题'}
                                 </button>
                               ) : null}
-                              {item.human_status !== 'dismissed' && item.id ? (
+                              {effectiveHumanStatus !== 'dismissed' && item.id ? (
                                 <button
                                   className="btn-dismiss"
                                   onClick={() =>
@@ -1093,7 +1101,7 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
                                   忽略
                                 </button>
                               ) : null}
-                              {item.human_status !== 'pending' && item.id ? (
+                              {effectiveHumanStatus !== 'pending' && item.id && item.auto_status !== 'PASS' ? (
                                 <button className="btn-pending" onClick={() => handleUpdateStatus(item.id, 'pending', null)}>
                                   恢复待复核
                                 </button>

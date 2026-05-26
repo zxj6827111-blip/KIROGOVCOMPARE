@@ -80,6 +80,12 @@ export const isDismissedConsistencyItem = (item) => item?.human_status === 'dism
 
 export const isNotAssessableConsistencyItem = (item) => item?.auto_status === 'NOT_ASSESSABLE';
 
+export const getEffectiveConsistencyHumanStatus = (item) => {
+  const status = item?.human_status || item?.humanStatus;
+  if (status === 'confirmed' || status === 'dismissed') return status;
+  return item?.auto_status === 'PASS' || item?.autoStatus === 'PASS' ? 'confirmed' : 'pending';
+};
+
 export const isProblemConsistencyItem = (item) =>
   item?.auto_status === 'FAIL' && !isDismissedConsistencyItem(item);
 
@@ -87,8 +93,8 @@ export const isNumberedConsistencyItem = (item) =>
   isProblemConsistencyItem(item) && !isDismissedConsistencyItem(item);
 
 export const isPendingReviewConsistencyItem = (item) =>
-  item?.human_status === 'pending' &&
-  item?.auto_status !== 'NOT_ASSESSABLE';
+  getEffectiveConsistencyHumanStatus(item) === 'pending' &&
+  (item?.auto_status === 'FAIL' || item?.auto_status === 'UNCERTAIN');
 
 export const isQualityAuditGroupKey = (groupKey) => QUALITY_AUDIT_GROUP_KEYS.includes(groupKey);
 
@@ -156,7 +162,7 @@ export const buildTable3CategoryStats = (items = []) => {
     if (isProblemConsistencyItem(item)) {
       buckets[key].problemCount += 1;
     }
-    if (item?.human_status === 'pending' && item?.auto_status !== 'FAIL') {
+    if (isPendingReviewConsistencyItem(item) && item?.auto_status !== 'FAIL') {
       buckets[key].pendingCount += 1;
     }
   });
@@ -175,8 +181,8 @@ const compareConsistencyItems = (left, right) => {
   const autoOrderRight = AUTO_STATUS_ORDER[right?.auto_status] ?? 99;
   if (autoOrderLeft !== autoOrderRight) return autoOrderLeft - autoOrderRight;
 
-  const humanOrderLeft = HUMAN_STATUS_ORDER[left?.human_status] ?? 99;
-  const humanOrderRight = HUMAN_STATUS_ORDER[right?.human_status] ?? 99;
+  const humanOrderLeft = HUMAN_STATUS_ORDER[getEffectiveConsistencyHumanStatus(left)] ?? 99;
+  const humanOrderRight = HUMAN_STATUS_ORDER[getEffectiveConsistencyHumanStatus(right)] ?? 99;
   if (humanOrderLeft !== humanOrderRight) return humanOrderLeft - humanOrderRight;
 
   const leftTitle = String(left?.title || left?.check_key || left?.id || '');
@@ -214,8 +220,8 @@ export const normalizeConsistencyGroup = (group) => {
     problemCount: items.filter((item) => isProblemConsistencyItem(item)).length,
     pendingCount: items.filter((item) => isPendingReviewConsistencyItem(item)).length,
     pendingCountRaw: items.filter((item) => isPendingReviewConsistencyItem(item)).length,
-    confirmedCount: items.filter((item) => item.human_status === 'confirmed').length,
-    dismissedCount: items.filter((item) => item.human_status === 'dismissed').length,
+    confirmedCount: items.filter((item) => getEffectiveConsistencyHumanStatus(item) === 'confirmed' && item.auto_status !== 'NOT_ASSESSABLE').length,
+    dismissedCount: items.filter((item) => getEffectiveConsistencyHumanStatus(item) === 'dismissed').length,
     notAssessableCount: items.filter((item) => item.auto_status === 'NOT_ASSESSABLE').length,
   };
 
@@ -335,9 +341,9 @@ const classifyQualityAuditItem = (item) => {
 const buildQualityAuditStats = (items = []) => ({
   itemCount: items.length,
   riskCount: items.filter((item) => isQualityAuditRiskItem(item)).length,
-  reviewCount: items.filter((item) => item?.human_status === 'pending' && item?.auto_status !== 'NOT_ASSESSABLE').length,
-  resolvedCount: items.filter((item) => item?.human_status === 'confirmed' && item?.auto_status !== 'NOT_ASSESSABLE').length,
-  dismissedCount: items.filter((item) => item?.human_status === 'dismissed').length,
+  reviewCount: items.filter((item) => isPendingReviewConsistencyItem(item)).length,
+  resolvedCount: items.filter((item) => getEffectiveConsistencyHumanStatus(item) === 'confirmed' && item?.auto_status !== 'NOT_ASSESSABLE').length,
+  dismissedCount: items.filter((item) => getEffectiveConsistencyHumanStatus(item) === 'dismissed').length,
   notAssessableCount: items.filter((item) => item?.auto_status === 'NOT_ASSESSABLE').length,
 });
 
@@ -412,7 +418,7 @@ export const summarizeQualityAuditGroups = (groups = []) =>
 export const collectPendingConsistencyItemIds = (groups = []) =>
   (groups || []).flatMap((group) =>
     (group?.items || [])
-      .filter((item) => item?.human_status === 'pending' && item?.auto_status !== 'NOT_ASSESSABLE' && item?.id)
+      .filter((item) => isPendingReviewConsistencyItem(item) && item?.id)
       .map((item) => item.id)
   );
 

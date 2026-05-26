@@ -1338,10 +1338,9 @@ function ReportDetail({ reportId: propReportId, onBack }) {
           if (item.human_status === 'dismissed') return;
           if (
             item.auto_status === 'FAIL' ||
-            item.auto_status === 'UNCERTAIN' ||
-            item.human_status === 'confirmed'
+            item.auto_status === 'UNCERTAIN'
           ) {
-            const isConfirmedItem = item.human_status === 'confirmed';
+            const isConfirmedItem = item.auto_status === 'FAIL' && item.human_status === 'confirmed';
 
             // 提取质量审计问题（Section 5/6）
             if (groupKey === 'quality') {

@@ -120,7 +120,7 @@ async function refreshComparisonStatusForReport(reportId: number): Promise<void>
       SELECT report_version_id, COUNT(*) as cnt
       FROM report_consistency_items
       WHERE report_version_id = ANY($1::int[])
-        AND auto_status = 'FAIL'
+        AND auto_status IN ('FAIL', 'UNCERTAIN')
         AND human_status = 'pending'
       GROUP BY report_version_id
     `, [versionIds]);
