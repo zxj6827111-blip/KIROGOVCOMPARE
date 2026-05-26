@@ -372,6 +372,66 @@ describe('ConsistencyCheckView onChecksUpdated callback', () => {
     });
   });
 
+  test('bulk confirm excludes PASS items even when legacy data still marks them pending', async () => {
+    const user = userEvent.setup();
+    const onChecksUpdated = jest.fn();
+    apiClient.get.mockResolvedValue({
+      data: {
+        data: {
+          latest_run: { id: 1 },
+          groups: [
+            {
+              group_key: 'table3',
+              items: [
+                {
+                  id: 401,
+                  check_key: 't3_pass_legacy_pending',
+                  title: 'pass check',
+                  auto_status: 'PASS',
+                  human_status: 'pending',
+                  evidence: { paths: ['tableData.total.meta.pass'] },
+                },
+                {
+                  id: 402,
+                  check_key: 't3_uncertain_pending',
+                  title: 'uncertain check',
+                  auto_status: 'UNCERTAIN',
+                  human_status: 'pending',
+                  evidence: { paths: ['tableData.total.meta.uncertain'] },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    apiClient.post.mockResolvedValue({ data: { success: true, updated_count: 1 } });
+
+    renderWithFeedback(
+      <ConsistencyCheckView
+        reportId={1}
+        versionId={2}
+        filterGroups={['table3']}
+        onChecksUpdated={onChecksUpdated}
+      />
+    );
+
+    await screen.findByText('勾稽关系校验');
+    await act(async () => {
+      await user.click(screen.getByRole('button', { name: '一键确认' }));
+    });
+
+    await waitFor(() => {
+      expect(apiClient.post).toHaveBeenCalledWith('/reports/1/checks/items/bulk-status', {
+        version_id: 2,
+        item_ids: [402],
+        human_status: 'confirmed',
+        human_comment: '批量确认',
+      });
+      expect(onChecksUpdated).toHaveBeenCalledTimes(1);
+    });
+  });
+
   test('onChecksUpdated is not called when no pending items exist', async () => {
     const user = userEvent.setup();
     const onChecksUpdated = jest.fn();

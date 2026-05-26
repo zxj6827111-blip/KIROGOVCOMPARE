@@ -115,6 +115,27 @@ interface SectionAlignmentRuleRow {
   enabled: boolean;
 }
 
+function buildConsistencyIssueStatusPart(year: number, count: number): string | null {
+  return count > 0 ? `${year}年校验${count}项` : null;
+}
+
+function mergeCheckStatusWithConsistencyIssues(
+  currentStatus: string | null,
+  issueParts: Array<string | null>
+): string {
+  const parts = issueParts.filter((part): part is string => Boolean(part));
+  if (currentStatus && currentStatus.startsWith('异常')) {
+    const existing = currentStatus.replace('异常(', '').replace(')', '');
+    if (existing) {
+      parts.unshift(existing);
+    }
+  }
+  if (parts.length > 0) {
+    return `异常(${parts.join('|')})`;
+  }
+  return currentStatus || '正常';
+}
+
 async function fetchActiveParsedReport(reportId: number): Promise<ActiveParsedReport | null> {
   const result = await pool.query(
     `SELECT
@@ -249,7 +270,7 @@ function collectNotReadySides(
   return sides;
 }
 
-async function countOpenReviewIssues(versionId: number | null): Promise<number> {
+async function countActiveConsistencyIssues(versionId: number | null): Promise<number> {
   if (!versionId) {
     return 0;
   }
@@ -258,7 +279,7 @@ async function countOpenReviewIssues(versionId: number | null): Promise<number> 
      FROM report_consistency_items
      WHERE report_version_id = $1
        AND auto_status IN ('FAIL', 'UNCERTAIN')
-       AND COALESCE(human_status, 'pending') = 'pending'`,
+       AND COALESCE(human_status, 'pending') != 'dismissed'`,
     [versionId]
   );
   return Number(result.rows[0]?.count || 0);
@@ -948,19 +969,12 @@ router.post('/create', authMiddleware, async (req: AuthRequest, res: Response) =
     const similarity = metrics.similarity;
     let checkStatus: string | null = metrics.checkStatus;
 
-    const leftIssues = await countOpenReviewIssues(leftReport.versionId);
-    const rightIssues = await countOpenReviewIssues(rightReport.versionId);
-    if (leftIssues > 0 || rightIssues > 0) {
-      const issueDesc: string[] = [];
-      if (checkStatus && checkStatus.startsWith('异常')) {
-        issueDesc.push(checkStatus.replace('异常(', '').replace(')', ''));
-      }
-      if (leftIssues > 0) issueDesc.push(`${leftReport.year}年校验${leftIssues}项`);
-      if (rightIssues > 0) issueDesc.push(`${rightReport.year}年校验${rightIssues}项`);
-      checkStatus = `异常(${issueDesc.join('|')})`;
-    } else if (!checkStatus) {
-      checkStatus = '正常';
-    }
+    const leftIssues = await countActiveConsistencyIssues(leftReport.versionId);
+    const rightIssues = await countActiveConsistencyIssues(rightReport.versionId);
+    checkStatus = mergeCheckStatusWithConsistencyIssues(checkStatus, [
+      buildConsistencyIssueStatusPart(leftReport.year, leftIssues),
+      buildConsistencyIssueStatusPart(rightReport.year, rightIssues),
+    ]);
 
     const comparisonRes = await pool.query(`
       INSERT INTO comparisons (

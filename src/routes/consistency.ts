@@ -20,6 +20,17 @@ function isPositiveInteger(value: number): boolean {
   return Number.isInteger(value) && value > 0;
 }
 
+function buildComparisonCheckStatus(yearA: number, yearB: number, leftCount: number, rightCount: number): string {
+  const issueParts: string[] = [];
+  if (leftCount > 0) {
+    issueParts.push(`${yearA}年校验${leftCount}项`);
+  }
+  if (rightCount > 0) {
+    issueParts.push(`${yearB}年校验${rightCount}项`);
+  }
+  return issueParts.length > 0 ? `异常(${issueParts.join('|')})` : '正常';
+}
+
 async function checkReportAccess(
   reportId: number,
   user?: AuthRequest['user']
@@ -120,8 +131,8 @@ async function refreshComparisonStatusForReport(reportId: number): Promise<void>
       SELECT report_version_id, COUNT(*) as cnt
       FROM report_consistency_items
       WHERE report_version_id = ANY($1::int[])
-        AND auto_status = 'FAIL'
-        AND human_status = 'pending'
+        AND auto_status IN ('FAIL', 'UNCERTAIN')
+        AND COALESCE(human_status, 'pending') != 'dismissed'
       GROUP BY report_version_id
     `, [versionIds]);
     const countRows = countRowsRes.rows;
@@ -137,15 +148,12 @@ async function refreshComparisonStatusForReport(reportId: number): Promise<void>
     const leftCount = leftVid ? (countsMap.get(leftVid) || 0) : 0;
     const rightCount = rightVid ? (countsMap.get(rightVid) || 0) : 0;
 
-    const issueParts: string[] = [];
-    if (leftCount > 0) {
-      issueParts.push(`${comparison.year_a}年校验${leftCount}项`);
-    }
-    if (rightCount > 0) {
-      issueParts.push(`${comparison.year_b}年校验${rightCount}项`);
-    }
-
-    const checkStatus = issueParts.length > 0 ? `异常(${issueParts.join('|')})` : '正常';
+    const checkStatus = buildComparisonCheckStatus(
+      Number(comparison.year_a),
+      Number(comparison.year_b),
+      leftCount,
+      rightCount
+    );
 
     await pool.query(`
       UPDATE comparisons
@@ -159,21 +167,21 @@ async function refreshCachedStatsForVersion(reportVersionId: number): Promise<vo
   const countsRes = await pool.query(`
     SELECT
       COUNT(*) FILTER (
-        WHERE auto_status = 'FAIL'
+        WHERE auto_status IN ('FAIL', 'UNCERTAIN')
           AND (human_status != 'dismissed' OR human_status IS NULL)
       ) AS total,
       COUNT(*) FILTER (
-        WHERE auto_status = 'FAIL'
+        WHERE auto_status IN ('FAIL', 'UNCERTAIN')
           AND group_key = 'visual'
           AND (human_status != 'dismissed' OR human_status IS NULL)
       ) AS visual,
       COUNT(*) FILTER (
-        WHERE auto_status = 'FAIL'
+        WHERE auto_status IN ('FAIL', 'UNCERTAIN')
           AND group_key = 'quality'
           AND (human_status != 'dismissed' OR human_status IS NULL)
       ) AS quality,
       COUNT(*) FILTER (
-        WHERE auto_status = 'FAIL'
+        WHERE auto_status IN ('FAIL', 'UNCERTAIN')
           AND group_key IN ('structure','table2','table3','table4','text','hierarchy')
           AND (human_status != 'dismissed' OR human_status IS NULL)
       ) AS structure

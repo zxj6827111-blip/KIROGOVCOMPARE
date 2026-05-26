@@ -304,6 +304,70 @@ describe('Legacy compare task routes', () => {
     );
   });
 
+  it('keeps confirmed consistency issues in created comparison status', async () => {
+    const app = buildCompareApp();
+
+    mockedQuery.mockImplementation(async (sql: unknown, params?: unknown[]) => {
+      const text = String(sql);
+
+      if (text.includes('FROM reports r') && text.includes('LEFT JOIN report_versions rv')) {
+        const reportId = Array.isArray(params) ? Number(params[0]) : 0;
+        return {
+          rows: [{
+            report_id: reportId,
+            region_id: 10,
+            year: reportId === 101 ? 2024 : 2025,
+            active_version_id: reportId === 101 ? 1001 : 1002,
+            version_id: reportId === 101 ? 1001 : 1002,
+            parsed_json: {
+              sections: [
+                {
+                  type: 'table_2',
+                  activeDisclosureData: {
+                    regulations: { valid: 1, made: 0, repealed: 0 },
+                    normativeDocuments: { valid: 1, made: 0, repealed: 0 },
+                  },
+                },
+              ],
+            },
+          }],
+        };
+      }
+
+      if (text.includes('FROM report_consistency_items') && text.includes("COALESCE(human_status, 'pending') != 'dismissed'")) {
+        return { rows: [{ count: Array.isArray(params) && Number(params[0]) === 1002 ? '1' : '0' }] };
+      }
+
+      if (text.includes('INSERT INTO comparisons') && text.includes('RETURNING id')) {
+        return { rows: [{ id: 777 }] };
+      }
+
+      if (text.includes('FROM jobs') && text.includes("kind = 'compare'") && text.includes("status IN ('queued', 'running')")) {
+        return { rows: [] };
+      }
+
+      if (text.includes('INSERT INTO jobs') && text.includes("kind, status, progress, step_code, step_name, comparison_id")) {
+        return { rows: [{ id: 9003 }] };
+      }
+
+      return { rows: [] };
+    });
+
+    const response = await request(app)
+      .post('/api/comparisons/create')
+      .send({
+        region_id: 10,
+        year_a: 2024,
+        year_b: 2025,
+        left_report_id: 101,
+        right_report_id: 102,
+      });
+
+    expect(response.status).toBe(200);
+    const insertCall = mockedQuery.mock.calls.find(([sql]) => String(sql).includes('INSERT INTO comparisons'));
+    expect(insertCall?.[1]?.[6]).toBe('异常(2025年校验1项)');
+  });
+
   it('keeps legacy EJS PDF export compatible and reuses a valid request trace id', async () => {
     const app = buildCompareApp();
     const traceId = 'REQ-123.alpha_1:ok';

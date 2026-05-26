@@ -97,7 +97,7 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
                   COUNT(*) FILTER (WHERE group_key NOT IN ('visual', 'structure', 'table2', 'table3', 'table4', 'text', 'hierarchy'))::int AS quality
                 FROM report_consistency_items
                 WHERE report_version_id = ANY($1::int[])
-                  AND auto_status = 'FAIL'
+                  AND auto_status IN ('FAIL', 'UNCERTAIN')
                   AND COALESCE(human_status, 'pending') != 'dismissed'
                 GROUP BY report_version_id
             `;

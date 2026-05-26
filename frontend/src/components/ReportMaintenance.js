@@ -93,8 +93,8 @@ const quickFilters = [
     { key: 'not_uploaded', label: '未上传', filters: { uploadStatus: 'not_uploaded', maintenanceStatus: 'not_uploaded' } },
     { key: 'parse_failed', label: '解析失败', filters: { parseStatus: 'failed', maintenanceStatus: 'parse_failed' } },
     { key: 'compare_abnormal', label: '比对异常', filters: { compareStatus: 'abnormal', maintenanceStatus: 'compare_abnormal' } },
-    { key: 'pending_review', label: '待复核', filters: { reviewStatus: 'pending_review', maintenanceStatus: 'pending_review' } },
-    { key: 'completed', label: '已完成', filters: { reviewStatus: 'archived', maintenanceStatus: 'completed' } }
+    { key: 'pending_review', label: '待复核', filters: { reviewStatus: 'pending_review' } },
+    { key: 'completed', label: '已完成', filters: { maintenanceStatus: 'completed' } }
 ];
 
 const getInitialParams = () => {
@@ -153,9 +153,9 @@ const getStatusMeta = (map, key) => map[key] || { label: formatValue(key), tone:
 const getMaintenanceStatus = (uploadStatus, parseStatus, compareStatus, reviewStatus) => {
     if (uploadStatus === 'not_uploaded') return 'not_uploaded';
     if (parseStatus === 'failed') return 'parse_failed';
-    if (compareStatus === 'abnormal') return 'compare_abnormal';
     if (reviewStatus === 'pending_review') return 'pending_review';
     if (reviewStatus === 'archived' || reviewStatus === 'passed') return 'completed';
+    if (compareStatus === 'abnormal') return 'compare_abnormal';
     return 'in_progress';
 };
 
@@ -206,7 +206,7 @@ const normalizeMaintenanceRow = (row) => {
         parse_status: parseStatus,
         compare_status: compareStatus,
         review_status: reviewStatus,
-        archive_status: row.archive_status || legacy.archive_status || (reviewStatus === 'archived' ? 'archived' : 'not_archived'),
+        archive_status: row.archive_status || legacy.archive_status || ((reviewStatus === 'archived' || reviewStatus === 'passed') ? 'archived' : 'not_archived'),
         maintenance_status: maintenanceStatus,
         abnormal_count: row.abnormal_count ?? null,
         abnormal_types: Array.isArray(row.abnormal_types) ? row.abnormal_types : []
@@ -241,7 +241,7 @@ const summarizeAnnualReportMaintenanceData = (payload, rows) => {
     const pendingReview = getProvided('pending_review_count') ?? countBy((row) => row.review_status === 'pending_review');
 
     // 当前后端尚无独立 archiveStatus 字段时，正式发布版本按已归档兼容计算。
-    const archived = getProvided('archived_count') ?? countBy((row) => row.archive_status === 'archived' || row.review_status === 'archived');
+    const archived = getProvided('archived_count') ?? countBy((row) => row.archive_status === 'archived' || row.review_status === 'archived' || row.review_status === 'passed');
     const notUploaded = getProvided('not_uploaded_count', 'missing_count') ?? Math.max(total - uploaded, 0);
 
     return {

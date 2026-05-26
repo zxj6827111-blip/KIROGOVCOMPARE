@@ -367,6 +367,75 @@ describe('issueAggregation', () => {
     expect(aggregate.issuesByGroupKey.table2[0].issueType).toBe('unsupported_not_assessable');
   });
 
+  test('legacy PASS pending is treated as system-confirmed and excluded from pending review ids', () => {
+    const groups = [
+      makeGroup('table3', [
+        makeIssue({
+          id: 51,
+          group_key: 'table3',
+          check_key: 't3_pass_legacy_pending',
+          auto_status: 'PASS',
+          human_status: 'pending',
+          evidence: { paths: ['tableData.total.meta.pass'] },
+        }),
+        makeIssue({
+          id: 52,
+          group_key: 'table3',
+          check_key: 't3_uncertain_pending',
+          auto_status: 'UNCERTAIN',
+          human_status: 'pending',
+          evidence: { paths: ['tableData.total.meta.uncertain'] },
+        }),
+      ]),
+    ];
+
+    const aggregate = aggregateIssuesFromChecks(groups, {
+      domain: 'consistency',
+      displayMode: 'management',
+      displayNoScope: 'group',
+    });
+
+    expect(aggregate.summary).toMatchObject({
+      ruleCount: 2,
+      problemCount: 0,
+      pendingCount: 1,
+      confirmedCount: 0,
+    });
+    expect(aggregate.pendingItemIds).toEqual([52]);
+    expect(aggregate.reviewIssues.map((issue) => issue.issueId)).toEqual(['id:52']);
+    expect(aggregate.confirmedIssues.map((issue) => issue.issueId)).toEqual([]);
+    expect(aggregate.activeIssues).toHaveLength(0);
+  });
+
+  test('raw PASS humanStatus stays visible on the normalized issue item', () => {
+    const groups = [
+      makeGroup('table3', [
+        makeIssue({
+          id: 53,
+          group_key: 'table3',
+          check_key: 't3_pass_confirmed',
+          auto_status: 'PASS',
+          human_status: 'confirmed',
+          evidence: { paths: ['tableData.total.meta.pass'] },
+        }),
+      ]),
+    ];
+
+    const aggregate = aggregateIssuesFromChecks(groups, {
+      domain: 'consistency',
+      displayMode: 'management',
+      displayNoScope: 'group',
+    });
+
+    expect(aggregate.issuesByGroupKey.table3[0]).toMatchObject({
+      issueId: 'id:53',
+      autoStatus: 'PASS',
+      humanStatus: 'confirmed',
+    });
+    expect(aggregate.summary.confirmedCount).toBe(0);
+    expect(aggregate.confirmedIssues).toEqual([]);
+  });
+
   test('confirmed FAIL stays active and keeps display number', () => {
     const groups = [
       makeGroup('table3', [
@@ -439,6 +508,14 @@ describe('issueAggregation', () => {
           evidence: { paths: ['tableData.total.meta.pass1'] },
         }),
         makeIssue({
+          id: 86,
+          group_key: 'table3',
+          check_key: 't3_uncertain_1',
+          auto_status: 'UNCERTAIN',
+          human_status: 'confirmed',
+          evidence: { paths: ['tableData.total.meta.uncertain1'] },
+        }),
+        makeIssue({
           id: 85,
           group_key: 'table3',
           check_key: 't3_na_1',
@@ -456,7 +533,7 @@ describe('issueAggregation', () => {
     });
 
     expect(aggregate.summary).toMatchObject({
-      ruleCount: 4,
+      ruleCount: 5,
       problemCount: 3,
       confirmedCount: 4,
       pendingCount: 0,
@@ -465,6 +542,7 @@ describe('issueAggregation', () => {
     expect(aggregate.activeIssues).toHaveLength(3);
     expect(aggregate.activeIssues.map((i) => i.issueId)).toEqual(['id:81', 'id:82', 'id:83']);
     expect(aggregate.confirmedIssues).toHaveLength(4);
+    expect(aggregate.confirmedIssues.map((i) => i.issueId)).toEqual(['id:81', 'id:82', 'id:83', 'id:86']);
     expect(aggregate.displayNoMap['id:81']).toBe(1);
     expect(aggregate.displayNoMap['id:82']).toBe(2);
     expect(aggregate.displayNoMap['id:83']).toBe(3);

@@ -326,9 +326,14 @@ function getSummaryItemHumanStatus(item: ConsistencySummarySourceItem): HumanSta
     return status === 'confirmed' || status === 'dismissed' ? status : 'pending';
 }
 
+function getDefaultHumanStatus(autoStatus: AutoStatus): HumanStatus {
+    return autoStatus === 'PASS' ? 'confirmed' : 'pending';
+}
+
 function applySummaryItem(bucket: ConsistencySummaryBucket, item: ConsistencySummarySourceItem): void {
     const autoStatus = getSummaryItemAutoStatus(item);
-    const humanStatus = getSummaryItemHumanStatus(item);
+    const rawHumanStatus = getSummaryItemHumanStatus(item);
+    const humanStatus = rawHumanStatus === 'pending' && autoStatus === 'PASS' ? 'confirmed' : rawHumanStatus;
 
     bucket.total += 1;
 
@@ -354,7 +359,7 @@ function applySummaryItem(bucket: ConsistencySummaryBucket, item: ConsistencySum
         bucket.pending += 1;
     }
 
-    if (humanStatus === 'pending' && autoStatus !== 'NOT_ASSESSABLE') {
+    if (humanStatus === 'pending' && (autoStatus === 'FAIL' || autoStatus === 'UNCERTAIN')) {
         bucket.reviewCount += 1;
     }
 }
@@ -2271,9 +2276,11 @@ export class ConsistencyCheckService {
             ));
         }
 
-        // Upsert each item, resetting human_status to pending on re-run
+        // Upsert each item, resetting human_status according to the current auto result.
+        // PASS items are system-confirmed; FAIL and UNCERTAIN stay in the human review queue.
         for (const item of items) {
             const evidenceStr = JSON.stringify(item.evidenceJson);
+            const defaultHumanStatus = getDefaultHumanStatus(item.autoStatus);
 
             await pool.query(`
         INSERT INTO report_consistency_items (
@@ -2283,7 +2290,7 @@ export class ConsistencyCheckService {
         ) VALUES (
           $1, $2, $3, $4, $5,
           $6, $7, $8, $9, $10, $11, $12,
-          $13, 'pending', NOW(), NOW()
+          $13, $14, NOW(), NOW()
         )
         ON CONFLICT(report_version_id, fingerprint) DO UPDATE SET
           run_id = excluded.run_id,
@@ -2296,13 +2303,13 @@ export class ConsistencyCheckService {
           tolerance = excluded.tolerance,
           auto_status = excluded.auto_status,
           evidence_json = excluded.evidence_json,
-          human_status = 'pending',
+          human_status = excluded.human_status,
           human_comment = NULL,
           updated_at = NOW();
       `, [
                 runId, reportVersionId, item.groupKey, item.checkKey, item.fingerprint,
                 item.title, item.expr, item.leftValue, item.rightValue, item.delta, item.tolerance, item.autoStatus,
-                evidenceStr
+                evidenceStr, defaultHumanStatus
             ]);
         }
 
@@ -2324,11 +2331,11 @@ export class ConsistencyCheckService {
     `, [JSON.stringify(summary), runId]);
 
         // Cache aggregated counts on report_versions for fast lookup
-        const failItems = items.filter(i => i.autoStatus === 'FAIL');
-        const visualCount = failItems.filter(i => i.groupKey === 'visual').length;
-        const qualityCount = failItems.filter(i => i.groupKey === 'quality').length;
-        const structureCount = failItems.filter(i => ['structure', 'table2', 'table3', 'table4', 'text', 'hierarchy'].includes(i.groupKey)).length;
-        const totalCount = failItems.length;
+        const abnormalItems = items.filter(i => i.autoStatus === 'FAIL' || i.autoStatus === 'UNCERTAIN');
+        const visualCount = abnormalItems.filter(i => i.groupKey === 'visual').length;
+        const qualityCount = abnormalItems.filter(i => i.groupKey === 'quality').length;
+        const structureCount = abnormalItems.filter(i => ['structure', 'table2', 'table3', 'table4', 'text', 'hierarchy'].includes(i.groupKey)).length;
+        const totalCount = abnormalItems.length;
 
         await pool.query(`
       UPDATE report_versions

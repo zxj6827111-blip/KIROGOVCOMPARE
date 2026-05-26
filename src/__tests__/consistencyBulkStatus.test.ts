@@ -63,6 +63,22 @@ describe('Consistency check bulk status route', () => {
       .mockResolvedValueOnce({ rowCount: 2, rows: [{ id: '10' }, { id: '11' }] })
       .mockResolvedValueOnce({ rows: [{ total: '0', visual: '0', structure: '0', quality: '0' }] })
       .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 333,
+          year_a: 2024,
+          year_b: 2025,
+          left_report_id: 44,
+          right_report_id: 45,
+        }],
+      })
+      .mockResolvedValueOnce({
+        rows: [
+          { report_id: 44, version_id: 222 },
+          { report_id: 45, version_id: 333 },
+        ],
+      })
+      .mockResolvedValueOnce({ rows: [{ report_version_id: 222, cnt: '1' }] })
       .mockResolvedValueOnce({ rows: [] });
 
     const response = await request(buildApp())
@@ -88,6 +104,14 @@ describe('Consistency check bulk status route', () => {
       expect.stringContaining('UPDATE report_consistency_items rci'),
       ['confirmed', 'batch confirm', 222, [10, 11]]
     );
+    const refreshComparisonCountCall = mockedQuery.mock.calls.find(([sql]) => {
+      const text = String(sql);
+      return (
+        text.includes('FROM report_consistency_items') &&
+        text.includes("COALESCE(human_status, 'pending') != 'dismissed'")
+      );
+    });
+    expect(refreshComparisonCountCall).toBeTruthy();
   });
 
   it('rejects empty item lists before touching the database', async () => {
