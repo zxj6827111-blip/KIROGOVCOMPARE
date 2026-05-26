@@ -224,7 +224,50 @@ const getLocationInfo = (item) => {
     return result;
 };
 
+const isSectionTitleIssue = (item) =>
+    String(item?.check_key || item?.checkKey || '') === 'section_title_misnumbered';
+
+const renderSectionTitleIssueCard = (item) => {
+    const values = item.evidence?.values || {};
+    const rawTitle = values.title || item.title || '原报告章节标题';
+    const normalizedTitle = values.normalizedTitle || values.normalized_title || '标准章节标题';
+    const path = (item.evidence?.paths || [])[0] || '';
+    const sectionIndex = Number.isInteger(values.sectionIndex) ? values.sectionIndex + 1 : null;
+
+    return (
+        <div key={item.id || item.fingerprint || `${rawTitle}-${normalizedTitle}`} className="issue-card issue-card--title">
+            <div className="issue-header issue-header--title">
+                <span className="issue-title">章节标题疑似有误</span>
+                <div className="issue-title-note">系统已按标准章节语义参与比对，不修改原报告内容。</div>
+            </div>
+
+            <div className="issue-detail">
+                <div className="section-title-comparison">
+                    <div className="section-title-box section-title-box--raw">
+                        <span className="section-title-label">原报告标题</span>
+                        <strong>{rawTitle}</strong>
+                    </div>
+                    <div className="section-title-arrow">→</div>
+                    <div className="section-title-box section-title-box--normalized">
+                        <span className="section-title-label">系统按此理解</span>
+                        <strong>{normalizedTitle}</strong>
+                    </div>
+                </div>
+                <div className="section-title-meta">
+                    {sectionIndex ? <span>位置：第 {sectionIndex} 个解析章节</span> : null}
+                    {path ? <span>字段：{path}</span> : null}
+                    {values.reason ? <span>{values.reason}</span> : null}
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const renderIssueCard = (item) => {
+    if (isSectionTitleIssue(item)) {
+        return renderSectionTitleIssueCard(item);
+    }
+
     const details = getLocationInfo(item);
     const leftPaths = item.evidence?.leftPaths || [];
     const rightPaths = item.evidence?.rightPaths || [];
