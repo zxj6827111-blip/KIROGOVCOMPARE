@@ -1,6 +1,7 @@
 param(
   [int]$Port = 8787,
   [string]$LogPath = "",
+  [int]$RateLimitMax = 2000,
   [switch]$Force,
   [switch]$ShowWindow
 )
@@ -46,6 +47,7 @@ if ($listener -and -not $Force) {
 }
 
 $env:PORT = "$Port"
+$env:RATE_LIMIT_MAX = "$RateLimitMax"
 # Database configuration will be loaded from .env by the Node app.
 
 
@@ -53,6 +55,7 @@ $pidFile = Join-Path $root ".llm-$Port.pid"
 
 Write-Host "Starting LLM server on port $Port..."
 Write-Host "DB: PostgreSQL (from .env)"
+Write-Host "Rate limit max: $RateLimitMax requests/window"
 Write-Host "Log: $LogPath"
 Write-Host "Err: $errPath"
 
@@ -60,7 +63,7 @@ $windowStyle = if ($ShowWindow) { 'Normal' } else { 'Hidden' }
 
 # Use cmd.exe for file redirection. PowerShell Start-Process redirection can fail
 # on Windows when the inherited environment contains both Path and PATH.
-$cmdLine = ('set "PORT={0}" && node -r dotenv/config dist\index-llm.js 1> "{1}" 2> "{2}"' -f $Port, $LogPath, $errPath)
+$cmdLine = ('set "PORT={0}" && set "RATE_LIMIT_MAX={3}" && node -r dotenv/config dist\index-llm.js 1> "{1}" 2> "{2}"' -f $Port, $LogPath, $errPath, $RateLimitMax)
 $proc = Start-Process -FilePath "cmd.exe" -ArgumentList @('/d', '/s', '/c', $cmdLine) -WorkingDirectory $root -WindowStyle $windowStyle -PassThru
 $proc.Id | Out-File -FilePath $pidFile -Encoding ascii
 Write-Host "Started. PID: $($proc.Id) (pid file: $pidFile)" -ForegroundColor Green

@@ -14,6 +14,7 @@ import {
   SectionAlignmentRule,
 } from '../utils/sectionAlignment';
 import { buildSectionAlignmentSuggestions } from '../utils/sectionAlignmentSuggestions';
+import { HIERARCHY_COMPLETENESS_SQL_EXCLUSION } from '../utils/consistencyReviewSemantics';
 
 const router = express.Router();
 
@@ -278,6 +279,7 @@ async function countActiveConsistencyIssues(versionId: number | null): Promise<n
     `SELECT COUNT(*) AS count
      FROM report_consistency_items
      WHERE report_version_id = $1
+       AND ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
        AND auto_status IN ('FAIL', 'UNCERTAIN')
        AND COALESCE(human_status, 'pending') != 'dismissed'`,
     [versionId]

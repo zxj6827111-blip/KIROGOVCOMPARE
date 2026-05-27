@@ -11,6 +11,7 @@ import { parseStructuredJsonFromText } from './LlmCommon';
 import { parseRunService } from './ParseRunService';
 import { resolveFirstNonEmpty, normalizeLlmProviderName } from '../utils/aiEnv';
 import { ConsistencyItem } from './ConsistencyCheckService';
+import { HIERARCHY_COMPLETENESS_SQL_EXCLUSION } from '../utils/consistencyReviewSemantics';
 
 export type VisionReviewTableId = 'table_2' | 'table_3' | 'table_4';
 export type VisionReviewStatus =
@@ -1278,6 +1279,7 @@ export class VisionReviewService {
        FROM report_consistency_items
        WHERE report_version_id = $1
          AND group_key = $2
+         AND ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
          AND auto_status IN ('FAIL', 'UNCERTAIN')`,
       [versionId, groupKey]
     );

@@ -168,7 +168,7 @@ describe('ConsistencyCheckView quality mode', () => {
               items: [
                 {
                   id: 501,
-                  check_key: 'hierarchy_sum_active__punishment__processed_count',
+                  check_key: 'hierarchy_sum_v2_active__punishment__processed_count',
                   title: '层级汇总一致性：淮安市 表二 行政处罚-处理决定数量',
                   auto_status: 'UNCERTAIN',
                   human_status: 'pending',
@@ -204,7 +204,7 @@ describe('ConsistencyCheckView quality mode', () => {
                 },
                 {
                   id: 502,
-                  check_key: 'hierarchy_sum_legal__review__maintained',
+                  check_key: 'hierarchy_sum_v2_legal__review__maintained',
                   title: '层级汇总一致性：淮安市 表四 复议后起诉-结果维持',
                   auto_status: 'UNCERTAIN',
                   human_status: 'pending',
@@ -427,6 +427,82 @@ describe('ConsistencyCheckView onChecksUpdated callback', () => {
         item_ids: [402],
         human_status: 'confirmed',
         human_comment: '批量确认',
+      });
+      expect(onChecksUpdated).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  test('bulk confirm excludes hierarchy completeness prompts from actionable ids', async () => {
+    const user = userEvent.setup();
+    const onChecksUpdated = jest.fn();
+    apiClient.get.mockResolvedValue({
+      data: {
+        data: {
+          latest_run: { id: 1 },
+          groups: [
+            {
+              group_key: 'hierarchy',
+              items: [
+                {
+                  id: 501,
+                  check_key: 'hierarchy_sum_v2_application__total__new_received',
+                  title: 'hierarchy delta',
+                  auto_status: 'FAIL',
+                  human_status: 'pending',
+                  evidence: { values: { table: 'hierarchy' } },
+                },
+                {
+                  id: 502,
+                  check_key: 'hierarchy_missing_child_reports',
+                  title: 'missing child reports',
+                  auto_status: 'UNCERTAIN',
+                  human_status: 'pending',
+                  evidence: {
+                    values: {
+                      missingReports: [{ regionId: 1, regionName: 'A' }],
+                    },
+                  },
+                },
+                {
+                  id: 503,
+                  check_key: 'hierarchy_missing_child_metrics',
+                  title: 'missing child metrics',
+                  auto_status: 'UNCERTAIN',
+                  human_status: 'pending',
+                  evidence: {
+                    values: {
+                      missingMetricChildren: [{ regionId: 2, regionName: 'B' }],
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    apiClient.post.mockResolvedValue({ data: { success: true, updated_count: 1 } });
+
+    renderWithFeedback(
+      <ConsistencyCheckView
+        reportId={1}
+        versionId={2}
+        filterGroups={['hierarchy']}
+        onChecksUpdated={onChecksUpdated}
+      />
+    );
+
+    await screen.findByText('hierarchy delta');
+    await act(async () => {
+      await user.click(screen.getAllByRole('button')[0]);
+    });
+
+    await waitFor(() => {
+      expect(apiClient.post).toHaveBeenCalledWith('/reports/1/checks/items/bulk-status', {
+        version_id: 2,
+        item_ids: [501],
+        human_status: 'confirmed',
+        human_comment: expect.any(String),
       });
       expect(onChecksUpdated).toHaveBeenCalledTimes(1);
     });

@@ -210,6 +210,41 @@ describe('consistency summary semantics', () => {
       dismissedCount: 0,
     });
   });
+
+  test('hierarchy completeness prompts stay outside pending review counts', () => {
+    const group = normalizeConsistencyGroup({
+      group_key: 'hierarchy',
+      items: [
+        makeItem({
+          checkKey: 'hierarchy_sum_v2_application__total__new_received',
+          autoStatus: 'FAIL',
+          humanStatus: 'pending',
+        }),
+        makeItem({
+          checkKey: 'hierarchy_missing_child_reports',
+          autoStatus: 'UNCERTAIN',
+          humanStatus: 'pending',
+        }),
+        makeItem({
+          checkKey: 'hierarchy_missing_child_metrics',
+          autoStatus: 'UNCERTAIN',
+          humanStatus: 'pending',
+        }),
+      ],
+    });
+    const summary = summarizeConsistencyGroups([group]);
+
+    expect(group.stats).toMatchObject({
+      ruleCount: 3,
+      problemCount: 1,
+      pendingCount: 1,
+    });
+    expect(summary).toMatchObject({
+      ruleCount: 3,
+      problemCount: 1,
+      pendingCount: 1,
+    });
+  });
 });
 
 describe('normalizeConsistencyGroups', () => {

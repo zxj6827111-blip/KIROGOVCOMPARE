@@ -7,6 +7,7 @@ import {
     getReportMaintenanceStatus,
     toRegionKey,
 } from '../utils/reportMaintenance';
+import { HIERARCHY_COMPLETENESS_SQL_EXCLUSION } from '../utils/consistencyReviewSemantics';
 
 const router = express.Router();
 
@@ -294,59 +295,71 @@ const buildReportRows = async (regions: RegionRow[], year: number): Promise<Map<
         LEFT JOIN LATERAL (
             SELECT
                 COUNT(*) FILTER (
-                    WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+                    WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+                      AND auto_status IN ('FAIL', 'UNCERTAIN')
                       AND COALESCE(human_status, 'pending') != 'dismissed'
                 ) AS open_issue_count,
                 COUNT(*) FILTER (
-                    WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+                    WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+                      AND auto_status IN ('FAIL', 'UNCERTAIN')
                       AND COALESCE(human_status, 'pending') = 'pending'
                 ) AS pending_issue_count,
                 COUNT(*) FILTER (
-                    WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+                    WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+                      AND auto_status IN ('FAIL', 'UNCERTAIN')
                       AND human_status = 'confirmed'
                 ) AS confirmed_issue_count,
                 COUNT(*) FILTER (
-                    WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+                    WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+                      AND auto_status IN ('FAIL', 'UNCERTAIN')
                       AND human_status = 'dismissed'
                 ) AS dismissed_issue_count,
                 COUNT(*) FILTER (
-                    WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+                    WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+                      AND auto_status IN ('FAIL', 'UNCERTAIN')
                       AND COALESCE(human_status, 'pending') != 'dismissed'
                       AND group_key = 'table2'
                 ) AS table2_issue_count,
                 COUNT(*) FILTER (
-                    WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+                    WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+                      AND auto_status IN ('FAIL', 'UNCERTAIN')
                       AND COALESCE(human_status, 'pending') != 'dismissed'
                       AND group_key = 'table3'
                 ) AS table3_issue_count,
                 COUNT(*) FILTER (
-                    WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+                    WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+                      AND auto_status IN ('FAIL', 'UNCERTAIN')
                       AND COALESCE(human_status, 'pending') != 'dismissed'
                       AND group_key = 'table4'
                 ) AS table4_issue_count,
                 COUNT(*) FILTER (
-                    WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+                    WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+                      AND auto_status IN ('FAIL', 'UNCERTAIN')
                       AND COALESCE(human_status, 'pending') != 'dismissed'
                       AND group_key = 'structure'
                 ) AS structure_issue_count,
                 COUNT(*) FILTER (
-                    WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+                    WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+                      AND auto_status IN ('FAIL', 'UNCERTAIN')
                       AND COALESCE(human_status, 'pending') != 'dismissed'
                       AND group_key = 'visual'
                 ) AS visual_issue_count,
                 COUNT(*) FILTER (
-                    WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+                    WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+                      AND auto_status IN ('FAIL', 'UNCERTAIN')
                       AND COALESCE(human_status, 'pending') != 'dismissed'
                       AND group_key = 'quality'
                 ) AS quality_issue_count,
                 COUNT(*) FILTER (
-                    WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+                    WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+                      AND auto_status IN ('FAIL', 'UNCERTAIN')
                       AND COALESCE(human_status, 'pending') != 'dismissed'
                       AND group_key = 'text'
                 ) AS text_issue_count,
                 COALESCE(
                     ARRAY_AGG(DISTINCT group_key) FILTER (
-                        WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+                        WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+                          AND auto_status IN ('FAIL', 'UNCERTAIN')
                           AND COALESCE(human_status, 'pending') != 'dismissed'
                     ),
                     ARRAY[]::varchar[]

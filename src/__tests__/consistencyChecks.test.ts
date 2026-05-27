@@ -127,6 +127,44 @@ describe('ConsistencyCheckService', () => {
                 reviewCount: 0,
             });
         });
+
+        it('keeps hierarchy completeness prompts visible but outside actionable review counts', () => {
+            const summary = buildConsistencyRunSummary([
+                {
+                    groupKey: 'hierarchy',
+                    checkKey: 'hierarchy_sum_v2_application__total__new_received',
+                    autoStatus: 'FAIL',
+                    humanStatus: 'pending',
+                },
+                {
+                    groupKey: 'hierarchy',
+                    checkKey: 'hierarchy_missing_child_reports',
+                    autoStatus: 'UNCERTAIN',
+                    humanStatus: 'pending',
+                },
+                {
+                    groupKey: 'hierarchy',
+                    checkKey: 'hierarchy_missing_child_metrics',
+                    autoStatus: 'UNCERTAIN',
+                    humanStatus: 'pending',
+                },
+            ]);
+
+            expect(summary).toMatchObject({
+                fail: 1,
+                uncertain: 2,
+                human: {
+                    pending: 3,
+                },
+                active: {
+                    reviewCount: 1,
+                },
+            });
+            expect(summary.byGroupKey.hierarchy).toMatchObject({
+                reviewCount: 1,
+                uncertain: 2,
+            });
+        });
     });
 
     describe('section title quality checks', () => {
@@ -278,7 +316,7 @@ describe('ConsistencyCheckService', () => {
         it('classifies hierarchy aggregation items separately', () => {
             expect(classifyConsistencyIssueType({
                 group_key: 'hierarchy',
-                check_key: 'hierarchy_sum_application__total__new_received',
+                check_key: 'hierarchy_sum_v2_application__total__new_received',
                 auto_status: 'FAIL',
             })).toBe('consistency_hierarchy_sum');
 
@@ -287,6 +325,12 @@ describe('ConsistencyCheckService', () => {
                 check_key: 'hierarchy_no_direct_children',
                 auto_status: 'NOT_ASSESSABLE',
             })).toBe('unsupported_not_assessable');
+
+            expect(classifyConsistencyIssueType({
+                group_key: 'hierarchy',
+                check_key: 'hierarchy_missing_child_reports',
+                auto_status: 'UNCERTAIN',
+            })).toBe('hierarchy_completeness_prompt');
         });
 
         it('classifies quality empty, text extraction and structure items', () => {
@@ -1179,7 +1223,7 @@ describe('ConsistencyCheckService', () => {
 
             const result = await service.runAndPersist(1000, { sections: [] });
             const hierarchyItems = result.items.filter((item) => item.groupKey === 'hierarchy');
-            const newReceived = hierarchyItems.find((item) => item.checkKey === 'hierarchy_sum_application__total__new_received');
+            const newReceived = hierarchyItems.find((item) => item.checkKey === 'hierarchy_sum_v2_application__total__new_received');
 
             expect(newReceived).toMatchObject({
                 autoStatus: 'FAIL',
@@ -1194,7 +1238,7 @@ describe('ConsistencyCheckService', () => {
             });
         });
 
-        it('keeps hierarchy item uncertain when a direct child lacks same-year report', async () => {
+        it('keeps comparable hierarchy metrics PASS/FAIL and emits one completeness prompt when a child report is missing', async () => {
             mockSuccessfulRunPreamble();
             mockedQuery
                 .mockResolvedValueOnce({
@@ -1225,11 +1269,12 @@ describe('ConsistencyCheckService', () => {
             mockFinalPersistQueries();
 
             const result = await service.runAndPersist(1000, { sections: [] });
-            const newReceived = result.items.find((item) => item.checkKey === 'hierarchy_sum_application__total__new_received');
+            const newReceived = result.items.find((item) => item.checkKey === 'hierarchy_sum_v2_application__total__new_received');
+            const missingReports = result.items.find((item) => item.checkKey === 'hierarchy_missing_child_reports');
 
             expect(newReceived).toMatchObject({
                 groupKey: 'hierarchy',
-                autoStatus: 'UNCERTAIN',
+                autoStatus: 'PASS',
                 leftValue: 40,
                 rightValue: 40,
                 delta: 0,
@@ -1237,6 +1282,20 @@ describe('ConsistencyCheckService', () => {
             expect(newReceived?.evidenceJson.values.missingReports).toEqual([
                 { regionId: 12, regionName: '清江浦区' },
             ]);
+            expect(missingReports).toMatchObject({
+                groupKey: 'hierarchy',
+                autoStatus: 'UNCERTAIN',
+                leftValue: null,
+                rightValue: null,
+                delta: null,
+            });
+            expect(missingReports?.evidenceJson.values).toMatchObject({
+                reason: 'hierarchy_missing_child_reports',
+                missingReportCount: 1,
+                missingReports: [
+                    { regionId: 12, regionName: '清江浦区' },
+                ],
+            });
         });
     });
 
@@ -1252,6 +1311,8 @@ describe('ConsistencyCheckService', () => {
                         text.includes('AS total') &&
                         text.includes("COALESCE(human_status, 'pending') = 'pending'")
                     ) {
+                        expect(text).toContain('hierarchy_missing_child_reports');
+                        expect(text).toContain('hierarchy_missing_child_metrics');
                         return { rows: [{ total: '2', visual: '0', structure: '2', quality: '0' }] };
                     }
                     return { rows: [] };
@@ -1320,6 +1381,8 @@ describe('ConsistencyCheckService', () => {
                         text.includes('AS total') &&
                         text.includes("COALESCE(human_status, 'pending') = 'pending'")
                     ) {
+                        expect(text).toContain('hierarchy_missing_child_reports');
+                        expect(text).toContain('hierarchy_missing_child_metrics');
                         return { rows: [{ total: '1', visual: '0', structure: '1', quality: '0' }] };
                     }
                     return { rows: [] };

@@ -664,6 +664,53 @@ describe('issueAggregation', () => {
     expect(aggregate.displayNoMap).toEqual({});
   });
 
+  test('hierarchy completeness prompts stay visible but do not inflate review counts or bulk ids', () => {
+    const groups = [
+      makeGroup('hierarchy', [
+        makeIssue({
+          id: 91,
+          group_key: 'hierarchy',
+          check_key: 'hierarchy_sum_v2_application__total__new_received',
+          auto_status: 'FAIL',
+          human_status: 'pending',
+          evidence: { paths: ['hierarchy.parent.metric'] },
+        }),
+        makeIssue({
+          id: 92,
+          group_key: 'hierarchy',
+          check_key: 'hierarchy_missing_child_reports',
+          auto_status: 'UNCERTAIN',
+          human_status: 'pending',
+          evidence: { paths: ['hierarchy.parent.missingReports'] },
+        }),
+        makeIssue({
+          id: 93,
+          group_key: 'hierarchy',
+          check_key: 'hierarchy_missing_child_metrics',
+          auto_status: 'UNCERTAIN',
+          human_status: 'pending',
+          evidence: { paths: ['hierarchy.parent.missingMetrics'] },
+        }),
+      ]),
+    ];
+
+    const aggregate = aggregateIssuesFromChecks(groups, {
+      domain: 'consistency',
+      displayMode: 'management',
+      displayNoScope: 'group',
+    });
+
+    expect(aggregate.issuesByGroupKey.hierarchy).toHaveLength(3);
+    expect(aggregate.summary).toMatchObject({
+      ruleCount: 3,
+      problemCount: 1,
+      pendingCount: 1,
+      reviewCount: 1,
+    });
+    expect(aggregate.reviewIssues.map((issue) => issue.issueId)).toEqual(['id:91']);
+    expect(aggregate.pendingItemIds).toEqual([91]);
+  });
+
   test('new displayNo map matches old normalizeConsistencyGroups output exactly', () => {
     const groups = [...buildTable3Fixture(), ...buildTable4Fixture(), ...buildTable2Fixture()];
     const oldGroups = normalizeConsistencyGroups(groups);

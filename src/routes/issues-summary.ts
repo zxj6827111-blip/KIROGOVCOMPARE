@@ -3,6 +3,7 @@ import pool from '../config/database-llm';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 import { compareRegionsByCityManagementOrder } from '../utils/regionSort';
+import { HIERARCHY_COMPLETENESS_SQL_EXCLUSION } from '../utils/consistencyReviewSemantics';
 
 const router = express.Router();
 
@@ -97,6 +98,7 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
                   COUNT(*) FILTER (WHERE group_key NOT IN ('visual', 'structure', 'table2', 'table3', 'table4', 'text', 'hierarchy'))::int AS quality
                 FROM report_consistency_items
                 WHERE report_version_id = ANY($1::int[])
+                  AND ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
                   AND auto_status IN ('FAIL', 'UNCERTAIN')
                   AND COALESCE(human_status, 'pending') != 'dismissed'
                 GROUP BY report_version_id
