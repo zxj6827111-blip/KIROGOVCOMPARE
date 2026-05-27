@@ -3,6 +3,7 @@ import fsp from 'fs/promises';
 import path from 'path';
 import pool from '../config/database-llm';
 import { checkStoragePathExists } from '../services/SourceFileGuardService';
+import { HIERARCHY_COMPLETENESS_SQL_EXCLUSION } from '../utils/consistencyReviewSemantics';
 
 type UnstableVersionRow = {
   version_id: number;
@@ -213,31 +214,37 @@ async function loadIssueAgg(versionIds: number[]): Promise<Map<number, IssueAgg>
     `SELECT
        report_version_id::int AS version_id,
        COUNT(*) FILTER (
-         WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+         WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+           AND auto_status IN ('FAIL', 'UNCERTAIN')
            AND COALESCE(human_status, 'pending') <> 'dismissed'
        )::int AS open_issue_count,
        COUNT(*) FILTER (
-         WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+         WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+           AND auto_status IN ('FAIL', 'UNCERTAIN')
            AND COALESCE(human_status, 'pending') <> 'dismissed'
            AND group_key IN ('table2', 'table3', 'table4')
        )::int AS open_table_issue_count,
        COUNT(*) FILTER (
-         WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+         WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+           AND auto_status IN ('FAIL', 'UNCERTAIN')
            AND COALESCE(human_status, 'pending') <> 'dismissed'
            AND group_key = 'table3'
        )::int AS open_table3_issue_count,
        COUNT(*) FILTER (
-         WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+         WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+           AND auto_status IN ('FAIL', 'UNCERTAIN')
            AND COALESCE(human_status, 'pending') <> 'dismissed'
            AND group_key = 'visual'
        )::int AS open_visual_issue_count,
        COUNT(*) FILTER (
-         WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+         WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+           AND auto_status IN ('FAIL', 'UNCERTAIN')
            AND COALESCE(human_status, 'pending') <> 'dismissed'
            AND group_key = 'quality'
        )::int AS open_quality_issue_count,
        COUNT(*) FILTER (
-         WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+         WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+           AND auto_status IN ('FAIL', 'UNCERTAIN')
            AND COALESCE(human_status, 'pending') <> 'dismissed'
            AND check_key = 'parse_error'
        )::int AS parse_error_count

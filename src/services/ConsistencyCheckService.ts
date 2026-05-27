@@ -1,6 +1,11 @@
 import crypto from 'crypto';
 import pool from '../config/database-llm';
 import { buildSectionTitleQualityItems } from '../utils/sectionTitleQuality';
+import {
+    HIERARCHY_COMPLETENESS_SQL_EXCLUSION,
+    isActionableConsistencyReviewItem,
+    isHierarchyCompletenessPrompt,
+} from '../utils/consistencyReviewSemantics';
 
 // Types for parsed JSON structure
 interface EntityResults {
@@ -127,6 +132,8 @@ export interface ConsistencyRunSummary extends ConsistencySummaryCounts {
 type ConsistencySummarySourceItem = {
     groupKey?: string | null;
     group_key?: string | null;
+    checkKey?: string | null;
+    check_key?: string | null;
     autoStatus?: string | null;
     auto_status?: string | null;
     humanStatus?: string | null;
@@ -223,6 +230,19 @@ interface HierarchyMetricBucket {
     tableLabel: string;
     parentValue: number | null;
     childValues: HierarchyMetricValue[];
+}
+
+interface HierarchyMissingMetricChild {
+    regionId: number;
+    regionName: string;
+    reportId: number | null;
+    versionId: number | null;
+    missingMetricCount: number;
+    metricSamples: Array<{
+        metricKey: string;
+        metricLabel: string;
+        table: string;
+    }>;
 }
 
 const HIERARCHY_ACTIVE_CATEGORY_LABELS: Record<string, string> = {
@@ -340,7 +360,7 @@ function applySummaryItem(bucket: ConsistencySummaryBucket, item: ConsistencySum
     if (autoStatus === 'FAIL') {
         bucket.fail += 1;
         bucket.rawFailCount += 1;
-        if (humanStatus !== 'dismissed') {
+        if (humanStatus !== 'dismissed' && !isHierarchyCompletenessPrompt(item)) {
             bucket.activeProblemCount += 1;
         }
     } else if (autoStatus === 'UNCERTAIN') {
@@ -359,7 +379,7 @@ function applySummaryItem(bucket: ConsistencySummaryBucket, item: ConsistencySum
         bucket.pending += 1;
     }
 
-    if (humanStatus === 'pending' && (autoStatus === 'FAIL' || autoStatus === 'UNCERTAIN')) {
+    if (humanStatus === 'pending' && isActionableConsistencyReviewItem(item)) {
         bucket.reviewCount += 1;
     }
 }
@@ -973,7 +993,7 @@ export class ConsistencyCheckService {
         const childVersionSet = new Set(bucket.childValues.map((item) => item.versionId));
         const childMissingMetric = childWithReports.filter((child) => child.versionId && !childVersionSet.has(child.versionId));
         const hasComparableChildren = childWithReports.length > 0;
-        const canCompare = hasParentValue && hasComparableChildren && childMissingMetric.length === 0 && missingReportChildren.length === 0;
+        const canCompare = hasParentValue && hasComparableChildren;
         const autoStatus: AutoStatus = canCompare
             ? (Math.abs((bucket.parentValue || 0) - childSum) <= 0 ? 'PASS' : 'FAIL')
             : 'UNCERTAIN';
@@ -989,7 +1009,7 @@ export class ConsistencyCheckService {
             }
             return `${names.slice(0, limit).join('、')}等${names.length}个`;
         };
-        const checkKey = `hierarchy_sum_${bucket.metricKey}`;
+        const checkKey = `hierarchy_sum_v2_${bucket.metricKey}`;
 
         return this.createManualItem(
             'hierarchy',
@@ -1049,6 +1069,106 @@ export class ConsistencyCheckService {
             },
             [`hierarchy.parent.${context.regionId}.${bucket.metricKey}`],
             bucket.childValues.map((item) => `hierarchy.child.${item.regionId}.${bucket.metricKey}`)
+        );
+    }
+
+    private createHierarchyMissingReportsItem(
+        context: HierarchyReportContext,
+        missingReportChildren: HierarchyChildReportContext[]
+    ): ConsistencyItem | null {
+        if (missingReportChildren.length === 0) return null;
+
+        return this.createManualItem(
+            'hierarchy',
+            'hierarchy_missing_child_reports',
+            `层级汇总完整性：${context.regionName} 下级缺少同年年报`,
+            'direct_child_reports_exist_for_same_year',
+            null,
+            null,
+            null,
+            0,
+            'UNCERTAIN',
+            [`hierarchy.${context.regionId}.missingReports`],
+            {
+                reason: 'hierarchy_missing_child_reports',
+                year: context.year,
+                parent: {
+                    regionId: context.regionId,
+                    regionName: context.regionName,
+                    reportId: context.reportId,
+                    versionId: context.versionId,
+                },
+                missingReportCount: missingReportChildren.length,
+                missingReports: missingReportChildren.map((child) => ({
+                    regionId: child.regionId,
+                    regionName: child.regionName,
+                })),
+                context: `缺少同年年报单位：${missingReportChildren.map((child) => child.regionName).join('、')}`,
+            }
+        );
+    }
+
+    private createHierarchyMissingMetricItem(
+        context: HierarchyReportContext,
+        buckets: HierarchyMetricBucket[],
+        childWithReports: HierarchyChildReportContext[]
+    ): ConsistencyItem | null {
+        const missingByRegion = new Map<number, HierarchyMissingMetricChild>();
+
+        for (const bucket of buckets) {
+            const childVersionSet = new Set(bucket.childValues.map((item) => item.versionId));
+            for (const child of childWithReports) {
+                if (!child.versionId || childVersionSet.has(child.versionId)) continue;
+
+                const existing: HierarchyMissingMetricChild = missingByRegion.get(child.regionId) || {
+                    regionId: child.regionId,
+                    regionName: child.regionName,
+                    reportId: child.reportId,
+                    versionId: child.versionId,
+                    missingMetricCount: 0,
+                    metricSamples: [],
+                };
+                existing.missingMetricCount += 1;
+                if (existing.metricSamples.length < 12) {
+                    existing.metricSamples.push({
+                        metricKey: bucket.metricKey,
+                        metricLabel: bucket.metricLabel,
+                        table: bucket.tableLabel,
+                    });
+                }
+                missingByRegion.set(child.regionId, existing);
+            }
+        }
+
+        const missingMetricChildren = Array.from(missingByRegion.values());
+        if (missingMetricChildren.length === 0) return null;
+
+        return this.createManualItem(
+            'hierarchy',
+            'hierarchy_missing_child_metrics',
+            `层级汇总完整性：${context.regionName} 下级缺少可汇总字段`,
+            'direct_child_metrics_exist_for_hierarchy_buckets',
+            null,
+            null,
+            null,
+            0,
+            'UNCERTAIN',
+            [`hierarchy.${context.regionId}.missingMetrics`],
+            {
+                reason: 'hierarchy_missing_child_metrics',
+                year: context.year,
+                parent: {
+                    regionId: context.regionId,
+                    regionName: context.regionName,
+                    reportId: context.reportId,
+                    versionId: context.versionId,
+                },
+                missingMetricUnitCount: missingMetricChildren.length,
+                missingMetricChildren,
+                context: `缺少可汇总字段单位：${missingMetricChildren
+                    .map((child) => `${child.regionName}(${child.missingMetricCount})`)
+                    .join('、')}`,
+            }
         );
     }
 
@@ -1141,7 +1261,8 @@ export class ConsistencyCheckService {
             childWithReports.map((child) => child.versionId!).filter(Boolean)
         );
 
-        const items = Array.from(buckets.values())
+        const bucketList = Array.from(buckets.values());
+        const items = bucketList
             .filter((bucket) => bucket.parentValue !== null || bucket.childValues.length > 0)
             .map((bucket) => this.createHierarchyItem(
                 context,
@@ -1150,6 +1271,11 @@ export class ConsistencyCheckService {
                 childWithReports,
                 missingReportChildren
             ));
+
+        const completenessItems = [
+            this.createHierarchyMissingReportsItem(context, missingReportChildren),
+            this.createHierarchyMissingMetricItem(context, bucketList, childWithReports),
+        ].filter((item): item is ConsistencyItem => Boolean(item));
 
         if (items.length === 0) {
             return [
@@ -1179,7 +1305,7 @@ export class ConsistencyCheckService {
             ];
         }
 
-        return items;
+        return [...items, ...completenessItems];
     }
 
     /**
@@ -2346,21 +2472,25 @@ export class ConsistencyCheckService {
         const countsRes = await pool.query(`
           SELECT
             COUNT(*) FILTER (
-              WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+              WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+                AND auto_status IN ('FAIL', 'UNCERTAIN')
                 AND COALESCE(human_status, 'pending') = 'pending'
             ) AS total,
             COUNT(*) FILTER (
-              WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+              WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+                AND auto_status IN ('FAIL', 'UNCERTAIN')
                 AND group_key = 'visual'
                 AND COALESCE(human_status, 'pending') = 'pending'
             ) AS visual,
             COUNT(*) FILTER (
-              WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+              WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+                AND auto_status IN ('FAIL', 'UNCERTAIN')
                 AND group_key = 'quality'
                 AND COALESCE(human_status, 'pending') = 'pending'
             ) AS quality,
             COUNT(*) FILTER (
-              WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+              WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+                AND auto_status IN ('FAIL', 'UNCERTAIN')
                 AND group_key IN ('structure','table2','table3','table4','text','hierarchy')
                 AND COALESCE(human_status, 'pending') = 'pending'
             ) AS structure

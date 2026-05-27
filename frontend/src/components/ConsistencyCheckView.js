@@ -11,6 +11,7 @@ import {
   getQualityAuditAutoStatusLabel,
   getQualityAuditHumanStatusLabel,
   isReviewableConsistencyItem,
+  isPendingReviewConsistencyItem,
   normalizeConsistencyGroups,
   QUALITY_AUDIT_GROUP_KEYS,
   summarizeConsistencyGroups,
@@ -82,7 +83,7 @@ const getHierarchyDisplayStats = (items = []) => {
     const effectiveHumanStatus = getEffectiveConsistencyHumanStatus(item);
     if (isReviewableConsistencyItem(item) && effectiveHumanStatus === 'confirmed') stats.confirmedCount += 1;
     if (item.auto_status === 'NOT_ASSESSABLE') stats.notAssessableCount += 1;
-    if (effectiveHumanStatus === 'pending' && (item.auto_status === 'FAIL' || item.auto_status === 'UNCERTAIN')) {
+    if (isPendingReviewConsistencyItem(item)) {
       stats.reviewCount += 1;
     }
     if (hasIncompleteInputs) stats.incompleteCount += 1;

@@ -19,6 +19,7 @@ import { normalizeAnnualReportOutputFromSource } from './SegmentedAnnualReportPa
 import { resolveParsePrimaryConfig } from '../utils/llmProviderConfig';
 import { buildParseConfigSnapshot, parseRunService } from './ParseRunService';
 import { buildSourceGateConfig, sourceGateService } from './SourceGateService';
+import { HIERARCHY_COMPLETENESS_SQL_EXCLUSION } from '../utils/consistencyReviewSemantics';
 
 interface QueuedJob {
   id: number;
@@ -1279,6 +1280,7 @@ export class LlmJobRunner {
       `SELECT COUNT(*) AS count
        FROM report_consistency_items
        WHERE report_version_id = $1
+         AND ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
          AND auto_status IN ('FAIL', 'UNCERTAIN')
          AND COALESCE(human_status, 'pending') = 'pending'`,
       [versionId]
@@ -1291,6 +1293,7 @@ export class LlmJobRunner {
       `SELECT COUNT(*) AS count
        FROM report_consistency_items
        WHERE report_version_id = $1
+         AND ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
          AND auto_status IN ('FAIL', 'UNCERTAIN')
          AND COALESCE(human_status, 'pending') != 'dismissed'`,
       [versionId]

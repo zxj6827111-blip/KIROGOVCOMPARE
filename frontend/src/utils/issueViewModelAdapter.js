@@ -167,6 +167,9 @@ export const classifyIssueTypeFallback = (item) => {
   }
 
   if (groupKey === 'hierarchy') {
+    if (checkKey === 'hierarchy_missing_child_reports' || checkKey === 'hierarchy_missing_child_metrics') {
+      return 'hierarchy_completeness_prompt';
+    }
     if (autoStatus === 'NOT_ASSESSABLE') {
       return 'unsupported_not_assessable';
     }

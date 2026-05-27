@@ -4,7 +4,11 @@ import { apiClient, getCurrentUser } from '../apiClient';
 import { Table2View, Table3View, Table4View } from './TableViews';
 import { normalizeTablePath } from '../utils/tableRowColMapping';
 import { buildTable3TraceModel } from '../utils/reportTrace';
-import { QUALITY_AUDIT_GROUP_KEYS, normalizeConsistencyGroups } from '../utils/consistencyDisplay';
+import {
+  QUALITY_AUDIT_GROUP_KEYS,
+  isPendingReviewConsistencyItem,
+  normalizeConsistencyGroups,
+} from '../utils/consistencyDisplay';
 import { buildEvidenceViewModel } from '../utils/evidenceViewModel';
 import { aggregateIssuesFromChecks } from '../utils/issueAggregation';
 import ParsedDataEditor from './ParsedDataEditor';
@@ -1328,7 +1332,7 @@ function ReportDetail({ reportId: propReportId, onBack }) {
         (group.items || []).forEach((item) => {
           const autoStatus = String(item.auto_status || item.autoStatus || '').toUpperCase();
           const humanStatus = item.human_status || item.humanStatus || 'pending';
-          if (humanStatus === 'pending' && (autoStatus === 'FAIL' || autoStatus === 'UNCERTAIN')) {
+          if (humanStatus === 'pending' && isPendingReviewConsistencyItem(item)) {
             if (QUALITY_AUDIT_GROUP_KEYS.includes(groupKey)) {
               nextTabIssueCounts.quality += 1;
             } else {

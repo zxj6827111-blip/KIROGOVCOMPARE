@@ -19,6 +19,7 @@ import { checkStoragePathExists } from '../services/SourceFileGuardService';
 import { hasParsedContent } from '../utils/parsedContent';
 import { getReportContentQuality } from '../utils/reportMaintenance';
 import { collectReportSectionTitleIssues } from '../utils/sectionTitleQuality';
+import { HIERARCHY_COMPLETENESS_SQL_EXCLUSION } from '../utils/consistencyReviewSemantics';
 
 const router = express.Router();
 
@@ -159,6 +160,7 @@ async function countOpenReviewIssues(versionId: number): Promise<number> {
     `SELECT COUNT(*) AS count
      FROM report_consistency_items
      WHERE report_version_id = $1
+       AND ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
        AND auto_status IN ('FAIL', 'UNCERTAIN')
        AND COALESCE(human_status, 'pending') = 'pending'`,
     [versionId]
@@ -1607,48 +1609,59 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
     .filter((id: number) => Number.isFinite(id) && id > 0);
   if (allVersionIds.length > 0) {
     const exactCountsRes = await pool.query(`
+      WITH requested_versions AS (
+        SELECT unnest($1::int[]) AS report_version_id
+      )
       SELECT
-        report_version_id,
+        rv.report_version_id,
         COUNT(*) FILTER (
-          WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+          WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+            AND auto_status IN ('FAIL', 'UNCERTAIN')
             AND COALESCE(human_status, 'pending') = 'pending'
         ) AS total,
         COUNT(*) FILTER (
-          WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+          WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+            AND auto_status IN ('FAIL', 'UNCERTAIN')
             AND group_key IN ('table2','table3','table4','text','hierarchy')
             AND COALESCE(human_status, 'pending') = 'pending'
         ) AS consistency,
         COUNT(*) FILTER (
-          WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+          WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+            AND auto_status IN ('FAIL', 'UNCERTAIN')
             AND group_key = 'visual'
             AND COALESCE(human_status, 'pending') = 'pending'
         ) AS visual,
         COUNT(*) FILTER (
-          WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+          WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+            AND auto_status IN ('FAIL', 'UNCERTAIN')
             AND group_key = 'quality'
             AND COALESCE(human_status, 'pending') = 'pending'
         ) AS quality,
         COUNT(*) FILTER (
-          WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+          WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+            AND auto_status IN ('FAIL', 'UNCERTAIN')
             AND group_key IN ('visual','structure','quality')
             AND COALESCE(human_status, 'pending') = 'pending'
         ) AS quality_review,
         COUNT(*) FILTER (
-          WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+          WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+            AND auto_status IN ('FAIL', 'UNCERTAIN')
             AND group_key IN ('structure','table2','table3','table4','text','hierarchy')
             AND COALESCE(human_status, 'pending') = 'pending'
         ) AS structure,
         COUNT(*) FILTER (
-          WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+          WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+            AND auto_status IN ('FAIL', 'UNCERTAIN')
             AND COALESCE(human_status, 'pending') = 'confirmed'
         ) AS confirmed_abnormal,
         COUNT(*) FILTER (
           WHERE group_key = 'hierarchy'
+            AND auto_status = 'FAIL'
             AND ABS(COALESCE(delta, 0)) > COALESCE(tolerance, 0)
         ) AS hierarchy_delta
-      FROM report_consistency_items
-      WHERE report_version_id = ANY($1::int[])
-      GROUP BY report_version_id
+      FROM requested_versions rv
+      LEFT JOIN report_consistency_items ci ON ci.report_version_id = rv.report_version_id
+      GROUP BY rv.report_version_id
     `, [allVersionIds]);
     for (const row of exactCountsRes.rows || []) {
       exactCountsMap.set(Number(row.report_version_id), row);
@@ -1697,40 +1710,48 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
         SELECT
           report_version_id,
           COUNT(*) FILTER (
-            WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+            WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
               AND COALESCE(human_status, 'pending') = 'pending'
           ) AS total,
           COUNT(*) FILTER (
-            WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+            WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
               AND group_key IN ('table2','table3','table4','text','hierarchy')
               AND COALESCE(human_status, 'pending') = 'pending'
           ) AS consistency,
           COUNT(*) FILTER (
-            WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+            WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
               AND group_key = 'visual'
               AND COALESCE(human_status, 'pending') = 'pending'
           ) AS visual,
           COUNT(*) FILTER (
-            WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+            WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
               AND group_key = 'quality'
               AND COALESCE(human_status, 'pending') = 'pending'
           ) AS quality,
           COUNT(*) FILTER (
-            WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+            WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
               AND group_key IN ('visual','structure','quality')
               AND COALESCE(human_status, 'pending') = 'pending'
           ) AS quality_review,
           COUNT(*) FILTER (
-            WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+            WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
               AND group_key IN ('structure','table2','table3','table4','text','hierarchy')
               AND COALESCE(human_status, 'pending') = 'pending'
           ) AS structure,
           COUNT(*) FILTER (
-            WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+            WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
               AND COALESCE(human_status, 'pending') = 'confirmed'
           ) AS confirmed_abnormal,
           COUNT(*) FILTER (
             WHERE group_key = 'hierarchy'
+              AND auto_status = 'FAIL'
               AND ABS(COALESCE(delta, 0)) > COALESCE(tolerance, 0)
           ) AS hierarchy_delta
         FROM report_consistency_items
@@ -1921,7 +1942,8 @@ router.get('/reports/:id/versions', authMiddleware, async (req: AuthRequest, res
          SELECT
            report_version_id,
            COUNT(*) FILTER (
-             WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+             WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+               AND auto_status IN ('FAIL', 'UNCERTAIN')
                AND COALESCE(human_status, 'pending') = 'pending'
            ) AS open_issue_count
          FROM report_consistency_items
@@ -2201,7 +2223,8 @@ router.get('/reports/:id', authMiddleware, async (req, res) => {
          SELECT
            report_version_id,
            COUNT(*) FILTER (
-             WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+             WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+               AND auto_status IN ('FAIL', 'UNCERTAIN')
                AND COALESCE(human_status, 'pending') = 'pending'
            ) AS open_issue_count
          FROM report_consistency_items
@@ -2232,7 +2255,8 @@ router.get('/reports/:id', authMiddleware, async (req, res) => {
          SELECT
            report_version_id,
            COUNT(*) FILTER (
-             WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+             WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+               AND auto_status IN ('FAIL', 'UNCERTAIN')
                AND COALESCE(human_status, 'pending') = 'pending'
            ) AS open_issue_count
          FROM report_consistency_items

@@ -86,21 +86,42 @@ export const getEffectiveConsistencyHumanStatus = (item) => {
   return item?.auto_status === 'PASS' || item?.autoStatus === 'PASS' ? 'confirmed' : 'pending';
 };
 
+const HIERARCHY_COMPLETENESS_CHECK_KEYS = new Set([
+  'hierarchy_missing_child_reports',
+  'hierarchy_missing_child_metrics',
+]);
+
+export const isHierarchyCompletenessPrompt = (item) =>
+  String(item?.group_key || item?.groupKey || '').toLowerCase() === 'hierarchy' &&
+  HIERARCHY_COMPLETENESS_CHECK_KEYS.has(String(item?.check_key || item?.checkKey || '').toLowerCase());
+
+export const isActionableConsistencyReviewItem = (item) =>
+  (item?.auto_status === 'FAIL' ||
+    item?.auto_status === 'UNCERTAIN' ||
+    item?.autoStatus === 'FAIL' ||
+    item?.autoStatus === 'UNCERTAIN') &&
+  !isHierarchyCompletenessPrompt(item);
+
 export const isProblemConsistencyItem = (item) =>
-  item?.auto_status === 'FAIL' && !isDismissedConsistencyItem(item);
+  item?.auto_status === 'FAIL' &&
+  !isDismissedConsistencyItem(item) &&
+  !isHierarchyCompletenessPrompt(item);
 
 export const isReviewableConsistencyItem = (item) =>
-  item?.auto_status === 'FAIL' ||
-  item?.auto_status === 'UNCERTAIN' ||
-  item?.autoStatus === 'FAIL' ||
-  item?.autoStatus === 'UNCERTAIN';
+  !isHierarchyCompletenessPrompt(item) &&
+  (
+    item?.auto_status === 'FAIL' ||
+    item?.auto_status === 'UNCERTAIN' ||
+    item?.autoStatus === 'FAIL' ||
+    item?.autoStatus === 'UNCERTAIN'
+  );
 
 export const isNumberedConsistencyItem = (item) =>
   isProblemConsistencyItem(item) && !isDismissedConsistencyItem(item);
 
 export const isPendingReviewConsistencyItem = (item) =>
   getEffectiveConsistencyHumanStatus(item) === 'pending' &&
-  (item?.auto_status === 'FAIL' || item?.auto_status === 'UNCERTAIN');
+  isActionableConsistencyReviewItem(item);
 
 export const isQualityAuditGroupKey = (groupKey) => QUALITY_AUDIT_GROUP_KEYS.includes(groupKey);
 

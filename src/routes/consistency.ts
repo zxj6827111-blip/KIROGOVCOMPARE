@@ -7,6 +7,7 @@ import { visionReviewService } from '../services/VisionReviewService';
 import { ocrCorrectionService } from '../services/OcrCorrectionService';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 import { classifyConsistencyIssueType } from '../utils/consistencyIssueType';
+import { HIERARCHY_COMPLETENESS_SQL_EXCLUSION } from '../utils/consistencyReviewSemantics';
 import { buildSectionTitleQualityItems } from '../utils/sectionTitleQuality';
 
 const router = express.Router();
@@ -131,6 +132,7 @@ async function refreshComparisonStatusForReport(reportId: number): Promise<void>
       SELECT report_version_id, COUNT(*) as cnt
       FROM report_consistency_items
       WHERE report_version_id = ANY($1::int[])
+        AND ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
         AND auto_status IN ('FAIL', 'UNCERTAIN')
         AND COALESCE(human_status, 'pending') != 'dismissed'
       GROUP BY report_version_id
@@ -167,21 +169,25 @@ async function refreshCachedStatsForVersion(reportVersionId: number): Promise<vo
   const countsRes = await pool.query(`
     SELECT
       COUNT(*) FILTER (
-        WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+        WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+          AND auto_status IN ('FAIL', 'UNCERTAIN')
           AND COALESCE(human_status, 'pending') = 'pending'
       ) AS total,
       COUNT(*) FILTER (
-        WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+        WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+          AND auto_status IN ('FAIL', 'UNCERTAIN')
           AND group_key = 'visual'
           AND COALESCE(human_status, 'pending') = 'pending'
       ) AS visual,
       COUNT(*) FILTER (
-        WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+        WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+          AND auto_status IN ('FAIL', 'UNCERTAIN')
           AND group_key = 'quality'
           AND COALESCE(human_status, 'pending') = 'pending'
       ) AS quality,
       COUNT(*) FILTER (
-        WHERE auto_status IN ('FAIL', 'UNCERTAIN')
+        WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+          AND auto_status IN ('FAIL', 'UNCERTAIN')
           AND group_key IN ('structure','table2','table3','table4','text','hierarchy')
           AND COALESCE(human_status, 'pending') = 'pending'
       ) AS structure

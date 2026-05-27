@@ -108,6 +108,8 @@ const REASON_DEFINITIONS = [
     key: 'hierarchy_incomplete',
     patterns: [
       'hierarchy_sum_incomplete_inputs',
+      'hierarchy_missing_child_reports',
+      'hierarchy_missing_child_metrics',
       'hierarchy_no_child_reports',
       'hierarchy_no_direct_children',
       'hierarchy_no_materialized_metrics',

@@ -2,7 +2,8 @@ import {
   QUALITY_AUDIT_GROUP_KEYS,
   getEffectiveConsistencyHumanStatus,
   getConsistencyGroupKey,
-  isReviewableConsistencyItem,
+  isActionableConsistencyReviewItem,
+  isHierarchyCompletenessPrompt,
   sortConsistencyItems,
 } from './consistencyDisplay';
 import {
@@ -76,13 +77,14 @@ const resolveDisplayScopeKey = (groupKey, scope) => {
 const isRawFailItem = (item) => getAutoStatus(item) === 'FAIL';
 
 const isReviewableItem = (item) =>
-  getAutoStatus(item) === 'FAIL' || getAutoStatus(item) === 'UNCERTAIN';
+  (getAutoStatus(item) === 'FAIL' || getAutoStatus(item) === 'UNCERTAIN') &&
+  !isHierarchyCompletenessPrompt(item);
 
 const isActiveProblemItem = (item) =>
   getAutoStatus(item) === 'FAIL' && getHumanStatus(item) !== 'dismissed';
 
 const isPendingReviewItem = (item) =>
-  getHumanStatus(item) === 'pending' && (getAutoStatus(item) === 'FAIL' || getAutoStatus(item) === 'UNCERTAIN');
+  getHumanStatus(item) === 'pending' && isActionableConsistencyReviewItem(item);
 
 const buildStatsFromIssues = (issues = []) => {
   const stats = {
@@ -306,7 +308,7 @@ export const aggregateQualityIssuesFromChecks = (groupsOrConfig = [], maybeOptio
       reviewCount: groupIssues.filter((issue) => {
         return isPendingReviewItem(issue);
       }).length,
-      resolvedCount: groupIssues.filter((issue) => isReviewableConsistencyItem(issue) && getHumanStatus(issue).toLowerCase() === 'confirmed').length,
+      resolvedCount: groupIssues.filter((issue) => isReviewableItem(issue) && getHumanStatus(issue).toLowerCase() === 'confirmed').length,
       dismissedCount: groupIssues.filter((issue) => getHumanStatus(issue).toLowerCase() === 'dismissed').length,
       notAssessableCount: groupIssues.filter((issue) => String(issue?.autoStatus || issue?.auto_status || '').toUpperCase() === 'NOT_ASSESSABLE').length,
     };

@@ -102,7 +102,7 @@ describe('issueViewModelAdapter', () => {
   test('normalizes hierarchy aggregation issue as a consistency problem', () => {
     const issue = normalizeIssueItem({
       group_key: 'hierarchy',
-      check_key: 'hierarchy_sum_application__total__new_received',
+      check_key: 'hierarchy_sum_v2_application__total__new_received',
       auto_status: 'FAIL',
       human_status: 'pending',
       displayNo: 1,

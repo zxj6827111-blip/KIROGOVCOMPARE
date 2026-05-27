@@ -328,6 +328,67 @@ describe('ReportDetail vision review integration', () => {
     });
   });
 
+  test('detail tab badge excludes hierarchy completeness prompts', async () => {
+    apiClient.get.mockImplementation((url) => {
+      switch (url) {
+        case '/reports/123':
+          return Promise.resolve({ data: { data: reportPayload } });
+        case '/v2/reports/123/facts/active_disclosure':
+        case '/v2/reports/123/facts/application':
+        case '/v2/reports/123/facts/legal_proceeding':
+          return Promise.resolve({ data: { data: [] } });
+        case '/reports/123/checks':
+          return Promise.resolve({
+            data: {
+              data: {
+                groups: [
+                  {
+                    group_key: 'hierarchy',
+                    items: [
+                      {
+                        id: 1,
+                        check_key: 'hierarchy_sum_v2_application__total__new_received',
+                        auto_status: 'FAIL',
+                        human_status: 'pending',
+                        title: 'hierarchy delta',
+                        evidence: {},
+                      },
+                      {
+                        id: 2,
+                        check_key: 'hierarchy_missing_child_reports',
+                        auto_status: 'UNCERTAIN',
+                        human_status: 'pending',
+                        title: 'missing child reports',
+                        evidence: {},
+                      },
+                      {
+                        id: 3,
+                        check_key: 'hierarchy_missing_child_metrics',
+                        auto_status: 'UNCERTAIN',
+                        human_status: 'pending',
+                        title: 'missing child metrics',
+                        evidence: {},
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          });
+        case '/reports/123/vision-review':
+          return Promise.resolve({ data: { data: { reviews: [], corrections: [] } } });
+        default:
+          return Promise.reject(new Error(`Unexpected GET ${url}`));
+      }
+    });
+
+    render(<ReportDetail reportId="123" />);
+
+    await waitFor(() => {
+      expect(document.querySelector('.tab-issue-badge')).toHaveTextContent('1');
+    });
+  });
+
   test('hides delete report action when current user lacks delete_reports', async () => {
     getCurrentUser.mockReturnValue({
       username: 'uploader',

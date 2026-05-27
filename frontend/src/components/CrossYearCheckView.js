@@ -4,6 +4,7 @@ import { apiClient } from '../apiClient';
 import { highlightNumber } from './DiffUtils';
 import { BarChart3, MapPin, Search, FileText, Table2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { getRowColFromPath, normalizeTablePath } from '../utils/tableRowColMapping';
+import { isActionableConsistencyReviewItem } from '../utils/consistencyDisplay';
 import './CrossYearCheckView.css';
 
 // 复制自 ConsistencyCheckView.js 的路径解析逻辑
@@ -142,7 +143,7 @@ const collectComparisonIssues = (data) => {
 
             group.items
                 .filter(item =>
-                    (item.auto_status === 'FAIL' || item.auto_status === 'UNCERTAIN') &&
+                    isActionableConsistencyReviewItem(item) &&
                     item.human_status !== 'dismissed'
                 )
                 .forEach(item => {
