@@ -89,6 +89,8 @@ export const getEffectiveConsistencyHumanStatus = (item) => {
 const HIERARCHY_COMPLETENESS_CHECK_KEYS = new Set([
   'hierarchy_missing_child_reports',
   'hierarchy_missing_child_metrics',
+  'hierarchy_no_child_reports',
+  'hierarchy_no_child_metrics',
 ]);
 
 export const isHierarchyCompletenessPrompt = (item) =>
@@ -99,16 +101,13 @@ export const isActionableConsistencyReviewItem = (item) =>
   (item?.auto_status === 'FAIL' ||
     item?.auto_status === 'UNCERTAIN' ||
     item?.autoStatus === 'FAIL' ||
-    item?.autoStatus === 'UNCERTAIN') &&
-  !isHierarchyCompletenessPrompt(item);
+    item?.autoStatus === 'UNCERTAIN');
 
 export const isProblemConsistencyItem = (item) =>
   item?.auto_status === 'FAIL' &&
-  !isDismissedConsistencyItem(item) &&
-  !isHierarchyCompletenessPrompt(item);
+  !isDismissedConsistencyItem(item);
 
 export const isReviewableConsistencyItem = (item) =>
-  !isHierarchyCompletenessPrompt(item) &&
   (
     item?.auto_status === 'FAIL' ||
     item?.auto_status === 'UNCERTAIN' ||

@@ -10,6 +10,7 @@ import {
   getConsistencyHumanStatusLabel,
   getQualityAuditAutoStatusLabel,
   getQualityAuditHumanStatusLabel,
+  isHierarchyCompletenessPrompt,
   isReviewableConsistencyItem,
   isPendingReviewConsistencyItem,
   normalizeConsistencyGroups,
@@ -27,6 +28,9 @@ const HIERARCHY_TABLE_ORDER = {
   '表二': 1,
   '表三': 2,
   '表四': 3,
+  '缺报告问题': 4,
+  '缺字段问题': 5,
+  '层级完整性问题': 6,
 };
 
 const getHierarchyEvidenceValues = (item) =>
@@ -47,9 +51,58 @@ const formatHierarchyNumber = (value) => {
 const asArray = (value) => (Array.isArray(value) ? value : []);
 
 const hasHierarchyDelta = (item) => {
+  if (isHierarchyCompletenessPrompt(item)) return false;
   const delta = toFiniteNumber(item?.delta);
   const tolerance = toFiniteNumber(item?.tolerance) ?? 0;
   return delta !== null && Math.abs(delta) > tolerance;
+};
+
+const getConsistencySummaryBreakdown = (summary, hierarchyStats) => {
+  const pendingCount = Number(summary?.pendingCount || 0);
+  const pendingHierarchyCount = Number(
+    hierarchyStats?.pendingDeltaCount ?? hierarchyStats?.pendingCount ?? 0
+  );
+  const pendingHierarchyCompletenessCount = Number(hierarchyStats?.pendingCompletenessCount || 0);
+  const pendingMissingReportCount = Number(hierarchyStats?.pendingMissingReportIssueCount || 0);
+  const pendingMissingFieldCount = Number(hierarchyStats?.pendingMissingFieldIssueCount || 0);
+  const pendingHierarchyCompletenessOtherCount = Math.max(
+    pendingHierarchyCompletenessCount - pendingMissingReportCount - pendingMissingFieldCount,
+    0
+  );
+  const pendingConsistencyCount = Math.max(
+    pendingCount - pendingHierarchyCount - pendingHierarchyCompletenessCount,
+    0
+  );
+  const confirmedCount = Number(summary?.confirmedCount || 0);
+  const confirmedHierarchyCount = Number(
+    hierarchyStats?.confirmedDeltaCount ?? hierarchyStats?.confirmedCount ?? 0
+  );
+  const confirmedHierarchyCompletenessCount = Number(hierarchyStats?.confirmedCompletenessCount || 0);
+  const confirmedMissingReportCount = Number(hierarchyStats?.confirmedMissingReportIssueCount || 0);
+  const confirmedMissingFieldCount = Number(hierarchyStats?.confirmedMissingFieldIssueCount || 0);
+  const confirmedHierarchyCompletenessOtherCount = Math.max(
+    confirmedHierarchyCompletenessCount - confirmedMissingReportCount - confirmedMissingFieldCount,
+    0
+  );
+  const confirmedConsistencyCount = Math.max(
+    confirmedCount - confirmedHierarchyCount - confirmedHierarchyCompletenessCount,
+    0
+  );
+
+  return {
+    pendingConsistencyCount,
+    pendingHierarchyCount,
+    pendingHierarchyCompletenessCount,
+    pendingMissingReportCount,
+    pendingMissingFieldCount,
+    pendingHierarchyCompletenessOtherCount,
+    confirmedConsistencyCount,
+    confirmedHierarchyCount,
+    confirmedHierarchyCompletenessCount,
+    confirmedMissingReportCount,
+    confirmedMissingFieldCount,
+    confirmedHierarchyCompletenessOtherCount,
+  };
 };
 
 const getHierarchyDisplayStats = (items = []) => {
@@ -59,10 +112,22 @@ const getHierarchyDisplayStats = (items = []) => {
     totalCount: items.length,
     deltaCount: 0,
     reviewCount: 0,
+    pendingCount: 0,
     incompleteCount: 0,
     failCount: 0,
     passCount: 0,
     confirmedCount: 0,
+    completenessCount: 0,
+    pendingDeltaCount: 0,
+    pendingCompletenessCount: 0,
+    confirmedDeltaCount: 0,
+    confirmedCompletenessCount: 0,
+    missingReportIssueCount: 0,
+    pendingMissingReportIssueCount: 0,
+    confirmedMissingReportIssueCount: 0,
+    missingFieldIssueCount: 0,
+    pendingMissingFieldIssueCount: 0,
+    confirmedMissingFieldIssueCount: 0,
     notAssessableCount: 0,
     missingReportUnitCount: 0,
     missingMetricUnitCount: 0,
@@ -77,14 +142,47 @@ const getHierarchyDisplayStats = (items = []) => {
       missingReports.length > 0 ||
       missingMetricChildren.length > 0;
 
-    if (hasHierarchyDelta(item)) stats.deltaCount += 1;
+    const effectiveHumanStatus = getEffectiveConsistencyHumanStatus(item);
+    const isCompletenessPrompt = isHierarchyCompletenessPrompt(item);
+    const isMissingReportPrompt =
+      String(item?.check_key || item?.checkKey || '').toLowerCase() === 'hierarchy_missing_child_reports' ||
+      String(item?.check_key || item?.checkKey || '').toLowerCase() === 'hierarchy_no_child_reports' ||
+      missingReports.length > 0;
+    const isMissingFieldPrompt =
+      String(item?.check_key || item?.checkKey || '').toLowerCase() === 'hierarchy_missing_child_metrics' ||
+      String(item?.check_key || item?.checkKey || '').toLowerCase() === 'hierarchy_no_child_metrics' ||
+      missingMetricChildren.length > 0;
+    if (isCompletenessPrompt && isReviewableConsistencyItem(item)) {
+      stats.completenessCount += 1;
+      if (isMissingReportPrompt) stats.missingReportIssueCount += 1;
+      if (isMissingFieldPrompt) stats.missingFieldIssueCount += 1;
+      if (effectiveHumanStatus === 'confirmed') {
+        stats.confirmedCompletenessCount += 1;
+        if (isMissingReportPrompt) stats.confirmedMissingReportIssueCount += 1;
+        if (isMissingFieldPrompt) stats.confirmedMissingFieldIssueCount += 1;
+      }
+    }
+    if (hasHierarchyDelta(item)) {
+      stats.deltaCount += 1;
+      if (isReviewableConsistencyItem(item) && effectiveHumanStatus === 'confirmed') {
+        stats.confirmedDeltaCount += 1;
+      }
+    }
     if (item.auto_status === 'FAIL') stats.failCount += 1;
     if (item.auto_status === 'PASS') stats.passCount += 1;
-    const effectiveHumanStatus = getEffectiveConsistencyHumanStatus(item);
     if (isReviewableConsistencyItem(item) && effectiveHumanStatus === 'confirmed') stats.confirmedCount += 1;
     if (item.auto_status === 'NOT_ASSESSABLE') stats.notAssessableCount += 1;
     if (isPendingReviewConsistencyItem(item)) {
       stats.reviewCount += 1;
+      stats.pendingCount += 1;
+      if (hasHierarchyDelta(item)) {
+        stats.pendingDeltaCount += 1;
+      }
+      if (isCompletenessPrompt) {
+        stats.pendingCompletenessCount += 1;
+        if (isMissingReportPrompt) stats.pendingMissingReportIssueCount += 1;
+        if (isMissingFieldPrompt) stats.pendingMissingFieldIssueCount += 1;
+      }
     }
     if (hasIncompleteInputs) stats.incompleteCount += 1;
 
@@ -100,6 +198,26 @@ const getHierarchyDisplayStats = (items = []) => {
 const getHierarchyTableLabel = (item) => {
   const values = getHierarchyEvidenceValues(item);
   if (values.table) return values.table;
+  if (isHierarchyCompletenessPrompt(item)) {
+    const checkKey = String(item?.check_key || item?.checkKey || '').toLowerCase();
+    const missingReports = asArray(values.missingReports);
+    const missingMetricChildren = asArray(values.missingMetricChildren);
+    if (
+      checkKey === 'hierarchy_missing_child_reports' ||
+      checkKey === 'hierarchy_no_child_reports' ||
+      missingReports.length > 0
+    ) {
+      return '缺报告问题';
+    }
+    if (
+      checkKey === 'hierarchy_missing_child_metrics' ||
+      checkKey === 'hierarchy_no_child_metrics' ||
+      missingMetricChildren.length > 0
+    ) {
+      return '缺字段问题';
+    }
+    return '层级完整性问题';
+  }
   const match = String(item?.title || '').match(/表[二三四]/);
   return match ? match[0] : '其他';
 };
@@ -328,15 +446,45 @@ const renderGroupSummary = (group, isQualityMode) => {
         <span className="group-summary-pill group-summary-pill--problem">
           差额项 {hierarchyStats.deltaCount}
         </span>
+        {hierarchyStats.missingReportIssueCount > 0 ? (
+          <span className="group-summary-pill group-summary-pill--warning">
+            缺报告问题 {hierarchyStats.missingReportIssueCount}
+          </span>
+        ) : null}
+        {hierarchyStats.missingFieldIssueCount > 0 ? (
+          <span className="group-summary-pill group-summary-pill--warning">
+            缺字段问题 {hierarchyStats.missingFieldIssueCount}
+          </span>
+        ) : null}
+        {hierarchyStats.completenessCount - hierarchyStats.missingReportIssueCount - hierarchyStats.missingFieldIssueCount > 0 ? (
+          <span className="group-summary-pill group-summary-pill--warning">
+            层级完整性问题 {hierarchyStats.completenessCount - hierarchyStats.missingReportIssueCount - hierarchyStats.missingFieldIssueCount}
+          </span>
+        ) : null}
         <span className="group-summary-pill group-summary-pill--warning">
           缺报告单位 {hierarchyStats.missingReportUnitCount}
         </span>
         <span className="group-summary-pill group-summary-pill--warning">
           缺字段单位 {hierarchyStats.missingMetricUnitCount}
         </span>
-        {hierarchyStats.confirmedCount > 0 ? (
+        {hierarchyStats.confirmedDeltaCount > 0 ? (
           <span className="group-summary-pill group-summary-pill--confirmed">
-            已确认 {hierarchyStats.confirmedCount}
+            已确认差额 {hierarchyStats.confirmedDeltaCount}
+          </span>
+        ) : null}
+        {hierarchyStats.confirmedMissingReportIssueCount > 0 ? (
+          <span className="group-summary-pill group-summary-pill--confirmed">
+            已确认缺报告问题 {hierarchyStats.confirmedMissingReportIssueCount}
+          </span>
+        ) : null}
+        {hierarchyStats.confirmedMissingFieldIssueCount > 0 ? (
+          <span className="group-summary-pill group-summary-pill--confirmed">
+            已确认缺字段问题 {hierarchyStats.confirmedMissingFieldIssueCount}
+          </span>
+        ) : null}
+        {hierarchyStats.confirmedCompletenessCount - hierarchyStats.confirmedMissingReportIssueCount - hierarchyStats.confirmedMissingFieldIssueCount > 0 ? (
+          <span className="group-summary-pill group-summary-pill--confirmed">
+            已确认层级完整性问题 {hierarchyStats.confirmedCompletenessCount - hierarchyStats.confirmedMissingReportIssueCount - hierarchyStats.confirmedMissingFieldIssueCount}
           </span>
         ) : null}
         {hierarchyStats.notAssessableCount > 0 ? (
@@ -584,6 +732,10 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
     const hierarchyGroup = displayedGroups.find((group) => group.group_key === 'hierarchy');
     return hierarchyGroup ? getHierarchyDisplayStats(hierarchyGroup.items || []) : null;
   }, [displayedGroups, modeMeta.isQualityMode]);
+  const summaryBreakdown = useMemo(
+    () => getConsistencySummaryBreakdown(summary, hierarchySummaryStats),
+    [summary, hierarchySummaryStats]
+  );
 
   const handleBulkConfirm = async () => {
     const pendingItemIds = modeMeta.isQualityMode
@@ -837,14 +989,56 @@ const ConsistencyCheckView = ({ reportId, versionId, onEdit, filterGroups = [], 
                   </>
                 ) : (
                   <>
-                    <span className="summary-item fail">问题 {summary.problemCount}</span>
-                    {hierarchySummaryStats?.deltaCount > 0 ? (
+                    {summary.pendingCount > 0 ? (
+                      <span className="summary-item pending">待复核 {summary.pendingCount}</span>
+                    ) : null}
+                    {summaryBreakdown.pendingConsistencyCount > 0 ? (
+                      <span className="summary-item fail">勾稽问题 {summaryBreakdown.pendingConsistencyCount}</span>
+                    ) : null}
+                    {summaryBreakdown.pendingHierarchyCount > 0 ? (
                       <span className="summary-item hierarchy-delta">
-                        层级差额 {hierarchySummaryStats.deltaCount}
+                        层级统计问题 {summaryBreakdown.pendingHierarchyCount}
                       </span>
                     ) : null}
-                    <span className="summary-item pending">待复核 {summary.pendingCount}</span>
-                    <span className="summary-item confirmed">已确认 {summary.confirmedCount}</span>
+                    {summaryBreakdown.pendingMissingReportCount > 0 ? (
+                      <span className="summary-item hierarchy-delta">
+                        缺报告问题 {summaryBreakdown.pendingMissingReportCount}
+                      </span>
+                    ) : null}
+                    {summaryBreakdown.pendingMissingFieldCount > 0 ? (
+                      <span className="summary-item hierarchy-delta">
+                        缺字段问题 {summaryBreakdown.pendingMissingFieldCount}
+                      </span>
+                    ) : null}
+                    {summaryBreakdown.pendingHierarchyCompletenessOtherCount > 0 ? (
+                      <span className="summary-item hierarchy-delta">
+                        层级完整性问题 {summaryBreakdown.pendingHierarchyCompletenessOtherCount}
+                      </span>
+                    ) : null}
+                    {summary.confirmedCount > 0 ? (
+                      <span className="summary-item confirmed">已确认问题 {summary.confirmedCount}</span>
+                    ) : null}
+                    {summaryBreakdown.confirmedConsistencyCount > 0 ? (
+                      <span className="summary-item confirmed">勾稽问题 {summaryBreakdown.confirmedConsistencyCount}</span>
+                    ) : null}
+                    {summaryBreakdown.confirmedHierarchyCount > 0 ? (
+                      <span className="summary-item confirmed">层级统计问题 {summaryBreakdown.confirmedHierarchyCount}</span>
+                    ) : null}
+                    {summaryBreakdown.confirmedMissingReportCount > 0 ? (
+                      <span className="summary-item confirmed">
+                        缺报告问题 {summaryBreakdown.confirmedMissingReportCount}
+                      </span>
+                    ) : null}
+                    {summaryBreakdown.confirmedMissingFieldCount > 0 ? (
+                      <span className="summary-item confirmed">
+                        缺字段问题 {summaryBreakdown.confirmedMissingFieldCount}
+                      </span>
+                    ) : null}
+                    {summaryBreakdown.confirmedHierarchyCompletenessOtherCount > 0 ? (
+                      <span className="summary-item confirmed">
+                        层级完整性问题 {summaryBreakdown.confirmedHierarchyCompletenessOtherCount}
+                      </span>
+                    ) : null}
                     <span className="summary-item dismissed">不可评估 {summary.notAssessableCount}</span>
                   </>
                 )}

@@ -241,7 +241,9 @@ describe('ConsistencyCheckView quality mode', () => {
     );
 
     await screen.findByRole('heading', { name: /层级汇总一致性/ });
-    expect(screen.getByText('层级差额 2')).toBeInTheDocument();
+    expect(screen.getByText('待复核 2')).toBeInTheDocument();
+    expect(screen.getByText('层级统计问题 2')).toBeInTheDocument();
+    expect(screen.queryByText('层级差额 2')).not.toBeInTheDocument();
     expect(screen.getByText('差额项 2')).toBeInTheDocument();
     expect(screen.getByText('缺报告单位 6')).toBeInTheDocument();
     expect(screen.getByText('缺字段单位 2')).toBeInTheDocument();
@@ -262,6 +264,198 @@ describe('ConsistencyCheckView quality mode', () => {
     expect(screen.getByText('涟水县、淮安区、金湖县、盱眙县、洪泽区、淮安经济技术开发区')).toBeInTheDocument();
     expect(screen.getByText('生态文旅区、农业农村局')).toBeInTheDocument();
     expect(screen.queryByText(/等 \d+ 个/)).toBeNull();
+  });
+
+  test('summary splits pending consistency and hierarchy issues without double counting', async () => {
+    apiClient.get.mockResolvedValue({
+      data: {
+        data: {
+          latest_run: { id: 4 },
+          groups: [
+            {
+              group_key: 'table3',
+              items: [
+                {
+                  id: 601,
+                  check_key: 't3_identity_1',
+                  title: '表三勾稽问题',
+                  auto_status: 'FAIL',
+                  human_status: 'pending',
+                  evidence: {
+                    leftPaths: ['tableData.total.newReceived'],
+                    rightPaths: ['tableData.total.carriedForward'],
+                  },
+                },
+              ],
+            },
+            {
+              group_key: 'hierarchy',
+              items: [
+                ...Array.from({ length: 2 }, (_, index) => ({
+                  id: 700 + index,
+                  check_key: `hierarchy_sum_${index}`,
+                  title: `层级统计问题 ${index + 1}`,
+                  auto_status: 'FAIL',
+                  human_status: 'pending',
+                  delta: 10 + index,
+                  tolerance: 0,
+                  evidence: {
+                    values: {
+                      table: '表二',
+                      metricLabel: `指标 ${index + 1}`,
+                    },
+                  },
+                })),
+                {
+                  id: 750,
+                  check_key: 'hierarchy_context_uncertain',
+                  title: '层级资料待核查',
+                  auto_status: 'UNCERTAIN',
+                  human_status: 'pending',
+                  delta: null,
+                  tolerance: 0,
+                  evidence: {
+                    values: {
+                      table: '表二',
+                      metricLabel: '资料完整性',
+                    },
+                  },
+                },
+                {
+                  id: 760,
+                  check_key: 'hierarchy_missing_child_reports',
+                  title: '层级缺少同年年报',
+                  auto_status: 'UNCERTAIN',
+                  human_status: 'pending',
+                  delta: null,
+                  tolerance: 0,
+                  evidence: {
+                    values: {
+                      reason: 'hierarchy_missing_child_reports',
+                      missingReports: [{ regionId: 1, regionName: '测试区' }],
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    renderWithFeedback(
+      <ConsistencyCheckView
+        reportId={1}
+        versionId={2}
+        filterGroups={['table3', 'hierarchy']}
+      />
+    );
+
+    await screen.findByText('待复核 5');
+    expect(screen.getByText('勾稽问题 2')).toBeInTheDocument();
+    expect(screen.getByText('层级统计问题 2')).toBeInTheDocument();
+    expect(screen.getAllByText('缺报告问题 1').length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText('问题 5')).not.toBeInTheDocument();
+    expect(screen.queryByText('层级统计问题 3')).not.toBeInTheDocument();
+    expect(screen.queryByText('层级差额 2')).not.toBeInTheDocument();
+    const sectionTitles = Array.from(document.querySelectorAll('.hierarchy-table-section__head span'))
+      .map((node) => node.textContent);
+    expect(sectionTitles).toContain('缺报告问题');
+    expect(sectionTitles).not.toContain('其他');
+  });
+
+  test('summary keeps issue type labels for confirmed consistency and hierarchy issues', async () => {
+    apiClient.get.mockResolvedValue({
+      data: {
+        data: {
+          latest_run: { id: 5 },
+          groups: [
+            {
+              group_key: 'table3',
+              items: [
+                {
+                  id: 801,
+                  check_key: 't3_identity_confirmed',
+                  title: '表三勾稽问题',
+                  auto_status: 'FAIL',
+                  human_status: 'confirmed',
+                  evidence: {
+                    leftPaths: ['tableData.total.newReceived'],
+                    rightPaths: ['tableData.total.carriedForward'],
+                  },
+                },
+              ],
+            },
+            {
+              group_key: 'hierarchy',
+              items: [
+                ...Array.from({ length: 2 }, (_, index) => ({
+                  id: 900 + index,
+                  check_key: `hierarchy_sum_confirmed_${index}`,
+                  title: `层级统计问题 ${index + 1}`,
+                  auto_status: 'FAIL',
+                  human_status: 'confirmed',
+                  delta: 10 + index,
+                  tolerance: 0,
+                  evidence: {
+                    values: {
+                      table: '表二',
+                      metricLabel: `指标 ${index + 1}`,
+                    },
+                  },
+                })),
+                {
+                  id: 950,
+                  check_key: 'hierarchy_context_confirmed_uncertain',
+                  title: '层级资料已确认待保留',
+                  auto_status: 'UNCERTAIN',
+                  human_status: 'confirmed',
+                  delta: null,
+                  tolerance: 0,
+                  evidence: {
+                    values: {
+                      table: '表二',
+                      metricLabel: '资料完整性',
+                    },
+                  },
+                },
+                {
+                  id: 960,
+                  check_key: 'hierarchy_missing_child_reports',
+                  title: '层级缺少同年年报已确认',
+                  auto_status: 'UNCERTAIN',
+                  human_status: 'confirmed',
+                  delta: null,
+                  tolerance: 0,
+                  evidence: {
+                    values: {
+                      reason: 'hierarchy_missing_child_reports',
+                      missingReports: [{ regionId: 1, regionName: '测试区' }],
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    renderWithFeedback(
+      <ConsistencyCheckView
+        reportId={1}
+        versionId={2}
+        filterGroups={['table3', 'hierarchy']}
+      />
+    );
+
+    await screen.findByText('已确认问题 5');
+    expect(screen.getByText('勾稽问题 2')).toBeInTheDocument();
+    expect(screen.getByText('层级统计问题 2')).toBeInTheDocument();
+    expect(screen.getAllByText('缺报告问题 1').length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText('层级统计问题 3')).not.toBeInTheDocument();
+    expect(screen.queryByText('已确认保留 3')).not.toBeInTheDocument();
+    expect(screen.queryByText('保留问题 3')).not.toBeInTheDocument();
   });
 
   test('bulk confirm in quality mode updates quality items with one request', async () => {
@@ -432,7 +626,7 @@ describe('ConsistencyCheckView onChecksUpdated callback', () => {
     });
   });
 
-  test('bulk confirm excludes hierarchy completeness prompts from actionable ids', async () => {
+  test('bulk confirm includes hierarchy completeness prompts in actionable ids', async () => {
     const user = userEvent.setup();
     const onChecksUpdated = jest.fn();
     apiClient.get.mockResolvedValue({
@@ -481,7 +675,7 @@ describe('ConsistencyCheckView onChecksUpdated callback', () => {
         },
       },
     });
-    apiClient.post.mockResolvedValue({ data: { success: true, updated_count: 1 } });
+    apiClient.post.mockResolvedValue({ data: { success: true, updated_count: 3 } });
 
     renderWithFeedback(
       <ConsistencyCheckView
@@ -500,9 +694,9 @@ describe('ConsistencyCheckView onChecksUpdated callback', () => {
     await waitFor(() => {
       expect(apiClient.post).toHaveBeenCalledWith('/reports/1/checks/items/bulk-status', {
         version_id: 2,
-        item_ids: [501],
+        item_ids: [501, 503, 502],
         human_status: 'confirmed',
-        human_comment: expect.any(String),
+        human_comment: '批量确认',
       });
       expect(onChecksUpdated).toHaveBeenCalledTimes(1);
     });

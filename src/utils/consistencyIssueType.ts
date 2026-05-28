@@ -7,6 +7,8 @@ export type ConsistencyIssueType =
   | 'consistency_table3_other'
   | 'consistency_table4_row_sum'
   | 'consistency_hierarchy_sum'
+  | 'hierarchy_missing_report'
+  | 'hierarchy_missing_field'
   | 'hierarchy_completeness_prompt'
   | 'quality_empty'
   | 'quality_format'
@@ -110,9 +112,15 @@ export function classifyConsistencyIssueType(item: ConsistencyIssueTypeSource): 
   if (groupKey === 'hierarchy') {
     if (
       checkKey === 'hierarchy_missing_child_reports' ||
-      checkKey === 'hierarchy_missing_child_metrics'
+      checkKey === 'hierarchy_no_child_reports'
     ) {
-      return 'hierarchy_completeness_prompt';
+      return 'hierarchy_missing_report';
+    }
+    if (
+      checkKey === 'hierarchy_missing_child_metrics' ||
+      checkKey === 'hierarchy_no_child_metrics'
+    ) {
+      return 'hierarchy_missing_field';
     }
     if (autoStatus === 'NOT_ASSESSABLE') {
       return 'unsupported_not_assessable';

@@ -26,6 +26,53 @@
   gap: 12px;
 }
 
+.city-batch-check-button {
+  position: relative;
+  overflow: hidden;
+  min-width: 112px;
+}
+
+.city-batch-check-button--active {
+  min-width: 150px;
+}
+
+.city-batch-check-button--active:disabled {
+  opacity: 1;
+}
+
+.city-batch-check-button .kc-button__icon {
+  position: relative;
+  z-index: 1;
+}
+
+.city-batch-check-button .kc-button__label {
+  position: static;
+}
+
+.city-batch-check-button__content {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  position: relative;
+  z-index: 1;
+}
+
+.city-batch-check-button__count {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.city-batch-check-button__progress {
+  position: absolute;
+  inset: auto auto 0 0;
+  height: 3px;
+  background: var(--primary);
+  transition: width 0.2s ease;
+  z-index: 0;
+}
+
 /* Button styles update: row layout for icon + text */
 .ghost-btn,
 .primary-btn {
@@ -515,6 +562,11 @@
   color: #166534;
 }
 
+.status-pill.green.strong {
+  border: 1px solid #22c55e;
+  font-weight: 700;
+}
+
 .status-pill.red {
   background: #fecaca;
   color: #b91c1c;
@@ -570,6 +622,12 @@
   border-color: #fed7aa;
   background: #fff7ed;
   color: #9a3412;
+}
+
+.status-mini-pill.success {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
 }
 
 .report-card-footer {

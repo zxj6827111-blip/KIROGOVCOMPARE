@@ -38,16 +38,78 @@ const toPositiveCount = (value) => {
   return Number.isFinite(count) && count > 0 ? count : 0;
 };
 
+const getPendingIssueItemCounts = (checkStatus) => {
+  const hierarchyDelta = toPositiveCount(
+    checkStatus.hierarchy_delta ??
+      checkStatus.hierarchyDelta ??
+      checkStatus.hierarchy_delta_pending ??
+      checkStatus.hierarchyDeltaPending
+  );
+  const hierarchyCompleteness = toPositiveCount(
+    checkStatus.hierarchy_completeness ?? checkStatus.hierarchyCompleteness
+  );
+  const hierarchyMissingReport = toPositiveCount(
+    checkStatus.hierarchy_missing_report ?? checkStatus.hierarchyMissingReport
+  );
+  const hierarchyMissingField = toPositiveCount(
+    checkStatus.hierarchy_missing_field ?? checkStatus.hierarchyMissingField
+  );
+  const hierarchyCompletenessOther = Math.max(
+    hierarchyCompleteness - hierarchyMissingReport - hierarchyMissingField,
+    0
+  );
+  const hierarchyLegacyTotal = toPositiveCount(checkStatus.hierarchy_pending ?? checkStatus.hierarchyPending);
+  const hasHierarchySplit =
+    checkStatus.hierarchy_delta !== undefined ||
+    checkStatus.hierarchyDelta !== undefined ||
+    checkStatus.hierarchy_completeness !== undefined ||
+    checkStatus.hierarchyCompleteness !== undefined ||
+    checkStatus.hierarchy_missing_report !== undefined ||
+    checkStatus.hierarchyMissingReport !== undefined ||
+    checkStatus.hierarchy_missing_field !== undefined ||
+    checkStatus.hierarchyMissingField !== undefined;
+  const hierarchyIssues = hasHierarchySplit ? hierarchyDelta : hierarchyLegacyTotal;
+  const hierarchyTotalForSubtract = hasHierarchySplit
+    ? hierarchyDelta + hierarchyCompleteness
+    : hierarchyLegacyTotal;
+  const hasDedicatedIssueBreakdown =
+    checkStatus.consistency !== undefined ||
+    checkStatus.consistency_other !== undefined ||
+    checkStatus.consistencyOther !== undefined ||
+    checkStatus.quality_review !== undefined ||
+    checkStatus.qualityReview !== undefined;
+  const consistencyRaw = toPositiveCount(
+    checkStatus.consistency ?? (hasDedicatedIssueBreakdown ? 0 : checkStatus.structure)
+  );
+  const consistency = toPositiveCount(
+    checkStatus.consistency_other ??
+      checkStatus.consistencyOther ??
+      Math.max(consistencyRaw - hierarchyTotalForSubtract, 0)
+  );
+
+  return {
+    consistency,
+    hierarchyIssues,
+    hierarchyMissingReport,
+    hierarchyMissingField,
+    hierarchyCompletenessOther,
+  };
+};
+
 const getIssueBreakdown = (checkStatus) => {
   if (!checkStatus || typeof checkStatus !== 'object') return [];
 
-  const hasDedicatedIssueBreakdown =
-    checkStatus.consistency !== undefined ||
-    checkStatus.quality_review !== undefined ||
-    checkStatus.qualityReview !== undefined;
-  const consistency = toPositiveCount(
-    checkStatus.consistency ?? (hasDedicatedIssueBreakdown ? 0 : checkStatus.structure)
+  const pendingCounts = getPendingIssueItemCounts(checkStatus);
+  const hierarchyMissingReportUnits = toPositiveCount(
+    checkStatus.hierarchy_missing_report_units ?? checkStatus.hierarchyMissingReportUnits
   );
+  const hierarchyMissingFieldUnits = toPositiveCount(
+    checkStatus.hierarchy_missing_field_units ?? checkStatus.hierarchyMissingFieldUnits
+  );
+  const displayedHierarchyMissingReport = hierarchyMissingReportUnits || pendingCounts.hierarchyMissingReport;
+  const displayedHierarchyMissingField = hierarchyMissingFieldUnits || pendingCounts.hierarchyMissingField;
+  const hierarchyMissingReportLabel = hierarchyMissingReportUnits > 0 ? '缺报告单位' : '缺报告问题';
+  const hierarchyMissingFieldLabel = hierarchyMissingFieldUnits > 0 ? '缺字段单位' : '缺字段问题';
   const qualityReview = toPositiveCount(
     checkStatus.quality_review ??
       checkStatus.qualityReview ??
@@ -56,25 +118,169 @@ const getIssueBreakdown = (checkStatus) => {
   const visionReview = toPositiveCount(checkStatus.vision_review ?? checkStatus.visionReview);
 
   return [
-    { key: 'consistency', label: '勾稽', count: consistency },
-    { key: 'quality', label: '质量', count: qualityReview },
-    { key: 'vision', label: '复核', count: visionReview },
+    { key: 'consistency', label: '勾稽问题', count: pendingCounts.consistency },
+    { key: 'hierarchy', label: '层级统计问题', count: pendingCounts.hierarchyIssues },
+    { key: 'hierarchy-missing-report', label: hierarchyMissingReportLabel, count: displayedHierarchyMissingReport },
+    { key: 'hierarchy-missing-field', label: hierarchyMissingFieldLabel, count: displayedHierarchyMissingField },
+    { key: 'hierarchy-completeness', label: '层级完整性问题', count: pendingCounts.hierarchyCompletenessOther },
+    { key: 'quality', label: '质量问题', count: qualityReview },
+    { key: 'vision', label: '视觉复核问题', count: visionReview },
   ].filter((item) => item.count > 0);
 };
 
-const getObservationBreakdown = (checkStatus) => {
+const getReviewedBreakdown = (checkStatus) => {
   if (!checkStatus || typeof checkStatus !== 'object') return [];
+
+  const confirmedAbnormal = toPositiveCount(checkStatus.confirmed_abnormal ?? checkStatus.confirmedAbnormal);
+  const dismissedCount = toPositiveCount(checkStatus.dismissed_count ?? checkStatus.dismissedCount);
+  const pendingCounts = getPendingIssueItemCounts(checkStatus);
+  const pendingConsistency = pendingCounts.consistency;
+  const pendingHierarchy = pendingCounts.hierarchyIssues;
+  const pendingHierarchyCompleteness = pendingCounts.hierarchyCompletenessOther;
+  const pendingHierarchyMissingReport = pendingCounts.hierarchyMissingReport;
+  const pendingHierarchyMissingField = pendingCounts.hierarchyMissingField;
+  const rawConfirmedConsistency = toPositiveCount(
+    checkStatus.confirmed_consistency ?? checkStatus.confirmedConsistency
+  );
+  const rawConfirmedHierarchyDelta = toPositiveCount(
+    checkStatus.confirmed_hierarchy_delta ??
+      checkStatus.confirmedHierarchyDelta
+  );
+  const rawConfirmedHierarchyCompleteness = toPositiveCount(
+    checkStatus.confirmed_hierarchy_completeness ?? checkStatus.confirmedHierarchyCompleteness
+  );
+  const rawConfirmedHierarchyMissingReport = toPositiveCount(
+    checkStatus.confirmed_hierarchy_missing_report ?? checkStatus.confirmedHierarchyMissingReport
+  );
+  const rawConfirmedHierarchyMissingReportUnits = toPositiveCount(
+    checkStatus.confirmed_hierarchy_missing_report_units ?? checkStatus.confirmedHierarchyMissingReportUnits
+  );
+  const rawConfirmedHierarchyMissingField = toPositiveCount(
+    checkStatus.confirmed_hierarchy_missing_field ?? checkStatus.confirmedHierarchyMissingField
+  );
+  const rawConfirmedHierarchyMissingFieldUnits = toPositiveCount(
+    checkStatus.confirmed_hierarchy_missing_field_units ?? checkStatus.confirmedHierarchyMissingFieldUnits
+  );
+  const hasConfirmedHierarchySplit =
+    checkStatus.confirmed_hierarchy_delta !== undefined ||
+    checkStatus.confirmedHierarchyDelta !== undefined ||
+    checkStatus.confirmed_hierarchy_completeness !== undefined ||
+    checkStatus.confirmedHierarchyCompleteness !== undefined ||
+    checkStatus.confirmed_hierarchy_missing_report !== undefined ||
+    checkStatus.confirmedHierarchyMissingReport !== undefined ||
+    checkStatus.confirmed_hierarchy_missing_field !== undefined ||
+    checkStatus.confirmedHierarchyMissingField !== undefined;
+  const legacyConfirmedHierarchy = toPositiveCount(
+    checkStatus.confirmed_hierarchy ?? checkStatus.confirmedHierarchy
+  );
+  const rawConfirmedHierarchy = hasConfirmedHierarchySplit
+    ? rawConfirmedHierarchyDelta
+    : legacyConfirmedHierarchy;
+  let confirmedConsistency = rawConfirmedConsistency;
+  let confirmedHierarchy = rawConfirmedHierarchy;
+  let confirmedHierarchyMissingReport = hasConfirmedHierarchySplit ? rawConfirmedHierarchyMissingReport : 0;
+  let confirmedHierarchyMissingField = hasConfirmedHierarchySplit ? rawConfirmedHierarchyMissingField : 0;
+  let confirmedHierarchyMissingReportUnits = hasConfirmedHierarchySplit ? rawConfirmedHierarchyMissingReportUnits : 0;
+  let confirmedHierarchyMissingFieldUnits = hasConfirmedHierarchySplit ? rawConfirmedHierarchyMissingFieldUnits : 0;
+  let confirmedHierarchyCompleteness = hasConfirmedHierarchySplit
+    ? Math.max(rawConfirmedHierarchyCompleteness - confirmedHierarchyMissingReport - confirmedHierarchyMissingField, 0)
+    : 0;
+  const rawConfirmedSplitTotal =
+    rawConfirmedConsistency +
+    rawConfirmedHierarchy +
+    rawConfirmedHierarchyCompleteness;
+
+  if (confirmedAbnormal > 0 && rawConfirmedSplitTotal !== confirmedAbnormal) {
+    const inferredTotal =
+      pendingConsistency +
+      pendingHierarchy +
+      pendingHierarchyCompleteness +
+      pendingHierarchyMissingReport +
+      pendingHierarchyMissingField;
+    if (inferredTotal === confirmedAbnormal) {
+      confirmedConsistency = pendingConsistency;
+      confirmedHierarchy = pendingHierarchy;
+      confirmedHierarchyCompleteness = pendingHierarchyCompleteness;
+      confirmedHierarchyMissingReport = pendingHierarchyMissingReport;
+      confirmedHierarchyMissingField = pendingHierarchyMissingField;
+      confirmedHierarchyMissingReportUnits = toPositiveCount(
+        checkStatus.hierarchy_missing_report_units ?? checkStatus.hierarchyMissingReportUnits
+      );
+      confirmedHierarchyMissingFieldUnits = toPositiveCount(
+        checkStatus.hierarchy_missing_field_units ?? checkStatus.hierarchyMissingFieldUnits
+      );
+    }
+  }
+
+  const displayedConfirmedHierarchyMissingReport =
+    confirmedHierarchyMissingReportUnits || confirmedHierarchyMissingReport;
+  const displayedConfirmedHierarchyMissingField =
+    confirmedHierarchyMissingFieldUnits || confirmedHierarchyMissingField;
+  const confirmedHierarchyMissingReportLabel =
+    confirmedHierarchyMissingReportUnits > 0 ? '缺报告单位' : '缺报告问题';
+  const confirmedHierarchyMissingFieldLabel =
+    confirmedHierarchyMissingFieldUnits > 0 ? '缺字段单位' : '缺字段问题';
+
+  const hasConfirmedSplit =
+    confirmedConsistency > 0 ||
+    confirmedHierarchy > 0 ||
+    confirmedHierarchyMissingReport > 0 ||
+    confirmedHierarchyMissingField > 0 ||
+    confirmedHierarchyCompleteness > 0;
+  const fallbackConfirmed = hasConfirmedSplit
+    ? Math.max(
+        confirmedAbnormal -
+          confirmedConsistency -
+          confirmedHierarchy -
+          confirmedHierarchyMissingReport -
+          confirmedHierarchyMissingField -
+          confirmedHierarchyCompleteness,
+        0
+      )
+    : confirmedAbnormal;
 
   return [
     {
-      key: 'confirmed-abnormal',
-      label: '已确认异常',
-      count: toPositiveCount(checkStatus.confirmed_abnormal ?? checkStatus.confirmedAbnormal),
+      key: 'confirmed-consistency',
+      label: '勾稽问题',
+      count: confirmedConsistency,
+      tone: 'success',
     },
     {
-      key: 'hierarchy-delta',
-      label: '层级差额',
-      count: toPositiveCount(checkStatus.hierarchy_delta ?? checkStatus.hierarchyDelta),
+      key: 'confirmed-hierarchy',
+      label: '层级统计问题',
+      count: confirmedHierarchy,
+      tone: 'success',
+    },
+    {
+      key: 'confirmed-hierarchy-missing-report',
+      label: confirmedHierarchyMissingReportLabel,
+      count: displayedConfirmedHierarchyMissingReport,
+      tone: 'success',
+    },
+    {
+      key: 'confirmed-hierarchy-missing-field',
+      label: confirmedHierarchyMissingFieldLabel,
+      count: displayedConfirmedHierarchyMissingField,
+      tone: 'success',
+    },
+    {
+      key: 'confirmed-hierarchy-completeness',
+      label: '层级完整性问题',
+      count: confirmedHierarchyCompleteness,
+      tone: 'success',
+    },
+    {
+      key: 'confirmed-fallback',
+      label: '问题',
+      count: fallbackConfirmed,
+      tone: 'success',
+    },
+    {
+      key: 'dismissed',
+      label: '已忽略',
+      count: dismissedCount,
+      tone: 'neutral',
     },
   ].filter((item) => item.count > 0);
 };
@@ -148,6 +354,7 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
   const [hideEmptyReports, setHideEmptyReports] = useState(true); // 默认隐藏无内容报告
   const [selectedYear, setSelectedYear] = useState('all'); // 年份筛选
   const [batchChecking, setBatchChecking] = useState(false);
+  const [batchProgress, setBatchProgress] = useState(null);
   const currentCatalogPath = useMemo(
     () => buildCatalogReturnPath(path, window.location.search),
     [path]
@@ -528,36 +735,105 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
     });
   }, [filteredReports, hideEmptyReports, checkStatusLoaded, checkStatusMap]);
 
+  const batchScopeRegionIds = useMemo(() => {
+    if (!currentParentId) return null;
+
+    const ids = new Set();
+    const stack = [currentParentId];
+    while (stack.length > 0) {
+      const nextId = stack.pop();
+      if (nextId === undefined || nextId === null) continue;
+      const normalizedId = String(nextId);
+      if (ids.has(normalizedId)) continue;
+      ids.add(normalizedId);
+      childrenOf(nextId).forEach((child) => stack.push(child.id));
+    }
+    return ids;
+  }, [currentParentId, regionTree]);
+
+  const batchScopeReports = useMemo(() => {
+    if (!batchScopeRegionIds) return reports;
+    return reports.filter((report) => batchScopeRegionIds.has(String(report.region_id)));
+  }, [batchScopeRegionIds, reports]);
+
+  const batchScopeReportIds = useMemo(() => {
+    return Array.from(new Set(
+      batchScopeReports
+        .map((report) => Number(report.report_id || report.id))
+        .filter((id) => Number.isFinite(id) && id > 0)
+    ));
+  }, [batchScopeReports]);
+
+  const batchScopeLabel = currentRegion?.name ? `${currentRegion.name}及下级区域` : '全库';
+  const batchProgressPercent = batchProgress?.total
+    ? Math.min(100, Math.round((batchProgress.completed / batchProgress.total) * 100))
+    : 0;
+
+  useEffect(() => {
+    if (!batchChecking) return undefined;
+
+    const handleBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = '';
+      return '';
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [batchChecking]);
+
   const handleBatchCheck = async () => {
     if (batchChecking) return;
-    const reportIds = visibleReports.map(r => r.report_id || r.id).filter(Boolean);
+    const reportIds = batchScopeReportIds;
     if (reportIds.length === 0) {
-      toast.warning('当前筛选没有可校验的报告');
+      toast.warning('当前页面范围没有可校验的报告');
       return;
     }
 
     const confirmed = await confirmAction({
       title: '批量校验',
-      message: `确认对当前筛选的 ${reportIds.length} 份报告批量校验？`,
+      message: `确认对${batchScopeLabel}的 ${reportIds.length} 份报告批量校验？系统会分批处理，可能需要一些时间。`,
       confirmText: '开始校验',
       tone: 'default',
     });
     if (!confirmed) return;
 
+    setBatchProgress({
+      total: reportIds.length,
+      completed: 0,
+      processed: 0,
+      skipped: 0,
+      failed: 0,
+    });
     setBatchChecking(true);
+    let totalProcessed = 0;
+    let totalSkipped = 0;
+    let totalFailed = 0;
+    const CHUNK_SIZE = 50;
     try {
-      const resp = await apiClient.post('/reports/batch-checks/run', { report_ids: reportIds });
-      const data = resp.data || {};
-      const processed = data.processed || 0;
-      const skipped = data.skipped || 0;
-      const failed = data.failed || 0;
+      for (let i = 0; i < reportIds.length; i += CHUNK_SIZE) {
+        const chunk = reportIds.slice(i, i + CHUNK_SIZE);
+        const resp = await apiClient.post('/reports/batch-checks/run', { report_ids: chunk });
+        const data = resp.data || {};
+        totalProcessed += data.processed || 0;
+        totalSkipped += data.skipped || 0;
+        totalFailed += data.failed || 0;
+        setBatchProgress({
+          total: reportIds.length,
+          completed: Math.min(i + chunk.length, reportIds.length),
+          processed: totalProcessed,
+          skipped: totalSkipped,
+          failed: totalFailed,
+        });
+      }
       await fetchCheckStatusForReports(reports);
-      toast.success('批量校验完成', `成功 ${processed}，跳过 ${skipped}，失败 ${failed}`);
+      toast.success('批量校验完成', `范围：${batchScopeLabel}；成功 ${totalProcessed}，跳过 ${totalSkipped}，失败 ${totalFailed}`);
     } catch (err) {
       const message = err.response?.data?.error || err.message || '批量校验失败';
       toast.error('批量校验失败', message);
     } finally {
       setBatchChecking(false);
+      setBatchProgress(null);
     }
   };
 
@@ -568,6 +844,31 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
         subtitle="全区政府信息公开年报数字化归档与分析总览。"
         actions={(
           <>
+            <Button
+              variant="secondary"
+              className={`city-batch-check-button${batchChecking ? ' city-batch-check-button--active' : ''}`}
+              icon={<BarChart size={16} className={batchChecking ? 'spin' : ''} />}
+              onClick={handleBatchCheck}
+              disabled={loading || batchChecking || batchScopeReportIds.length === 0}
+              title={batchChecking
+                ? `正在校验${batchScopeLabel}报告：${batchProgress?.completed || 0}/${batchProgress?.total || batchScopeReportIds.length}`
+                : `批量校验${batchScopeLabel}报告`}
+            >
+              {batchChecking ? (
+                <>
+                  <span
+                    className="city-batch-check-button__progress"
+                    style={{ width: `${batchProgressPercent}%` }}
+                  />
+                  <span className="city-batch-check-button__content" aria-live="polite">
+                    <span>校验 {batchProgressPercent}%</span>
+                    <span className="city-batch-check-button__count">
+                      {batchProgress?.completed || 0}/{batchProgress?.total || batchScopeReportIds.length}
+                    </span>
+                  </span>
+                </>
+              ) : '批量校验'}
+            </Button>
             <Button variant="secondary" icon={<AlertCircle size={16} />} onClick={() => {
               const regionParam = currentParentId ? `?region=${currentParentId}&name=${encodeURIComponent(currentRegion?.name || '')}` : '';
               goTo(appendReturnTo(`/issues${regionParam}`, currentCatalogPath));
@@ -647,15 +948,6 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
                     <option key={year} value={year}>{year}年</option>
                   ))}
                 </select>
-                <button
-                  className="ghost-btn"
-                  onClick={handleBatchCheck}
-                  disabled={batchChecking || visibleReports.length === 0}
-                  title="对当前筛选报告批量运行勾稽校验"
-                >
-                  <BarChart size={16} className={batchChecking ? 'spin' : ''} />
-                  {batchChecking ? '批量校验中...' : `批量校验(${visibleReports.length})`}
-                </button>
                 {selectedForCompare.length === 2 && (
                   <button
                     className="compare-btn"
@@ -741,31 +1033,80 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
                         }
 
                         const issueBreakdown = getIssueBreakdown(checkStatus);
-                        const observationBreakdown = getObservationBreakdown(checkStatus);
+                        const reviewedBreakdown = getReviewedBreakdown(checkStatus);
+                        const confirmedAbnormal = toPositiveCount(checkStatus.confirmed_abnormal ?? checkStatus.confirmedAbnormal);
+                        const dismissedCount = toPositiveCount(checkStatus.dismissed_count ?? checkStatus.dismissedCount);
+                        const reviewedCount = toPositiveCount(
+                          checkStatus.reviewed_count ??
+                          checkStatus.reviewedCount ??
+                          (confirmedAbnormal + dismissedCount)
+                        );
 
-                        if (checkStatus.total === 0 && observationBreakdown.length === 0) {
+                        if (checkStatus.total === 0 && reviewedBreakdown.length === 0) {
                           return (
-                            <span className="status-pill green">
-                              <CheckCircle size={14} />
-                              <span>无待复核项</span>
-                            </span>
+                            <div className="report-card-status-stack">
+                              {reviewedCount > 0 && (
+                                <span className="status-pill green strong">
+                                  <CheckCircle size={14} />
+                                  <span>已复核 {reviewedCount}</span>
+                                </span>
+                              )}
+                              <span className="status-pill green">
+                                <CheckCircle size={14} />
+                                <span>无待复核项</span>
+                              </span>
+                            </div>
                           );
                         }
 
                         if (checkStatus.total === 0) {
-                          const primaryObservation = observationBreakdown[0];
-                          const remainingObservations = observationBreakdown.slice(1);
+                          const primaryReviewed = reviewedBreakdown[0];
+                          const remainingReviewed = reviewedBreakdown.slice(1);
+
+                          if (reviewedCount === 0) {
+                            return (
+                              <div className="report-card-status-stack">
+                                <span className="status-pill amber">
+                                  <AlertCircle size={14} />
+                                  <span>{primaryReviewed.label} {primaryReviewed.count}</span>
+                                </span>
+                                {remainingReviewed.length > 0 && (
+                                  <div className="status-breakdown" aria-label="已确认状态">
+                                    {remainingReviewed.map((item) => (
+                                      <span key={item.key} className={`status-mini-pill ${item.tone || 'neutral'}`}>
+                                        {item.label} {item.count}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }
 
                           return (
                             <div className="report-card-status-stack">
-                              <span className="status-pill amber">
-                                <AlertCircle size={14} />
-                                <span>{primaryObservation.label} {primaryObservation.count}</span>
+                              <span className="status-pill green strong">
+                                <CheckCircle size={14} />
+                                  <span>
+                                    {confirmedAbnormal > 0
+                                    ? `已复核·问题 ${confirmedAbnormal}`
+                                    : `已复核 ${reviewedCount}`}
+                                </span>
                               </span>
-                              {remainingObservations.length > 0 && (
+                              <div className="status-breakdown" aria-label="已复核状态">
+                                {confirmedAbnormal === 0 && (
+                                  <span className="status-mini-pill success">
+                                    无待复核项
+                                  </span>
+                                )}
+                                <span className={`status-mini-pill ${primaryReviewed.tone || 'neutral'}`}>
+                                  {primaryReviewed.label} {primaryReviewed.count}
+                                </span>
+                              </div>
+                              {remainingReviewed.length > 0 && (
                                 <div className="status-breakdown" aria-label="已确认状态">
-                                  {remainingObservations.map((item) => (
-                                    <span key={item.key} className="status-mini-pill neutral">
+                                  {remainingReviewed.map((item) => (
+                                    <span key={item.key} className={`status-mini-pill ${item.tone || 'neutral'}`}>
                                       {item.label} {item.count}
                                     </span>
                                   ))}
@@ -781,18 +1122,23 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
                               <AlertCircle size={14} />
                               <span>待复核 {checkStatus.total}</span>
                             </span>
-                            {(issueBreakdown.length > 0 || observationBreakdown.length > 0) && (
+                            {(issueBreakdown.length > 0 || reviewedBreakdown.length > 0 || reviewedCount > 0) && (
                               <div className="status-breakdown" aria-label="状态明细">
                                 {issueBreakdown.map((item) => (
                                   <span key={item.key} className="status-mini-pill danger">
                                     {item.label} {item.count}
                                   </span>
                                 ))}
-                                {observationBreakdown.map((item) => (
-                                  <span key={item.key} className="status-mini-pill neutral">
+                                {reviewedBreakdown.map((item) => (
+                                  <span key={item.key} className={`status-mini-pill ${item.tone || 'neutral'}`}>
                                     {item.label} {item.count}
                                   </span>
                                 ))}
+                                {reviewedCount > 0 && reviewedBreakdown.length === 0 && (
+                                  <span className="status-mini-pill success">
+                                    已复核 {reviewedCount}
+                                  </span>
+                                )}
                               </div>
                             )}
                           </div>

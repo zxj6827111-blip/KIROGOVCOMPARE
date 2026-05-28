@@ -19,9 +19,35 @@ import { checkStoragePathExists } from '../services/SourceFileGuardService';
 import { hasParsedContent } from '../utils/parsedContent';
 import { getReportContentQuality } from '../utils/reportMaintenance';
 import { collectReportSectionTitleIssues } from '../utils/sectionTitleQuality';
-import { HIERARCHY_COMPLETENESS_SQL_EXCLUSION } from '../utils/consistencyReviewSemantics';
+import {
+  HIERARCHY_COMPLETENESS_SQL_EXCLUSION,
+  HIERARCHY_COMPLETENESS_SQL_MATCH,
+  HIERARCHY_MISSING_FIELD_SQL_MATCH,
+  HIERARCHY_MISSING_REPORT_SQL_MATCH,
+} from '../utils/consistencyReviewSemantics';
 
 const router = express.Router();
+
+const HIERARCHY_DELTA_ISSUE_SQL =
+  `group_key = 'hierarchy'
+    AND NOT (${HIERARCHY_COMPLETENESS_SQL_MATCH})
+    AND auto_status = 'FAIL'
+    AND ABS(COALESCE(delta, 0)) > COALESCE(tolerance, 0)`;
+const CONSISTENCY_GROUP_SQL = "group_key IN ('table2','table3','table4','text','hierarchy')";
+const CONSISTENCY_OTHER_SQL = `${CONSISTENCY_GROUP_SQL} AND NOT (${HIERARCHY_DELTA_ISSUE_SQL}) AND NOT (${HIERARCHY_COMPLETENESS_SQL_MATCH})`;
+const HIERARCHY_REVIEW_ISSUE_SQL = `(${HIERARCHY_DELTA_ISSUE_SQL}) OR (${HIERARCHY_COMPLETENESS_SQL_MATCH})`;
+const HIERARCHY_MISSING_REPORT_UNITS_SQL = `
+  CASE
+    WHEN jsonb_typeof(evidence_json->'values'->'missingReports') = 'array'
+      THEN jsonb_array_length(evidence_json->'values'->'missingReports')
+    ELSE 0
+  END`;
+const HIERARCHY_MISSING_FIELD_UNITS_SQL = `
+  CASE
+    WHEN jsonb_typeof(evidence_json->'values'->'missingMetricChildren') = 'array'
+      THEN jsonb_array_length(evidence_json->'values'->'missingMetricChildren')
+    ELSE 0
+  END`;
 
 const tempDir = UPLOADS_TMP_DIR;
 if (!fs.existsSync(tempDir)) {
@@ -1622,9 +1648,59 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
         COUNT(*) FILTER (
           WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
             AND auto_status IN ('FAIL', 'UNCERTAIN')
-            AND group_key IN ('table2','table3','table4','text','hierarchy')
+            AND ${CONSISTENCY_GROUP_SQL}
             AND COALESCE(human_status, 'pending') = 'pending'
         ) AS consistency,
+        COUNT(*) FILTER (
+          WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+            AND auto_status IN ('FAIL', 'UNCERTAIN')
+            AND (${HIERARCHY_REVIEW_ISSUE_SQL})
+            AND COALESCE(human_status, 'pending') = 'pending'
+        ) AS hierarchy_pending,
+        COUNT(*) FILTER (
+          WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+            AND auto_status IN ('FAIL', 'UNCERTAIN')
+            AND (${HIERARCHY_COMPLETENESS_SQL_MATCH})
+            AND COALESCE(human_status, 'pending') = 'pending'
+        ) AS hierarchy_completeness,
+        COUNT(*) FILTER (
+          WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+            AND auto_status IN ('FAIL', 'UNCERTAIN')
+            AND (${HIERARCHY_MISSING_REPORT_SQL_MATCH})
+            AND COALESCE(human_status, 'pending') = 'pending'
+        ) AS hierarchy_missing_report,
+        COALESCE(SUM(
+          CASE
+            WHEN ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
+              AND (${HIERARCHY_MISSING_REPORT_SQL_MATCH})
+              AND COALESCE(human_status, 'pending') = 'pending'
+            THEN ${HIERARCHY_MISSING_REPORT_UNITS_SQL}
+            ELSE 0
+          END
+        ), 0) AS hierarchy_missing_report_units,
+        COUNT(*) FILTER (
+          WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+            AND auto_status IN ('FAIL', 'UNCERTAIN')
+            AND (${HIERARCHY_MISSING_FIELD_SQL_MATCH})
+            AND COALESCE(human_status, 'pending') = 'pending'
+        ) AS hierarchy_missing_field,
+        COALESCE(SUM(
+          CASE
+            WHEN ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
+              AND (${HIERARCHY_MISSING_FIELD_SQL_MATCH})
+              AND COALESCE(human_status, 'pending') = 'pending'
+            THEN ${HIERARCHY_MISSING_FIELD_UNITS_SQL}
+            ELSE 0
+          END
+        ), 0) AS hierarchy_missing_field_units,
+        COUNT(*) FILTER (
+          WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+            AND auto_status IN ('FAIL', 'UNCERTAIN')
+            AND ${CONSISTENCY_OTHER_SQL}
+            AND COALESCE(human_status, 'pending') = 'pending'
+        ) AS consistency_other,
         COUNT(*) FILTER (
           WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
             AND auto_status IN ('FAIL', 'UNCERTAIN')
@@ -1655,9 +1731,74 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
             AND COALESCE(human_status, 'pending') = 'confirmed'
         ) AS confirmed_abnormal,
         COUNT(*) FILTER (
-          WHERE group_key = 'hierarchy'
-            AND auto_status = 'FAIL'
-            AND ABS(COALESCE(delta, 0)) > COALESCE(tolerance, 0)
+          WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+            AND auto_status IN ('FAIL', 'UNCERTAIN')
+            AND ${CONSISTENCY_OTHER_SQL}
+            AND COALESCE(human_status, 'pending') = 'confirmed'
+        ) AS confirmed_consistency,
+        COUNT(*) FILTER (
+          WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+            AND auto_status IN ('FAIL', 'UNCERTAIN')
+            AND (${HIERARCHY_REVIEW_ISSUE_SQL})
+            AND COALESCE(human_status, 'pending') = 'confirmed'
+        ) AS confirmed_hierarchy,
+        COUNT(*) FILTER (
+          WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+            AND (${HIERARCHY_DELTA_ISSUE_SQL})
+            AND COALESCE(human_status, 'pending') = 'confirmed'
+        ) AS confirmed_hierarchy_delta,
+        COUNT(*) FILTER (
+          WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+            AND auto_status IN ('FAIL', 'UNCERTAIN')
+            AND (${HIERARCHY_COMPLETENESS_SQL_MATCH})
+            AND COALESCE(human_status, 'pending') = 'confirmed'
+        ) AS confirmed_hierarchy_completeness,
+        COUNT(*) FILTER (
+          WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+            AND auto_status IN ('FAIL', 'UNCERTAIN')
+            AND (${HIERARCHY_MISSING_REPORT_SQL_MATCH})
+            AND COALESCE(human_status, 'pending') = 'confirmed'
+        ) AS confirmed_hierarchy_missing_report,
+        COALESCE(SUM(
+          CASE
+            WHEN ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
+              AND (${HIERARCHY_MISSING_REPORT_SQL_MATCH})
+              AND COALESCE(human_status, 'pending') = 'confirmed'
+            THEN ${HIERARCHY_MISSING_REPORT_UNITS_SQL}
+            ELSE 0
+          END
+        ), 0) AS confirmed_hierarchy_missing_report_units,
+        COUNT(*) FILTER (
+          WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+            AND auto_status IN ('FAIL', 'UNCERTAIN')
+            AND (${HIERARCHY_MISSING_FIELD_SQL_MATCH})
+            AND COALESCE(human_status, 'pending') = 'confirmed'
+        ) AS confirmed_hierarchy_missing_field,
+        COALESCE(SUM(
+          CASE
+            WHEN ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
+              AND (${HIERARCHY_MISSING_FIELD_SQL_MATCH})
+              AND COALESCE(human_status, 'pending') = 'confirmed'
+            THEN ${HIERARCHY_MISSING_FIELD_UNITS_SQL}
+            ELSE 0
+          END
+        ), 0) AS confirmed_hierarchy_missing_field_units,
+        COUNT(*) FILTER (
+          WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+            AND auto_status IN ('FAIL', 'UNCERTAIN')
+            AND COALESCE(human_status, 'pending') IN ('confirmed', 'dismissed')
+        ) AS reviewed_count,
+        COUNT(*) FILTER (
+          WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+            AND auto_status IN ('FAIL', 'UNCERTAIN')
+            AND COALESCE(human_status, 'pending') = 'dismissed'
+        ) AS dismissed_count,
+        COUNT(*) FILTER (
+          WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+            AND (${HIERARCHY_DELTA_ISSUE_SQL})
+            AND COALESCE(human_status, 'pending') = 'pending'
         ) AS hierarchy_delta
       FROM requested_versions rv
       LEFT JOIN report_consistency_items ci ON ci.report_version_id = rv.report_version_id
@@ -1678,12 +1819,34 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
     const sectionTitleIssueCount = countDynamicSectionTitleIssues(row.parsed_json, Number(row.section_title_active_issue_count || 0));
     const exactCounts = exactCountsMap.get(versionId);
     const baseTotal = Number(exactCounts?.total ?? row.check_total ?? 0);
+    const baseConsistency = Number(exactCounts?.consistency ?? row.check_structure ?? 0);
     const baseQuality = Number(exactCounts?.quality ?? row.check_quality ?? 0);
     const baseQualityReview = Number(
       exactCounts?.quality_review ?? (Number(row.check_visual || 0) + Number(row.check_quality || 0))
     );
     const confirmedAbnormal = Number(exactCounts?.confirmed_abnormal ?? 0);
+    const confirmedConsistency = Number(exactCounts?.confirmed_consistency ?? 0);
+    const confirmedHierarchyDelta = Number(exactCounts?.confirmed_hierarchy_delta ?? 0);
+    const confirmedHierarchyCompleteness = Number(exactCounts?.confirmed_hierarchy_completeness ?? 0);
+    const confirmedHierarchyMissingReport = Number(exactCounts?.confirmed_hierarchy_missing_report ?? 0);
+    const confirmedHierarchyMissingReportUnits = Number(exactCounts?.confirmed_hierarchy_missing_report_units ?? 0);
+    const confirmedHierarchyMissingField = Number(exactCounts?.confirmed_hierarchy_missing_field ?? 0);
+    const confirmedHierarchyMissingFieldUnits = Number(exactCounts?.confirmed_hierarchy_missing_field_units ?? 0);
+    const confirmedHierarchy = Number(
+      exactCounts?.confirmed_hierarchy ?? (confirmedHierarchyDelta + confirmedHierarchyCompleteness)
+    );
+    const reviewedCount = Number(exactCounts?.reviewed_count ?? confirmedAbnormal);
+    const dismissedCount = Number(exactCounts?.dismissed_count ?? 0);
     const hierarchyDelta = Number(exactCounts?.hierarchy_delta ?? 0);
+    const hierarchyCompleteness = Number(exactCounts?.hierarchy_completeness ?? 0);
+    const hierarchyMissingReport = Number(exactCounts?.hierarchy_missing_report ?? 0);
+    const hierarchyMissingReportUnits = Number(exactCounts?.hierarchy_missing_report_units ?? 0);
+    const hierarchyMissingField = Number(exactCounts?.hierarchy_missing_field ?? 0);
+    const hierarchyMissingFieldUnits = Number(exactCounts?.hierarchy_missing_field_units ?? 0);
+    const hierarchyPending = Number(exactCounts?.hierarchy_pending ?? (hierarchyDelta + hierarchyCompleteness));
+    const consistencyOther = Number(
+      exactCounts?.consistency_other ?? Math.max(baseConsistency - hierarchyPending, 0)
+    );
     if (versionId && !checked) {
       missingVersionIds.push(versionId);
     }
@@ -1696,10 +1859,27 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
       visual: checked ? Number(exactCounts?.visual ?? row.check_visual ?? 0) : null,
       structure: checked ? Number(exactCounts?.structure ?? row.check_structure ?? 0) : null,
       quality: checked ? baseQuality + sectionTitleIssueCount : (sectionTitleIssueCount > 0 ? sectionTitleIssueCount : null),
-      consistency: checked ? Number(exactCounts?.consistency ?? row.check_structure ?? 0) : null,
+      consistency: checked ? baseConsistency : null,
+      consistency_other: checked ? consistencyOther : null,
+      hierarchy_pending: checked ? hierarchyPending : 0,
       quality_review: checked ? baseQualityReview + sectionTitleIssueCount : (sectionTitleIssueCount > 0 ? sectionTitleIssueCount : null),
       confirmed_abnormal: checked ? confirmedAbnormal : 0,
-      hierarchy_delta: checked ? hierarchyDelta : 0
+      confirmed_consistency: checked ? confirmedConsistency : 0,
+      confirmed_hierarchy: checked ? confirmedHierarchy : 0,
+      confirmed_hierarchy_delta: checked ? confirmedHierarchyDelta : 0,
+      confirmed_hierarchy_completeness: checked ? confirmedHierarchyCompleteness : 0,
+      confirmed_hierarchy_missing_report: checked ? confirmedHierarchyMissingReport : 0,
+      confirmed_hierarchy_missing_report_units: checked ? confirmedHierarchyMissingReportUnits : 0,
+      confirmed_hierarchy_missing_field: checked ? confirmedHierarchyMissingField : 0,
+      confirmed_hierarchy_missing_field_units: checked ? confirmedHierarchyMissingFieldUnits : 0,
+      reviewed_count: checked ? reviewedCount : 0,
+      dismissed_count: checked ? dismissedCount : 0,
+      hierarchy_delta: checked ? hierarchyDelta : 0,
+      hierarchy_completeness: checked ? hierarchyCompleteness : 0,
+      hierarchy_missing_report: checked ? hierarchyMissingReport : 0,
+      hierarchy_missing_report_units: checked ? hierarchyMissingReportUnits : 0,
+      hierarchy_missing_field: checked ? hierarchyMissingField : 0,
+      hierarchy_missing_field_units: checked ? hierarchyMissingFieldUnits : 0
     };
   }
 
@@ -1717,9 +1897,59 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
           COUNT(*) FILTER (
             WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
               AND auto_status IN ('FAIL', 'UNCERTAIN')
-              AND group_key IN ('table2','table3','table4','text','hierarchy')
+              AND ${CONSISTENCY_GROUP_SQL}
               AND COALESCE(human_status, 'pending') = 'pending'
           ) AS consistency,
+          COUNT(*) FILTER (
+            WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
+              AND (${HIERARCHY_REVIEW_ISSUE_SQL})
+              AND COALESCE(human_status, 'pending') = 'pending'
+          ) AS hierarchy_pending,
+          COUNT(*) FILTER (
+            WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
+              AND (${HIERARCHY_COMPLETENESS_SQL_MATCH})
+              AND COALESCE(human_status, 'pending') = 'pending'
+          ) AS hierarchy_completeness,
+          COUNT(*) FILTER (
+            WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
+              AND (${HIERARCHY_MISSING_REPORT_SQL_MATCH})
+              AND COALESCE(human_status, 'pending') = 'pending'
+          ) AS hierarchy_missing_report,
+          COALESCE(SUM(
+            CASE
+              WHEN ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+                AND auto_status IN ('FAIL', 'UNCERTAIN')
+                AND (${HIERARCHY_MISSING_REPORT_SQL_MATCH})
+                AND COALESCE(human_status, 'pending') = 'pending'
+              THEN ${HIERARCHY_MISSING_REPORT_UNITS_SQL}
+              ELSE 0
+            END
+          ), 0) AS hierarchy_missing_report_units,
+          COUNT(*) FILTER (
+            WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
+              AND (${HIERARCHY_MISSING_FIELD_SQL_MATCH})
+              AND COALESCE(human_status, 'pending') = 'pending'
+          ) AS hierarchy_missing_field,
+          COALESCE(SUM(
+            CASE
+              WHEN ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+                AND auto_status IN ('FAIL', 'UNCERTAIN')
+                AND (${HIERARCHY_MISSING_FIELD_SQL_MATCH})
+                AND COALESCE(human_status, 'pending') = 'pending'
+              THEN ${HIERARCHY_MISSING_FIELD_UNITS_SQL}
+              ELSE 0
+            END
+          ), 0) AS hierarchy_missing_field_units,
+          COUNT(*) FILTER (
+            WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
+              AND ${CONSISTENCY_OTHER_SQL}
+              AND COALESCE(human_status, 'pending') = 'pending'
+          ) AS consistency_other,
           COUNT(*) FILTER (
             WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
               AND auto_status IN ('FAIL', 'UNCERTAIN')
@@ -1750,9 +1980,74 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
               AND COALESCE(human_status, 'pending') = 'confirmed'
           ) AS confirmed_abnormal,
           COUNT(*) FILTER (
-            WHERE group_key = 'hierarchy'
-              AND auto_status = 'FAIL'
-              AND ABS(COALESCE(delta, 0)) > COALESCE(tolerance, 0)
+            WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
+              AND ${CONSISTENCY_OTHER_SQL}
+              AND COALESCE(human_status, 'pending') = 'confirmed'
+          ) AS confirmed_consistency,
+          COUNT(*) FILTER (
+            WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
+              AND (${HIERARCHY_REVIEW_ISSUE_SQL})
+              AND COALESCE(human_status, 'pending') = 'confirmed'
+          ) AS confirmed_hierarchy,
+          COUNT(*) FILTER (
+            WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND (${HIERARCHY_DELTA_ISSUE_SQL})
+              AND COALESCE(human_status, 'pending') = 'confirmed'
+          ) AS confirmed_hierarchy_delta,
+          COUNT(*) FILTER (
+            WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
+              AND (${HIERARCHY_COMPLETENESS_SQL_MATCH})
+              AND COALESCE(human_status, 'pending') = 'confirmed'
+          ) AS confirmed_hierarchy_completeness,
+          COUNT(*) FILTER (
+            WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
+              AND (${HIERARCHY_MISSING_REPORT_SQL_MATCH})
+              AND COALESCE(human_status, 'pending') = 'confirmed'
+          ) AS confirmed_hierarchy_missing_report,
+          COALESCE(SUM(
+            CASE
+              WHEN ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+                AND auto_status IN ('FAIL', 'UNCERTAIN')
+                AND (${HIERARCHY_MISSING_REPORT_SQL_MATCH})
+                AND COALESCE(human_status, 'pending') = 'confirmed'
+              THEN ${HIERARCHY_MISSING_REPORT_UNITS_SQL}
+              ELSE 0
+            END
+          ), 0) AS confirmed_hierarchy_missing_report_units,
+          COUNT(*) FILTER (
+            WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
+              AND (${HIERARCHY_MISSING_FIELD_SQL_MATCH})
+              AND COALESCE(human_status, 'pending') = 'confirmed'
+          ) AS confirmed_hierarchy_missing_field,
+          COALESCE(SUM(
+            CASE
+              WHEN ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+                AND auto_status IN ('FAIL', 'UNCERTAIN')
+                AND (${HIERARCHY_MISSING_FIELD_SQL_MATCH})
+                AND COALESCE(human_status, 'pending') = 'confirmed'
+              THEN ${HIERARCHY_MISSING_FIELD_UNITS_SQL}
+              ELSE 0
+            END
+          ), 0) AS confirmed_hierarchy_missing_field_units,
+          COUNT(*) FILTER (
+            WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
+              AND COALESCE(human_status, 'pending') IN ('confirmed', 'dismissed')
+          ) AS reviewed_count,
+          COUNT(*) FILTER (
+            WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND auto_status IN ('FAIL', 'UNCERTAIN')
+              AND COALESCE(human_status, 'pending') = 'dismissed'
+          ) AS dismissed_count,
+          COUNT(*) FILTER (
+            WHERE ${HIERARCHY_COMPLETENESS_SQL_EXCLUSION}
+              AND (${HIERARCHY_DELTA_ISSUE_SQL})
+              AND COALESCE(human_status, 'pending') = 'pending'
           ) AS hierarchy_delta
         FROM report_consistency_items
         WHERE report_version_id = ANY($1::int[])
@@ -1786,7 +2081,24 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
         const quality = Number(counts.quality || 0);
         const qualityReview = Number(counts.quality_review || 0);
         const confirmedAbnormal = Number(counts.confirmed_abnormal || 0);
+        const confirmedConsistency = Number(counts.confirmed_consistency || 0);
+        const confirmedHierarchyDelta = Number(counts.confirmed_hierarchy_delta || 0);
+        const confirmedHierarchyCompleteness = Number(counts.confirmed_hierarchy_completeness || 0);
+        const confirmedHierarchyMissingReport = Number(counts.confirmed_hierarchy_missing_report || 0);
+        const confirmedHierarchyMissingReportUnits = Number(counts.confirmed_hierarchy_missing_report_units || 0);
+        const confirmedHierarchyMissingField = Number(counts.confirmed_hierarchy_missing_field || 0);
+        const confirmedHierarchyMissingFieldUnits = Number(counts.confirmed_hierarchy_missing_field_units || 0);
+        const confirmedHierarchy = Number(counts.confirmed_hierarchy || confirmedHierarchyDelta + confirmedHierarchyCompleteness);
+        const reviewedCount = Number(counts.reviewed_count || confirmedAbnormal);
+        const dismissedCount = Number(counts.dismissed_count || 0);
         const hierarchyDelta = Number(counts.hierarchy_delta || 0);
+        const hierarchyCompleteness = Number(counts.hierarchy_completeness || 0);
+        const hierarchyMissingReport = Number(counts.hierarchy_missing_report || 0);
+        const hierarchyMissingReportUnits = Number(counts.hierarchy_missing_report_units || 0);
+        const hierarchyMissingField = Number(counts.hierarchy_missing_field || 0);
+        const hierarchyMissingFieldUnits = Number(counts.hierarchy_missing_field_units || 0);
+        const hierarchyPending = Number(counts.hierarchy_pending || hierarchyDelta + hierarchyCompleteness);
+        const consistencyOther = Number(counts.consistency_other || Math.max(consistency - hierarchyPending, 0));
         const sectionTitleIssueCount = countDynamicSectionTitleIssues(row.parsed_json, Number(row.section_title_active_issue_count || 0));
 
         result[String(reportId)] = {
@@ -1799,9 +2111,26 @@ async function buildBatchCheckStatus(reportIds: number[], user: AuthRequest['use
           structure,
           quality: quality + sectionTitleIssueCount,
           consistency,
+          consistency_other: consistencyOther,
+          hierarchy_pending: hierarchyPending,
           quality_review: qualityReview + sectionTitleIssueCount,
           confirmed_abnormal: confirmedAbnormal,
-          hierarchy_delta: hierarchyDelta
+          confirmed_consistency: confirmedConsistency,
+          confirmed_hierarchy: confirmedHierarchy,
+          confirmed_hierarchy_delta: confirmedHierarchyDelta,
+          confirmed_hierarchy_completeness: confirmedHierarchyCompleteness,
+          confirmed_hierarchy_missing_report: confirmedHierarchyMissingReport,
+          confirmed_hierarchy_missing_report_units: confirmedHierarchyMissingReportUnits,
+          confirmed_hierarchy_missing_field: confirmedHierarchyMissingField,
+          confirmed_hierarchy_missing_field_units: confirmedHierarchyMissingFieldUnits,
+          reviewed_count: reviewedCount,
+          dismissed_count: dismissedCount,
+          hierarchy_delta: hierarchyDelta,
+          hierarchy_completeness: hierarchyCompleteness,
+          hierarchy_missing_report: hierarchyMissingReport,
+          hierarchy_missing_report_units: hierarchyMissingReportUnits,
+          hierarchy_missing_field: hierarchyMissingField,
+          hierarchy_missing_field_units: hierarchyMissingFieldUnits
         };
       }
     }

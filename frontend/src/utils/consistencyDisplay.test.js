@@ -211,7 +211,7 @@ describe('consistency summary semantics', () => {
     });
   });
 
-  test('hierarchy completeness prompts stay outside pending review counts', () => {
+  test('hierarchy completeness prompts count as pending review items', () => {
     const group = normalizeConsistencyGroup({
       group_key: 'hierarchy',
       items: [
@@ -230,19 +230,29 @@ describe('consistency summary semantics', () => {
           autoStatus: 'UNCERTAIN',
           humanStatus: 'pending',
         }),
+        makeItem({
+          checkKey: 'hierarchy_no_child_reports',
+          autoStatus: 'UNCERTAIN',
+          humanStatus: 'pending',
+        }),
+        makeItem({
+          checkKey: 'hierarchy_no_child_metrics',
+          autoStatus: 'UNCERTAIN',
+          humanStatus: 'pending',
+        }),
       ],
     });
     const summary = summarizeConsistencyGroups([group]);
 
     expect(group.stats).toMatchObject({
-      ruleCount: 3,
+      ruleCount: 5,
       problemCount: 1,
-      pendingCount: 1,
+      pendingCount: 5,
     });
     expect(summary).toMatchObject({
-      ruleCount: 3,
+      ruleCount: 5,
       problemCount: 1,
-      pendingCount: 1,
+      pendingCount: 5,
     });
   });
 });

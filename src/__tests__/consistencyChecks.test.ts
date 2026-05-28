@@ -128,7 +128,7 @@ describe('ConsistencyCheckService', () => {
             });
         });
 
-        it('keeps hierarchy completeness prompts visible but outside actionable review counts', () => {
+        it('keeps hierarchy completeness prompts visible and inside actionable review counts', () => {
             const summary = buildConsistencyRunSummary([
                 {
                     groupKey: 'hierarchy',
@@ -157,11 +157,11 @@ describe('ConsistencyCheckService', () => {
                     pending: 3,
                 },
                 active: {
-                    reviewCount: 1,
+                    reviewCount: 3,
                 },
             });
             expect(summary.byGroupKey.hierarchy).toMatchObject({
-                reviewCount: 1,
+                reviewCount: 3,
                 uncertain: 2,
             });
         });
@@ -330,7 +330,25 @@ describe('ConsistencyCheckService', () => {
                 group_key: 'hierarchy',
                 check_key: 'hierarchy_missing_child_reports',
                 auto_status: 'UNCERTAIN',
-            })).toBe('hierarchy_completeness_prompt');
+            })).toBe('hierarchy_missing_report');
+
+            expect(classifyConsistencyIssueType({
+                group_key: 'hierarchy',
+                check_key: 'hierarchy_no_child_reports',
+                auto_status: 'UNCERTAIN',
+            })).toBe('hierarchy_missing_report');
+
+            expect(classifyConsistencyIssueType({
+                group_key: 'hierarchy',
+                check_key: 'hierarchy_missing_child_metrics',
+                auto_status: 'UNCERTAIN',
+            })).toBe('hierarchy_missing_field');
+
+            expect(classifyConsistencyIssueType({
+                group_key: 'hierarchy',
+                check_key: 'hierarchy_no_child_metrics',
+                auto_status: 'UNCERTAIN',
+            })).toBe('hierarchy_missing_field');
         });
 
         it('classifies quality empty, text extraction and structure items', () => {
@@ -1311,8 +1329,7 @@ describe('ConsistencyCheckService', () => {
                         text.includes('AS total') &&
                         text.includes("COALESCE(human_status, 'pending') = 'pending'")
                     ) {
-                        expect(text).toContain('hierarchy_missing_child_reports');
-                        expect(text).toContain('hierarchy_missing_child_metrics');
+                        expect(text).toContain('WHERE TRUE');
                         return { rows: [{ total: '2', visual: '0', structure: '2', quality: '0' }] };
                     }
                     return { rows: [] };
@@ -1381,8 +1398,7 @@ describe('ConsistencyCheckService', () => {
                         text.includes('AS total') &&
                         text.includes("COALESCE(human_status, 'pending') = 'pending'")
                     ) {
-                        expect(text).toContain('hierarchy_missing_child_reports');
-                        expect(text).toContain('hierarchy_missing_child_metrics');
+                        expect(text).toContain('WHERE TRUE');
                         return { rows: [{ total: '1', visual: '0', structure: '1', quality: '0' }] };
                     }
                     return { rows: [] };
