@@ -233,12 +233,21 @@ describe('Report batch check status route', () => {
           report_version_id: 4477,
           total: '0',
           consistency: '0',
+          hierarchy_pending: '0',
+          consistency_other: '0',
           visual: '0',
           quality: '0',
           quality_review: '0',
           structure: '0',
           confirmed_abnormal: '200',
-          hierarchy_delta: '81',
+          confirmed_consistency: '119',
+          confirmed_hierarchy: '81',
+          confirmed_hierarchy_delta: '81',
+          confirmed_hierarchy_completeness: '0',
+          reviewed_count: '203',
+          dismissed_count: '3',
+          hierarchy_delta: '0',
+          hierarchy_completeness: '0',
         }],
       });
 
@@ -251,16 +260,34 @@ describe('Report batch check status route', () => {
       checked: true,
       total: 0,
       consistency: 0,
+      hierarchy_pending: 0,
+      consistency_other: 0,
       structure: 0,
       confirmed_abnormal: 200,
-      hierarchy_delta: 81,
+      confirmed_consistency: 119,
+      confirmed_hierarchy: 81,
+      confirmed_hierarchy_delta: 81,
+      confirmed_hierarchy_completeness: 0,
+      reviewed_count: 203,
+      dismissed_count: 3,
+      hierarchy_delta: 0,
+      hierarchy_completeness: 0,
     });
     expect(mockedQuery.mock.calls[1][0]).toContain("COALESCE(human_status, 'pending') = 'pending'");
+    expect(mockedQuery.mock.calls[1][0]).toContain('consistency_other');
+    expect(mockedQuery.mock.calls[1][0]).toContain('hierarchy_pending');
     expect(mockedQuery.mock.calls[1][0]).toContain('confirmed_abnormal');
+    expect(mockedQuery.mock.calls[1][0]).toContain('confirmed_consistency');
+    expect(mockedQuery.mock.calls[1][0]).toContain('confirmed_hierarchy');
+    expect(mockedQuery.mock.calls[1][0]).toContain('confirmed_hierarchy_delta');
+    expect(mockedQuery.mock.calls[1][0]).toContain('confirmed_hierarchy_completeness');
+    expect(mockedQuery.mock.calls[1][0]).toContain('reviewed_count');
+    expect(mockedQuery.mock.calls[1][0]).toContain('dismissed_count');
     expect(mockedQuery.mock.calls[1][0]).toContain('hierarchy_delta');
+    expect(mockedQuery.mock.calls[1][0]).toContain('hierarchy_completeness');
   });
 
-  it('keeps pending FAIL and UNCERTAIN in pending totals and reports hierarchy delta separately', async () => {
+  it('keeps pending FAIL and UNCERTAIN in pending totals and exposes non-overlapping issue groups', async () => {
     mockedQuery
       .mockResolvedValueOnce({
         rows: [{
@@ -280,14 +307,23 @@ describe('Report batch check status route', () => {
       .mockResolvedValueOnce({
         rows: [{
           report_version_id: 4451,
-          total: '109',
-          consistency: '109',
+          total: '90',
+          consistency: '90',
+          hierarchy_pending: '75',
+          consistency_other: '15',
           visual: '0',
           quality: '0',
           quality_review: '0',
-          structure: '109',
+          structure: '90',
           confirmed_abnormal: '0',
-          hierarchy_delta: '63',
+          confirmed_consistency: '0',
+          confirmed_hierarchy: '0',
+          confirmed_hierarchy_delta: '0',
+          confirmed_hierarchy_completeness: '0',
+          reviewed_count: '0',
+          dismissed_count: '0',
+          hierarchy_delta: '75',
+          hierarchy_completeness: '0',
         }],
       });
 
@@ -298,11 +334,148 @@ describe('Report batch check status route', () => {
     expect(response.status).toBe(200);
     expect(response.body['4762']).toMatchObject({
       checked: true,
-      total: 109,
-      consistency: 109,
-      structure: 109,
+      total: 90,
+      consistency: 90,
+      hierarchy_pending: 75,
+      consistency_other: 15,
+      structure: 90,
       confirmed_abnormal: 0,
-      hierarchy_delta: 63,
+      confirmed_consistency: 0,
+      confirmed_hierarchy: 0,
+      confirmed_hierarchy_delta: 0,
+      hierarchy_delta: 75,
+      hierarchy_completeness: 0,
+    });
+  });
+
+  it('uses hierarchy delta as hierarchy issue count and keeps uncertain hierarchy in consistency bucket', async () => {
+    mockedQuery
+      .mockResolvedValueOnce({
+        rows: [{
+          report_id: 215,
+          version_id: 210,
+          review_status: 'published',
+          has_content_db: true,
+          check_total: 0,
+          check_visual: 0,
+          check_structure: 0,
+          check_quality: 0,
+          checks_updated_at: '2026-05-27T09:29:38.288Z',
+          parsed_json: { sections: [] },
+          section_title_active_issue_count: 0,
+        }],
+      })
+      .mockResolvedValueOnce({
+        rows: [{
+          report_version_id: 210,
+          total: '0',
+          consistency: '0',
+          hierarchy_pending: '0',
+          consistency_other: '0',
+          visual: '0',
+          quality: '0',
+          quality_review: '0',
+          structure: '0',
+          confirmed_abnormal: '90',
+          confirmed_consistency: '15',
+          confirmed_hierarchy: '75',
+          confirmed_hierarchy_delta: '75',
+          confirmed_hierarchy_completeness: '0',
+          reviewed_count: '90',
+          dismissed_count: '0',
+          hierarchy_delta: '0',
+          hierarchy_completeness: '0',
+        }],
+      });
+
+    const response = await request(buildApp())
+      .post('/api/reports/batch-check-status')
+      .send({ report_ids: [215] });
+
+    expect(response.status).toBe(200);
+    expect(response.body['215']).toMatchObject({
+      checked: true,
+      total: 0,
+      confirmed_abnormal: 90,
+      confirmed_consistency: 15,
+      confirmed_hierarchy: 75,
+      confirmed_hierarchy_delta: 75,
+      confirmed_hierarchy_completeness: 0,
+      reviewed_count: 90,
+      dismissed_count: 0,
+    });
+    expect(mockedQuery.mock.calls[1][0]).toContain('ABS(COALESCE(delta, 0)) > COALESCE(tolerance, 0)');
+    expect(mockedQuery.mock.calls[1][0]).toContain("group_key IN ('table2','table3','table4','text','hierarchy')");
+    expect(mockedQuery.mock.calls[1][0]).toContain('hierarchy_missing_report_units');
+    expect(mockedQuery.mock.calls[1][0]).toContain('jsonb_array_length');
+  });
+
+  it('exposes hierarchy completeness separately from hierarchy delta and consistency', async () => {
+    mockedQuery
+      .mockResolvedValueOnce({
+        rows: [{
+          report_id: 217,
+          version_id: 3756,
+          review_status: 'published',
+          has_content_db: true,
+          check_total: 2,
+          check_visual: 0,
+          check_structure: 1,
+          check_quality: 1,
+          checks_updated_at: '2026-05-27T11:11:12.408Z',
+          parsed_json: { sections: [] },
+          section_title_active_issue_count: 0,
+        }],
+      })
+      .mockResolvedValueOnce({
+        rows: [{
+          report_version_id: 3756,
+          total: '2',
+          consistency: '1',
+          hierarchy_pending: '1',
+          hierarchy_completeness: '1',
+          hierarchy_missing_report: '1',
+          hierarchy_missing_report_units: '56',
+          hierarchy_missing_field: '0',
+          hierarchy_missing_field_units: '0',
+          consistency_other: '0',
+          visual: '0',
+          quality: '1',
+          quality_review: '1',
+          structure: '1',
+          confirmed_abnormal: '0',
+          confirmed_consistency: '0',
+          confirmed_hierarchy: '0',
+          confirmed_hierarchy_delta: '0',
+          confirmed_hierarchy_completeness: '0',
+          confirmed_hierarchy_missing_report: '0',
+          confirmed_hierarchy_missing_report_units: '0',
+          confirmed_hierarchy_missing_field: '0',
+          confirmed_hierarchy_missing_field_units: '0',
+          reviewed_count: '0',
+          dismissed_count: '0',
+          hierarchy_delta: '0',
+        }],
+      });
+
+    const response = await request(buildApp())
+      .post('/api/reports/batch-check-status')
+      .send({ report_ids: [217] });
+
+    expect(response.status).toBe(200);
+    expect(response.body['217']).toMatchObject({
+      checked: true,
+      total: 2,
+      consistency: 1,
+      consistency_other: 0,
+      hierarchy_pending: 1,
+      hierarchy_delta: 0,
+      hierarchy_completeness: 1,
+      hierarchy_missing_report: 1,
+      hierarchy_missing_report_units: 56,
+      hierarchy_missing_field: 0,
+      hierarchy_missing_field_units: 0,
+      quality_review: 1,
     });
   });
 });

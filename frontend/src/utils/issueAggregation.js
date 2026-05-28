@@ -3,7 +3,6 @@ import {
   getEffectiveConsistencyHumanStatus,
   getConsistencyGroupKey,
   isActionableConsistencyReviewItem,
-  isHierarchyCompletenessPrompt,
   sortConsistencyItems,
 } from './consistencyDisplay';
 import {
@@ -77,8 +76,7 @@ const resolveDisplayScopeKey = (groupKey, scope) => {
 const isRawFailItem = (item) => getAutoStatus(item) === 'FAIL';
 
 const isReviewableItem = (item) =>
-  (getAutoStatus(item) === 'FAIL' || getAutoStatus(item) === 'UNCERTAIN') &&
-  !isHierarchyCompletenessPrompt(item);
+  getAutoStatus(item) === 'FAIL' || getAutoStatus(item) === 'UNCERTAIN';
 
 const isActiveProblemItem = (item) =>
   getAutoStatus(item) === 'FAIL' && getHumanStatus(item) !== 'dismissed';

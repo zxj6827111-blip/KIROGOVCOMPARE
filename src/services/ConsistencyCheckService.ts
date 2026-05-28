@@ -4,7 +4,6 @@ import { buildSectionTitleQualityItems } from '../utils/sectionTitleQuality';
 import {
     HIERARCHY_COMPLETENESS_SQL_EXCLUSION,
     isActionableConsistencyReviewItem,
-    isHierarchyCompletenessPrompt,
 } from '../utils/consistencyReviewSemantics';
 
 // Types for parsed JSON structure
@@ -360,7 +359,7 @@ function applySummaryItem(bucket: ConsistencySummaryBucket, item: ConsistencySum
     if (autoStatus === 'FAIL') {
         bucket.fail += 1;
         bucket.rawFailCount += 1;
-        if (humanStatus !== 'dismissed' && !isHierarchyCompletenessPrompt(item)) {
+        if (humanStatus !== 'dismissed') {
             bucket.activeProblemCount += 1;
         }
     } else if (autoStatus === 'UNCERTAIN') {

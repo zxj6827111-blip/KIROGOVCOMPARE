@@ -328,7 +328,7 @@ describe('ReportDetail vision review integration', () => {
     });
   });
 
-  test('detail tab badge excludes hierarchy completeness prompts', async () => {
+  test('detail tab badge includes hierarchy completeness prompts', async () => {
     apiClient.get.mockImplementation((url) => {
       switch (url) {
         case '/reports/123':
@@ -385,7 +385,7 @@ describe('ReportDetail vision review integration', () => {
     render(<ReportDetail reportId="123" />);
 
     await waitFor(() => {
-      expect(document.querySelector('.tab-issue-badge')).toHaveTextContent('1');
+      expect(document.querySelector('.tab-issue-badge')).toHaveTextContent('3');
     });
   });
 

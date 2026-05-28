@@ -12,6 +12,9 @@ const SHORT_TITLE_BY_TYPE = {
   consistency_table3_other: '表三其他',
   consistency_table4_row_sum: '行内合计',
   consistency_hierarchy_sum: '层级汇总',
+  hierarchy_missing_report: '缺报告问题',
+  hierarchy_missing_field: '缺字段问题',
+  hierarchy_completeness_prompt: '层级完整性',
   consistency_table2: '表二低风险规则',
   consistency_text: '正文一致性',
   unsupported_not_assessable: '暂无可评估规则',
@@ -35,6 +38,9 @@ const ISSUE_TONE_BY_TYPE = {
   consistency_table3_other: 'neutral',
   consistency_table4_row_sum: 'table4',
   consistency_hierarchy_sum: 'hierarchy',
+  hierarchy_missing_report: 'hierarchy',
+  hierarchy_missing_field: 'hierarchy',
+  hierarchy_completeness_prompt: 'hierarchy',
   consistency_table2: 'table2',
   consistency_text: 'text',
   quality_empty: 'quality',
@@ -167,8 +173,17 @@ export const classifyIssueTypeFallback = (item) => {
   }
 
   if (groupKey === 'hierarchy') {
-    if (checkKey === 'hierarchy_missing_child_reports' || checkKey === 'hierarchy_missing_child_metrics') {
-      return 'hierarchy_completeness_prompt';
+    if (
+      checkKey === 'hierarchy_missing_child_reports' ||
+      checkKey === 'hierarchy_no_child_reports'
+    ) {
+      return 'hierarchy_missing_report';
+    }
+    if (
+      checkKey === 'hierarchy_missing_child_metrics' ||
+      checkKey === 'hierarchy_no_child_metrics'
+    ) {
+      return 'hierarchy_missing_field';
     }
     if (autoStatus === 'NOT_ASSESSABLE') {
       return 'unsupported_not_assessable';

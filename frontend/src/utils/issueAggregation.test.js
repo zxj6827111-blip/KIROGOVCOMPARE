@@ -664,7 +664,7 @@ describe('issueAggregation', () => {
     expect(aggregate.displayNoMap).toEqual({});
   });
 
-  test('hierarchy completeness prompts stay visible but do not inflate review counts or bulk ids', () => {
+  test('hierarchy completeness prompts stay visible and count as review items', () => {
     const groups = [
       makeGroup('hierarchy', [
         makeIssue({
@@ -691,6 +691,22 @@ describe('issueAggregation', () => {
           human_status: 'pending',
           evidence: { paths: ['hierarchy.parent.missingMetrics'] },
         }),
+        makeIssue({
+          id: 94,
+          group_key: 'hierarchy',
+          check_key: 'hierarchy_no_child_reports',
+          auto_status: 'UNCERTAIN',
+          human_status: 'pending',
+          evidence: { paths: ['hierarchy.parent.noReports'] },
+        }),
+        makeIssue({
+          id: 95,
+          group_key: 'hierarchy',
+          check_key: 'hierarchy_no_child_metrics',
+          auto_status: 'UNCERTAIN',
+          human_status: 'pending',
+          evidence: { paths: ['hierarchy.parent.noMetrics'] },
+        }),
       ]),
     ];
 
@@ -700,15 +716,28 @@ describe('issueAggregation', () => {
       displayNoScope: 'group',
     });
 
-    expect(aggregate.issuesByGroupKey.hierarchy).toHaveLength(3);
+    expect(aggregate.issuesByGroupKey.hierarchy).toHaveLength(5);
     expect(aggregate.summary).toMatchObject({
-      ruleCount: 3,
+      ruleCount: 5,
       problemCount: 1,
-      pendingCount: 1,
-      reviewCount: 1,
+      pendingCount: 5,
+      reviewCount: 5,
     });
-    expect(aggregate.reviewIssues.map((issue) => issue.issueId)).toEqual(['id:91']);
-    expect(aggregate.pendingItemIds).toEqual([91]);
+    expect(aggregate.reviewIssues.map((issue) => issue.issueId)).toEqual([
+      'id:91',
+      'id:92',
+      'id:93',
+      'id:94',
+      'id:95',
+    ]);
+    expect(aggregate.issuesByGroupKey.hierarchy.map((issue) => issue.issueType)).toEqual([
+      'consistency_hierarchy_sum',
+      'hierarchy_missing_report',
+      'hierarchy_missing_field',
+      'hierarchy_missing_report',
+      'hierarchy_missing_field',
+    ]);
+    expect(aggregate.pendingItemIds).toEqual([91, 93, 92, 95, 94]);
   });
 
   test('new displayNo map matches old normalizeConsistencyGroups output exactly', () => {
