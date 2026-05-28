@@ -30,6 +30,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Use Node.js 20
         uses: actions/setup-node@v4
@@ -42,9 +44,37 @@ jobs:
       - name: Install backend dependencies
         run: npm ci
 
+      - name: Backend typecheck
+        run: npx tsc --noEmit
+
+      - name: Backend tests
+        run: npm test -- --runInBand --watchAll=false
+
       - name: Build backend
         run: npm run build
 
-      - name: Run tests
-        run: npm test -- --runInBand
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
 
+      - name: Frontend typecheck
+        run: npx tsc --noEmit
+        working-directory: frontend
+
+      - name: Frontend build
+        run: npm run build
+        working-directory: frontend
+
+      - name: npm audit
+        run: npm audit --audit-level=moderate
+
+      - name: Whitespace check
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git diff --check "origin/${{ github.base_ref }}...HEAD"
+          elif git rev-parse HEAD^ >/dev/null 2>&1; then
+            git diff --check "HEAD^..HEAD"
+          else
+            git diff --check HEAD
+          fi

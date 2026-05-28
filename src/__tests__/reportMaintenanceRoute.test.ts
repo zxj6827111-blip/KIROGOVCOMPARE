@@ -14,6 +14,13 @@ jest.mock('../middleware/auth', () => ({
     };
     next();
   },
+  requirePermission: (permission: string) => (req: any, res: any, next: () => void) => {
+    if (req.user?.permissions?.[permission] === true) {
+      next();
+      return;
+    }
+    res.status(403).json({ error: 'permission_denied', required: permission });
+  },
 }));
 
 jest.mock('../utils/dataScope', () => ({

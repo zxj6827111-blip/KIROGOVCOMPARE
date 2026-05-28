@@ -1,18 +1,29 @@
-FROM node:18-alpine
+FROM node:20-alpine
+
+# Puppeteer / Chromium system dependencies
+RUN apk add --no-cache chromium nss freetype harfbuzz ca-certificates ttf-freefont
+
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 WORKDIR /app
 
-# 复制package文件
+# Install production dependencies first (layer caching)
 COPY package*.json ./
+RUN npm ci --omit=dev
 
-# 安装依赖
-RUN npm ci --only=production
-
-# 复制源代码
+# Copy built application
 COPY dist ./dist
 
-# 暴露端口
-EXPOSE 3000
+# Non-root user
+RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
+RUN mkdir -p data/uploads data/exports/pdf uploads logs && chown -R nodejs:nodejs /app
 
-# 启动应用
-CMD ["node", "dist/index.js"]
+EXPOSE 8787
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://localhost:${PORT:-8787}/api/health || exit 1
+
+USER nodejs
+
+CMD ["node", "dist/index-llm.js"]

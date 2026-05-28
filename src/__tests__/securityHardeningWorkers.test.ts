@@ -161,4 +161,53 @@ describe('security hardening worker recovery and file paths', () => {
     expect(response.status).toBe(200);
     expect(fs.existsSync(safePath)).toBe(false);
   });
+
+  it('requeues a job with retry_count < max_retries on failure', async () => {
+    const job = { id: 501, kind: 'parse', report_id: 10, version_id: 20, retry_count: 0, max_retries: 2 };
+    const error = new Error('temporary API failure');
+
+    mockedQuery
+      .mockResolvedValueOnce({ rows: [] })           // SELECT previous error
+      .mockResolvedValueOnce({ rows: [] });           // UPDATE requeue
+
+    await (llmJobRunner as any).handleJobFailure(job, error);
+
+    const updateCall = mockedQuery.mock.calls.find((c: any[]) => String(c[0]).includes("SET status = 'queued'"));
+    expect(updateCall).toBeDefined();
+    expect(updateCall![1]).toEqual(
+      expect.arrayContaining([1, 0, 'QUEUED', 'Retry 1/2', 501])
+    );
+  });
+
+  it('permanently fails a job with retry_count >= max_retries', async () => {
+    const job = { id: 502, kind: 'parse', report_id: 10, version_id: 20, retry_count: 2, max_retries: 2 };
+    const error = new Error('persistent failure');
+
+    mockedQuery
+      .mockResolvedValueOnce({ rows: [{ error_message: 'Attempt 1 failed: err' }] })  // SELECT previous error
+      .mockResolvedValueOnce({ rows: [] });           // UPDATE permanent fail
+
+    await (llmJobRunner as any).handleJobFailure(job, error);
+
+    const updateCall = mockedQuery.mock.calls.find((c: any[]) => String(c[0]).includes("SET status = 'failed'"));
+    expect(updateCall).toBeDefined();
+    expect(String(updateCall![1][1])).toContain('Attempt 1 failed');
+    expect(String(updateCall![1][1])).toContain('Attempt 3 failed');
+  });
+
+  it('never retries pdf_export jobs even when retries remain', async () => {
+    const job = { id: 503, kind: 'pdf_export', report_id: 10, version_id: null, retry_count: 0, max_retries: 3 };
+    const error = new Error('pdf render failed');
+
+    mockedQuery
+      .mockResolvedValueOnce({ rows: [] })           // SELECT previous error
+      .mockResolvedValueOnce({ rows: [] });           // UPDATE permanent fail
+
+    await (llmJobRunner as any).handleJobFailure(job, error);
+
+    const retryCall = mockedQuery.mock.calls.find((c: any[]) => String(c[0]).includes("SET status = 'queued'"));
+    expect(retryCall).toBeUndefined();
+    const failCall = mockedQuery.mock.calls.find((c: any[]) => String(c[0]).includes("SET status = 'failed'"));
+    expect(failCall).toBeDefined();
+  });
 });
