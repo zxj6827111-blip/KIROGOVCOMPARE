@@ -217,7 +217,7 @@ export const DashboardHome: React.FC = () => {
           title="行政事业性收费"
           value={(currentData.fees.amount / 10000).toFixed(1)}
           unit="亿元"
-          trend={null} // Mock data doesn't fully support trend calc unless I improved types.ts more, but relying on mocked data.ts logic 
+          trend={null}
           color="amber"
           tooltip="本年度根据国家规定收取的行政事业性收费总额"
           source="表2-20-(8)"

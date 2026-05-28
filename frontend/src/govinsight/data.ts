@@ -92,14 +92,6 @@ const sortEntityTree = (nodes: EntityProfile[]): EntityProfile[] =>
       children: node.children ? sortEntityTree(node.children) : [],
     }));
 
-// Legacy compat for views
-export const districts: EntityProfile[] = [];
-export const departments: EntityProfile[] = [];
-export const provinceAvg: any = { data: [] };
-export const nanjingCity: any = { data: [] };
-export const mockShanghai: any = { data: [] };
-export const mockSuzhou: any = { data: [] };
-
 // Transform API record to Frontend AnnualData
 export const transformYearData = (record: AnnualDataRecord): AnnualData => {
   return {
