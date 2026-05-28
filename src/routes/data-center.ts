@@ -151,7 +151,7 @@ async function applyRegionScope(
   return false;
 }
 
-router.get('/v2/reports', async (req, res) => {
+router.get('/v2/reports', requirePermission('view_reports'), async (req, res) => {
   try {
     const year = typeof req.query.year === 'string' ? req.query.year.trim() : '';
     const unitName = typeof req.query.unit_name === 'string' ? req.query.unit_name.trim() : '';
@@ -251,7 +251,7 @@ router.get('/v2/reports', async (req, res) => {
   }
 });
 
-router.get('/v2/batches', async (req: AuthRequest, res) => {
+router.get('/v2/batches', requirePermission('view_reports'), async (req: AuthRequest, res) => {
   try {
     const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
     if (allowedRegionIds && allowedRegionIds.length === 0) {
@@ -281,7 +281,7 @@ router.get('/v2/batches', async (req: AuthRequest, res) => {
   }
 });
 
-router.get('/v2/batches/:batchUuid', async (req, res) => {
+router.get('/v2/batches/:batchUuid', requirePermission('view_reports'), async (req, res) => {
   try {
     const batchUuid = req.params.batchUuid;
     const batchRes = await pool.query(
@@ -414,7 +414,7 @@ router.post('/v2/batches/:batchUuid/retry', requirePermission('manage_jobs'), as
   }
 });
 
-router.get('/v2/alerts/missing-sources', async (req: AuthRequest, res) => {
+router.get('/v2/alerts/missing-sources', requirePermission('view_reports'), async (req: AuthRequest, res) => {
   try {
     const limitParam = typeof req.query.limit === 'string' ? Number(req.query.limit) : 200;
     const scanLimitParam = typeof req.query.scan_limit === 'string' ? Number(req.query.scan_limit) : 5000;
@@ -578,7 +578,7 @@ router.get('/v2/alerts/missing-sources', async (req: AuthRequest, res) => {
   }
 });
 
-router.get('/v2/reports/:reportId/facts/:tableName', async (req, res) => {
+router.get('/v2/reports/:reportId/facts/:tableName', requirePermission('view_reports'), async (req, res) => {
   try {
     const reportId = Number(req.params.reportId);
     if (!reportId || Number.isNaN(reportId)) {
@@ -675,7 +675,7 @@ router.get('/v2/reports/:reportId/facts/:tableName', async (req, res) => {
   }
 });
 
-router.get('/v2/reports/:reportId/cells', async (req, res) => {
+router.get('/v2/reports/:reportId/cells', requirePermission('view_reports'), async (req, res) => {
   try {
     const reportId = Number(req.params.reportId);
     if (!reportId || Number.isNaN(reportId)) {
@@ -757,7 +757,7 @@ router.get('/v2/reports/:reportId/cells', async (req, res) => {
   }
 });
 
-router.get('/v2/reports/:reportId/quality-issues', async (req, res) => {
+router.get('/v2/reports/:reportId/quality-issues', requirePermission('view_reports'), async (req, res) => {
   try {
     const reportId = Number(req.params.reportId);
     if (!reportId || Number.isNaN(reportId)) {
@@ -793,7 +793,7 @@ router.get('/v2/reports/:reportId/quality-issues', async (req, res) => {
   }
 });
 
-router.get('/v2/reports/:reportId/quality-flags', async (req, res) => {
+router.get('/v2/reports/:reportId/quality-flags', requirePermission('view_reports'), async (req, res) => {
   try {
     const reportId = Number(req.params.reportId);
     if (!reportId || Number.isNaN(reportId)) {
@@ -830,7 +830,7 @@ router.get('/v2/reports/:reportId/quality-flags', async (req, res) => {
   }
 });
 
-router.get('/v2/reports/:reportId/report', async (req, res) => {
+router.get('/v2/reports/:reportId/report', requirePermission('view_reports'), async (req, res) => {
   try {
     const reportId = Number(req.params.reportId);
     if (!reportId || Number.isNaN(reportId)) {
@@ -883,7 +883,7 @@ router.get('/v2/reports/:reportId/report', async (req, res) => {
   }
 });
 
-router.get('/v2/metrics', async (_req, res) => {
+router.get('/v2/metrics', requirePermission('view_reports'), async (_req, res) => {
   try {
     const metricsRes = await pool.query(`
       SELECT id, metric_key, version, display_name, description, unit,
@@ -932,7 +932,7 @@ router.post('/v2/derived/run', requirePermission('manage_jobs'), async (req, res
   }
 });
 
-router.get('/v2/dashboard/kpis', async (req, res) => {
+router.get('/v2/dashboard/kpis', requirePermission('view_reports'), async (req, res) => {
   try {
     const yearParam = typeof req.query.year === 'string' ? Number(req.query.year) : undefined;
     const regionParam = typeof req.query.region_id === 'string' ? Number(req.query.region_id) : undefined;
@@ -995,7 +995,7 @@ router.get('/v2/dashboard/kpis', async (req, res) => {
   }
 });
 
-router.get('/v2/dashboard/trends', async (req, res) => {
+router.get('/v2/dashboard/trends', requirePermission('view_reports'), async (req, res) => {
   try {
     const regionParam = typeof req.query.region_id === 'string' ? Number(req.query.region_id) : undefined;
     const unitParam = typeof req.query.unit_id === 'string' ? Number(req.query.unit_id) : undefined;
@@ -1046,7 +1046,7 @@ router.get('/v2/dashboard/trends', async (req, res) => {
   }
 });
 
-router.get('/v2/dashboard/rankings', async (req, res) => {
+router.get('/v2/dashboard/rankings', requirePermission('view_reports'), async (req, res) => {
   try {
     const yearParam = typeof req.query.year === 'string' ? Number(req.query.year) : undefined;
     const regionParam = typeof req.query.region_id === 'string' ? Number(req.query.region_id) : undefined;

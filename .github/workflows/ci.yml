@@ -42,9 +42,31 @@ jobs:
       - name: Install backend dependencies
         run: npm ci
 
+      - name: Backend typecheck
+        run: npx tsc --noEmit
+
+      - name: Backend tests
+        run: npm test -- --runInBand --watchAll=false
+
       - name: Build backend
         run: npm run build
 
-      - name: Run tests
-        run: npm test -- --runInBand
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Frontend typecheck
+        run: npx tsc --noEmit
+        working-directory: frontend
+
+      - name: Frontend build
+        run: npm run build
+        working-directory: frontend
+
+      - name: npm audit
+        run: npm audit --audit-level=moderate
+        continue-on-error: true
+
+      - name: Whitespace check
+        run: git diff --check HEAD~1 || true
 

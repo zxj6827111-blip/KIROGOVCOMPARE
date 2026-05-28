@@ -234,7 +234,10 @@ export class LlmJobRunner {
       'SOURCE_FILE_MISSING',
       'MATERIALIZE_EMPTY_FACTS',
       'PARSED_JSON_EMPTY',
+      'PARSE_EMPTY_OUTPUT',
       'PARSE_NOT_READY',
+      'REPORT_NOT_FOUND',
+      'VERSION_NOT_FOUND',
       'vision_channel_unavailable',
       'vision_provider_unsupported',
       'source_capture_failed',
@@ -283,6 +286,27 @@ export class LlmJobRunner {
     const finalMessage = previousErrorMessage
       ? `${previousErrorMessage}\nAttempt ${attempt} failed: ${message}`
       : `Attempt ${attempt} failed: ${message}`;
+
+    const isRetryable = job.kind !== 'pdf_export' &&
+                        (job.retry_count || 0) < (job.max_retries || 0);
+
+    if (isRetryable) {
+      const newRetryCount = (job.retry_count || 0) + 1;
+      await pool.query(`
+        UPDATE jobs
+        SET status = 'queued',
+            retry_count = $1,
+            progress = $2,
+            step_code = $3,
+            step_name = $4,
+            error_code = NULL,
+            error_message = NULL,
+            started_at = NULL
+        WHERE id = $5`,
+        [newRetryCount, STEPS.QUEUED.progress, STEPS.QUEUED.code, `Retry ${newRetryCount}/${job.max_retries}`, job.id]);
+      console.log(`[Job ${job.id}] Retrying (${newRetryCount}/${job.max_retries})`);
+      return;
+    }
 
     await pool.query(`
       UPDATE jobs

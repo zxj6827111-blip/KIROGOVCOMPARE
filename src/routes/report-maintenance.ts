@@ -1,6 +1,6 @@
 import express from 'express';
 import pool from '../config/database-llm';
-import { authMiddleware, AuthRequest } from '../middleware/auth';
+import { authMiddleware, AuthRequest, requirePermission } from '../middleware/auth';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 import {
     MaintenanceReportRow,
@@ -572,7 +572,7 @@ const getExportScope = (raw: unknown): ExportScope => {
     return 'abnormal';
 };
 
-router.get('/', authMiddleware, async (req: AuthRequest, res) => {
+router.get('/', authMiddleware, requirePermission('view_reports'), async (req: AuthRequest, res) => {
     try {
         const year = validateYear(req.query.year);
         if (!year) {
@@ -619,7 +619,7 @@ router.get('/', authMiddleware, async (req: AuthRequest, res) => {
     }
 });
 
-router.get('/export', authMiddleware, async (req: AuthRequest, res) => {
+router.get('/export', authMiddleware, requirePermission('view_reports'), async (req: AuthRequest, res) => {
     try {
         const year = validateYear(req.query.year);
         if (!year) {
