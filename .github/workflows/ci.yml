@@ -65,8 +65,6 @@ jobs:
 
       - name: npm audit
         run: npm audit --audit-level=moderate
-        continue-on-error: true
 
       - name: Whitespace check
-        run: git diff --check HEAD~1 || true
-
+        run: git diff --check HEAD~1

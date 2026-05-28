@@ -3,19 +3,21 @@ FROM node:20-alpine
 # Puppeteer / Chromium system dependencies
 RUN apk add --no-cache chromium nss freetype harfbuzz ca-certificates ttf-freefont
 
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 WORKDIR /app
 
 # Install production dependencies first (layer caching)
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
 # Copy built application
 COPY dist ./dist
 
 # Non-root user
 RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
+RUN mkdir -p data/uploads data/exports/pdf uploads logs && chown -R nodejs:nodejs /app
 
 EXPOSE 8787
 
