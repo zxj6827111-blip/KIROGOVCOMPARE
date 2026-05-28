@@ -22,7 +22,9 @@ import ReportMaintenance from './components/ReportMaintenance';
 import { ToastProvider } from './components/common/ToastProvider';
 import { ConfirmDialogProvider } from './components/common/ConfirmDialogProvider';
 import { TaskDrawerProvider } from './components/tasks/TaskDrawerProvider';
+import ErrorBoundary from './components/common/ErrorBoundary';
 import AppShell from './components/app/AppShell';
+import NotFound from './components/NotFound';
 
 import DataCenterReportsList from './components/datacenter/DataCenterReportsList';
 import DataCenterReportDetail from './components/datacenter/DataCenterReportDetail';
@@ -166,7 +168,7 @@ function AuthenticatedApp({ onLogout, user }) {
               <Route path="/datacenter" element={<DataCenterRoute navigate={navigate} />} />
               <Route path="/datacenter/reports/:reportId" element={<DataCenterReportRoute navigate={navigate} />} />
               <Route path="/govinsight/*" element={<GovInsightModule />} />
-              <Route path="*" element={<Navigate to="/catalog" replace />} />
+              <Route path="*" element={<NotFound />} />
             </Routes>
           </AppShell>
         </TaskDrawerProvider>
@@ -206,20 +208,22 @@ function App() {
   }
 
   return (
-    <Routes>
-      <Route path="/print/comparison/:comparisonId" element={<ComparisonPrintRoute />} />
-      <Route path="/print/govinsight-report/:orgId/:year" element={<GovInsightPrintRoute />} />
-      <Route
-        path="/*"
-        element={
-          user ? (
-            <AuthenticatedApp onLogout={handleLogout} user={user} />
-          ) : (
-            <Login onLoginSuccess={handleLoginSuccess} />
-          )
-        }
-      />
-    </Routes>
+    <ErrorBoundary>
+      <Routes>
+        <Route path="/print/comparison/:comparisonId" element={<ComparisonPrintRoute />} />
+        <Route path="/print/govinsight-report/:orgId/:year" element={<GovInsightPrintRoute />} />
+        <Route
+          path="/*"
+          element={
+            user ? (
+              <AuthenticatedApp onLogout={handleLogout} user={user} />
+            ) : (
+              <Login onLoginSuccess={handleLoginSuccess} />
+            )
+          }
+        />
+      </Routes>
+    </ErrorBoundary>
   );
 }
 
