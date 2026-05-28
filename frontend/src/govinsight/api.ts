@@ -21,6 +21,11 @@ const normalizeApiBase = (rawBase: string | undefined): string => {
 
 const API_BASE = normalizeApiBase(process.env.REACT_APP_API_BASE_URL || process.env.REACT_APP_API_URL);
 
+const getAuthHeaders = (): Record<string, string> | undefined => {
+  const token = localStorage.getItem('admin_token');
+  return token ? { Authorization: `Bearer ${token}` } : undefined;
+};
+
 export interface GovInsightAIReportRecord {
   content: any;
   model: string;
@@ -74,7 +79,10 @@ export async function fetchAnnualData(
   if (includeChildren) params.set('include_children', 'true');
 
   const url = `${API_BASE}/gov-insight/annual-data${params.toString() ? '?' + params.toString() : ''}`;
-  const response = await fetch(url, { credentials: 'include' });
+  const response = await fetch(url, {
+    credentials: 'include',
+    headers: getAuthHeaders(),
+  });
 
   if (!response.ok) {
     throw new Error(`Failed to fetch annual data: ${response.status}`);
@@ -93,7 +101,10 @@ export async function fetchAnnualData(
  */
 export async function fetchYears(): Promise<number[]> {
   const url = `${API_BASE}/gov-insight/years`;
-  const response = await fetch(url, { credentials: 'include' });
+  const response = await fetch(url, {
+    credentials: 'include',
+    headers: getAuthHeaders(),
+  });
 
   if (!response.ok) {
     throw new Error(`Failed to fetch years: ${response.status}`);
@@ -116,7 +127,10 @@ export async function fetchOrgs(year?: number): Promise<OrgItem[]> {
   if (year) params.set('year', String(year));
 
   const url = `${API_BASE}/gov-insight/orgs${params.toString() ? '?' + params.toString() : ''}`;
-  const response = await fetch(url, { credentials: 'include' });
+  const response = await fetch(url, {
+    credentials: 'include',
+    headers: getAuthHeaders(),
+  });
 
   if (!response.ok) {
     throw new Error(`Failed to fetch orgs: ${response.status}`);
@@ -141,12 +155,11 @@ export async function saveAIReport(
   model?: string
 ): Promise<void> {
   const url = `${API_BASE}/gov-insight/ai-report/save`;
-  const token = localStorage.getItem('admin_token');
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(getAuthHeaders() || {}),
     },
     body: JSON.stringify({ org_id: orgId, org_name: orgName, year, content, model }),
     credentials: 'include'
@@ -174,7 +187,10 @@ export async function fetchAIReport(
   params.set('year', String(year));
 
   const url = `${API_BASE}/gov-insight/ai-report?${params.toString()}`;
-  const response = await fetch(url, { credentials: 'include' });
+  const response = await fetch(url, {
+    credentials: 'include',
+    headers: getAuthHeaders(),
+  });
 
   if (!response.ok) {
     throw new Error(`Failed to fetch AI report: ${response.status}`);
@@ -196,10 +212,9 @@ export async function fetchAIReportReplayContext(
   params.set('year', String(year));
 
   const url = `${API_BASE}/gov-insight/ai-report/replay?${params.toString()}`;
-  const token = localStorage.getItem('admin_token');
   const response = await fetch(url, {
     credentials: 'include',
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    headers: getAuthHeaders(),
   });
 
   if (response.status === 401 || response.status === 403) {
@@ -230,10 +245,9 @@ export async function fetchAIReportPayload(
   params.set('year', String(year));
 
   const url = `${API_BASE}/gov-insight/ai-report/payload?${params.toString()}`;
-  const token = localStorage.getItem('admin_token');
   const response = await fetch(url, {
     credentials: 'include',
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    headers: getAuthHeaders(),
   });
 
   if (response.status === 401 || response.status === 403) {
@@ -264,7 +278,10 @@ export async function fetchAnnualReportSummary(
   params.set('year', String(year));
 
   const url = `${API_BASE}/gov-insight/annual-report-summary?${params.toString()}`;
-  const response = await fetch(url, { credentials: 'include' });
+  const response = await fetch(url, {
+    credentials: 'include',
+    headers: getAuthHeaders(),
+  });
 
   if (!response.ok) {
     throw new Error(`Failed to fetch annual report summary: ${response.status}`);
@@ -287,10 +304,9 @@ export async function fetchLeaderCockpitModel(
   params.set('year', String(year));
 
   const url = `${API_BASE}/gov-insight/leader-cockpit/model?${params.toString()}`;
-  const token = localStorage.getItem('admin_token');
   const response = await fetch(url, {
     credentials: 'include',
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    headers: getAuthHeaders(),
   });
 
   if (response.status === 401 || response.status === 403) {
@@ -330,10 +346,9 @@ export async function fetchLeaderCockpitComparison(
   params.set('enable_stable_sample', calibration.enableStableSample ? 'true' : 'false');
 
   const url = `${API_BASE}/gov-insight/leader-cockpit/comparison?${params.toString()}`;
-  const token = localStorage.getItem('admin_token');
   const response = await fetch(url, {
     credentials: 'include',
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    headers: getAuthHeaders(),
   });
 
   if (response.status === 401 || response.status === 403) {

@@ -187,6 +187,34 @@ function parseBooleanEnv(raw: string | undefined, fallback: boolean): boolean {
   return fallback;
 }
 
+function isLoopbackOrLocalhost(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase();
+  return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1' || normalized === '[::1]';
+}
+
+function assertSecureOpenAiBaseUrl(baseUrl: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    const error = new Error('OPENAI_BASE_URL is invalid for vision review');
+    (error as any).code = 'openai_invalid_base_url';
+    throw error;
+  }
+
+  if (parsed.protocol === 'https:') {
+    return;
+  }
+
+  if (parsed.protocol === 'http:' && isLoopbackOrLocalhost(parsed.hostname) && process.env.NODE_ENV !== 'production') {
+    return;
+  }
+
+  const error = new Error('OPENAI_BASE_URL must use HTTPS outside local development for vision review');
+  (error as any).code = 'openai_insecure_base_url';
+  throw error;
+}
+
 function normalizeTableId(value: unknown): VisionReviewTableId | null {
   const key = String(value || '').trim();
   return TABLE_SECTION_TYPES[key] || null;
@@ -1893,7 +1921,9 @@ export class VisionReviewService {
       (error as any).code = 'openai_missing_base_url';
       throw error;
     }
-    return baseUrl.replace(/\/+$/, '');
+    const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
+    assertSecureOpenAiBaseUrl(normalizedBaseUrl);
+    return normalizedBaseUrl;
   }
 
   private resolveOpenAiApiKey(): string {

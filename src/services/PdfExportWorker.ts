@@ -242,6 +242,20 @@ async function pollAndProcess(): Promise<void> {
     }
 }
 
+async function recoverRunningPdfExportJobs(): Promise<void> {
+    await pool.query(`
+      UPDATE jobs
+      SET status = 'queued',
+          step_code = 'QUEUED',
+          step_name = 'Queued',
+          progress = 0,
+          started_at = NULL,
+          error_code = NULL,
+          error_message = NULL
+      WHERE kind = 'pdf_export' AND status = 'running'
+    `);
+}
+
 export function startPdfExportWorker(): void {
     if (isRunning) {
         console.log('[PdfExportWorker] Already running');
@@ -252,6 +266,10 @@ export function startPdfExportWorker(): void {
     console.log('[PdfExportWorker] Starting...');
 
     ensureExportsDir();
+
+    recoverRunningPdfExportJobs().catch((error) => {
+        console.error('[PdfExportWorker] Failed to recover running PDF export jobs:', error);
+    });
 
     pollIntervalRef = setInterval(() => {
         if (isRunning) {

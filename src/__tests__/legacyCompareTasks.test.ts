@@ -14,8 +14,21 @@ jest.mock('../middleware/auth', () => ({
     req.user = {
       id: 1,
       username: 'route-smoke-user',
+      permissions: {
+        view_reports: true,
+        upload_reports: true,
+        manage_jobs: true,
+        delete_reports: true,
+      },
       dataScope: { regions: [] },
     };
+    next();
+  },
+  requirePermission: (permission: string) => (req: any, res: any, next: () => void) => {
+    if (!req.user?.permissions?.[permission]) {
+      res.status(403).json({ error: 'Insufficient permissions' });
+      return;
+    }
     next();
   },
 }));

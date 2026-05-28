@@ -9,8 +9,20 @@ jest.mock('../middleware/auth', () => ({
     req.user = {
       id: 7,
       username: 'consistency-bulk-user',
+      permissions: {
+        view_reports: true,
+        upload_reports: true,
+        manage_jobs: true,
+      },
       dataScope: { regions: ['Scoped'] },
     };
+    next();
+  },
+  requirePermission: (permission: string) => (req: any, res: any, next: () => void) => {
+    if (!req.user?.permissions?.[permission]) {
+      res.status(403).json({ error: 'Insufficient permissions' });
+      return;
+    }
     next();
   },
 }));

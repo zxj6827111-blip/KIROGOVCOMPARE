@@ -2173,7 +2173,7 @@ router.post('/reports/batch-check-status', authMiddleware, async (req: AuthReque
 });
 
 // Batch run consistency checks for reports
-router.post('/reports/batch-checks/run', authMiddleware, async (req, res) => {
+router.post('/reports/batch-checks/run', authMiddleware, requirePermission('upload_reports'), async (req, res) => {
   try {
     const reportIdsRaw = req.body?.report_ids;
     if (!Array.isArray(reportIdsRaw) || reportIdsRaw.length === 0) {

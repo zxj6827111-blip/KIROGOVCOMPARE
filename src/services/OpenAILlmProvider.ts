@@ -101,6 +101,33 @@ function sanitizeUpstreamErrorMessage(message: string, status?: number): string 
     return raw.length > 240 ? `${raw.slice(0, 240)}...` : raw;
 }
 
+function isLoopbackOrLocalhost(hostname: string): boolean {
+    const normalized = hostname.trim().toLowerCase();
+    return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1' || normalized === '[::1]';
+}
+
+function assertSecureBaseUrl(baseURL: string, provider: string): void {
+    let parsed: URL;
+    try {
+        parsed = new URL(baseURL);
+    } catch {
+        throw new LlmProviderError(`${provider} base URL is invalid`, 'llm_invalid_base_url');
+    }
+
+    if (parsed.protocol === 'https:') {
+        return;
+    }
+
+    if (parsed.protocol === 'http:' && isLoopbackOrLocalhost(parsed.hostname) && process.env.NODE_ENV !== 'production') {
+        return;
+    }
+
+    throw new LlmProviderError(
+        `${provider} base URL must use HTTPS outside local development`,
+        'llm_insecure_base_url'
+    );
+}
+
 function isPlainObject(value: unknown): value is Record<string, any> {
     return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -135,6 +162,7 @@ export class OpenAILlmProvider implements LlmProvider {
         if (!this.baseURL) {
             throw new LlmProviderError('OPENAI_BASE_URL is required for OpenAI-compatible provider', 'openai_missing_base_url');
         }
+        assertSecureBaseUrl(this.baseURL, this.provider);
         const proxyUrl = this.resolveProxyUrl();
         const dispatcher = getProxyDispatcher(proxyUrl);
         if (proxyUrl) {
