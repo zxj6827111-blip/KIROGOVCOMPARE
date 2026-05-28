@@ -82,7 +82,7 @@ export function createLlmApp(): express.Express {
   });
 
   app.use('/api', llmHealthRouter);
-  app.use('/api/gov-insight', govInsightRouter); // Public dashboard API (no auth)
+  app.use('/api/gov-insight', govInsightRouter);
   app.use('/api/gov-insight', govInsightPdfRouter);
 
   app.get('/', (_req, res) => {

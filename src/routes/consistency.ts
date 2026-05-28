@@ -1,7 +1,7 @@
 import express from 'express';
 import crypto from 'crypto';
 import pool from '../config/database-llm';
-import { authMiddleware, AuthRequest } from '../middleware/auth';
+import { authMiddleware, AuthRequest, requirePermission } from '../middleware/auth';
 import { consistencyCheckService } from '../services/ConsistencyCheckService';
 import { visionReviewService } from '../services/VisionReviewService';
 import { ocrCorrectionService } from '../services/OcrCorrectionService';
@@ -216,7 +216,7 @@ async function refreshCachedStatsForVersion(reportVersionId: number): Promise<vo
 /**
  * GET /reports/:id/checks - Get consistency checks for a report
  */
-router.get('/reports/:id/checks', async (req: AuthRequest, res) => {
+router.get('/reports/:id/checks', requirePermission('view_reports'), async (req: AuthRequest, res) => {
   const reportId = Number(req.params.id);
   const access = await checkReportAccess(reportId, req.user);
   if (!access.ok) {
@@ -381,7 +381,7 @@ router.get('/reports/:id/checks', async (req: AuthRequest, res) => {
 /**
  * POST /reports/:id/checks/run - Run consistency checks
  */
-router.post('/reports/:id/checks/run', async (req: AuthRequest, res) => {
+router.post('/reports/:id/checks/run', requirePermission('upload_reports'), async (req: AuthRequest, res) => {
   const reportId = Number(req.params.id);
   try {
     const access = await checkReportAccess(reportId, req.user);
@@ -428,7 +428,7 @@ router.post('/reports/:id/checks/run', async (req: AuthRequest, res) => {
 /**
  * GET /reports/:id/vision-review - Get table visual review results
  */
-router.get('/reports/:id/vision-review', async (req: AuthRequest, res) => {
+router.get('/reports/:id/vision-review', requirePermission('view_reports'), async (req: AuthRequest, res) => {
   const reportId = Number(req.params.id);
   try {
     const access = await checkReportAccess(reportId, req.user);
@@ -457,7 +457,7 @@ router.get('/reports/:id/vision-review', async (req: AuthRequest, res) => {
 /**
  * POST /reports/:id/vision-review/run - Manually run visual review
  */
-router.post('/reports/:id/vision-review/run', async (req: AuthRequest, res) => {
+router.post('/reports/:id/vision-review/run', requirePermission('manage_jobs'), async (req: AuthRequest, res) => {
   const reportId = Number(req.params.id);
   try {
     const access = await checkReportAccess(reportId, req.user);
@@ -484,7 +484,7 @@ router.post('/reports/:id/vision-review/run', async (req: AuthRequest, res) => {
 /**
  * POST /reports/:id/vision-review/corrections/resolve - Confirm or reject pending OCR corrections
  */
-router.post('/reports/:id/vision-review/corrections/resolve', async (req: AuthRequest, res) => {
+router.post('/reports/:id/vision-review/corrections/resolve', requirePermission('upload_reports'), async (req: AuthRequest, res) => {
   const reportId = Number(req.params.id);
   try {
     const access = await checkReportAccess(reportId, req.user);
@@ -537,7 +537,7 @@ router.post('/reports/:id/vision-review/corrections/resolve', async (req: AuthRe
  * Used by "one-click confirm" to avoid hundreds of single PATCH requests hitting
  * the global API rate limiter and refreshing cached stats repeatedly.
  */
-router.post('/reports/:id/checks/items/bulk-status', async (req: AuthRequest, res) => {
+router.post('/reports/:id/checks/items/bulk-status', requirePermission('upload_reports'), async (req: AuthRequest, res) => {
   const reportId = Number(req.params.id);
   const { version_id, item_ids, human_status, human_comment } = req.body || {};
 
@@ -625,7 +625,7 @@ router.post('/reports/:id/checks/items/bulk-status', async (req: AuthRequest, re
 /**
  * PATCH /reports/:id/checks/items/:itemId - Update check item status
  */
-router.patch('/reports/:id/checks/items/:itemId', async (req: AuthRequest, res) => {
+router.patch('/reports/:id/checks/items/:itemId', requirePermission('upload_reports'), async (req: AuthRequest, res) => {
   const reportId = Number(req.params.id);
   const itemId = Number(req.params.itemId);
   const { human_status, human_comment } = req.body;

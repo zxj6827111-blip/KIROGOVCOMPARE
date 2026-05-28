@@ -1,4 +1,4 @@
-import { buildVisionReviewFocus, compareVisionOcrWithParsed } from '../services/VisionReviewService';
+import { buildVisionReviewFocus, compareVisionOcrWithParsed, VisionReviewService } from '../services/VisionReviewService';
 import { ConsistencyItem } from '../services/ConsistencyCheckService';
 
 const makeTrigger = (
@@ -578,5 +578,41 @@ describe('compareVisionOcrWithParsed', () => {
 
     expect(result.conclusion).toBe('source_table_anomaly');
     expect(result.differences).toHaveLength(0);
+  });
+});
+
+describe('VisionReviewService OpenAI base URL security', () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalOpenAiBaseUrl = process.env.OPENAI_BASE_URL;
+  const originalVisionReviewBaseUrl = process.env.VISION_REVIEW_BASE_URL;
+
+  afterEach(() => {
+    process.env.NODE_ENV = originalNodeEnv;
+    if (originalOpenAiBaseUrl === undefined) {
+      delete process.env.OPENAI_BASE_URL;
+    } else {
+      process.env.OPENAI_BASE_URL = originalOpenAiBaseUrl;
+    }
+    if (originalVisionReviewBaseUrl === undefined) {
+      delete process.env.VISION_REVIEW_BASE_URL;
+    } else {
+      process.env.VISION_REVIEW_BASE_URL = originalVisionReviewBaseUrl;
+    }
+  });
+
+  it('rejects remote HTTP base URLs in production', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.OPENAI_BASE_URL = 'http://api.example.com/v1';
+    delete process.env.VISION_REVIEW_BASE_URL;
+
+    expect(() => (new VisionReviewService() as any).resolveOpenAiBaseUrl()).toThrow(/must use HTTPS/);
+  });
+
+  it('allows localhost HTTP base URLs outside production for local relay testing', () => {
+    process.env.NODE_ENV = 'test';
+    process.env.OPENAI_BASE_URL = 'http://127.0.0.1:8787/v1/';
+    delete process.env.VISION_REVIEW_BASE_URL;
+
+    expect((new VisionReviewService() as any).resolveOpenAiBaseUrl()).toBe('http://127.0.0.1:8787/v1');
   });
 });

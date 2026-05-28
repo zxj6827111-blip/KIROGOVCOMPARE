@@ -1,6 +1,6 @@
 import express from 'express';
 import pool from '../config/database-llm';
-import { authMiddleware, optionalAuthMiddleware, requirePermission, AuthRequest } from '../middleware/auth';
+import { authMiddleware, requirePermission, AuthRequest } from '../middleware/auth';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 import {
   cleanExcerpt,
@@ -85,15 +85,22 @@ const isRegionAllowed = (regionId: number, allowedRegionIds: number[] | null): b
   return allowedRegionIds.includes(regionId);
 };
 
-const canBypassGovInsightAiAuth = (): boolean => process.env.NODE_ENV !== 'production';
-
-const ensureGovInsightAiAuth = (req: AuthRequest, res: express.Response): boolean => {
-  if (req.user || canBypassGovInsightAiAuth()) {
-    return true;
+const requireAnyPermission = (permissions: string[]) => (
+  req: AuthRequest,
+  res: express.Response,
+  next: express.NextFunction
+) => {
+  if (!req.user) {
+    return res.status(401).json({ error: '未登录，请先登录' });
   }
 
-  res.status(401).json({ code: 401, msg: '未登录，请先登录', data: null });
-  return false;
+  const userPermissions = req.user.permissions || {};
+  const hasPermission = permissions.some((permission) => userPermissions[permission] === true);
+  if (!hasPermission) {
+    return res.status(403).json({ error: '权限不足', required: permissions });
+  }
+
+  return next();
 };
 
 const parseBooleanParam = (value: unknown, fallback = false): boolean => {
@@ -246,7 +253,7 @@ const resolveEffectiveReportPayload = async (
  *   - year (optional): 年份, e.g. 2024
  *   - org_id (optional): 单位ID, e.g. "city_1001" or numeric region_id
  */
-router.get('/annual-data', async (req, res) => {
+router.get('/annual-data', authMiddleware, requirePermission('view_reports'), async (req, res) => {
   try {
     const yearParam = typeof req.query.year === 'string' ? req.query.year.trim() : '';
     const orgIdParam = typeof req.query.org_id === 'string' ? req.query.org_id.trim() : '';
@@ -457,7 +464,7 @@ router.get('/annual-data', async (req, res) => {
  * 
  * 获取可用年份列表
  */
-router.get('/years', async (_req, res) => {
+router.get('/years', authMiddleware, requirePermission('view_reports'), async (_req, res) => {
   try {
     const result = await pool.query(`
       SELECT DISTINCT year
@@ -486,7 +493,7 @@ router.get('/years', async (_req, res) => {
  * 
  * 获取可用单位列表
  */
-router.get('/orgs', async (req, res) => {
+router.get('/orgs', authMiddleware, requirePermission('view_reports'), async (req, res) => {
   try {
     const yearParam = typeof req.query.year === 'string' ? req.query.year.trim() : '';
 
@@ -618,7 +625,7 @@ router.get('/orgs', async (req, res) => {
  *
  * 获取指定单位年度报告的原文摘要
  */
-router.get('/annual-report-summary', async (req, res) => {
+router.get('/annual-report-summary', authMiddleware, requirePermission('view_reports'), async (req, res) => {
   try {
     const { org_id, year } = req.query;
     if (!org_id || !year) {
@@ -751,7 +758,7 @@ router.get('/annual-report-summary', async (req, res) => {
  *
  * 获取领导驾驶舱总览模型（后端权威口径）
  */
-router.get('/leader-cockpit/model', authMiddleware, async (req: AuthRequest, res) => {
+router.get('/leader-cockpit/model', authMiddleware, requireAnyPermission(['system_admin', 'manage_users']), async (req: AuthRequest, res) => {
   try {
     const orgId = typeof req.query.org_id === 'string' ? req.query.org_id.trim() : '';
     const yearNum = Number(req.query.year);
@@ -783,7 +790,7 @@ router.get('/leader-cockpit/model', authMiddleware, async (req: AuthRequest, res
  *
  * 获取领导驾驶舱区县/部门对比模型（后端权威口径）
  */
-router.get('/leader-cockpit/comparison', authMiddleware, async (req: AuthRequest, res) => {
+router.get('/leader-cockpit/comparison', authMiddleware, requireAnyPermission(['system_admin', 'manage_users']), async (req: AuthRequest, res) => {
   try {
     const orgId = typeof req.query.org_id === 'string' ? req.query.org_id.trim() : '';
     const yearNum = Number(req.query.year);
@@ -840,10 +847,8 @@ router.get('/leader-cockpit/comparison', authMiddleware, async (req: AuthRequest
  *
  * 创建或复用后台 AI 报告生成任务
  */
-router.post('/ai-report/jobs', optionalAuthMiddleware, async (req: AuthRequest, res) => {
+router.post('/ai-report/jobs', authMiddleware, requireAnyPermission(['upload_reports', 'manage_jobs']), async (req: AuthRequest, res) => {
   try {
-    if (!ensureGovInsightAiAuth(req, res)) return;
-
     const {
       org_id,
       org_name,
@@ -1011,10 +1016,8 @@ router.post('/ai-report/jobs', optionalAuthMiddleware, async (req: AuthRequest, 
  *
  * 获取某单位年度的最近一条 AI 报告生成任务
  */
-router.get('/ai-report/jobs/latest', optionalAuthMiddleware, async (req: AuthRequest, res) => {
+router.get('/ai-report/jobs/latest', authMiddleware, requirePermission('view_reports'), async (req: AuthRequest, res) => {
   try {
-    if (!ensureGovInsightAiAuth(req, res)) return;
-
     const orgId = typeof req.query.org_id === 'string' ? req.query.org_id.trim() : '';
     const yearNum = Number(req.query.year);
     const regionId = parseRegionId(orgId);
@@ -1059,10 +1062,8 @@ router.get('/ai-report/jobs/latest', optionalAuthMiddleware, async (req: AuthReq
  *
  * 获取 AI 报告后台任务状态
  */
-router.get('/ai-report/jobs/:jobId', optionalAuthMiddleware, async (req: AuthRequest, res) => {
+router.get('/ai-report/jobs/:jobId', authMiddleware, requirePermission('view_reports'), async (req: AuthRequest, res) => {
   try {
-    if (!ensureGovInsightAiAuth(req, res)) return;
-
     const jobId = Number(req.params.jobId);
     if (!Number.isInteger(jobId) || jobId <= 0) {
       return res.status(400).json({ code: 400, msg: 'Invalid job ID', data: null });
@@ -1104,7 +1105,7 @@ router.get('/ai-report/jobs/:jobId', optionalAuthMiddleware, async (req: AuthReq
  * 
  * 保存 AI 辅助决策报告
  */
-router.get('/ai-report/payload', authMiddleware, async (req: AuthRequest, res) => {
+router.get('/ai-report/payload', authMiddleware, requirePermission('view_reports'), async (req: AuthRequest, res) => {
   try {
     const orgId = typeof req.query.org_id === 'string' ? req.query.org_id.trim() : '';
     const yearNum = Number(req.query.year);
@@ -1132,7 +1133,7 @@ router.get('/ai-report/payload', authMiddleware, async (req: AuthRequest, res) =
  *
  * 获取后端构建的 report_payload_v1
  */
-router.post('/ai-report/save', authMiddleware, async (req: AuthRequest, res) => {
+router.post('/ai-report/save', authMiddleware, requireAnyPermission(['upload_reports', 'manage_jobs']), async (req: AuthRequest, res) => {
   try {
     const { org_id, org_name, year, content } = req.body;
     const resolvedModel = resolveGovInsightReportModel();
@@ -1265,7 +1266,7 @@ router.post('/ai-report/save', authMiddleware, async (req: AuthRequest, res) => 
  * 
  * 获取 AI 辅助决策报告
  */
-router.get('/ai-report', async (req, res) => {
+router.get('/ai-report', authMiddleware, requirePermission('view_reports'), async (req, res) => {
   try {
     const { org_id, year } = req.query;
     if (!org_id || !year) {

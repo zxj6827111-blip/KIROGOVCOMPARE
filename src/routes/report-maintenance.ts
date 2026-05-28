@@ -61,7 +61,7 @@ interface MaintenanceDetailRow {
 }
 
 const isAdminUser = (req: AuthRequest) => {
-    return (req.user as any)?.role === 'admin' || req.user?.username === 'System Admin';
+    return req.user?.permissions?.system_admin === true;
 };
 
 const parseDbJson = (value: unknown) => {

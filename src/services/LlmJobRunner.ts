@@ -607,7 +607,7 @@ export class LlmJobRunner {
   }
 
   /**
-   * Restart recovery: reset all 'running' jobs to 'queued' state
+   * Restart recovery: reset this worker's running jobs to queued state
    * to avoid permanent stall on server restart
    */
   private recoverRunningJobs(): void {
@@ -616,11 +616,11 @@ export class LlmJobRunner {
   }
 
   private async recoverRunningJobsAsync(): Promise<void> {
-    const result = await pool.query(`SELECT id FROM jobs WHERE status = 'running'`);
+    const result = await pool.query(`SELECT id FROM jobs WHERE status = 'running' AND kind != 'pdf_export'`);
     const runningJobs = result.rows;
 
     if (runningJobs.length > 0) {
-      console.log(`[Recovery] Found ${runningJobs.length} running jobs, resetting to queued...`);
+      console.log(`[Recovery] Found ${runningJobs.length} non-PDF running jobs, resetting to queued...`);
 
       await pool.query(`
         UPDATE jobs 
@@ -630,10 +630,10 @@ export class LlmJobRunner {
             step_name = $3,
             error_code = NULL,
             error_message = NULL
-        WHERE status = 'running'`,
+        WHERE status = 'running' AND kind != 'pdf_export'`,
         [STEPS.QUEUED.progress, STEPS.QUEUED.code, STEPS.QUEUED.name]);
 
-      console.log(`[Recovery] Reset ${runningJobs.length} jobs to queued`);
+      console.log(`[Recovery] Reset ${runningJobs.length} non-PDF jobs to queued`);
     }
   }
 

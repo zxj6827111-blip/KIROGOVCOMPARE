@@ -2,7 +2,7 @@ import express, { Response, Router } from 'express';
 import fs from 'fs';
 import archiver from 'archiver';
 import pool from '../config/database-llm';
-import { authMiddleware, AuthRequest } from '../middleware/auth';
+import { authMiddleware, AuthRequest, requirePermission } from '../middleware/auth';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 import {
     DEFAULT_PDF_EXPORTS_DIR,
@@ -40,7 +40,7 @@ function normalizeBatchJobIds(value: unknown): number[] | null {
  * Recommended user-facing comparison PDF export entry.
  * 创建 PDF 导出任务
  */
-router.post('/', authMiddleware, async (req: AuthRequest, res: Response) => {
+router.post('/', authMiddleware, requirePermission('manage_jobs'), async (req: AuthRequest, res: Response) => {
     try {
         ensureExportsDir();
 
@@ -322,7 +322,7 @@ router.get('/:id/download', authMiddleware, async (req: AuthRequest, res: Respon
  * DELETE /api/pdf-jobs/:id
  * 删除 PDF 导出任务及其文件
  */
-router.delete('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
+router.delete('/:id', authMiddleware, requirePermission('manage_jobs'), async (req: AuthRequest, res: Response) => {
     try {
         const jobId = Number(req.params.id);
         if (isNaN(jobId)) {
@@ -381,7 +381,7 @@ router.delete('/:id', authMiddleware, async (req: AuthRequest, res: Response) =>
  * POST /api/pdf-jobs/:id/regenerate
  * 重新生成已过期的 PDF
  */
-router.post('/:id/regenerate', authMiddleware, async (req: AuthRequest, res: Response) => {
+router.post('/:id/regenerate', authMiddleware, requirePermission('manage_jobs'), async (req: AuthRequest, res: Response) => {
     try {
         const jobId = Number(req.params.id);
         if (isNaN(jobId)) {

@@ -5,6 +5,7 @@ import { llmJobRunner } from '../services/LlmJobRunner';
 import { authMiddleware, AuthRequest, requirePermission } from '../middleware/auth';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 import { checkVersionSourceFileExists } from '../services/SourceFileGuardService';
+import { resolvePdfExportFilePath } from '../utils/pdfExportPath';
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -829,13 +830,16 @@ router.delete('/task/:jobId', requirePermission('manage_jobs'), async (req, res)
         try {
             if (job.kind === 'pdf_export') {
                 console.log(`[Delete Task] Deleting PDF export job ${jobId}`);
-                if (job.file_path && fs.existsSync(job.file_path)) {
+                const safePdfPath = resolvePdfExportFilePath(job.file_path);
+                if (safePdfPath && fs.existsSync(safePdfPath)) {
                     try {
-                        fs.unlinkSync(job.file_path);
-                        console.log(`[Delete Task] Deleted PDF file: ${job.file_path}`);
+                        fs.unlinkSync(safePdfPath);
+                        console.log(`[Delete Task] Deleted PDF file: ${safePdfPath}`);
                     } catch (e) {
-                        console.warn(`[Delete Task] Failed to delete PDF file ${job.file_path}:`, e);
+                        console.warn(`[Delete Task] Failed to delete PDF file ${safePdfPath}:`, e);
                     }
+                } else if (job.file_path) {
+                    console.warn(`[Delete Task] Skipped unsafe or missing PDF file path for job ${jobId}`);
                 }
                 await pool.query('DELETE FROM jobs WHERE id = $1', [jobId]);
                 console.log(`[Delete Task] Successfully deleted PDF job ${jobId}`);

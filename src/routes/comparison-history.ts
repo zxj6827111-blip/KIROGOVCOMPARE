@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import pool from '../config/database-llm';
-import { authMiddleware, AuthRequest } from '../middleware/auth';
+import { authMiddleware, AuthRequest, requirePermission } from '../middleware/auth';
 import pdfExportService from '../services/PdfExportService';
 import { calculateReportMetrics } from '../utils/reportAnalysis';
 import { ComparisonReportData } from '../services/PdfExportService';
@@ -921,7 +921,7 @@ router.get('/grouped', authMiddleware, async (req: AuthRequest, res: Response) =
  * POST /api/comparisons/create
  * Create a new comparison record (Seems duplicate of llm-comparisons/comparisons, but keeping for compatibility)
  */
-router.post('/create', authMiddleware, async (req: AuthRequest, res: Response) => {
+router.post('/create', authMiddleware, requirePermission('upload_reports'), async (req: AuthRequest, res: Response) => {
   try {
     const { region_id, year_a, year_b, left_report_id, right_report_id } = req.body;
 
@@ -1167,7 +1167,7 @@ router.get('/:id/alignment-suggestions', authMiddleware, async (req: AuthRequest
  * POST /api/comparisons/:id/alignment-rules
  * Persist confirmed title-alignment rules for future comparisons.
  */
-router.post('/:id/alignment-rules', authMiddleware, async (req: AuthRequest, res: Response) => {
+router.post('/:id/alignment-rules', authMiddleware, requirePermission('upload_reports'), async (req: AuthRequest, res: Response) => {
   try {
     const comparisonId = Number(req.params.id);
     if (!comparisonId || Number.isNaN(comparisonId)) {
@@ -1259,7 +1259,7 @@ router.post('/:id/alignment-rules', authMiddleware, async (req: AuthRequest, res
  * DELETE /api/comparisons/:id
  * Delete a comparison record
  */
-router.delete('/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
+router.delete('/:id', authMiddleware, requirePermission('delete_reports'), async (req: AuthRequest, res: Response) => {
   try {
     const comparisonId = Number(req.params.id);
     if (!comparisonId || Number.isNaN(comparisonId)) {
@@ -1285,7 +1285,7 @@ router.delete('/:id', authMiddleware, async (req: AuthRequest, res: Response) =>
  * Export comparison to PDF with optional watermark.
  * Deprecated legacy EJS compatibility path. Prefer /api/pdf-jobs for user-facing comparison PDF exports.
  */
-router.post('/:id/export/pdf', authMiddleware, async (req: AuthRequest, res: Response) => {
+router.post('/:id/export/pdf', authMiddleware, requirePermission('manage_jobs'), async (req: AuthRequest, res: Response) => {
   let legacyTraceId = '';
   try {
     const comparisonId = Number(req.params.id);
@@ -1536,7 +1536,7 @@ router.get('/failed-jobs', authMiddleware, async (req: AuthRequest, res: Respons
  * POST /api/comparisons/retry-jobs
  * Retry failed comparison jobs
  */
-router.post('/retry-jobs', authMiddleware, async (req: AuthRequest, res: Response) => {
+router.post('/retry-jobs', authMiddleware, requirePermission('manage_jobs'), async (req: AuthRequest, res: Response) => {
   try {
     const { jobIds, all } = req.body;
 
