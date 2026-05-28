@@ -1,7 +1,5 @@
 import React, { useContext } from 'react';
-import { EntityProfile } from '../types';
 import { EntityContext } from '../components/Layout';
-import { districts, departments } from '../data';
 import { MetricTip } from '../components/MetricTip';
 import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, ComposedChart, Bar
@@ -9,48 +7,6 @@ import {
 import {
   AlertTriangle, CheckCircle2, FileText
 } from 'lucide-react';
-
-// Comparison Component
-const MetricComparisonRow = ({ label, value, median, unit = '%', inverse = false }: any) => {
-  if (value === undefined || median === undefined) return null;
-  const diff = value - median;
-  let statusText = '正常';
-  let colorClass = 'bg-blue-500';
-  let textClass = 'text-blue-600';
-
-  const threshold = 5;
-
-  if (inverse) { // Lower is better
-    if (diff > threshold) { statusText = '偏高'; colorClass = 'bg-rose-500'; textClass = 'text-rose-600'; }
-    else if (diff < -threshold) { statusText = '优异'; colorClass = 'bg-emerald-500'; textClass = 'text-emerald-600'; }
-  } else { // Higher is better
-    if (diff < -threshold) { statusText = '偏低'; colorClass = 'bg-rose-500'; textClass = 'text-rose-600'; }
-    else if (diff > threshold) { statusText = '优异'; colorClass = 'bg-emerald-500'; textClass = 'text-emerald-600'; }
-  }
-
-  const maxVal = Math.max(value, median) * 1.5 || 100;
-
-  return (
-    <div className="flex items-center text-sm py-3 border-b border-slate-50 last:border-0">
-      <div className="w-32 font-medium text-slate-700">{label}</div>
-      <div className="flex-1 flex flex-col px-4">
-        <div className="flex justify-between text-xs mb-1 text-slate-500">
-          <span>本单位: {value.toFixed(1)}{unit}</span>
-          <span>同级中位: {median.toFixed(1)}{unit}</span>
-        </div>
-        <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden relative">
-          <div className="absolute top-0 bottom-0 w-0.5 bg-slate-400 z-10" style={{ left: `${(median / maxVal) * 100}%` }}></div>
-          <div className={`h-full rounded-full ${colorClass}`} style={{ width: `${(value / maxVal) * 100}%` }}></div>
-        </div>
-      </div>
-      <div className="w-24 text-right">
-        <span className={`text-xs px-2 py-0.5 rounded font-bold bg-slate-50 ${textClass}`}>
-          {diff > 0 ? '+' : ''}{diff.toFixed(1)} {statusText}
-        </span>
-      </div>
-    </div>
-  );
-};
 
 export const EntityPortrait: React.FC = () => {
   const { entity } = useContext(EntityContext);
@@ -70,8 +26,6 @@ export const EntityPortrait: React.FC = () => {
 
   if (!currentData) return <div className="p-10 text-center text-slate-500">数据不完整</div>;
 
-  const peers = (entity?.type === 'district' ? districts : (entity?.type === 'department' ? departments : [entity])).filter(Boolean) as EntityProfile[];
-
   const calculateMetrics = (d: any) => {
     if (!d) return null;
     const totalHandled = d.applications.totalHandled || 1;
@@ -90,44 +44,19 @@ export const EntityPortrait: React.FC = () => {
 
   const myMetrics = calculateMetrics(currentData)!;
 
-  // Filter peers who actually have data for the current year
-  const peerMetricsList = peers
-    .map(p => {
-      const d = p.data?.find(x => x.year === currentYear);
-      return calculateMetrics(d);
-    })
-    .filter((m): m is NonNullable<ReturnType<typeof calculateMetrics>> => m !== null);
-
-  const getMedian = (key: keyof typeof myMetrics) => {
-    if (peerMetricsList.length <= 1) return myMetrics[key];
-    const sorted = peerMetricsList.map(m => m[key]).sort((a, b) => a - b);
-    return sorted[Math.floor(sorted.length / 2)];
-  };
-
-  const medians = {
-    openRate: getMedian('openRate'),
-    unableRate: getMedian('unableRate'),
-    correctionRate: getMedian('correctionRate'),
-    disputeRatio: getMedian('disputeRatio'),
-    total: getMedian('total')
-  };
-
-  // --- 2. Advanced Diagnosis Logic (Dual Thresholds) ---
+  // --- 2. Diagnosis Logic ---
   const shortcomings = [];
   const suggestions = [];
 
-  // 1. Correction Risk (Absolute > 15% OR Relative > 5%)
+  // 1. Correction Risk (Absolute > 15%)
   if (myMetrics.correctionRate > 15) {
     shortcomings.push(`<strong>败诉风险高企</strong>：复议诉讼纠错率达 ${myMetrics.correctionRate.toFixed(1)}%，超过 15% 警戒红线。`);
     suggestions.push("启动败诉案件复盘机制，重点审查'程序性瑕疵'（如超期、告知不全）。");
-  } else if (myMetrics.correctionRate - medians.correctionRate > 5) {
-    shortcomings.push(`<strong>败诉率相对偏高</strong>：虽未破红线，但高出同级中位数 ${(myMetrics.correctionRate - medians.correctionRate).toFixed(1)}个百分点。`);
-    suggestions.push("建议加强法制审核力量，引入法律顾问前置审查机制。");
   }
 
-  // 2. Structural Issue: High Volume + High Rejection (Archives Issue)
-  if (myMetrics.total > medians.total && myMetrics.unableRate > 20) {
-    shortcomings.push(`<strong>档案管理隐患</strong>：申请量大且'无法提供'占比高(${myMetrics.unableRate.toFixed(1)}%)，可能存在以查代复问题。`);
+  // 2. Structural Issue: High rejection / unable-to-provide rate.
+  if (myMetrics.unableRate > 20) {
+    shortcomings.push(`<strong>档案管理隐患</strong>：'无法提供'占比高(${myMetrics.unableRate.toFixed(1)}%)，可能存在以查代复问题。`);
     suggestions.push("核查'无法提供'案件真实性，完善信息检索登记台账。");
   }
 
@@ -175,7 +104,7 @@ export const EntityPortrait: React.FC = () => {
             <FileText className="w-5 h-5 mr-2 text-indigo-600" />
             智能诊断报告 ({currentYear})
           </h3>
-          <p className="text-xs text-slate-400 mb-4">基于双阈值算法 (绝对红线 + 相对排名)</p>
+            <p className="text-xs text-slate-400 mb-4">基于年度指标阈值和结构性风险规则</p>
 
           <div className="flex-1 space-y-4 overflow-y-auto pr-2">
             <div>
@@ -230,12 +159,13 @@ export const EntityPortrait: React.FC = () => {
 
           <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
             <h3 className="text-sm font-bold text-slate-700 mb-4 border-l-4 border-blue-500 pl-3">
-              同类单位横向对标 (差距分析)
+              同类单位横向对标
             </h3>
-            <div className="space-y-1">
-              <MetricComparisonRow label="公开率 (高优)" value={myMetrics.openRate} median={medians.openRate} />
-              <MetricComparisonRow label="无法提供率 (低优)" value={myMetrics.unableRate} median={medians.unableRate} inverse />
-              <MetricComparisonRow label="纠错率 (低优)" value={myMetrics.correctionRate} median={medians.correctionRate} inverse />
+            <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/70 p-6 text-center">
+              <div className="text-sm font-semibold text-slate-700 mb-2">暂无同级对标数据</div>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                当前画像仅展示本单位年度指标；待同级单位对标接口接入后，再展示中位数、差距和排名分析。
+              </p>
             </div>
           </div>
         </div>
