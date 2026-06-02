@@ -111,7 +111,9 @@
 
 .jobs-table {
     width: 100%;
+    min-width: 1398px;
     border-collapse: collapse;
+    table-layout: fixed;
 }
 
 .jobs-table thead {
@@ -128,11 +130,6 @@
     white-space: nowrap;
 }
 
-.jobs-table th:nth-child(8) {
-    /* Attempt Count column usually */
-    min-width: 100px;
-}
-
 .jobs-table td {
     padding: 16px;
     border-bottom: 1px solid var(--border-color);
@@ -142,6 +139,98 @@
 }
 
 .jobs-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.jobs-table th:nth-child(1),
+.jobs-table td:nth-child(1) {
+    width: 44px;
+    min-width: 44px;
+    max-width: 44px;
+}
+
+.jobs-table th:nth-child(2),
+.jobs-table td:nth-child(2) {
+    width: 108px;
+}
+
+.jobs-table th:nth-child(3),
+.jobs-table td:nth-child(3) {
+    width: 72px;
+}
+
+.jobs-table th:nth-child(4),
+.jobs-table td:nth-child(4) {
+    width: 360px;
+    text-align: left;
+}
+
+.jobs-table th:nth-child(5),
+.jobs-table td:nth-child(5) {
+    width: 88px;
+}
+
+.jobs-table th:nth-child(6),
+.jobs-table td:nth-child(6) {
+    width: 150px;
+}
+
+.jobs-table th:nth-child(7),
+.jobs-table td:nth-child(7) {
+    width: 72px;
+}
+
+.jobs-table th:nth-child(8),
+.jobs-table td:nth-child(8) {
+    width: 96px;
+}
+
+.jobs-table th:nth-child(9),
+.jobs-table td:nth-child(9) {
+    width: 92px;
+}
+
+.jobs-table th:nth-child(10),
+.jobs-table td:nth-child(10) {
+    width: 90px;
+}
+
+.jobs-table th:nth-child(11),
+.jobs-table td:nth-child(11) {
+    width: 122px;
+}
+
+.jobs-table th:nth-child(12),
+.jobs-table td:nth-child(12) {
+    width: 108px;
+    min-width: 108px;
+}
+
+.jobs-table td:nth-child(2),
+.jobs-table td:nth-child(4),
+.jobs-table td:nth-child(8),
+.jobs-table td:nth-child(11) {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.jobs-table th:nth-child(12) {
+    position: sticky;
+    right: 0;
+    z-index: 6;
+    background: var(--bg-surface-hover);
+    box-shadow: -1px 0 0 var(--border-color);
+}
+
+.jobs-table td:nth-child(12) {
+    position: sticky;
+    right: 0;
+    z-index: 4;
+    background: var(--bg-surface);
+    box-shadow: -1px 0 0 var(--border-color);
+}
+
+.jobs-table tbody tr:hover td:nth-child(12) {
     background: rgba(255, 255, 255, 0.02);
 }
 
@@ -185,6 +274,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
+    min-width: 0;
 }
 
 .progress-bar {
@@ -209,11 +299,21 @@
     font-weight: 500;
 }
 
+.action-buttons {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    min-width: 0;
+}
+
 /* Action Buttons - icon-btn style (matching ComparisonHistory) */
 .icon-btn {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 4px;
+    width: 100%;
     padding: 6px 12px;
     border: 1px solid transparent;
     border-radius: 4px;
