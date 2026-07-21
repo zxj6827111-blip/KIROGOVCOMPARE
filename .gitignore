@@ -46,3 +46,9 @@ append_css.ps1
 replace.ps1
 replace_tableviews.ps1
 table3-diagnostic-optimized.png
+
+.env*
+*.png
+.codegraph/
+.mimocode/
+
