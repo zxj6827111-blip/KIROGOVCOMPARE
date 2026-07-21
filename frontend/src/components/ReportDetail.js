@@ -1088,6 +1088,26 @@ const applyPendingOcrCorrections = (parsed, corrections = []) => {
   return next;
 };
 
+
+function summarizeSourceStructureAudit(parsed) {
+  const audit = parsed?.source_structure_audit;
+  if (!audit || !Array.isArray(audit.issues)) {
+    return null;
+  }
+  const counts = {
+    source_format: 0,
+    source_content: 0,
+    extraction: 0,
+    consistency: 0,
+    total: audit.issues.length,
+  };
+  audit.issues.forEach((issue) => {
+    const cls = issue.issue_class || issue.issueClass || 'source_format';
+    if (counts[cls] !== undefined) counts[cls] += 1;
+  });
+  return { counts, issues: audit.issues, outline: parsed?.raw_source_outline || [] };
+}
+
 function ReportDetail({ reportId: propReportId, onBack }) {
   const toast = useToast();
   const taskDrawer = useTaskDrawer();
@@ -2707,6 +2727,39 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                   <Button onClick={refresh} disabled={loading}>刷新</Button>
                   <Button onClick={handleReparse} disabled={loading}>自动解析</Button>
                 </>
+        {(() => {
+          const parsedForAudit = (() => {
+            const rawParsed = report?.parsed_json ?? report?.parsedJson ?? null;
+            if (!rawParsed) return null;
+            if (typeof rawParsed === 'string') {
+              try { return JSON.parse(rawParsed); } catch { return null; }
+            }
+            return rawParsed;
+          })();
+          const srcAudit = summarizeSourceStructureAudit(parsedForAudit);
+          if (!srcAudit) return null;
+          return (
+            <div className="source-structure-audit-panel" style={{ margin: '12px 0', padding: '12px', border: '1px solid #f0c36d', background: 'rgba(253,214,99,0.12)', borderRadius: 8 }}>
+              <h4 style={{ margin: '0 0 8px' }}>源文件与解析核查摘要</h4>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, fontSize: 13 }}>
+                <span>源文件格式 {srcAudit.counts.source_format}</span>
+                <span>源文件内容 {srcAudit.counts.source_content}</span>
+                <span>系统抽取 {srcAudit.counts.extraction}</span>
+                <span>一致性 {srcAudit.counts.consistency}</span>
+                <span>合计 {srcAudit.counts.total}</span>
+              </div>
+              <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12, maxHeight: 180, overflow: 'auto' }}>
+                {srcAudit.issues.slice(0, 12).map((issue, idx) => (
+                  <li key={idx}>
+                    <strong>[{issue.issue_class || issue.issueClass}]</strong> {issue.title}
+                    {issue.responsibility ? `（责任: ${issue.responsibility}）` : ''}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })()}
+
               )}
               {canDeleteReports && (
                   <Button

@@ -1,3 +1,4 @@
+import { tryParseTable2FromSourceText } from './TableSectionScoring';
 import OpenAI from 'openai';
 import axios from 'axios';
 import path from 'path';
@@ -485,8 +486,22 @@ export class OpenAILlmProvider implements LlmProvider {
             if (parallelTables) {
                 console.log('[OpenAI] Segmented parse: running table_2 and table_3 in parallel with per-segment retries.');
                 [table2, table3] = await Promise.all([runTable2(), runTable3()]);
+                {
+                    const detT2 = tryParseTable2FromSourceText(split.table2Text || '');
+                    if (detT2) {
+                        console.log('[OpenAI] Parsed table_2 via deterministic source anchors.');
+                        table2 = { activeDisclosureData: detT2 };
+                    }
+                }
             } else {
                 table2 = await runTable2();
+                {
+                    const detT2Seq = tryParseTable2FromSourceText(split.table2Text || '');
+                    if (detT2Seq) {
+                        console.log('[OpenAI] Parsed table_2 via deterministic source anchors.');
+                        table2 = { activeDisclosureData: detT2Seq };
+                    }
+                }
                 table3 = await runTable3();
             }
 
