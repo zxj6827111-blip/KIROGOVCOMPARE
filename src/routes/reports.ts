@@ -18,6 +18,7 @@ import { authMiddleware, requirePermission, AuthRequest } from '../middleware/au
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 import { checkStoragePathExists } from '../services/SourceFileGuardService';
 import { hasParsedContent } from '../utils/parsedContent';
+import { resolveParseMaxRetries } from '../utils/jobRetryPolicy';
 import { getReportContentQuality } from '../utils/reportMaintenance';
 import { collectReportSectionTitleIssues } from '../utils/sectionTitleQuality';
 import {
@@ -600,11 +601,12 @@ async function enqueueReportParseJob(input: {
     };
   }
 
+  const parseMaxRetries = resolveParseMaxRetries();
   const jobRes = await pool.query(
-    `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model, ingestion_batch_id)
-     VALUES ($1, $2, 'parse', 'queued', 0, $3, $4, $5)
+    `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model, max_retries, ingestion_batch_id)
+     VALUES ($1, $2, 'parse', 'queued', 0, $3, $4, $6, $5)
      RETURNING id`,
-    [reportId, versionId, versionRow.provider ?? null, versionRow.model ?? null, versionRow.ingestion_batch_id ?? null]
+    [reportId, versionId, versionRow.provider ?? null, versionRow.model ?? null, versionRow.ingestion_batch_id ?? null, parseMaxRetries]
   );
   const jobId = jobRes.rows[0]?.id;
 

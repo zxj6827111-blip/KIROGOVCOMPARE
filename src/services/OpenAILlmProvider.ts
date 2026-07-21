@@ -1969,7 +1969,7 @@ export class OpenAILlmProvider implements LlmProvider {
         if (status === 524) {
             return new LlmProviderError(
                 'OpenAI relay timed out (HTTP 524). Please retry later or check the configured relay service.',
-                'openai_http_error'
+                'openai_timeout'
             );
         }
 

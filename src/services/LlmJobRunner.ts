@@ -21,6 +21,11 @@ import { aiModelConfigService } from './AiModelConfigService';
 import { buildParseConfigSnapshot, parseRunService } from './ParseRunService';
 import { buildSourceGateConfig, sourceGateService } from './SourceGateService';
 import { HIERARCHY_COMPLETENESS_SQL_EXCLUSION } from '../utils/consistencyReviewSemantics';
+import {
+  isNonRetryableJobErrorCode,
+  isUserCancellationError,
+  shouldAutomaticallyRetryJob,
+} from '../utils/jobRetryPolicy';
 
 interface QueuedJob {
   id: number;
@@ -233,21 +238,9 @@ export class LlmJobRunner {
   private async handleJobFailure(job: QueuedJob, error: any): Promise<void> {
     const { code, message } = this.normalizeError(error);
     const failureStep = getFailureStep(job.kind);
-    const nonRetryableCodes = new Set([
-      'SOURCE_FILE_MISSING',
-      'MATERIALIZE_EMPTY_FACTS',
-      'PARSED_JSON_EMPTY',
-      'PARSE_EMPTY_OUTPUT',
-      'PARSE_NOT_READY',
-      'REPORT_NOT_FOUND',
-      'VERSION_NOT_FOUND',
-      'vision_channel_unavailable',
-      'vision_provider_unsupported',
-      'source_capture_failed',
-    ]);
 
-    // Check for Cancellation
-    if (axios.isCancel(error) || error.name === 'AbortError' || message.includes('User cancelled') || message.includes('canceled')) {
+    // User cancel only — do not treat LLM stage AbortError (timeouts) as cancel.
+    if (axios.isCancel(error) || isUserCancellationError(error, message)) {
       console.log(`[Job ${job.id}] Job was cancelled.`);
       await pool.query(`
         UPDATE jobs 
@@ -261,7 +254,7 @@ export class LlmJobRunner {
       return;
     }
 
-    if (nonRetryableCodes.has(code)) {
+    if (isNonRetryableJobErrorCode(code)) {
       await pool.query(`
         UPDATE jobs
         SET status = 'failed',
@@ -290,8 +283,10 @@ export class LlmJobRunner {
       ? `${previousErrorMessage}\nAttempt ${attempt} failed: ${message}`
       : `Attempt ${attempt} failed: ${message}`;
 
-    const isRetryable = job.kind !== 'pdf_export' &&
-                        (job.retry_count || 0) < (job.max_retries || 0);
+    const hasRetryBudget = (job.retry_count || 0) < (job.max_retries || 0);
+    const isRetryable =
+      hasRetryBudget &&
+      shouldAutomaticallyRetryJob({ kind: job.kind, errorCode: code });
 
     if (isRetryable) {
       const newRetryCount = (job.retry_count || 0) + 1;
@@ -302,12 +297,21 @@ export class LlmJobRunner {
             progress = $2,
             step_code = $3,
             step_name = $4,
-            error_code = NULL,
-            error_message = NULL,
-            started_at = NULL
-        WHERE id = $5`,
-        [newRetryCount, STEPS.QUEUED.progress, STEPS.QUEUED.code, `Retry ${newRetryCount}/${job.max_retries}`, job.id]);
-      console.log(`[Job ${job.id}] Retrying (${newRetryCount}/${job.max_retries})`);
+            error_code = $5,
+            error_message = $6,
+            started_at = NULL,
+            finished_at = NULL
+        WHERE id = $7`,
+        [
+          newRetryCount,
+          STEPS.QUEUED.progress,
+          STEPS.QUEUED.code,
+          `Retry ${newRetryCount}/${job.max_retries}`,
+          code,
+          finalMessage,
+          job.id,
+        ]);
+      console.log(`[Job ${job.id}] Retrying (${newRetryCount}/${job.max_retries}) code=${code}`);
       return;
     }
 
@@ -1228,16 +1232,17 @@ export class LlmJobRunner {
 
   private normalizeError(error: any): { code: string; message: string } {
     const message = error instanceof Error ? error.message : String(error);
+    const lower = message.toLowerCase();
     let code = 'UNKNOWN_ERROR';
     if (error instanceof LlmProviderError) {
       code = error.code || 'UNKNOWN_ERROR';
-    } else if (message.toLowerCase().includes('enoent') || message.toLowerCase().includes('no such file or directory')) {
+    } else if (lower.includes('enoent') || lower.includes('no such file or directory')) {
       code = 'SOURCE_FILE_MISSING';
-    } else if (message.includes('timeout')) {
+    } else if (lower.includes('timeout') || lower.includes('timed out') || lower.includes('524')) {
       code = 'TIMEOUT';
-    } else if (message.includes('network')) {
+    } else if (lower.includes('network') || lower.includes('socket hang up') || lower.includes('econnreset')) {
       code = 'NETWORK_ERROR';
-    } else if (message.includes('json')) {
+    } else if (lower.includes('json')) {
       code = 'JSON_PARSE_ERROR';
     }
     return { code, message };

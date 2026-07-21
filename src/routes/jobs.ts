@@ -6,6 +6,7 @@ import { authMiddleware, AuthRequest, requirePermission } from '../middleware/au
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 import { checkVersionSourceFileExists } from '../services/SourceFileGuardService';
 import { resolvePdfExportFilePath } from '../utils/pdfExportPath';
+import { resolveParseMaxRetries } from '../utils/jobRetryPolicy';
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -527,18 +528,37 @@ router.post('/:version_id/retry', requirePermission('manage_jobs'), async (req, 
             const jobDetailsRes = await pool.query('SELECT * FROM jobs WHERE id = $1', [job.id]);
             const jobDetails = jobDetailsRes.rows[0];
 
+            const kind = String(jobDetails.kind || job.kind || '');
+            // Manual retry from UI should also allow automatic requeues for parse (transient relay failures).
+            const maxRetries =
+              kind === 'parse'
+                ? resolveParseMaxRetries()
+                : Number(jobDetails.max_retries ?? 1) > 0
+                  ? Number(jobDetails.max_retries)
+                  : 1;
+
             // Insert NEW job
             await pool.query(`
                 INSERT INTO jobs (
                     report_id, version_id, kind, status, 
                     progress, step_code, step_name, 
-                    created_at, retry_count, max_retries, ingestion_batch_id
+                    created_at, retry_count, max_retries, ingestion_batch_id,
+                    provider, model
                 ) VALUES (
                     $1, $2, $3, 'queued', 
                     0, 'QUEUED', '等待处理', 
-                    NOW(), 0, 1, $4
+                    NOW(), 0, $5, $4,
+                    $6, $7
                 )
-            `, [jobDetails.report_id, jobDetails.version_id, jobDetails.kind, jobDetails.ingestion_batch_id || null]);
+            `, [
+              jobDetails.report_id,
+              jobDetails.version_id,
+              kind,
+              jobDetails.ingestion_batch_id || null,
+              maxRetries,
+              jobDetails.provider ?? null,
+              jobDetails.model ?? null,
+            ]);
             retryCount++;
         }
 
