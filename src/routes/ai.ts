@@ -2,7 +2,7 @@ import express from 'express';
 import { authMiddleware, AuthRequest } from '../middleware/auth';
 import { LlmProviderError } from '../services/LlmProvider';
 import { createLlmProvider } from '../services/LlmProviderFactory';
-import { resolveParseUploadModelOptions, resolveUnifiedLlmConfig } from '../utils/aiEnv';
+import { aiModelConfigService } from '../services/AiModelConfigService';
 
 const router = express.Router();
 
@@ -26,15 +26,6 @@ function stripJsonFences(text: string): string {
   return text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
 }
 
-function normalizeModelSelection(modelInput?: string): { providerName: string; modelName: string } {
-  const config = resolveUnifiedLlmConfig({
-    model: modelInput,
-    providerEnvKeys: ['GOV_INSIGHT_REPORT_PROVIDER', 'LLM_REPORT_PROVIDER', 'LLM_PROVIDER'],
-    modelEnvKeys: ['GOV_INSIGHT_REPORT_MODEL', 'LLM_REPORT_MODEL', 'OPENAI_MODEL', 'LLM_MODEL'],
-  });
-  return { providerName: config.provider, modelName: config.model };
-}
-
 function withThinkingInstruction(systemInstruction: string | undefined, config?: GenerateConfig): string | undefined {
   const budget = Number(config?.thinkingBudget || 0);
   if (!Number.isFinite(budget) || budget <= 0) {
@@ -51,8 +42,36 @@ function withThinkingInstruction(systemInstruction: string | undefined, config?:
 }
 
 router.get('/config', authMiddleware, async (_req: AuthRequest, res) => {
-  const uploadParse = resolveParseUploadModelOptions();
-  return res.json({ uploadParse });
+  const uploadParse = await aiModelConfigService.resolveUploadParseOptions();
+  const [parseRuntime, reportRuntime, visionRuntime] = await Promise.all([
+    aiModelConfigService.resolveRuntime('upload_parse'),
+    aiModelConfigService.resolveRuntime('gov_insight_report'),
+    aiModelConfigService.resolveRuntime('vision_review'),
+  ]);
+
+  return res.json({
+    uploadParse,
+    purposes: {
+      upload_parse: {
+        source: parseRuntime.source,
+        model: parseRuntime.modelValue,
+        profileId: parseRuntime.profileId,
+        profileName: parseRuntime.profileName,
+      },
+      gov_insight_report: {
+        source: reportRuntime.source,
+        model: reportRuntime.modelValue,
+        profileId: reportRuntime.profileId,
+        profileName: reportRuntime.profileName,
+      },
+      vision_review: {
+        source: visionRuntime.source,
+        model: visionRuntime.modelValue,
+        profileId: visionRuntime.profileId,
+        profileName: visionRuntime.profileName,
+      },
+    },
+  });
 });
 
 router.post('/generate-report', authMiddleware, async (req: AuthRequest, res) => {
@@ -63,12 +82,17 @@ router.post('/generate-report', authMiddleware, async (req: AuthRequest, res) =>
       return res.status(400).json({ error: 'Prompt is required' });
     }
 
-    const { providerName, modelName } = normalizeModelSelection(model);
+    const resolved = await aiModelConfigService.resolveCredentialForModel('gov_insight_report', model);
+    const providerName = resolved.provider;
+    const modelName = resolved.model;
     const finalSystemInstruction = withThinkingInstruction(systemInstruction, config);
 
-    console.log(`[AI] Generating report with ${providerName} / ${modelName}`);
+    console.log(`[AI] Generating report with ${providerName} / ${modelName} (source=${resolved.source})`);
 
-    const llm = createLlmProvider(providerName, modelName);
+    const llm = createLlmProvider(providerName, modelName, {
+      apiKey: resolved.apiKey || undefined,
+      baseURL: resolved.baseUrl || undefined,
+    });
     if (!llm.generate) {
       return res.status(500).json({ error: `Provider ${providerName} does not support generation` });
     }

@@ -9,6 +9,7 @@ import {
   normalizePlainText,
 } from '../utils/annualReportSummary';
 import { resolveUnifiedLlmConfig } from '../utils/aiEnv';
+import { aiModelConfigService } from '../services/AiModelConfigService';
 import { govInsightReportPayloadService } from '../services/GovInsightReportPayloadService';
 import {
   buildGovInsightNarrativeResponseSchema,
@@ -32,6 +33,15 @@ function resolveGovInsightReportModel(): string {
     providerEnvKeys: ['GOV_INSIGHT_REPORT_PROVIDER', 'LLM_REPORT_PROVIDER', 'LLM_PROVIDER'],
     modelEnvKeys: ['GOV_INSIGHT_REPORT_MODEL', 'LLM_REPORT_MODEL', 'OPENAI_MODEL', 'LLM_MODEL'],
   }).modelValue;
+}
+
+async function resolveGovInsightReportModelAsync(): Promise<string> {
+  try {
+    const runtime = await aiModelConfigService.resolveRuntime('gov_insight_report');
+    return runtime.modelValue || resolveGovInsightReportModel();
+  } catch {
+    return resolveGovInsightReportModel();
+  }
 }
 
 function toFiniteNumber(value: string | undefined, fallback: number): number {
@@ -861,7 +871,7 @@ router.post('/ai-report/jobs', authMiddleware, requireAnyPermission(['upload_rep
 
     const regionId = parseRegionId(org_id);
     const yearNum = Number(year);
-    const resolvedModel = resolveGovInsightReportModel();
+    const resolvedModel = await resolveGovInsightReportModelAsync();
     const resolvedMaxRetries = 0;
     const resolvedConfig = resolveGovInsightRequestConfig(config);
     const useBackendPayload = use_backend_payload !== false;
@@ -1136,7 +1146,7 @@ router.get('/ai-report/payload', authMiddleware, requirePermission('view_reports
 router.post('/ai-report/save', authMiddleware, requireAnyPermission(['upload_reports', 'manage_jobs']), async (req: AuthRequest, res) => {
   try {
     const { org_id, org_name, year, content } = req.body;
-    const resolvedModel = resolveGovInsightReportModel();
+    const resolvedModel = await resolveGovInsightReportModelAsync();
 
     // Validate inputs
     if (!org_id || !year || !content) {

@@ -10,6 +10,7 @@ import { DATA_DIR, PROJECT_ROOT } from '../config/constants';
 import { parseStructuredJsonFromText } from './LlmCommon';
 import { parseRunService } from './ParseRunService';
 import { resolveFirstNonEmpty, normalizeLlmProviderName } from '../utils/aiEnv';
+import { aiModelConfigService } from './AiModelConfigService';
 import { ConsistencyItem } from './ConsistencyCheckService';
 import { HIERARCHY_COMPLETENESS_SQL_EXCLUSION } from '../utils/consistencyReviewSemantics';
 
@@ -34,6 +35,9 @@ interface VisionReviewConfig {
   model: string;
   apiMode: 'auto' | VisionReviewApiMode;
   timeoutMs: number;
+  baseUrl?: string;
+  apiKey?: string;
+  source?: 'database' | 'env';
 }
 
 interface ReportVersionRow {
@@ -945,22 +949,50 @@ export function compareVisionOcrWithParsed(
 }
 
 export class VisionReviewService {
-  resolveConfig(): VisionReviewConfig {
-    const provider = normalizeLlmProviderName(
-      resolveFirstNonEmpty(process.env.VISION_REVIEW_PROVIDER, process.env.LLM_PROVIDER, 'openai'),
-      'openai'
-    );
-    const model = resolveFirstNonEmpty(process.env.VISION_REVIEW_MODEL, process.env.OPENAI_MODEL, process.env.LLM_MODEL, 'gpt-5.5');
+  async resolveConfig(): Promise<VisionReviewConfig> {
     const apiModeRaw = String(process.env.VISION_REVIEW_API_MODE || 'auto').trim().toLowerCase();
     const timeoutMs = Number(process.env.VISION_REVIEW_TIMEOUT_MS || 120000);
+    const enabled = parseBooleanEnv(process.env.VISION_REVIEW_ENABLED, true);
 
-    return {
-      enabled: parseBooleanEnv(process.env.VISION_REVIEW_ENABLED, true),
-      provider,
-      model,
-      apiMode: apiModeRaw === 'responses' || apiModeRaw === 'chat_completions' || apiModeRaw === 'mock' ? apiModeRaw : 'auto',
-      timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 120000,
-    };
+    try {
+      const runtime = await aiModelConfigService.resolveRuntime('vision_review');
+      return {
+        enabled,
+        provider: runtime.provider || 'openai',
+        model: runtime.model || 'gpt-5.5',
+        apiMode:
+          apiModeRaw === 'responses' || apiModeRaw === 'chat_completions' || apiModeRaw === 'mock'
+            ? apiModeRaw
+            : 'auto',
+        timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 120000,
+        baseUrl: runtime.baseUrl || undefined,
+        apiKey: runtime.apiKey || undefined,
+        source: runtime.source,
+      };
+    } catch (error) {
+      console.warn('[VisionReview] resolveConfig from DB failed, fallback to env:', error);
+      const provider = normalizeLlmProviderName(
+        resolveFirstNonEmpty(process.env.VISION_REVIEW_PROVIDER, process.env.LLM_PROVIDER, 'openai'),
+        'openai'
+      );
+      const model = resolveFirstNonEmpty(
+        process.env.VISION_REVIEW_MODEL,
+        process.env.OPENAI_MODEL,
+        process.env.LLM_MODEL,
+        'gpt-5.5'
+      );
+      return {
+        enabled,
+        provider,
+        model,
+        apiMode:
+          apiModeRaw === 'responses' || apiModeRaw === 'chat_completions' || apiModeRaw === 'mock'
+            ? apiModeRaw
+            : 'auto',
+        timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 120000,
+        source: 'env',
+      };
+    }
   }
 
   normalizeTableIds(input: unknown): VisionReviewTableId[] {
@@ -975,7 +1007,7 @@ export class VisionReviewService {
     items: ConsistencyItem[],
     forceRerun = false
   ): Promise<number> {
-    const config = this.resolveConfig();
+    const config = await this.resolveConfig();
     if (!config.enabled) return 0;
 
     const tableIds = TABLE_IDS.filter((tableId) => hasTableTriggerFailure(items, tableId));
@@ -990,7 +1022,7 @@ export class VisionReviewService {
     triggerReason: string,
     forceRerun: boolean
   ): Promise<number> {
-    const config = this.resolveConfig();
+    const config = await this.resolveConfig();
     if (!config.enabled) return 0;
 
     const version = await this.loadReportVersion(reportId, versionId);
@@ -1067,7 +1099,7 @@ export class VisionReviewService {
   }
 
   async runNow(reportId: number, versionId: number, tableIds: VisionReviewTableId[], forceRerun = true): Promise<any[]> {
-    const config = this.resolveConfig();
+    const config = await this.resolveConfig();
     await this.enqueueReviewRows(reportId, versionId, tableIds, 'manual', forceRerun);
     await pool.query(
       `UPDATE table_visual_reviews
@@ -1091,7 +1123,7 @@ export class VisionReviewService {
     model?: string,
     tableIds?: VisionReviewTableId[]
   ): Promise<any[]> {
-    const config = this.resolveConfig();
+    const config = await this.resolveConfig();
     const targetProvider = provider || config.provider;
     const targetModel = model || config.model;
     const pendingRes = await pool.query(
@@ -1914,8 +1946,12 @@ export class VisionReviewService {
     return `data:${mime};base64,${base64}`;
   }
 
-  private resolveOpenAiBaseUrl(): string {
-    const baseUrl = resolveFirstNonEmpty(process.env.VISION_REVIEW_BASE_URL, process.env.OPENAI_BASE_URL);
+  private resolveOpenAiBaseUrl(overrideBaseUrl?: string): string {
+    const baseUrl = resolveFirstNonEmpty(
+      overrideBaseUrl,
+      process.env.VISION_REVIEW_BASE_URL,
+      process.env.OPENAI_BASE_URL
+    );
     if (!baseUrl) {
       const error = new Error('OPENAI_BASE_URL is required for vision review');
       (error as any).code = 'openai_missing_base_url';
@@ -1926,8 +1962,12 @@ export class VisionReviewService {
     return normalizedBaseUrl;
   }
 
-  private resolveOpenAiApiKey(): string {
-    const apiKey = resolveFirstNonEmpty(process.env.VISION_REVIEW_API_KEY, process.env.OPENAI_API_KEY);
+  private resolveOpenAiApiKey(overrideApiKey?: string): string {
+    const apiKey = resolveFirstNonEmpty(
+      overrideApiKey,
+      process.env.VISION_REVIEW_API_KEY,
+      process.env.OPENAI_API_KEY
+    );
     if (!apiKey) {
       const error = new Error('OPENAI_API_KEY is required for vision review');
       (error as any).code = 'openai_missing_api_key';
@@ -1943,7 +1983,7 @@ export class VisionReviewService {
     focus?: VisionReviewFocus
   ): Promise<Record<string, any>> {
     const response = await axios.post(
-      `${this.resolveOpenAiBaseUrl()}/responses`,
+      `${this.resolveOpenAiBaseUrl(config.baseUrl)}/responses`,
       {
         model: config.model,
         input: [
@@ -1984,7 +2024,7 @@ export class VisionReviewService {
     focus?: VisionReviewFocus
   ): Promise<Record<string, any>> {
     const response = await axios.post(
-      `${this.resolveOpenAiBaseUrl()}/chat/completions`,
+      `${this.resolveOpenAiBaseUrl(config.baseUrl)}/chat/completions`,
       {
         model: config.model,
         messages: [
@@ -2023,7 +2063,7 @@ export class VisionReviewService {
   private buildAxiosOptions(config: VisionReviewConfig) {
     return {
       headers: {
-        Authorization: `Bearer ${this.resolveOpenAiApiKey()}`,
+        Authorization: `Bearer ${this.resolveOpenAiApiKey(config.apiKey)}`,
         'Content-Type': 'application/json',
       },
       responseType: 'text' as const,

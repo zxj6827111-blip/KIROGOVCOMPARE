@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS report_versions (
   approved_by BIGINT,
   created_by BIGINT,
   ingestion_batch_id BIGINT REFERENCES ingestion_batches(id),
+  source_url TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -480,6 +481,7 @@ ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS approved_by BIGINT REFERENCES admin_users(id);
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS created_by BIGINT;
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS ingestion_batch_id BIGINT REFERENCES ingestion_batches(id);
+ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS source_url TEXT;
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS check_total INTEGER;
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS check_visual INTEGER;
 ALTER TABLE report_versions ADD COLUMN IF NOT EXISTS check_structure INTEGER;
@@ -1438,6 +1440,43 @@ export async function runLLMMigrations(): Promise<void> {
     } catch (indexError: any) {
       console.error('[Migrations] Failed to create idx_report_versions_review_status:', indexError?.message || indexError);
     }
+
+    // ------------------------------------------------------------------------
+    // AI model catalog + per-purpose default bindings (admin-managed, hot reload).
+    // ------------------------------------------------------------------------
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ai_model_profiles (
+        id BIGSERIAL PRIMARY KEY,
+        name VARCHAR(120) NOT NULL,
+        model_name VARCHAR(255) NOT NULL,
+        base_url TEXT NOT NULL,
+        api_key TEXT NOT NULL,
+        provider VARCHAR(50) NOT NULL DEFAULT 'openai',
+        is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_by BIGINT,
+        updated_by BIGINT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_ai_model_profiles_enabled
+        ON ai_model_profiles(is_enabled, sort_order, id);
+
+      CREATE TABLE IF NOT EXISTS ai_model_purpose_bindings (
+        purpose VARCHAR(64) PRIMARY KEY,
+        profile_id BIGINT REFERENCES ai_model_profiles(id) ON DELETE SET NULL,
+        updated_by BIGINT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      INSERT INTO ai_model_purpose_bindings (purpose, profile_id)
+      VALUES
+        ('upload_parse', NULL),
+        ('gov_insight_report', NULL),
+        ('vision_review', NULL)
+      ON CONFLICT (purpose) DO NOTHING;
+    `);
 
   } catch (error: any) {
     console.error('Failed to run Postgres schema migrations:', error);

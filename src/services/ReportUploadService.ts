@@ -8,6 +8,7 @@ import { uuidv5, validateUuid } from '../utils/uuid';
 import { checkStoragePathExists } from './SourceFileGuardService';
 import { hasParsedContent } from '../utils/parsedContent';
 import { resolveUnifiedLlmConfig } from '../utils/aiEnv';
+import { aiModelConfigService } from './AiModelConfigService';
 
 const NAMESPACE_uuid = '6ba7b810-9dad-11d1-80b4-00c04fd430c8'; // Standard namespace
 const REPORT_UPLOAD_DEBUG = process.env.REPORT_UPLOAD_DEBUG === '1';
@@ -22,6 +23,7 @@ export interface ReportUploadPayload {
   size: number;
   model?: string;
   batchUuid?: string; // Optional batch UUID for grouping batch uploads
+  sourceUrl?: string | null;
 }
 
 export interface ReportTextUploadPayload {
@@ -51,7 +53,16 @@ function ensureStorageDir(dir: string = storageDir): void {
   }
 }
 
-function resolveProviderAndModel(modelInput?: string): { provider: string; model: string } {
+async function resolveProviderAndModel(modelInput?: string): Promise<{ provider: string; model: string }> {
+  try {
+    const resolved = await aiModelConfigService.resolveCredentialForModel('upload_parse', modelInput);
+    if (resolved.provider && resolved.model) {
+      return { provider: resolved.provider, model: resolved.model };
+    }
+  } catch (error) {
+    console.warn('[ReportUpload] resolve from AI model catalog failed, fallback to env:', error);
+  }
+
   const config = resolveUnifiedLlmConfig({
     model: modelInput,
     providerEnvKeys: ['LLM_PARSE_PROVIDER', 'LLM_PROVIDER'],
@@ -211,7 +222,7 @@ export class ReportUploadService {
       throw new Error('region_not_found');
     }
 
-    const { provider, model } = resolveProviderAndModel(payload.model);
+    const { provider, model } = await resolveProviderAndModel(payload.model);
     const fileHash = await calculateFileHash(payload.tempFilePath);
     const unitName = normalizeUnitName(payload.unitName, region.name);
     const ingestionBatchId = await resolveIngestionBatchId(payload.batchUuid, null);
@@ -250,16 +261,26 @@ export class ReportUploadService {
         `INSERT INTO report_versions (
           report_id, file_name, file_hash, file_size, storage_path, text_path,
           provider, model, prompt_version, parsed_json, schema_version, is_active, raw_text,
-          version_type, parent_version_id, state, review_status, ingestion_batch_id
-        ) VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, 'v1', '{}', 'v1', false, NULL, 'original_parse', NULL, 'pending_review', 'pending_review', $8)
+          version_type, parent_version_id, state, review_status, ingestion_batch_id, source_url
+        ) VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, 'v1', '{}', 'v1', false, NULL, 'original_parse', NULL, 'pending_review', 'pending_review', $8, $9)
         RETURNING id`,
-        [report.id, payload.originalName, fileHash, payload.size, storageRelative, provider, model, ingestionBatchId]
+        [report.id, payload.originalName, fileHash, payload.size, storageRelative, provider, model, ingestionBatchId, payload.sourceUrl || null]
       );
       const version = insertVersionResult.rows[0];
       versionId = version?.id;
     } else {
       reusedVersion = true;
       versionId = existingVersion.id;
+      if (payload.sourceUrl && !existingVersion.source_url) {
+        await pool.query(
+          `UPDATE report_versions
+           SET source_url = $1,
+               updated_at = NOW()
+           WHERE id = $2
+             AND (source_url IS NULL OR BTRIM(source_url) = '')`,
+          [payload.sourceUrl, versionId]
+        );
+      }
     }
 
     if (!versionId) {
@@ -327,7 +348,7 @@ export class ReportUploadService {
       throw new Error('region_not_found');
     }
 
-    const { provider, model } = resolveProviderAndModel(payload.model);
+    const { provider, model } = await resolveProviderAndModel(payload.model);
     const rawText = String(payload.rawText || '').trim();
     if (!rawText) {
       throw new Error('raw_text_empty');

@@ -1,7 +1,7 @@
 import pool from '../config/database-llm';
 import { createLlmProvider } from './LlmProviderFactory';
 import { LlmProviderError } from './LlmProvider';
-import { resolveUnifiedLlmConfig } from '../utils/aiEnv';
+import { aiModelConfigService } from './AiModelConfigService';
 import { parseStructuredJsonFromText } from './LlmCommon';
 import { govInsightReportPayloadService } from './GovInsightReportPayloadService';
 import {
@@ -119,12 +119,21 @@ function parseRequestConfig(raw: unknown): Record<string, unknown> {
   return defaults;
 }
 
-function normalizeModelSelection(): { providerName: string; modelName: string } {
-  const config = resolveUnifiedLlmConfig({
-    providerEnvKeys: ['GOV_INSIGHT_REPORT_PROVIDER', 'LLM_REPORT_PROVIDER', 'LLM_PROVIDER'],
-    modelEnvKeys: ['GOV_INSIGHT_REPORT_MODEL', 'LLM_REPORT_MODEL', 'OPENAI_MODEL', 'LLM_MODEL'],
-  });
-  return { providerName: config.provider, modelName: config.model };
+async function resolveGovInsightModelSelection(): Promise<{
+  providerName: string;
+  modelName: string;
+  apiKey?: string;
+  baseURL?: string;
+  source: string;
+}> {
+  const runtime = await aiModelConfigService.resolveRuntime('gov_insight_report');
+  return {
+    providerName: runtime.provider,
+    modelName: runtime.model,
+    apiKey: runtime.apiKey || undefined,
+    baseURL: runtime.baseUrl || undefined,
+    source: runtime.source,
+  };
 }
 
 function normalizeError(error: unknown): { code: string; message: string } {
@@ -270,11 +279,17 @@ class GovInsightReportJobWorker {
         [STEPS.GENERATING.progress, STEPS.GENERATING.code, STEPS.GENERATING.name, job.id]
       );
 
-      const { providerName, modelName } = normalizeModelSelection();
-      const llm = createLlmProvider(providerName, modelName);
+      const { providerName, modelName, apiKey, baseURL, source } = await resolveGovInsightModelSelection();
+      const llm = createLlmProvider(providerName, modelName, {
+        apiKey,
+        baseURL,
+      });
       if (!llm.generate) {
         throw new Error(`Provider ${providerName} does not support generation`);
       }
+      console.log(
+        `[GovInsightReportJobWorker] Job ${job.id} using ${providerName}/${modelName} (source=${source})`
+      );
 
       const requestConfig = parseRequestConfig(job.request_config);
       const reportPayload =

@@ -55,7 +55,8 @@ export function parsePrefixedModelValue(input: string | undefined): { provider?:
 }
 
 function normalizeRuntimeModelName(modelName: string | undefined): string {
-  return DEFAULT_LLM_MODEL;
+  const text = String(modelName || '').trim();
+  return text || DEFAULT_LLM_MODEL;
 }
 
 export function resolveUnifiedLlmConfig(options: {
@@ -70,7 +71,8 @@ export function resolveUnifiedLlmConfig(options: {
   const modelEnvKeys = options.modelEnvKeys || ['OPENAI_MODEL', 'LLM_MODEL'];
 
   const explicit = parsePrefixedModelValue(options.model);
-  const explicitModelAllowed = String(explicit.model || '').trim().toLowerCase() === DEFAULT_LLM_MODEL;
+  const explicitModel = String(explicit.model || '').trim();
+  const explicitModelAllowed = Boolean(explicitModel);
   const providerFromEnv = resolveFirstNonEmpty(...providerEnvKeys.map((key) => env[key]));
   const modelFromEnv = resolveFirstNonEmpty(...modelEnvKeys.map((key) => env[key]));
 
@@ -79,7 +81,7 @@ export function resolveUnifiedLlmConfig(options: {
     DEFAULT_LLM_PROVIDER
   );
   const model = normalizeRuntimeModelName(
-    explicitModelAllowed ? explicit.model : resolveFirstNonEmpty(modelFromEnv, DEFAULT_LLM_MODEL)
+    explicitModelAllowed ? explicitModel : resolveFirstNonEmpty(modelFromEnv, DEFAULT_LLM_MODEL)
   );
 
   return {
