@@ -116,6 +116,8 @@ function BatchUpload({
   const [isDragging, setIsDragging] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [, setBatchId] = useState(null); // Only setter used for batch tracking
+  // Client-side spacing between batch uploads (ms). Higher = gentler on parse queue / relay.
+  const [uploadGapMs, setUploadGapMs] = useState(1500);
   const fileInputRef = useRef(null);
 
   // 加载区域列表
@@ -500,8 +502,11 @@ function BatchUpload({
         }
       }
 
-      // 短暂延迟避免请求过快
-      await new Promise((r) => setTimeout(r, 500));
+      // Space out uploads so the LLM worker is less likely to hit 524 under batch load.
+      const gap = Math.max(0, Number(uploadGapMs) || 0);
+      if (gap > 0) {
+        await new Promise((r) => setTimeout(r, gap));
+      }
     }
 
     setIsProcessing(false);

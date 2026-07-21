@@ -94,7 +94,8 @@ const PARSE_RULE_GATE_ENABLED = toBooleanEnv(process.env.LLM_PARSE_RULE_GATE_ENA
 const PARSE_RULE_GATE_BLOCKING = toBooleanEnv(process.env.LLM_PARSE_RULE_GATE_BLOCKING, false);
 const PARSE_CONSENSUS_ALLOW_SAME_MODEL = toBooleanEnv(process.env.LLM_PARSE_CONSENSUS_ALLOW_SAME_MODEL, true);
 const PARSE_STABILIZE_MODE = (process.env.LLM_PARSE_STABILIZE_MODE || 'table3,table4').toLowerCase().trim();
-const SOURCE_GATE_ENABLED = toBooleanEnv(process.env.SOURCE_GATE_ENABLED, false);
+const SOURCE_GATE_ENABLED = toBooleanEnv(process.env.SOURCE_GATE_ENABLED, true);
+const SOURCE_GATE_BLOCKING = toBooleanEnv(process.env.SOURCE_GATE_BLOCKING, false);
 const AUTO_PUBLISH_CLEAN_UPLOADS = toBooleanEnv(process.env.AUTO_PUBLISH_CLEAN_UPLOADS, true);
 
 function getFailureStep(jobKind: string): { code: string; name: string; progress: number } {
@@ -189,7 +190,9 @@ export class LlmJobRunner {
     console.log(
       `[JobRunner] Parse stabilize mode: ${PARSE_STABILIZE_MODE || 'none'} (table3=${PARSE_STABILIZE_OPTIONS.table3}, table4=${PARSE_STABILIZE_OPTIONS.table4}), parse_rule_gate=${PARSE_RULE_GATE_ENABLED}, parse_rule_gate_blocking=${PARSE_RULE_GATE_BLOCKING}`
     );
-    console.log(`[JobRunner] Source gate enabled=${SOURCE_GATE_ENABLED}`);
+    console.log(
+      `[JobRunner] Source gate enabled=${SOURCE_GATE_ENABLED} blocking=${SOURCE_GATE_BLOCKING}`
+    );
     this.scheduleNextTick();
   }
 
@@ -416,6 +419,29 @@ export class LlmJobRunner {
     await parseRunService.markRunning(parseRunId);
 
     try {
+      // Skip LLM when the same parse config already produced accepted output for this version.
+      const reusable = await parseRunService.findReusableAcceptedParseRun(
+        job.version_id,
+        createdRun.fingerprint
+      );
+      if (reusable?.outputJson && hasParsedContent(reusable.outputJson)) {
+        console.log(
+          `[Job ${job.id}] Reusing accepted parse_run ${reusable.parseRunId} for fingerprint ${createdRun.fingerprint.slice(0, 12)}… (skip LLM)`
+        );
+        draftOutput = reusable.outputJson;
+        draftRepairs.push(`fingerprint_reuse:${reusable.parseRunId}`);
+        await parseRunService.finalizeParseRun({
+          parseRunId,
+          finalStatus: 'accepted',
+          outputJson: draftOutput,
+          repairsJson: draftRepairs,
+          gateResultJson: { type: 'fingerprint_reuse', reused_from: reusable.parseRunId },
+          consensusResultJson: null,
+          sourceSnapshotsJson: [],
+        });
+        return;
+      }
+
       const parseResult = await provider.parse({
         reportId: job.report_id || 0,
         versionId: job.version_id,
@@ -606,7 +632,7 @@ export class LlmJobRunner {
         return;
       }
 
-      if (sourceGateResult && !sourceGateResult.passed) {
+      if (sourceGateResult && !sourceGateResult.passed && SOURCE_GATE_BLOCKING) {
         const issueText = sourceGateResult.issues.slice(0, 8).map((issue) => `${issue.path}:${issue.reason}`).join('; ');
         const errorMessage = `Source gate failed: ${issueText}`;
         await parseRunService.finalizeParseRun({
@@ -621,6 +647,22 @@ export class LlmJobRunner {
           errorMessage,
         });
         return;
+      }
+
+      if (sourceGateResult && !sourceGateResult.passed && !SOURCE_GATE_BLOCKING) {
+        console.warn(
+          `[Job ${job.id}] Source gate would block (${sourceGateResult.status}, blockers=${sourceGateResult.blockerCount}) but SOURCE_GATE_BLOCKING=false; accepting with audit trail.`
+        );
+        parseResult.output = {
+          ...(parseResult.output || {}),
+          source_gate: sourceGateResult,
+          visual_audit: {
+            ...((parseResult.output as any)?.visual_audit || {}),
+            source_gate: sourceGateResult,
+            source_gate_non_blocking: true,
+          },
+        };
+        draftOutput = parseResult.output;
       }
 
       if (typeof parseResult.sourceText === 'string' && await this.hasRawTextColumn()) {

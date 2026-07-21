@@ -95,6 +95,7 @@ interface ResolvedRegion {
 const DEFAULT_MAX_ITEMS = 50;
 const MAX_MAX_ITEMS = 200;
 const REQUEST_TIMEOUT_MS = Number(process.env.URL_COLLECTION_TIMEOUT_MS || 20000);
+const URL_COLLECTION_SUBMIT_GAP_MS = Math.max(0, Number(process.env.URL_COLLECTION_SUBMIT_GAP_MS || 800));
 const MAX_PAGE_BYTES = Number(process.env.URL_COLLECTION_MAX_PAGE_BYTES || 15 * 1024 * 1024);
 const MAX_REDIRECTS = 5;
 const USER_AGENT =
@@ -679,6 +680,10 @@ export class UrlCollectionImportService {
             reused_job: uploadResult.reusedJob,
             message: uploadResult.reusedVersion || uploadResult.reusedJob ? '已存在相同来源内容，复用已有解析任务' : '已创建解析任务',
           });
+        
+          if (URL_COLLECTION_SUBMIT_GAP_MS > 0) {
+            await new Promise((resolve) => setTimeout(resolve, URL_COLLECTION_SUBMIT_GAP_MS));
+          }
         } finally {
           await fsPromises.unlink(tempFilePath).catch(() => undefined);
         }

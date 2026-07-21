@@ -154,7 +154,7 @@ export function buildParseConfigSnapshot(input: Partial<ParseConfigSnapshot> & {
     parserVersion: input.parserVersion ?? process.env.LLM_PARSER_VERSION ?? 'v1',
     sourceExtractorVersion: input.sourceExtractorVersion ?? process.env.LLM_SOURCE_EXTRACTOR_VERSION ?? 'v1',
     schemaVersion: input.schemaVersion ?? process.env.LLM_PARSE_SCHEMA_VERSION ?? 'v1',
-    stabilizeMode: input.stabilizeMode ?? process.env.LLM_PARSE_STABILIZE_MODE ?? 'none',
+    stabilizeMode: input.stabilizeMode ?? process.env.LLM_PARSE_STABILIZE_MODE ?? 'table3,table4',
     ruleGateEnabled: input.ruleGateEnabled ?? ['1', 'true', 'yes', 'on'].includes(String(process.env.LLM_PARSE_RULE_GATE_ENABLED || '').toLowerCase()),
     promptRulesVersion: input.promptRulesVersion ?? process.env.LLM_PROMPT_RULES_VERSION ?? 'v1',
     sourceGate: {
@@ -240,6 +240,31 @@ export class ParseRunService {
     );
 
     return { id: Number(result.rows[0].id), fingerprint };
+  }
+
+  /**
+   * If an accepted parse_run already exists for this version+fingerprint with usable output,
+   * return it so the worker can skip a redundant LLM call.
+   */
+  async findReusableAcceptedParseRun(
+    reportVersionId: number,
+    fingerprint: string
+  ): Promise<{ parseRunId: number; outputJson: unknown } | null> {
+    const result = await this.db.query<{ id: number; output_json: unknown }>(
+      `SELECT id, output_json
+       FROM parse_runs
+       WHERE report_version_id = $1
+         AND fingerprint = $2
+         AND status = 'accepted'
+         AND output_json IS NOT NULL
+       ORDER BY COALESCE(accepted_at, finished_at, created_at) DESC, id DESC
+       LIMIT 1`,
+      [reportVersionId, fingerprint]
+    );
+    const row = result.rows[0];
+    if (!row?.id) return null;
+    const outputJson = parseDbJson(row.output_json);
+    return { parseRunId: Number(row.id), outputJson };
   }
 
   async markRunning(parseRunId: number): Promise<void> {
