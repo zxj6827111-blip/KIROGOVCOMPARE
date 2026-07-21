@@ -420,12 +420,56 @@ export class LlmJobRunner {
         return;
       }
 
-      const parseResult = await provider.parse({
-        reportId: job.report_id || 0,
-        versionId: job.version_id,
-        storagePath: resolvedStoragePath,
-        fileHash: job.file_hash,
-      }, signal);
+      let parseResult: LlmParseResult;
+      try {
+        parseResult = await provider.parse({
+          reportId: job.report_id || 0,
+          versionId: job.version_id,
+          storagePath: resolvedStoragePath,
+          fileHash: job.file_hash,
+        }, signal);
+      } catch (primaryError: any) {
+        const code = String(primaryError?.code || '').toLowerCase();
+        const msg = String(primaryError?.message || '').toLowerCase();
+        const failoverEnabled = !['0', 'false', 'off', 'no'].includes(
+          String(process.env.LLM_PARSE_MODEL_FAILOVER_ENABLED || 'true').toLowerCase()
+        );
+        const isTransientEmpty =
+          code.includes('empty_response') ||
+          code.includes('timeout') ||
+          msg.includes('empty content') ||
+          msg.includes('timed out') ||
+          msg.includes('524');
+        if (!failoverEnabled || !isTransientEmpty) {
+          throw primaryError;
+        }
+        const alternates = await aiModelConfigService.listAlternateUploadParseModels(
+          selectedModelName || ''
+        );
+        const alt = alternates[0];
+        if (!alt?.model || !alt.apiKey) {
+          throw primaryError;
+        }
+        console.warn(
+          `[Job ${job.id}] Primary parse failed (${primaryError?.code || primaryError?.message}); trying alternate model ${alt.provider}/${alt.model}`
+        );
+        draftRepairs.push(
+          `model_failover:${selectedProviderName}/${selectedModelName}->${alt.provider}/${alt.model}`
+        );
+        selectedProviderName = alt.provider;
+        selectedModelName = alt.model;
+        provider = createLlmProvider(alt.provider, alt.model, {
+          apiKey: alt.apiKey,
+          baseURL: alt.baseUrl,
+        });
+        parseResult = await provider.parse({
+          reportId: job.report_id || 0,
+          versionId: job.version_id,
+          storagePath: resolvedStoragePath,
+          fileHash: job.file_hash,
+        }, signal);
+        console.log(`[Job ${job.id}] Alternate model parse succeeded with ${alt.provider}/${alt.model}`);
+      }
 
       const annualReportNormalized = normalizeAnnualReportOutputFromSource(
         parseResult.output,

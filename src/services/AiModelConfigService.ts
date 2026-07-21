@@ -546,7 +546,44 @@ export class AiModelConfigService {
     };
   }
 
-  async testConnectivity(input: {
+  
+  /**
+   * Other enabled upload_parse candidates (show_in_upload) excluding the primary model.
+   * Used for one-shot failover when the primary model returns empty/timeout.
+   */
+  async listAlternateUploadParseModels(excludeModel?: string): Promise<ResolvedRuntimeAiModel[]> {
+    const exclude = String(excludeModel || '').trim().toLowerCase();
+    try {
+      const data = await loadCache();
+      const enabled = data.profiles.filter((item) => item.is_enabled === true && item.show_in_upload !== false);
+      const out: ResolvedRuntimeAiModel[] = [];
+      for (const match of enabled) {
+        const provider = normalizeLlmProviderName(match.provider, 'openai') || 'openai';
+        const model = String(match.model_name || '').trim();
+        if (!model) continue;
+        if (exclude && (model.toLowerCase() === exclude || buildPrefixedModelValue(provider, model).toLowerCase() === exclude)) {
+          continue;
+        }
+        out.push({
+          source: 'database',
+          profileId: Number(match.id),
+          profileName: match.name,
+          purpose: 'upload_parse',
+          provider,
+          model,
+          modelValue: buildPrefixedModelValue(provider, model),
+          baseUrl: normalizeBaseUrl(match.base_url),
+          apiKey: String(match.api_key || '').trim(),
+        });
+      }
+      return out;
+    } catch (error) {
+      console.warn('[AiModelConfig] listAlternateUploadParseModels failed:', error);
+      return [];
+    }
+  }
+
+async testConnectivity(input: {
     profileId?: number | null;
     name?: string;
     modelName?: string;

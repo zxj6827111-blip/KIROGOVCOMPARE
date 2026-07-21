@@ -35,6 +35,8 @@ import {
     resolveSegmentedBodyParseResponse,
     splitAnnualReportForSegmentedParse,
     tryParseFlattenedTable4,
+    looksLikeReviewLitigationSegment,
+    looksLikeApplicationOnlySegment,
 } from './SegmentedAnnualReportParse';
 import { runSegmentWithRetries } from '../utils/segmentRetry';
 
@@ -525,6 +527,15 @@ export class OpenAILlmProvider implements LlmProvider {
                         if (!hasMeaningfulTable4Data(parsed?.reviewLitigationData)) {
                             const fallbackTable4 = tryParseFlattenedTable4(split.table4Text);
                             if (!fallbackTable4) {
+                                if (
+                                    looksLikeApplicationOnlySegment(split.table4Text) ||
+                                    !looksLikeReviewLitigationSegment(split.table4Text)
+                                ) {
+                                    console.warn(
+                                        '[OpenAI] table_4 segment does not look like review/litigation; using empty table_4 skeleton.'
+                                    );
+                                    return this.buildEmptyTable4ParseResponse();
+                                }
                                 throw new LlmProviderError(
                                     'Segmented table_4 parse returned empty content.',
                                     'openai_empty_response'
