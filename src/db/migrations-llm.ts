@@ -1453,12 +1453,17 @@ export async function runLLMMigrations(): Promise<void> {
         api_key TEXT NOT NULL,
         provider VARCHAR(50) NOT NULL DEFAULT 'openai',
         is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        show_in_upload BOOLEAN NOT NULL DEFAULT TRUE,
         sort_order INTEGER NOT NULL DEFAULT 0,
         created_by BIGINT,
         updated_by BIGINT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+
+      -- Existing deployments created ai_model_profiles before show_in_upload existed.
+      ALTER TABLE ai_model_profiles
+        ADD COLUMN IF NOT EXISTS show_in_upload BOOLEAN NOT NULL DEFAULT TRUE;
 
       CREATE INDEX IF NOT EXISTS idx_ai_model_profiles_enabled
         ON ai_model_profiles(is_enabled, sort_order, id);
