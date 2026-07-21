@@ -2727,6 +2727,21 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                   <Button onClick={refresh} disabled={loading}>刷新</Button>
                   <Button onClick={handleReparse} disabled={loading}>自动解析</Button>
                 </>
+              )}
+              {canDeleteReports && (
+                <Button
+                  variant="danger"
+                  className="report-danger-action"
+                  onClick={handleDelete}
+                  disabled={loading}
+                >
+                  删除报告
+                </Button>
+              )}
+              <Button onClick={handleBack}>返回上一级</Button>
+            </>
+          )}
+        />
         {(() => {
           const parsedForAudit = (() => {
             const rawParsed = report?.parsed_json ?? report?.parsedJson ?? null;
@@ -2753,28 +2768,13 @@ function ReportDetail({ reportId: propReportId, onBack }) {
                   <li key={idx}>
                     <strong>[{issue.issue_class || issue.issueClass}]</strong> {issue.title}
                     {issue.responsibility ? `（责任: ${issue.responsibility}）` : ''}
+                    {issue.source_page != null ? ` · 第${issue.source_page}页` : ''}
                   </li>
                 ))}
               </ul>
             </div>
           );
         })()}
-
-              )}
-              {canDeleteReports && (
-                  <Button
-                    variant="danger"
-                    className="report-danger-action"
-                    onClick={handleDelete}
-                    disabled={loading}
-                  >
-                    删除报告
-                  </Button>
-              )}
-              <Button onClick={handleBack}>返回上一层</Button>
-            </>
-          )}
-        />
         {false && (
         <div className="detail-header report-detail__legacy-header">
           <div>

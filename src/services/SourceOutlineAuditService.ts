@@ -1,3 +1,4 @@
+import { estimatePageFromLine } from '../utils/structuredFieldMerge';
 /**
  * Pre-parse audit of annual-report source outline / titles / text quality.
  * Does NOT modify source text — only emits issues + raw_source_outline.
@@ -194,6 +195,72 @@ function classifyHeading(title: string): Omit<RawOutlineHeading, 'line' | 'page'
   };
 }
 
+
+/** Generic text quality patterns. Unit-specific fixtures must not be required for production. */
+const TEXT_QUALITY_LEXICON: Array<{
+  id: string;
+  re: RegExp;
+  check_key: string;
+  title: string;
+  message: string;
+  severity: IssueSeverity;
+}> = [
+  {
+    id: 'dup_word_generic',
+    re: /([\u4e00-\u9fff]{2,8})\1/,
+    check_key: 'SRC_TEXT_DUPLICATED_WORD',
+    title: '疑似用词重复',
+    message: '正文出现连续重复的中文词组，请人工核对是否笔误。',
+    severity: 'warning',
+  },
+  {
+    id: 'incomplete_guan',
+    re: /审查管(?!理)/,
+    check_key: 'SRC_TEXT_INCOMPLETE_SENTENCE',
+    title: '疑似残句（审查管）',
+    message: '出现“审查管”且未接“理”，疑似残句（通用词库，非单文件硬编码逻辑入口）。',
+    severity: 'warning',
+  },
+  {
+    id: 'suspicious_sheji',
+    re: /重新涉及部门网站/,
+    check_key: 'SRC_TEXT_SUSPICIOUS_WORDING',
+    title: '疑似用词错误（重新涉及部门网站）',
+    message: '“重新涉及部门网站”在政务公开语境下疑似应为“重新设计…”，请人工确认。',
+    severity: 'warning',
+  },
+  {
+    id: 'en_comma_liufen',
+    re: /六部分,/,
+    check_key: 'SRC_TEXT_PUNCTUATION',
+    title: '标点不规范（英文逗号）',
+    message: '“六部分,”使用了英文逗号，建议使用中文标点。',
+    severity: 'info',
+  },
+];
+
+function loadExtraTextLexicon(): typeof TEXT_QUALITY_LEXICON {
+  // Optional JSON: [{ "id","pattern","check_key","title","message","severity" }]
+  const rawEnv = process.env.SOURCE_TEXT_QUALITY_LEXICON_JSON;
+  if (!rawEnv) return [];
+  try {
+    const arr = JSON.parse(rawEnv);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .map((item: any) => ({
+        id: String(item.id || 'extra'),
+        re: new RegExp(String(item.pattern || ''), 'g'),
+        check_key: String(item.check_key || 'SRC_TEXT_SUSPICIOUS_WORDING'),
+        title: String(item.title || '文字质量问题'),
+        message: String(item.message || ''),
+        severity: (item.severity || 'warning') as IssueSeverity,
+      }))
+      .filter((x: any) => x.re.source);
+  } catch {
+    return [];
+  }
+}
+
 function issue(
   partial: Omit<SourceAuditIssue, 'needs_human_review'> & { needs_human_review?: boolean }
 ): SourceAuditIssue {
@@ -213,7 +280,7 @@ export function auditSourceOutline(sourceText: string): SourceOutlineAuditResult
     outline.push({
       ...classified,
       line: idx + 1,
-      page: null,
+      page: estimatePageFromLine(String(sourceText || ''), idx + 1),
       source_excerpt: line.trim().slice(0, 200),
     });
   });
@@ -425,7 +492,30 @@ export function auditSourceOutline(sourceText: string): SourceOutlineAuditResult
     );
   }
 
-  // Internal contradiction: all finished vs carry-over 1
+  
+  const lexicon = [...TEXT_QUALITY_LEXICON, ...loadExtraTextLexicon()];
+  for (const rule of lexicon) {
+    if (!rule.re.test(full)) continue;
+    rule.re.lastIndex = 0;
+    const m = full.match(rule.re);
+    const idx = m ? full.search(rule.re) : -1;
+    issues.push(
+      issue({
+        check_key: rule.check_key,
+        issue_class: 'source_content',
+        responsibility: 'source',
+        severity: rule.severity,
+        group_key: 'text',
+        title: rule.title,
+        message: rule.message,
+        source_page: idx >= 0 ? estimatePageFromLine(full, full.slice(0, idx).split(/\n/).length) : null,
+        source_excerpt: idx >= 0 ? full.slice(Math.max(0, idx - 20), idx + 40) : '',
+        evidence_json: { lexicon_id: rule.id },
+      })
+    );
+  }
+
+// Internal contradiction: all finished vs carry-over 1
   if (/所有申请均已按要求办理完成/.test(full) && /转下一年度办理|结转下年度/.test(full)) {
     issues.push(
       issue({
