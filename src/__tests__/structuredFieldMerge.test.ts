@@ -28,4 +28,3 @@ describe('mergeStructuredFields', () => {
     expect(merged.regulations).toEqual({ made: 0, repealed: 0, valid: 0 });
   });
 });
-

@@ -80,4 +80,3 @@ describeIf(fs.existsSync(OFFICIAL_PDF))('Official sample PDF smoke extract', () 
     expect(audit.issues.filter((i) => i.check_key === 'SRC_OVERALL_SUBTOPIC_AS_TOP_LEVEL').length).toBe(0);
   });
 });
-

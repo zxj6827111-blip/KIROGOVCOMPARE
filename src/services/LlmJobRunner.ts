@@ -241,7 +241,7 @@ export class LlmJobRunner {
     if (axios.isCancel(error) || isUserCancellationError(error, message)) {
       console.log(`[Job ${job.id}] Job was cancelled.`);
       await pool.query(`
-        UPDATE jobs 
+        UPDATE jobs
         SET status = 'cancelled',
             error_message = '用户手动取消',
             progress = 100,
@@ -786,7 +786,7 @@ export class LlmJobRunner {
       console.log(`[Recovery] Found ${runningJobs.length} non-PDF running jobs, resetting to queued...`);
 
       await pool.query(`
-        UPDATE jobs 
+        UPDATE jobs
         SET status = 'queued',
             progress = $1,
             step_code = $2,
@@ -872,7 +872,7 @@ export class LlmJobRunner {
     } catch (error: any) {
       console.error(`[CompareWorker] Job ${job.id} failed:`, error.message);
       await pool.query(`
-        UPDATE jobs 
+        UPDATE jobs
         SET status = 'failed',
             error_message = $1,
             finished_at = NOW()
@@ -1155,14 +1155,14 @@ export class LlmJobRunner {
     }
 
     await pool.query(`
-        UPDATE jobs 
-        SET status = 'succeeded', 
+        UPDATE jobs
+        SET status = 'succeeded',
             progress = $1,
             step_code = $2,
             step_name = $3,
             error_code = NULL,
             error_message = NULL,
-            finished_at = NOW() 
+            finished_at = NOW()
         WHERE id = $4`,
       [STEPS.DONE.progress, STEPS.DONE.code, STEPS.DONE.name, job.id]);
   }
@@ -1236,12 +1236,12 @@ export class LlmJobRunner {
     );
 
     await pool.query(`
-      UPDATE jobs 
-      SET status = 'succeeded', 
+      UPDATE jobs
+      SET status = 'succeeded',
           progress = $1,
           step_code = $2,
           step_name = $3,
-          finished_at = NOW() 
+          finished_at = NOW()
       WHERE id = $4`,
       [STEPS.DONE.progress, STEPS.DONE.code, STEPS.DONE.name, job.id]);
   }
@@ -1302,8 +1302,8 @@ export class LlmJobRunner {
     }
 
     const result = await pool.query(`
-      SELECT column_name 
-      FROM information_schema.columns 
+      SELECT column_name
+      FROM information_schema.columns
       WHERE table_name = 'report_versions' AND column_name = 'parsed_json'
     `);
     this.parsedJsonColumnExists = result.rows.length > 0;
@@ -1421,7 +1421,7 @@ export class LlmJobRunner {
     const content = JSON.stringify({
       reportId: report.report_id,
       versionId: versionId,
-      message: `File ${report.file_name} parsed and materialized successfully.`, 
+      message: `File ${report.file_name} parsed and materialized successfully.`,
       timestamp: new Date().toISOString()
     });
 
@@ -1723,4 +1723,3 @@ export class LlmJobRunner {
 }
 
 export const llmJobRunner = new LlmJobRunner();
-
