@@ -36,6 +36,7 @@ import {
     splitAnnualReportForSegmentedParse,
     tryParseFlattenedTable4,
 } from './SegmentedAnnualReportParse';
+import { runSegmentWithRetries } from '../utils/segmentRetry';
 
 const OPENAI_DEBUG_LOGS = process.env.LLM_DEBUG_LOGS === '1';
 
@@ -402,41 +403,93 @@ export class OpenAILlmProvider implements LlmProvider {
     ): Promise<any> {
         try {
             const reasoningEffort = this.resolveParseReasoningEffort();
-            const table2 = normalizeTable2ParseResponse(await this.requestStructuredJson<Table2ParseResponse>(
-                {
-                    prompt: buildTable2ParsePrompt(this.truncatePrompt(split.table2Text, 'segmented_table_2')),
-                    systemInstruction: buildTable2ParseSystemInstruction(),
-                    temperature,
-                    maxOutputTokens: this.resolveStageMaxOutputTokens(4096),
-                    responseSchema: buildTable2ParseResponseSchema(),
-                    responseSchemaName: 'gov_report_table_2_parse',
-                    responseSchemaDescription: 'Structured extraction of section 2 from a Chinese government annual report.',
-                    responseStrict: parseBooleanEnv(process.env.OPENAI_RESPONSE_STRICT, false),
-                    timeoutMs: this.resolveStageTimeoutMs(90000),
-                    reasoningEffort,
-                },
-                'segmented_table_2',
-                signal
-            ));
+            const parallelTables = parseBooleanEnv(process.env.OPENAI_SEGMENTED_PARALLEL_TABLES, true);
 
-            const table3 = normalizeTable3ParseResponse(await this.requestStructuredJson<Table3ParseResponse>(
-                {
-                    prompt: buildTable3ParsePrompt(this.truncatePrompt(split.table3Text, 'segmented_table_3')),
-                    systemInstruction: buildTable3ParseSystemInstruction(),
-                    temperature,
-                    maxOutputTokens: this.resolveStageMaxOutputTokens(8192),
-                    responseSchema: buildTable3ParseResponseSchema(),
-                    responseSchemaName: 'gov_report_table_3_parse',
-                    responseSchemaDescription: 'Structured extraction of section 3 from a Chinese government annual report.',
-                    responseStrict: parseBooleanEnv(process.env.OPENAI_RESPONSE_STRICT, false),
-                    timeoutMs: this.resolveStageTimeoutMs(120000),
-                    reasoningEffort,
-                },
-                'segmented_table_3',
-                signal
-            ));
+            const runTable2 = () =>
+                runSegmentWithRetries(
+                    'segmented_table_2',
+                    async () =>
+                        normalizeTable2ParseResponse(
+                            await this.requestStructuredJson<Table2ParseResponse>(
+                                {
+                                    prompt: buildTable2ParsePrompt(
+                                        this.truncatePrompt(split.table2Text, 'segmented_table_2')
+                                    ),
+                                    systemInstruction: buildTable2ParseSystemInstruction(),
+                                    temperature,
+                                    maxOutputTokens: this.resolveStageMaxOutputTokens(4096),
+                                    responseSchema: buildTable2ParseResponseSchema(),
+                                    responseSchemaName: 'gov_report_table_2_parse',
+                                    responseSchemaDescription:
+                                        'Structured extraction of section 2 from a Chinese government annual report.',
+                                    responseStrict: parseBooleanEnv(process.env.OPENAI_RESPONSE_STRICT, false),
+                                    timeoutMs: this.resolveStageTimeoutMs(90000),
+                                    reasoningEffort,
+                                },
+                                'segmented_table_2',
+                                signal
+                            )
+                        ),
+                    {
+                        signal,
+                        onRetry: ({ label, attempt, maxAttempts, delayMs, error }) => {
+                            const msg = error instanceof Error ? error.message : String(error);
+                            console.warn(
+                                `[OpenAI] ${label} attempt ${attempt}/${maxAttempts} failed (${msg}). Retrying in ${delayMs}ms.`
+                            );
+                        },
+                    }
+                );
+
+            const runTable3 = () =>
+                runSegmentWithRetries(
+                    'segmented_table_3',
+                    async () =>
+                        normalizeTable3ParseResponse(
+                            await this.requestStructuredJson<Table3ParseResponse>(
+                                {
+                                    prompt: buildTable3ParsePrompt(
+                                        this.truncatePrompt(split.table3Text, 'segmented_table_3')
+                                    ),
+                                    systemInstruction: buildTable3ParseSystemInstruction(),
+                                    temperature,
+                                    maxOutputTokens: this.resolveStageMaxOutputTokens(8192),
+                                    responseSchema: buildTable3ParseResponseSchema(),
+                                    responseSchemaName: 'gov_report_table_3_parse',
+                                    responseSchemaDescription:
+                                        'Structured extraction of section 3 from a Chinese government annual report.',
+                                    responseStrict: parseBooleanEnv(process.env.OPENAI_RESPONSE_STRICT, false),
+                                    timeoutMs: this.resolveStageTimeoutMs(120000),
+                                    reasoningEffort,
+                                },
+                                'segmented_table_3',
+                                signal
+                            )
+                        ),
+                    {
+                        signal,
+                        onRetry: ({ label, attempt, maxAttempts, delayMs, error }) => {
+                            const msg = error instanceof Error ? error.message : String(error);
+                            console.warn(
+                                `[OpenAI] ${label} attempt ${attempt}/${maxAttempts} failed (${msg}). Retrying in ${delayMs}ms.`
+                            );
+                        },
+                    }
+                );
+
+            // Table 2/3 are independent — parallel cuts latency; each segment retries alone on 524/timeout.
+            let table2: Table2ParseResponse;
+            let table3: Table3ParseResponse;
+            if (parallelTables) {
+                console.log('[OpenAI] Segmented parse: running table_2 and table_3 in parallel with per-segment retries.');
+                [table2, table3] = await Promise.all([runTable2(), runTable3()]);
+            } else {
+                table2 = await runTable2();
+                table3 = await runTable3();
+            }
 
             let table4: Table4ParseResponse;
+            // Prefer deterministic table_4 before any LLM call (avoids empty_response window).
             const deterministicTable4 = split.table4Text ? tryParseFlattenedTable4(split.table4Text) : null;
             if (!split.table4Text) {
                 console.log('[OpenAI] table_4 section missing in partial segmented parse; using empty table_4.');
@@ -445,31 +498,55 @@ export class OpenAILlmProvider implements LlmProvider {
                 console.log('[OpenAI] Parsed table_4 via deterministic flattened-row fallback.');
                 table4 = { reviewLitigationData: deterministicTable4 };
             } else {
-                table4 = normalizeTable4ParseResponse(await this.requestStructuredJson<Table4ParseResponse>(
-                    {
-                        prompt: buildTable4ParsePrompt(this.truncatePrompt(split.table4Text, 'segmented_table_4')),
-                        systemInstruction: buildTable4ParseSystemInstruction(),
-                        temperature,
-                        maxOutputTokens: this.resolveStageMaxOutputTokens(2048),
-                        responseSchema: buildTable4ParseResponseSchema(),
-                        responseSchemaName: 'gov_report_table_4_parse',
-                        responseSchemaDescription: 'Structured extraction of section 4 from a Chinese government annual report.',
-                        responseStrict: parseBooleanEnv(process.env.OPENAI_RESPONSE_STRICT, false),
-                        timeoutMs: this.resolveStageTimeoutMs(90000),
-                        reasoningEffort,
-                    },
+                table4 = await runSegmentWithRetries(
                     'segmented_table_4',
-                    signal
-                ));
-
-                if (!hasMeaningfulTable4Data(table4?.reviewLitigationData)) {
-                    const fallbackTable4 = tryParseFlattenedTable4(split.table4Text);
-                    if (!fallbackTable4) {
-                        throw new LlmProviderError('Segmented table_4 parse returned empty content.', 'openai_empty_response');
+                    async () => {
+                        const parsed = normalizeTable4ParseResponse(
+                            await this.requestStructuredJson<Table4ParseResponse>(
+                                {
+                                    prompt: buildTable4ParsePrompt(
+                                        this.truncatePrompt(split.table4Text, 'segmented_table_4')
+                                    ),
+                                    systemInstruction: buildTable4ParseSystemInstruction(),
+                                    temperature,
+                                    maxOutputTokens: this.resolveStageMaxOutputTokens(2048),
+                                    responseSchema: buildTable4ParseResponseSchema(),
+                                    responseSchemaName: 'gov_report_table_4_parse',
+                                    responseSchemaDescription:
+                                        'Structured extraction of section 4 from a Chinese government annual report.',
+                                    responseStrict: parseBooleanEnv(process.env.OPENAI_RESPONSE_STRICT, false),
+                                    timeoutMs: this.resolveStageTimeoutMs(90000),
+                                    reasoningEffort,
+                                },
+                                'segmented_table_4',
+                                signal
+                            )
+                        );
+                        if (!hasMeaningfulTable4Data(parsed?.reviewLitigationData)) {
+                            const fallbackTable4 = tryParseFlattenedTable4(split.table4Text);
+                            if (!fallbackTable4) {
+                                throw new LlmProviderError(
+                                    'Segmented table_4 parse returned empty content.',
+                                    'openai_empty_response'
+                                );
+                            }
+                            console.log(
+                                '[OpenAI] Recovered table_4 from deterministic fallback after empty model output.'
+                            );
+                            return { reviewLitigationData: fallbackTable4 };
+                        }
+                        return parsed;
+                    },
+                    {
+                        signal,
+                        onRetry: ({ label, attempt, maxAttempts, delayMs, error }) => {
+                            const msg = error instanceof Error ? error.message : String(error);
+                            console.warn(
+                                `[OpenAI] ${label} attempt ${attempt}/${maxAttempts} failed (${msg}). Retrying in ${delayMs}ms.`
+                            );
+                        },
                     }
-                    console.log('[OpenAI] Recovered table_4 from deterministic fallback after empty model output.');
-                    table4 = { reviewLitigationData: fallbackTable4 };
-                }
+                );
             }
 
             if (!table2?.activeDisclosureData || typeof table2.activeDisclosureData !== 'object') {
@@ -1935,16 +2012,27 @@ export class OpenAILlmProvider implements LlmProvider {
         }
 
         if (error instanceof LlmProviderError) {
-            return error.code === 'openai_empty_response';
+            const code = String(error.code || '').toLowerCase();
+            return (
+                code === 'openai_empty_response' ||
+                code === 'openai_timeout' ||
+                code === 'openai_http_error' ||
+                code === 'openai_request_error' ||
+                code === 'openai_connection_refused' ||
+                code === 'quota_exceeded'
+            );
         }
 
         const status = Number(error?.status || error?.response?.status || 0);
+        if (status === 429 || status === 524 || status >= 500) {
+            return true;
+        }
         if (status >= 400 && status < 500) {
             return false;
         }
 
         const code = String(error?.code || '').toUpperCase();
-        if (['ECONNRESET', 'EAI_AGAIN', 'ENOTFOUND', 'EPIPE', 'ECONNABORTED'].includes(code)) {
+        if (['ECONNRESET', 'EAI_AGAIN', 'ENOTFOUND', 'EPIPE', 'ECONNABORTED', 'ETIMEDOUT'].includes(code)) {
             return true;
         }
 
@@ -1954,7 +2042,10 @@ export class OpenAILlmProvider implements LlmProvider {
             message.includes('socket hang up') ||
             message.includes('connection error') ||
             message.includes('network error') ||
-            message.includes('fetch failed')
+            message.includes('fetch failed') ||
+            message.includes('timeout') ||
+            message.includes('timed out') ||
+            message.includes('524')
         );
     }
 
