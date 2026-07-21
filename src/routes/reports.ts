@@ -6,6 +6,7 @@ import path from 'path';
 import pool from '../config/database-llm';
 import { PROJECT_ROOT, UPLOADS_TMP_DIR } from '../config/constants';
 import { reportUploadService } from '../services/ReportUploadService';
+import { urlCollectionImportService } from '../services/UrlCollectionImportService';
 import { consistencyCheckService } from '../services/ConsistencyCheckService';
 import { materializeService } from '../services/data-center/MaterializeService';
 import { govInsightStatsService } from '../services/GovInsightStatsService';
@@ -829,6 +830,71 @@ router.post('/reports', authMiddleware, requirePermission('upload_reports'), han
     if (tmpFilePath) {
       await fsPromises.unlink(tmpFilePath).catch(() => undefined);
     }
+  }
+});
+
+router.post('/reports/url-collection', authMiddleware, requirePermission('upload_reports'), express.json({ limit: '1mb' }), async (req: AuthRequest, res) => {
+  try {
+    const url = String(req.body?.url || '').trim();
+    const rawMode = String(req.body?.collection_mode ?? req.body?.collectionMode ?? 'auto').trim();
+    const collectionMode = ['auto', 'single', 'list'].includes(rawMode) ? (rawMode as 'auto' | 'single' | 'list') : 'auto';
+    const yearRaw = req.body?.year;
+    const regionIdRaw = req.body?.region_id ?? req.body?.regionId;
+    const unitNameRaw = req.body?.unit_name ?? req.body?.unitName;
+    const limitRaw = req.body?.limit;
+    const dryRun = req.body?.dry_run === true || req.body?.dryRun === true || req.body?.dry_run === 'true' || req.body?.dryRun === 'true';
+
+    if (!url) {
+      return res.status(400).json({ error: 'url 不能为空' });
+    }
+
+    const year = yearRaw === undefined || yearRaw === null || yearRaw === '' || yearRaw === 'auto' ? null : Number(yearRaw);
+    if (year !== null && (!Number.isInteger(year) || year < 2000 || year > 2100)) {
+      return res.status(400).json({ error: 'year 无效' });
+    }
+
+    const regionId = regionIdRaw === undefined || regionIdRaw === null || regionIdRaw === '' ? null : Number(regionIdRaw);
+    if (regionId !== null && (!Number.isInteger(regionId) || regionId < 1)) {
+      return res.status(400).json({ error: 'region_id 无效' });
+    }
+
+    const limit = limitRaw === undefined || limitRaw === null || limitRaw === '' ? undefined : Number(limitRaw);
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 200)) {
+      return res.status(400).json({ error: 'limit 无效，范围为 1-200' });
+    }
+
+    const allowedRegionIds = await getAllowedRegionIdsAsync(req.user);
+    if (allowedRegionIds && allowedRegionIds.length === 0) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    if (regionId && allowedRegionIds && !allowedRegionIds.includes(regionId)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+
+    const result = await urlCollectionImportService.collectAndImport({
+      url,
+      collectionMode,
+      year,
+      regionId,
+      unitName: typeof unitNameRaw === 'string' && unitNameRaw.trim() ? unitNameRaw.trim() : null,
+      model: req.body?.model,
+      limit,
+      allowedRegionIds,
+      dryRun,
+    });
+
+    return res.status(dryRun ? 200 : 201).json(result);
+  } catch (error: any) {
+    if (error?.message === 'url_required') {
+      return res.status(400).json({ error: 'url 不能为空' });
+    }
+    if (typeof error?.message === 'string' && error.message.includes('URL')) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    console.error('URL collection import error:', error);
+    return res.status(500).json({ error: '网址采集失败', message: error?.message || 'Internal server error' });
   }
 });
 

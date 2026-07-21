@@ -115,6 +115,7 @@ export function createLlmApp(): express.Express {
   app.use('/api/report-maintenance', reportMaintenanceRouter);
   app.use('/api/pdf-jobs', pdfJobsRouter);
   app.use('/api/ai', require('./routes/ai').default);
+  app.use('/api/ai', require('./routes/ai-models').default);
 
   const publicDir = path.resolve(process.cwd(), 'dist', 'public');
   const indexHtmlPath = path.join(publicDir, 'index.html');

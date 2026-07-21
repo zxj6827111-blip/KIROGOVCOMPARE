@@ -3,7 +3,20 @@ import './UploadReport.css';
 import { apiClient } from '../apiClient';
 import BatchUpload from './BatchUpload';
 import RegionCascader from './RegionCascader';
-import { FileText, FolderOpen, AlertTriangle, UploadCloud } from 'lucide-react';
+import {
+  AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  Database,
+  FileText,
+  FolderOpen,
+  Link,
+  PlayCircle,
+  RefreshCw,
+  Search,
+  UploadCloud,
+} from 'lucide-react';
 import {
   extractRegionFromFilename,
   extractUnitNameFromText,
@@ -70,6 +83,566 @@ const extractPdfFirstPageText = async (selectedFile) => {
     await pdf.destroy?.();
   }
 };
+
+const URL_DEMO_RULE = {
+  province: '江苏省',
+  city: '淮安市',
+  unit: '政府信息公开年报栏目',
+  domain: 'www.huaian.gov.cn',
+  status: '已启用',
+};
+
+const URL_COLLECTION_MODES = {
+  auto: {
+    label: '自动识别',
+    description: '系统根据网址结构判断单页或栏目页',
+  },
+  single: {
+    label: '单页采集',
+    description: '适合具体某一篇年报详情页',
+    expected: '预计 1 篇',
+  },
+  list: {
+    label: '栏目批量采集',
+    description: '适合年报栏目、列表或汇总页',
+    expected: '预计多篇',
+  },
+};
+
+const URL_MODE_EXAMPLES = {
+  single: 'https://scjgj.huaian.gov.cn/col/4039_446643/art/17356608/17364738729029ffO7DUB.html',
+  list: 'https://www.huaian.gov.cn/col/18073_668815/index.html',
+};
+
+const isPdfCollectionUrl = (url) => /\.pdf(?:$|[?#])/i.test((url || '').trim());
+
+const inferUrlCollectionMode = (url) => {
+  const normalized = (url || '').trim().toLowerCase();
+  if (!normalized) return 'list';
+  if (isPdfCollectionUrl(normalized)) return 'single';
+  if (normalized.includes('/art/') || /\/art\/[^/]+\/[^/]+\.html?$/.test(normalized)) return 'single';
+  if (normalized.includes('/index.') || normalized.includes('/col/') || normalized.includes('list')) return 'list';
+  return 'list';
+};
+
+const getUrlHost = (url) => {
+  try {
+    return new URL(url).host;
+  } catch {
+    return URL_DEMO_RULE.domain;
+  }
+};
+
+const URL_DEMO_STATUS = {
+  ready: {
+    label: '预览命中',
+    tone: 'neutral',
+    icon: Search,
+  },
+  queued: {
+    label: '已创建解析',
+    tone: 'info',
+    icon: Clock,
+  },
+  reused: {
+    label: '复用已有任务',
+    tone: 'success',
+    icon: CheckCircle2,
+  },
+  imported: {
+    label: '已入库',
+    tone: 'success',
+    icon: CheckCircle2,
+  },
+  parsing: {
+    label: '解析中',
+    tone: 'info',
+    icon: Clock,
+  },
+  pending: {
+    label: '待匹配',
+    tone: 'warning',
+    icon: AlertTriangle,
+  },
+  failed: {
+    label: '下载失败',
+    tone: 'error',
+    icon: AlertCircle,
+  },
+  downloaded: {
+    label: '已下载',
+    tone: 'neutral',
+    icon: Database,
+  },
+  skipped: {
+    label: '已跳过',
+    tone: 'muted',
+    icon: AlertCircle,
+  },
+  collecting: {
+    label: '处理中',
+    tone: 'info',
+    icon: Clock,
+  },
+};
+
+const mapUrlCollectionItem = (item, index) => {
+  const statusMap = {
+    ready: 'ready',
+    queued: 'queued',
+    reused: 'reused',
+    pending_match: 'pending',
+    failed: 'failed',
+  };
+  const fileName = item.file_name || '';
+
+  return {
+    id: item.id || `${item.url || 'url'}-${index}`,
+    unitName: item.unit_name || item.region_name || '待确认单位',
+    regionName: item.region_name || '',
+    year: item.year || '-',
+    title: item.title || item.url || '未命名年报',
+    sourceUrl: item.final_url || item.url || '',
+    status: statusMap[item.status] || 'downloaded',
+    fileType: fileName.toLowerCase().endsWith('.pdf') || isPdfCollectionUrl(item.final_url || item.url) ? 'PDF' : 'HTML',
+    message: item.message || '',
+    reportId: item.report_id,
+    versionId: item.version_id,
+    jobId: item.job_id,
+    reusedVersion: Boolean(item.reused_version),
+    reusedJob: Boolean(item.reused_job),
+  };
+};
+
+function UrlCollectionDemo({ toast, model, taskDrawer }) {
+  const [targetUrl, setTargetUrl] = useState(URL_MODE_EXAMPLES.list);
+  const [collectionMode, setCollectionMode] = useState('auto');
+  const [targetYear, setTargetYear] = useState('auto');
+  const [ruleMode, setRuleMode] = useState('auto');
+  const [ruleData, setRuleData] = useState(URL_DEMO_RULE);
+  const [started, setStarted] = useState(false);
+  const [previewed, setPreviewed] = useState(false);
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const [isCollecting, setIsCollecting] = useState(false);
+  const [lastResult, setLastResult] = useState(null);
+  const inferredMode = inferUrlCollectionMode(targetUrl);
+  const effectiveMode = lastResult?.collection_mode || (collectionMode === 'auto' ? inferredMode : collectionMode);
+  const modeView = URL_COLLECTION_MODES[effectiveMode];
+  const pageTypeLabel = effectiveMode === 'single' ? '具体详情页' : '栏目汇总页';
+  const expectedCount =
+    lastResult?.summary?.discovered > 0
+      ? `已发现 ${lastResult.summary.discovered} 篇年报`
+      : effectiveMode === 'single'
+        ? '预计 1 篇年报'
+        : '预计多篇年报';
+  const [rows, setRows] = useState([]);
+
+  const summary = rows.reduce(
+    (acc, row) => {
+      acc.discovered += row.status === 'skipped' ? 0 : 1;
+      if (!['failed', 'skipped'].includes(row.status)) acc.downloaded += 1;
+      if (['ready', 'queued', 'reused', 'downloaded'].includes(row.status)) acc.matched += 1;
+      if (row.status === 'pending') acc.pending += 1;
+      if (row.status === 'failed') acc.failed += 1;
+      return acc;
+    },
+    { discovered: 0, downloaded: 0, matched: 0, pending: 0, failed: 0 }
+  );
+
+  const setRowStatus = (id, status) => {
+    setRows((current) => current.map((row) => (row.id === id ? { ...row, status } : row)));
+  };
+
+  const changeCollectionMode = (mode) => {
+    setCollectionMode(mode);
+    setStarted(false);
+    setPreviewed(false);
+    setLastResult(null);
+    if (mode === 'single') setTargetUrl(URL_MODE_EXAMPLES.single);
+    if (mode === 'list') setTargetUrl(URL_MODE_EXAMPLES.list);
+    setRows([]);
+  };
+
+  const buildRequestPayload = (dryRun, overrides = {}) => {
+    const payload = {
+      url: overrides.url || targetUrl.trim(),
+      collection_mode: overrides.collectionMode || collectionMode,
+      dry_run: dryRun,
+      limit: overrides.limit || 50,
+    };
+    const requestYear = overrides.year ?? targetYear;
+    if (requestYear && requestYear !== 'auto') {
+      payload.year = Number(requestYear);
+    }
+    if (model) {
+      payload.model = model;
+    }
+    return payload;
+  };
+
+  const applyCollectionResult = (data, options = {}) => {
+    const mappedRows = (data?.items || []).map(mapUrlCollectionItem);
+    setRows(mappedRows);
+    setLastResult(data || null);
+    setRuleData({
+      province: data?.rule?.province || URL_DEMO_RULE.province,
+      city: data?.rule?.city || URL_DEMO_RULE.city,
+      unit: data?.rule?.unit || URL_DEMO_RULE.unit,
+      domain: data?.rule?.domain || getUrlHost(targetUrl),
+      status: data?.rule?.status === 'enabled' ? '已启用' : URL_DEMO_RULE.status,
+    });
+    setPreviewed(Boolean(options.previewed));
+    setStarted(Boolean(options.started));
+    return mappedRows;
+  };
+
+  const trackCreatedJobs = (mappedRows) => {
+    const jobRows = mappedRows.filter((row) => row.jobId);
+    jobRows.forEach((row) => {
+      taskDrawer.trackParseJob({
+        job_id: row.jobId,
+        version_id: row.versionId,
+        status: 'queued',
+        progress: 0,
+        step_name: row.reusedJob || row.reusedVersion ? '复用已有解析任务' : '等待解析',
+        file_name: row.title,
+      });
+    });
+    if (jobRows.length > 0) {
+      taskDrawer.openDrawer();
+    }
+  };
+
+  const handleIdentifyRule = async () => {
+    if (!targetUrl.trim()) {
+      toast.warning('请输入网址', '请粘贴政府网站年报详情页或栏目页网址。');
+      return;
+    }
+
+    setIsPreviewing(true);
+    try {
+      const response = await apiClient.post('/reports/url-collection', buildRequestPayload(true));
+      const mappedRows = applyCollectionResult(response.data, { previewed: true, started: false });
+      const discovered = response.data?.summary?.discovered ?? mappedRows.length;
+      toast.success('规则识别完成', `后端已预览命中 ${discovered} 条年报内容，尚未写入数据库。`);
+    } catch (error) {
+      const friendly = getAxiosFriendlyError(error, '规则识别失败，请检查网址是否可访问。');
+      toast.error('规则识别失败', friendly.message, { detail: friendly.detail });
+    } finally {
+      setIsPreviewing(false);
+    }
+  };
+
+  const handleStart = async () => {
+    if (!targetUrl.trim()) {
+      toast.warning('请输入网址', '请粘贴政府网站年报详情页或栏目页网址。');
+      return;
+    }
+
+    setIsCollecting(true);
+    try {
+      const response = await apiClient.post('/reports/url-collection', buildRequestPayload(false));
+      const mappedRows = applyCollectionResult(response.data, { previewed: false, started: true });
+      trackCreatedJobs(mappedRows);
+      const submitted = response.data?.summary?.submitted || 0;
+      const reused = response.data?.summary?.reused || 0;
+      const pending = response.data?.summary?.pending || 0;
+      const failed = response.data?.summary?.failed || 0;
+      if (submitted === 0 && reused === 0 && pending === 0 && failed > 0) {
+        toast.error('采集导入未成功', `失败 ${failed} 条，请查看采集结果中的原因。`);
+      } else if (failed > 0) {
+        toast.warning('采集导入部分完成', `已创建 ${submitted} 个解析任务，复用 ${reused} 个，待确认 ${pending} 条，失败 ${failed} 条。`);
+      } else {
+        toast.success('采集导入已提交', `已创建 ${submitted} 个解析任务，复用 ${reused} 个，待确认 ${pending} 条。`);
+      }
+    } catch (error) {
+      const friendly = getAxiosFriendlyError(error, '采集导入失败，请稍后重试。');
+      toast.error('采集导入失败', friendly.message, { detail: friendly.detail });
+    } finally {
+      setIsCollecting(false);
+    }
+  };
+
+  const handlePendingMatch = () => {
+    toast.info('需要人工确认', '当前已保留待匹配结果，人工选择单位并重新入库的接口将在下一步接入。');
+  };
+
+  const handleRetry = async (row) => {
+    setRowStatus(row.id, 'collecting');
+    try {
+      const response = await apiClient.post(
+        '/reports/url-collection',
+        buildRequestPayload(false, {
+          url: row.sourceUrl,
+          collectionMode: 'single',
+          year: row.year === '-' ? targetYear : row.year,
+          limit: 1,
+        })
+      );
+      const [nextRow] = (response.data?.items || []).map(mapUrlCollectionItem);
+      setRows((current) => current.map((item) => (item.id === row.id ? nextRow || { ...item, status: 'failed' } : item)));
+      if (nextRow?.jobId) {
+        trackCreatedJobs([nextRow]);
+      }
+      toast.success('重试已提交', '该条目已重新采集并尝试创建解析任务。');
+    } catch (error) {
+      const friendly = getAxiosFriendlyError(error, '重试失败，请稍后再试。');
+      setRows((current) =>
+        current.map((item) => (item.id === row.id ? { ...item, status: 'failed', message: friendly.message } : item))
+      );
+      toast.error('重试失败', friendly.message, { detail: friendly.detail });
+    }
+  };
+
+  const handleSkip = (id) => {
+    setRowStatus(id, 'skipped');
+    toast.warning('已跳过', '该条目不会进入本次入库流程。');
+  };
+
+  const handleViewTask = (row) => {
+    if (row.versionId || row.jobId) {
+      taskDrawer.openDrawer();
+      return;
+    }
+    toast.info('暂无任务', row.message || '该条目尚未创建解析任务。');
+  };
+
+  return (
+    <div className="url-collection-demo">
+      <div className="url-collection-panel">
+        <div className="url-collection-form">
+          <div className="form-section url-input-section">
+            <label>目标网址</label>
+            <div className="url-input-row">
+              <span className="url-input-icon">
+                <Link size={18} />
+              </span>
+              <input
+                type="text"
+                value={targetUrl}
+                onChange={(event) => {
+                  setTargetUrl(event.target.value);
+                  setStarted(false);
+                  setPreviewed(false);
+                  setLastResult(null);
+                }}
+                placeholder="粘贴政府网站年报详情页或栏目页网址"
+              />
+              <button
+                type="button"
+                className="btn-secondary btn-icon-text"
+                onClick={handleIdentifyRule}
+                disabled={isPreviewing || isCollecting}
+              >
+                <Search size={16} /> {isPreviewing ? '识别中...' : '识别规则'}
+              </button>
+            </div>
+          </div>
+
+          <div className="form-section url-mode-section">
+            <label>采集方式</label>
+            <div className="url-mode-toggle" role="group" aria-label="采集方式">
+              {Object.entries(URL_COLLECTION_MODES).map(([mode, config]) => {
+                const ModeIcon = mode === 'single' ? FileText : mode === 'list' ? FolderOpen : Search;
+                return (
+                  <button
+                    type="button"
+                    key={mode}
+                    className={`url-mode-option ${collectionMode === mode ? 'active' : ''}`}
+                    onClick={() => changeCollectionMode(mode)}
+                  >
+                    <ModeIcon size={16} />
+                    <span>
+                      <strong>{config.label}</strong>
+                      <small>{config.description}</small>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="url-mode-hint">
+              <span>单页示例：{URL_MODE_EXAMPLES.single}</span>
+              <span>栏目示例：{URL_MODE_EXAMPLES.list}</span>
+            </div>
+          </div>
+
+          <div className="url-collection-grid">
+            <div className="form-section">
+              <label>年份</label>
+              <select value={targetYear} onChange={(event) => setTargetYear(event.target.value)}>
+                <option value="auto">自动识别</option>
+                <option value="2025">2025</option>
+                <option value="2024">2024</option>
+                <option value="2023">2023</option>
+              </select>
+            </div>
+            <div className="form-section">
+              <label>采集规则</label>
+              <select value={ruleMode} onChange={(event) => setRuleMode(event.target.value)}>
+                <option value="auto">自动匹配规则</option>
+                <option value="huaian-common">江苏省 / 淮安市 / 通用年报栏目</option>
+                <option value="common">通用采集</option>
+              </select>
+            </div>
+            <div className="form-section">
+              <label>采集内容</label>
+              <select defaultValue="annual-report">
+                <option value="annual-report">政府信息公开年报</option>
+                <option value="budget" disabled>
+                  预决算报告（后续扩展）
+                </option>
+              </select>
+            </div>
+          </div>
+
+          {(previewed || started || ruleData) && (
+            <div className="rule-preview">
+              <div>
+                <p className="rule-preview__label">匹配到的规则</p>
+                <h3>
+                  {ruleData.province} / {ruleData.city} / {ruleData.unit}
+                </h3>
+                <p className="rule-preview__mode">
+                  当前识别为：<strong>{pageTypeLabel}</strong>，{expectedCount}
+                </p>
+              </div>
+              <div className="rule-preview__meta">
+                <span>页面类型：{effectiveMode === 'single' ? 'detail_page' : 'list_page'}</span>
+                <span>识别方式：{collectionMode === 'auto' ? '自动识别' : '手动指定'}</span>
+                <span>域名：{ruleData.domain || getUrlHost(targetUrl)}</span>
+                <span className="rule-preview__enabled">{ruleData.status}</span>
+              </div>
+            </div>
+          )}
+
+          <div className="url-demo-note">
+            这里不会显示 API Key、OCR 参数、浏览器路径、调试开关和服务器存储目录；这些内容后续只放在服务端或管理员配置里。
+          </div>
+
+          <div className="url-collection-actions">
+            <button
+              type="button"
+              className="btn-primary btn-icon-text"
+              onClick={handleStart}
+              disabled={isCollecting || isPreviewing || !targetUrl.trim()}
+            >
+              <PlayCircle size={17} /> {isCollecting ? '采集中...' : '开始采集并导入'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className={`url-task-summary ${started ? 'is-active' : ''}`}>
+        {[
+          ['发现', summary.discovered],
+          ['已下载', summary.downloaded],
+          ['已匹配', summary.matched],
+          ['待确认', summary.pending],
+          ['失败', summary.failed],
+        ].map(([label, value]) => (
+          <div className="url-summary-item" key={label}>
+            <span>{label}</span>
+            <strong>{started || previewed ? value : 0}</strong>
+          </div>
+        ))}
+      </div>
+
+      <div className="url-results-panel">
+        <div className="url-results-header">
+          <div>
+            <h3>采集结果</h3>
+            <p>
+              {isCollecting
+                ? '系统正在下载网页、识别年报链接并创建解析任务。'
+                : started
+                ? effectiveMode === 'single'
+                  ? '已调用后端导入单个详情页，解析任务会进入右侧任务抽屉。'
+                  : '已调用后端导入栏目页命中的年报内容，解析任务会进入右侧任务抽屉。'
+                : previewed
+                  ? '这是后端预览结果，尚未写入数据库。'
+                  : '点击“识别规则”预览命中内容，点击“开始采集并导入”后写入数据库并创建解析任务。'}
+            </p>
+          </div>
+          <span className="url-results-badge">{effectiveMode === 'single' ? '单页采集' : '栏目批量'}</span>
+        </div>
+
+        <div className="url-results-table-wrap">
+          <table className="url-results-table">
+            <thead>
+              <tr>
+                <th>单位名称</th>
+                <th>年份</th>
+                <th>标题</th>
+                <th>来源</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan="6" className="url-results-empty">
+                    暂无采集结果
+                  </td>
+                </tr>
+              )}
+              {rows.map((row) => {
+                const status = URL_DEMO_STATUS[row.status] || URL_DEMO_STATUS.downloaded;
+                const StatusIcon = status.icon;
+                return (
+                  <tr key={row.id} className={row.status === 'skipped' ? 'is-muted' : ''}>
+                    <td>{row.unitName}</td>
+                    <td>{row.year}</td>
+                    <td>
+                      <div className="url-result-title">
+                        <span>{row.title}</span>
+                        <small>{row.fileType}{row.message ? ` · ${row.message}` : ''}</small>
+                      </div>
+                    </td>
+                    <td className="source-cell">{row.sourceUrl}</td>
+                    <td>
+                      <span className={`status-pill status-pill--${status.tone}`}>
+                        <StatusIcon size={14} /> {status.label}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="row-actions">
+                        {row.status === 'pending' && (
+                          <>
+                            <button type="button" onClick={() => handlePendingMatch(row)}>
+                              选择单位
+                            </button>
+                            <button type="button" onClick={() => handleSkip(row.id)}>
+                              跳过
+                            </button>
+                          </>
+                        )}
+                        {row.status === 'failed' && (
+                          <button type="button" onClick={() => handleRetry(row)}>
+                            <RefreshCw size={13} /> 重试
+                          </button>
+                        )}
+                        {['queued', 'reused'].includes(row.status) && (
+                          <button type="button" onClick={() => handleViewTask(row)}>
+                            查看任务
+                          </button>
+                        )}
+                        {row.status === 'ready' && <span className="muted-action">预览结果</span>}
+                        {row.status === 'downloaded' && <button type="button" onClick={() => handleRetry(row)}>继续入库</button>}
+                        {row.status === 'collecting' && <span className="muted-action">处理中...</span>}
+                        {row.status === 'skipped' && <span className="muted-action">无需处理</span>}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function UploadReport() {
   const toast = useToast();
@@ -520,6 +1093,13 @@ function UploadReport() {
         >
           <FolderOpen size={16} /> 批量上传
         </button>
+        <button
+          type="button"
+          className={`upload-tab ${uploadMode === 'url' ? 'active' : ''}`}
+          onClick={() => setUploadMode('url')}
+        >
+          <Link size={16} /> 网址采集
+        </button>
       </div>
 
       {uploadMode === 'single' ? (
@@ -627,7 +1207,7 @@ function UploadReport() {
             </div>
           </div>
         </div>
-      ) : (
+      ) : uploadMode === 'batch' ? (
         <BatchUpload
           isEmbedded={true}
           model={model}
@@ -635,6 +1215,8 @@ function UploadReport() {
           modelOptions={modelOptions}
           modelConfigLoading={modelConfigLoading}
         />
+      ) : (
+        <UrlCollectionDemo toast={toast} model={model} taskDrawer={taskDrawer} />
       )}
     </div>
   );

@@ -45,12 +45,23 @@ function resolveProviderName(): SupportedLlmProvider {
   return 'stub';
 }
 
-export function createLlmProvider(providerName?: string, modelName?: string): LlmProvider {
+export interface CreateLlmProviderOptions {
+  apiKey?: string;
+  baseURL?: string;
+  apiMode?: string;
+}
+
+export function createLlmProvider(
+  providerName?: string,
+  modelName?: string,
+  options?: CreateLlmProviderOptions
+): LlmProvider {
   const provider = providerName ? (providerName.toLowerCase() as SupportedLlmProvider) : resolveProviderName();
 
   if (provider === 'openai') {
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = resolveFirstNonEmpty(options?.apiKey, process.env.OPENAI_API_KEY);
     const model = resolveFirstNonEmpty(modelName, process.env.OPENAI_MODEL, process.env.LLM_MODEL);
+    const baseURL = resolveFirstNonEmpty(options?.baseURL, process.env.OPENAI_BASE_URL);
 
     if (!apiKey) {
       throw new LlmProviderError('OPENAI_API_KEY is required for OpenAI provider', 'openai_missing_api_key');
@@ -59,7 +70,11 @@ export function createLlmProvider(providerName?: string, modelName?: string): Ll
       throw new LlmProviderError('OPENAI_MODEL or LLM_MODEL is required for OpenAI provider', 'openai_missing_model');
     }
 
-    return new OpenAILlmProvider(apiKey, model);
+    return new OpenAILlmProvider(apiKey, model, {
+      baseURL: baseURL || undefined,
+      apiMode: options?.apiMode,
+      providerLabel: 'openai',
+    });
   }
 
   if (provider === 'gemini') {

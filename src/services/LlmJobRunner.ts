@@ -16,7 +16,8 @@ import { calculateReportMetrics } from '../utils/reportAnalysis';
 import { hasParsedContent } from '../utils/parsedContent';
 import { PROJECT_ROOT } from '../config/constants';
 import { normalizeAnnualReportOutputFromSource } from './SegmentedAnnualReportParse';
-import { resolveParsePrimaryConfig } from '../utils/llmProviderConfig';
+import { resolveParsePrimaryConfigAsync } from '../utils/llmProviderConfig';
+import { aiModelConfigService } from './AiModelConfigService';
 import { buildParseConfigSnapshot, parseRunService } from './ParseRunService';
 import { buildSourceGateConfig, sourceGateService } from './SourceGateService';
 import { HIERARCHY_COMPLETENESS_SQL_EXCLUSION } from '../utils/consistencyReviewSemantics';
@@ -32,6 +33,8 @@ interface QueuedJob {
   file_hash?: string;
   comparison_id?: number | null;
   ingestion_batch_id?: number | null;
+  provider?: string | null;
+  model?: string | null;
 }
 
 interface ActiveCompareVersion {
@@ -346,11 +349,27 @@ export class LlmJobRunner {
     let draftConsensusResult: any = null;
     let draftSourceSnapshots: any[] = [];
 
-    const parsePrimary = resolveParsePrimaryConfig();
-    selectedProviderName = parsePrimary.provider;
-    selectedModelName = parsePrimary.model;
-    provider = createLlmProvider(parsePrimary.provider, parsePrimary.model);
-    console.log(`[Job ${job.id}] Using config: Provider=${parsePrimary.provider}, Model=${parsePrimary.model}`);
+    const parsePrimary = await resolveParsePrimaryConfigAsync();
+    const jobModelHint = String(job.model || '').trim();
+    const jobProviderHint = String(job.provider || '').trim();
+    // Prefer credentials from admin catalog for the job-selected model when available.
+    // Fall back to purpose default (DB binding / env).
+    const resolvedCreds = jobModelHint
+      ? await aiModelConfigService.resolveCredentialForModel(
+          'upload_parse',
+          jobProviderHint ? `${jobProviderHint}/${jobModelHint}` : jobModelHint
+        )
+      : await aiModelConfigService.resolveRuntime('upload_parse');
+
+    selectedProviderName = resolvedCreds.provider || jobProviderHint || parsePrimary.provider;
+    selectedModelName = resolvedCreds.model || jobModelHint || parsePrimary.model;
+    provider = createLlmProvider(selectedProviderName, selectedModelName, {
+      apiKey: resolvedCreds.apiKey || parsePrimary.apiKey,
+      baseURL: resolvedCreds.baseUrl || parsePrimary.baseUrl,
+    });
+    console.log(
+      `[Job ${job.id}] Using config: Provider=${selectedProviderName}, Model=${selectedModelName}, source=${resolvedCreds.source || parsePrimary.source || 'env'}`
+    );
 
     console.log(`[Job ${job.id}] Processing parse job (attempt ${attempt})...`);
 
@@ -797,7 +816,7 @@ export class LlmJobRunner {
           progress = $3
       FROM next_job n
       WHERE j.id = n.id
-      RETURNING j.id, j.report_id, j.version_id, j.kind, j.comparison_id, j.retry_count, j.max_retries
+      RETURNING j.id, j.report_id, j.version_id, j.kind, j.comparison_id, j.retry_count, j.max_retries, j.provider, j.model
     `,
       [STEPS.PARSING.code, STEPS.PARSING.name, STEPS.PARSING.progress, NON_COMPARE_ALLOWED_KIND_LIST]);
 
@@ -815,6 +834,8 @@ export class LlmJobRunner {
       comparison_id?: number;
       retry_count?: number;
       max_retries?: number;
+      provider?: string | null;
+      model?: string | null;
     };
 
     let storagePath: string | undefined;
@@ -838,6 +859,8 @@ export class LlmJobRunner {
       file_hash: fileHash,
       comparison_id: jobRow.comparison_id ?? null,
       max_retries: Number(jobRow.max_retries ?? 0),
+      provider: jobRow.provider ?? null,
+      model: jobRow.model ?? null,
     } as QueuedJob;
   }
 

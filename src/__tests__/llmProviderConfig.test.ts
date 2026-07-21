@@ -10,18 +10,22 @@ describe('resolveParsePrimaryConfig', () => {
     expect(result).toEqual({
       provider: 'openai',
       model: 'gpt-5.5',
+      source: 'env',
     });
   });
 
-  it('normalizes any alternate configured parse model to GPT-5.5', () => {
+  it('keeps alternate configured parse model names', () => {
     const result = resolveParsePrimaryConfig({
       LLM_PARSE_PROVIDER: 'openai',
       LLM_PARSE_MODEL: 'legacy-model',
+      OPENAI_MODEL: 'gpt-5.5',
+      LLM_MODEL: 'gpt-5.5',
     });
 
     expect(result).toEqual({
       provider: 'openai',
-      model: 'gpt-5.5',
+      model: 'legacy-model',
+      source: 'env',
     });
   });
 });
