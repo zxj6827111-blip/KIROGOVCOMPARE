@@ -479,7 +479,7 @@ export function splitAnnualReportForSegmentedParse(text: string): AnnualReportSp
   }, {} as Record<SegmentKey, string | null>);
 
   const bodyText = BODY_KEYS.map((key) => segments[key]).filter(Boolean).join('\n\n');
-  
+
   // table4 segment self-check: drop mis-sliced applications text and re-locate litigation.
   if (segments.reviewLitigation && looksLikeApplicationOnlySegment(segments.reviewLitigation)) {
     const currentStart = starts.reviewLitigation;

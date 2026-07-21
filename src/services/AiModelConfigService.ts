@@ -546,7 +546,7 @@ export class AiModelConfigService {
     };
   }
 
-  
+
   /**
    * Other enabled upload_parse candidates (show_in_upload) excluding the primary model.
    * Used for one-shot failover when the primary model returns empty/timeout.

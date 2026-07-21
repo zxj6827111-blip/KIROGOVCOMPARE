@@ -680,7 +680,7 @@ export class UrlCollectionImportService {
             reused_job: uploadResult.reusedJob,
             message: uploadResult.reusedVersion || uploadResult.reusedJob ? '已存在相同来源内容，复用已有解析任务' : '已创建解析任务',
           });
-        
+
           if (URL_COLLECTION_SUBMIT_GAP_MS > 0) {
             await new Promise((resolve) => setTimeout(resolve, URL_COLLECTION_SUBMIT_GAP_MS));
           }
