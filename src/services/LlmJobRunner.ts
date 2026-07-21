@@ -26,6 +26,10 @@ import {
   isUserCancellationError,
   shouldAutomaticallyRetryJob,
 } from '../utils/jobRetryPolicy';
+import {
+  resolveParseStabilizeModeFromEnv,
+  resolveStabilizeOptions,
+} from '../utils/parseStabilizeMode';
 
 interface QueuedJob {
   id: number;
@@ -93,7 +97,7 @@ const PARSE_CONSENSUS_ENABLED = toBooleanEnv(process.env.LLM_PARSE_CONSENSUS_ENA
 const PARSE_RULE_GATE_ENABLED = toBooleanEnv(process.env.LLM_PARSE_RULE_GATE_ENABLED, false);
 const PARSE_RULE_GATE_BLOCKING = toBooleanEnv(process.env.LLM_PARSE_RULE_GATE_BLOCKING, false);
 const PARSE_CONSENSUS_ALLOW_SAME_MODEL = toBooleanEnv(process.env.LLM_PARSE_CONSENSUS_ALLOW_SAME_MODEL, true);
-const PARSE_STABILIZE_MODE = (process.env.LLM_PARSE_STABILIZE_MODE || 'table3,table4').toLowerCase().trim();
+const PARSE_STABILIZE_MODE = resolveParseStabilizeModeFromEnv();
 const SOURCE_GATE_ENABLED = toBooleanEnv(process.env.SOURCE_GATE_ENABLED, true);
 const SOURCE_GATE_BLOCKING = toBooleanEnv(process.env.SOURCE_GATE_BLOCKING, false);
 const AUTO_PUBLISH_CLEAN_UPLOADS = toBooleanEnv(process.env.AUTO_PUBLISH_CLEAN_UPLOADS, true);
@@ -117,32 +121,6 @@ function toBooleanEnv(raw: string | undefined, fallback: boolean): boolean {
   if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
   if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
   return fallback;
-}
-
-function resolveStabilizeOptions(modeRaw: string): { table3: boolean; table4: boolean } {
-  const mode = modeRaw.trim().toLowerCase();
-  if (!mode || mode === 'none' || mode === 'off' || mode === '0' || mode === 'false') {
-    return { table3: false, table4: false };
-  }
-  if (mode === 'all' || mode === 'full' || mode === 'true' || mode === '1' || mode === 'on') {
-    return { table3: true, table4: true };
-  }
-  if (mode === 'table4' || mode === 'table4-only') {
-    return { table3: false, table4: true };
-  }
-  if (mode === 'table3' || mode === 'table3-only') {
-    return { table3: true, table4: false };
-  }
-  // Comma / plus lists: "table3,table4", "table3+table4"
-  const tokens = mode.split(/[,+|\s]+/).map((t) => t.trim()).filter(Boolean);
-  if (tokens.length > 0) {
-    const table3 = tokens.some((t) => t === 'table3' || t === 't3' || t === 'all' || t === 'full');
-    const table4 = tokens.some((t) => t === 'table4' || t === 't4' || t === 'all' || t === 'full');
-    if (table3 || table4) {
-      return { table3, table4 };
-    }
-  }
-  return { table3: false, table4: false };
 }
 
 const PARSE_STABILIZE_OPTIONS = resolveStabilizeOptions(PARSE_STABILIZE_MODE);
