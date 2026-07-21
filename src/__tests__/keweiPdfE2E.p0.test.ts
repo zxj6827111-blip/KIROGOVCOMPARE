@@ -1,4 +1,4 @@
-﻿import path from 'path';
+import path from 'path';
 import fs from 'fs';
 import PdfParseService from '../services/PdfParseService';
 import { splitAnnualReportForSegmentedParse } from '../services/SegmentedAnnualReportParse';

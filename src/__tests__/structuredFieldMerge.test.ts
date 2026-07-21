@@ -1,4 +1,4 @@
-﻿import { mergeStructuredFields } from '../utils/structuredFieldMerge';
+import { mergeStructuredFields } from '../utils/structuredFieldMerge';
 
 describe('mergeStructuredFields', () => {
   it('prefers deterministic non-empty and keeps existing when det empty', () => {

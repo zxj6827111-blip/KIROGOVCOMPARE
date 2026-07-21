@@ -492,7 +492,7 @@ export function auditSourceOutline(sourceText: string): SourceOutlineAuditResult
     );
   }
 
-  
+
   const lexicon = [...TEXT_QUALITY_LEXICON, ...loadExtraTextLexicon()];
   for (const rule of lexicon) {
     if (!rule.re.test(full)) continue;
