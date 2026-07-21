@@ -6,6 +6,12 @@ import { authMiddleware, AuthRequest, requirePermission } from '../middleware/au
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 import { checkVersionSourceFileExists } from '../services/SourceFileGuardService';
 import { resolvePdfExportFilePath } from '../utils/pdfExportPath';
+import { resolveParseMaxRetries } from '../utils/jobRetryPolicy';
+import {
+  buildUploadPipelineSummary,
+  computePipelineOverallProgress,
+  determineCorePipelineStatus,
+} from '../utils/jobPipeline';
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -335,53 +341,36 @@ router.get('/:version_id', async (req, res) => {
 
         const jobs = jobsRes.rows.map(normalizeJobForDisplay);
 
-        // Aggregate status
-        const aggregatedStatus = determineVersionStatus(jobs);
+        // Aggregate status from core pipeline (parse → materialize → checks), not compare/pdf noise
+        const aggregatedStatus = determineCorePipelineStatus(jobs);
+        const pipeline = buildUploadPipelineSummary(jobs);
+        const overallProgress = computePipelineOverallProgress(jobs);
 
-        // Get current progress - only consider core jobs (parse, materialize, checks), not compare jobs
         const coreJobs = jobs.filter((j: any) => ['parse', 'materialize', 'checks'].includes(j.kind));
-        const currentCoreJob = coreJobs.find((j: any) => j.status === 'running' || j.status === 'queued') || coreJobs[coreJobs.length - 1];
+        const currentCoreJob =
+          coreJobs.find((j: any) => j.status === 'running' || j.status === 'queued') ||
+          coreJobs.filter((j: any) => j.status === 'failed').slice(-1)[0] ||
+          coreJobs[coreJobs.length - 1];
 
-        // Calculate overall progress based on step_code to sync with 5-step UI progress
-        // Steps: RECEIVED(20%) -> ENQUEUED(40%) -> PARSING(40-80%) -> POSTPROCESS(80-100%) -> DONE(100%)
-        let overallProgress = 0;
-        if (currentCoreJob) {
-            const stepCode = currentCoreJob.step_code;
-            const jobProgress = currentCoreJob.progress || 0;
+        // Keep legacy step_code mapping for the 5-step bar
+        let stepCode = currentCoreJob?.step_code || 'QUEUED';
+        let stepName = currentCoreJob?.step_name || '等待处理';
+        if (pipeline.current_stage_key === 'parse' && currentCoreJob?.kind === 'parse') {
+          // unchanged
+        } else if (pipeline.current_stage_key === 'materialize') {
+          stepCode = currentCoreJob?.status === 'failed' ? 'POSTPROCESS' : 'POSTPROCESS';
+          stepName = currentCoreJob?.step_name || '结构化入库';
+        } else if (pipeline.current_stage_key === 'checks') {
+          stepCode = 'POSTPROCESS';
+          stepName = currentCoreJob?.step_name || '一致性校验';
+        } else if (pipeline.all_core_succeeded) {
+          stepCode = 'DONE';
+          stepName = '完成';
+        }
 
-            if (currentCoreJob.status === 'failed') {
-                overallProgress = jobProgress;
-            } else {
-                switch (stepCode) {
-                    case 'RECEIVED':
-                        overallProgress = 20;
-                        break;
-                    case 'ENQUEUED':
-                    case 'QUEUED':
-                        overallProgress = 40;
-                        break;
-                    case 'PARSING':
-                        // AI parsing: 40% to 80% (40% range)
-                        overallProgress = 40 + Math.round((jobProgress / 100) * 40);
-                        break;
-                    case 'POSTPROCESS':
-                        // Post processing: 80% to 100% (20% range)
-                        overallProgress = 80 + Math.round((jobProgress / 100) * 20);
-                        break;
-                    case 'DONE':
-                        overallProgress = 100;
-                        break;
-                    default:
-                        // Fallback: use job progress directly
-                        overallProgress = jobProgress;
-                }
-            }
-        }
-        // Ensure all core jobs completed means 100%
-        const allCoreCompleted = coreJobs.length > 0 && coreJobs.every((j: any) => j.status === 'succeeded');
-        if (allCoreCompleted) {
-            overallProgress = 100;
-        }
+        const errorJob =
+          coreJobs.find((j: any) => j.status === 'failed') ||
+          currentCoreJob;
 
         return res.json({
             version_id: version.version_id,
@@ -392,13 +381,17 @@ router.get('/:version_id', async (req, res) => {
             file_name: version.file_name,
             status: aggregatedStatus,
             progress: overallProgress,
-            step_code: currentCoreJob?.step_code || 'QUEUED',
-            step_name: currentCoreJob?.step_name || '等待处理',
-            attempt: currentCoreJob?.attempt || 1,
+            step_code: stepCode,
+            step_name: stepName,
+            attempt: Number(currentCoreJob?.retry_count || 0) + 1,
+            retry_count: Number(currentCoreJob?.retry_count || 0),
+            max_retries: Number(currentCoreJob?.max_retries || 0),
             provider: currentCoreJob?.provider,
             model: currentCoreJob?.model,
-            error_code: currentCoreJob?.error_code,
-            error_message: currentCoreJob?.error_message,
+            error_code: errorJob?.error_code,
+            error_message: errorJob?.error_message,
+            pipeline,
+            pipeline_headline: pipeline.headline,
             created_at: version.created_at,
             updated_at: version.created_at,
             jobs,
@@ -527,18 +520,37 @@ router.post('/:version_id/retry', requirePermission('manage_jobs'), async (req, 
             const jobDetailsRes = await pool.query('SELECT * FROM jobs WHERE id = $1', [job.id]);
             const jobDetails = jobDetailsRes.rows[0];
 
+            const kind = String(jobDetails.kind || job.kind || '');
+            // Manual retry from UI should also allow automatic requeues for parse (transient relay failures).
+            const maxRetries =
+              kind === 'parse'
+                ? resolveParseMaxRetries()
+                : Number(jobDetails.max_retries ?? 1) > 0
+                  ? Number(jobDetails.max_retries)
+                  : 1;
+
             // Insert NEW job
             await pool.query(`
                 INSERT INTO jobs (
                     report_id, version_id, kind, status, 
                     progress, step_code, step_name, 
-                    created_at, retry_count, max_retries, ingestion_batch_id
+                    created_at, retry_count, max_retries, ingestion_batch_id,
+                    provider, model
                 ) VALUES (
                     $1, $2, $3, 'queued', 
                     0, 'QUEUED', '等待处理', 
-                    NOW(), 0, 1, $4
+                    NOW(), 0, $5, $4,
+                    $6, $7
                 )
-            `, [jobDetails.report_id, jobDetails.version_id, jobDetails.kind, jobDetails.ingestion_batch_id || null]);
+            `, [
+              jobDetails.report_id,
+              jobDetails.version_id,
+              kind,
+              jobDetails.ingestion_batch_id || null,
+              maxRetries,
+              jobDetails.provider ?? null,
+              jobDetails.model ?? null,
+            ]);
             retryCount++;
         }
 

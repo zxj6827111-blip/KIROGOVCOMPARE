@@ -174,9 +174,46 @@ describe('security hardening worker recovery and file paths', () => {
 
     const updateCall = mockedQuery.mock.calls.find((c: any[]) => String(c[0]).includes("SET status = 'queued'"));
     expect(updateCall).toBeDefined();
-    expect(updateCall![1]).toEqual(
-      expect.arrayContaining([1, 0, 'QUEUED', 'Retry 1/2', 501])
-    );
+    // [retry_count, progress, step_code, step_name, error_code, error_message, job_id]
+    expect(updateCall![1][0]).toBe(1);
+    expect(updateCall![1][2]).toBe('QUEUED');
+    expect(updateCall![1][3]).toBe('Retry 1/2');
+    expect(updateCall![1][6]).toBe(501);
+  });
+
+  it('requeues parse jobs on openai_timeout without treating AbortError as cancel', async () => {
+    const { LlmProviderError } = require('../services/LlmProvider');
+    const job = { id: 504, kind: 'parse', report_id: 10, version_id: 20, retry_count: 0, max_retries: 2 };
+    const error = new LlmProviderError('OpenAI API request timed out: timed out', 'openai_timeout');
+    error.name = 'AbortError';
+
+    mockedQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    await (llmJobRunner as any).handleJobFailure(job, error);
+
+    const cancelCall = mockedQuery.mock.calls.find((c: any[]) => String(c[0]).includes("status = 'cancelled'"));
+    expect(cancelCall).toBeUndefined();
+    const updateCall = mockedQuery.mock.calls.find((c: any[]) => String(c[0]).includes("SET status = 'queued'"));
+    expect(updateCall).toBeDefined();
+    expect(updateCall![1]).toEqual(expect.arrayContaining(['openai_timeout', 504]));
+  });
+
+  it('does not requeue permanent SOURCE_FILE_MISSING even when retries remain', async () => {
+    const { LlmProviderError } = require('../services/LlmProvider');
+    const job = { id: 505, kind: 'parse', report_id: 10, version_id: 20, retry_count: 0, max_retries: 2 };
+    const error = new LlmProviderError('source file missing', 'SOURCE_FILE_MISSING');
+
+    mockedQuery.mockResolvedValueOnce({ rows: [] });
+
+    await (llmJobRunner as any).handleJobFailure(job, error);
+
+    const retryCall = mockedQuery.mock.calls.find((c: any[]) => String(c[0]).includes("SET status = 'queued'"));
+    expect(retryCall).toBeUndefined();
+    const failCall = mockedQuery.mock.calls.find((c: any[]) => String(c[0]).includes("SET status = 'failed'"));
+    expect(failCall).toBeDefined();
+    expect(failCall![1][0]).toBe('SOURCE_FILE_MISSING');
   });
 
   it('permanently fails a job with retry_count >= max_retries', async () => {

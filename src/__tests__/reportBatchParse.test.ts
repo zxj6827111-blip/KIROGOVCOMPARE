@@ -189,7 +189,7 @@ describe('Report batch parse route', () => {
     ]);
     expect(mockedQuery).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO jobs'),
-      [41, 4101, 'openai', 'gpt-test', 501]
+      [41, 4101, 'openai', 'gpt-test', 501, 2]
     );
   });
 

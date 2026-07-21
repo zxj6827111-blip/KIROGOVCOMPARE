@@ -420,4 +420,34 @@ describe('SegmentedAnnualReportParse', () => {
     expect(table4.reviewLitigationData?.litigationDirect?.total).toBe(10);
     expect(table4.reviewLitigationData?.litigationPostReview?.total).toBe(15);
   });
+
+  it('should treat Shanghai-style applications heading as table_3 not table_4', () => {
+    const shanghaiStyle = [
+      '一、总体情况',
+      '总体叙述。',
+      '二、工作机制保障',
+      '机制叙述。',
+      '三、主动公开工作情况',
+      '主动公开叙述。',
+      '四、政府信息公开申请情况',
+      '全年收到政府信息公开申请 34 件。',
+      '五、政府信息管理',
+      '管理叙述。',
+      '三、政府信息公开行政复议、行政诉讼情况',
+      '行政复议行政诉讼',
+      '| 维持 | 纠正 | 结果 | 审结 | 结果 | 结果 | 其他 | 尚未 | 结果 | 结果 | 其他 | 尚未 |',
+      '|---|---|---|---|---|---|---|---|---|---|---|---|',
+      '| 1 | 0 | 0 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |',
+      '五、存在的主要问题及改进情况',
+      '问题叙述。',
+    ].join('\n');
+
+    const split = splitAnnualReportForSegmentedParse(shanghaiStyle);
+    expect(split.table3Text).toContain('申请情况');
+    expect(split.table3Text).toContain('34');
+    expect(split.table4Text).toContain('复议');
+    expect(split.table4Text).not.toContain('34 件');
+    expect(split.canUseSegmentedParse).toBe(true);
+  });
+
 });

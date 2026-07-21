@@ -21,6 +21,15 @@ import { aiModelConfigService } from './AiModelConfigService';
 import { buildParseConfigSnapshot, parseRunService } from './ParseRunService';
 import { buildSourceGateConfig, sourceGateService } from './SourceGateService';
 import { HIERARCHY_COMPLETENESS_SQL_EXCLUSION } from '../utils/consistencyReviewSemantics';
+import {
+  isNonRetryableJobErrorCode,
+  isUserCancellationError,
+  shouldAutomaticallyRetryJob,
+} from '../utils/jobRetryPolicy';
+import {
+  resolveParseStabilizeModeFromEnv,
+  resolveStabilizeOptions,
+} from '../utils/parseStabilizeMode';
 
 interface QueuedJob {
   id: number;
@@ -88,8 +97,9 @@ const PARSE_CONSENSUS_ENABLED = toBooleanEnv(process.env.LLM_PARSE_CONSENSUS_ENA
 const PARSE_RULE_GATE_ENABLED = toBooleanEnv(process.env.LLM_PARSE_RULE_GATE_ENABLED, false);
 const PARSE_RULE_GATE_BLOCKING = toBooleanEnv(process.env.LLM_PARSE_RULE_GATE_BLOCKING, false);
 const PARSE_CONSENSUS_ALLOW_SAME_MODEL = toBooleanEnv(process.env.LLM_PARSE_CONSENSUS_ALLOW_SAME_MODEL, true);
-const PARSE_STABILIZE_MODE = (process.env.LLM_PARSE_STABILIZE_MODE || 'none').toLowerCase().trim();
-const SOURCE_GATE_ENABLED = toBooleanEnv(process.env.SOURCE_GATE_ENABLED, false);
+const PARSE_STABILIZE_MODE = resolveParseStabilizeModeFromEnv();
+const SOURCE_GATE_ENABLED = toBooleanEnv(process.env.SOURCE_GATE_ENABLED, true);
+const SOURCE_GATE_BLOCKING = toBooleanEnv(process.env.SOURCE_GATE_BLOCKING, false);
 const AUTO_PUBLISH_CLEAN_UPLOADS = toBooleanEnv(process.env.AUTO_PUBLISH_CLEAN_UPLOADS, true);
 
 function getFailureStep(jobKind: string): { code: string; name: string; progress: number } {
@@ -111,17 +121,6 @@ function toBooleanEnv(raw: string | undefined, fallback: boolean): boolean {
   if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
   if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
   return fallback;
-}
-
-function resolveStabilizeOptions(modeRaw: string): { table3: boolean; table4: boolean } {
-  const mode = modeRaw.trim().toLowerCase();
-  if (mode === 'all' || mode === 'full') {
-    return { table3: true, table4: true };
-  }
-  if (mode === 'table4' || mode === 'table4-only') {
-    return { table3: false, table4: true };
-  }
-  return { table3: false, table4: false };
 }
 
 const PARSE_STABILIZE_OPTIONS = resolveStabilizeOptions(PARSE_STABILIZE_MODE);
@@ -169,7 +168,9 @@ export class LlmJobRunner {
     console.log(
       `[JobRunner] Parse stabilize mode: ${PARSE_STABILIZE_MODE || 'none'} (table3=${PARSE_STABILIZE_OPTIONS.table3}, table4=${PARSE_STABILIZE_OPTIONS.table4}), parse_rule_gate=${PARSE_RULE_GATE_ENABLED}, parse_rule_gate_blocking=${PARSE_RULE_GATE_BLOCKING}`
     );
-    console.log(`[JobRunner] Source gate enabled=${SOURCE_GATE_ENABLED}`);
+    console.log(
+      `[JobRunner] Source gate enabled=${SOURCE_GATE_ENABLED} blocking=${SOURCE_GATE_BLOCKING}`
+    );
     this.scheduleNextTick();
   }
 
@@ -233,21 +234,9 @@ export class LlmJobRunner {
   private async handleJobFailure(job: QueuedJob, error: any): Promise<void> {
     const { code, message } = this.normalizeError(error);
     const failureStep = getFailureStep(job.kind);
-    const nonRetryableCodes = new Set([
-      'SOURCE_FILE_MISSING',
-      'MATERIALIZE_EMPTY_FACTS',
-      'PARSED_JSON_EMPTY',
-      'PARSE_EMPTY_OUTPUT',
-      'PARSE_NOT_READY',
-      'REPORT_NOT_FOUND',
-      'VERSION_NOT_FOUND',
-      'vision_channel_unavailable',
-      'vision_provider_unsupported',
-      'source_capture_failed',
-    ]);
 
-    // Check for Cancellation
-    if (axios.isCancel(error) || error.name === 'AbortError' || message.includes('User cancelled') || message.includes('canceled')) {
+    // User cancel only — do not treat LLM stage AbortError (timeouts) as cancel.
+    if (axios.isCancel(error) || isUserCancellationError(error, message)) {
       console.log(`[Job ${job.id}] Job was cancelled.`);
       await pool.query(`
         UPDATE jobs 
@@ -261,7 +250,7 @@ export class LlmJobRunner {
       return;
     }
 
-    if (nonRetryableCodes.has(code)) {
+    if (isNonRetryableJobErrorCode(code)) {
       await pool.query(`
         UPDATE jobs
         SET status = 'failed',
@@ -290,8 +279,10 @@ export class LlmJobRunner {
       ? `${previousErrorMessage}\nAttempt ${attempt} failed: ${message}`
       : `Attempt ${attempt} failed: ${message}`;
 
-    const isRetryable = job.kind !== 'pdf_export' &&
-                        (job.retry_count || 0) < (job.max_retries || 0);
+    const hasRetryBudget = (job.retry_count || 0) < (job.max_retries || 0);
+    const isRetryable =
+      hasRetryBudget &&
+      shouldAutomaticallyRetryJob({ kind: job.kind, errorCode: code });
 
     if (isRetryable) {
       const newRetryCount = (job.retry_count || 0) + 1;
@@ -302,12 +293,21 @@ export class LlmJobRunner {
             progress = $2,
             step_code = $3,
             step_name = $4,
-            error_code = NULL,
-            error_message = NULL,
-            started_at = NULL
-        WHERE id = $5`,
-        [newRetryCount, STEPS.QUEUED.progress, STEPS.QUEUED.code, `Retry ${newRetryCount}/${job.max_retries}`, job.id]);
-      console.log(`[Job ${job.id}] Retrying (${newRetryCount}/${job.max_retries})`);
+            error_code = $5,
+            error_message = $6,
+            started_at = NULL,
+            finished_at = NULL
+        WHERE id = $7`,
+        [
+          newRetryCount,
+          STEPS.QUEUED.progress,
+          STEPS.QUEUED.code,
+          `Retry ${newRetryCount}/${job.max_retries}`,
+          code,
+          finalMessage,
+          job.id,
+        ]);
+      console.log(`[Job ${job.id}] Retrying (${newRetryCount}/${job.max_retries}) code=${code}`);
       return;
     }
 
@@ -397,12 +397,79 @@ export class LlmJobRunner {
     await parseRunService.markRunning(parseRunId);
 
     try {
-      const parseResult = await provider.parse({
-        reportId: job.report_id || 0,
-        versionId: job.version_id,
-        storagePath: resolvedStoragePath,
-        fileHash: job.file_hash,
-      }, signal);
+      // Skip LLM when the same parse config already produced accepted output for this version.
+      const reusable = await parseRunService.findReusableAcceptedParseRun(
+        job.version_id,
+        createdRun.fingerprint
+      );
+      if (reusable?.outputJson && hasParsedContent(reusable.outputJson)) {
+        console.log(
+          `[Job ${job.id}] Reusing accepted parse_run ${reusable.parseRunId} for fingerprint ${createdRun.fingerprint.slice(0, 12)}… (skip LLM)`
+        );
+        draftOutput = reusable.outputJson;
+        draftRepairs.push(`fingerprint_reuse:${reusable.parseRunId}`);
+        await parseRunService.finalizeParseRun({
+          parseRunId,
+          finalStatus: 'accepted',
+          outputJson: draftOutput,
+          repairsJson: draftRepairs,
+          gateResultJson: { type: 'fingerprint_reuse', reused_from: reusable.parseRunId },
+          consensusResultJson: null,
+          sourceSnapshotsJson: [],
+        });
+        return;
+      }
+
+      let parseResult: LlmParseResult;
+      try {
+        parseResult = await provider.parse({
+          reportId: job.report_id || 0,
+          versionId: job.version_id,
+          storagePath: resolvedStoragePath,
+          fileHash: job.file_hash,
+        }, signal);
+      } catch (primaryError: any) {
+        const code = String(primaryError?.code || '').toLowerCase();
+        const msg = String(primaryError?.message || '').toLowerCase();
+        const failoverEnabled = !['0', 'false', 'off', 'no'].includes(
+          String(process.env.LLM_PARSE_MODEL_FAILOVER_ENABLED || 'true').toLowerCase()
+        );
+        const isTransientEmpty =
+          code.includes('empty_response') ||
+          code.includes('timeout') ||
+          msg.includes('empty content') ||
+          msg.includes('timed out') ||
+          msg.includes('524');
+        if (!failoverEnabled || !isTransientEmpty) {
+          throw primaryError;
+        }
+        const alternates = await aiModelConfigService.listAlternateUploadParseModels(
+          selectedModelName || ''
+        );
+        const alt = alternates[0];
+        if (!alt?.model || !alt.apiKey) {
+          throw primaryError;
+        }
+        console.warn(
+          `[Job ${job.id}] Primary parse failed (${primaryError?.code || primaryError?.message}); trying alternate model ${alt.provider}/${alt.model}`
+        );
+        draftRepairs.push(
+          `model_failover:${selectedProviderName}/${selectedModelName}->${alt.provider}/${alt.model}`
+        );
+        selectedProviderName = alt.provider;
+        selectedModelName = alt.model;
+        provider = createLlmProvider(alt.provider, alt.model, {
+          apiKey: alt.apiKey,
+          baseURL: alt.baseUrl,
+        });
+        parseResult = await provider.parse({
+          reportId: job.report_id || 0,
+          versionId: job.version_id,
+          storagePath: resolvedStoragePath,
+          fileHash: job.file_hash,
+        }, signal);
+        console.log(`[Job ${job.id}] Alternate model parse succeeded with ${alt.provider}/${alt.model}`);
+      }
 
       const annualReportNormalized = normalizeAnnualReportOutputFromSource(
         parseResult.output,
@@ -587,7 +654,7 @@ export class LlmJobRunner {
         return;
       }
 
-      if (sourceGateResult && !sourceGateResult.passed) {
+      if (sourceGateResult && !sourceGateResult.passed && SOURCE_GATE_BLOCKING) {
         const issueText = sourceGateResult.issues.slice(0, 8).map((issue) => `${issue.path}:${issue.reason}`).join('; ');
         const errorMessage = `Source gate failed: ${issueText}`;
         await parseRunService.finalizeParseRun({
@@ -602,6 +669,22 @@ export class LlmJobRunner {
           errorMessage,
         });
         return;
+      }
+
+      if (sourceGateResult && !sourceGateResult.passed && !SOURCE_GATE_BLOCKING) {
+        console.warn(
+          `[Job ${job.id}] Source gate would block (${sourceGateResult.status}, blockers=${sourceGateResult.blockerCount}) but SOURCE_GATE_BLOCKING=false; accepting with audit trail.`
+        );
+        parseResult.output = {
+          ...(parseResult.output || {}),
+          source_gate: sourceGateResult,
+          visual_audit: {
+            ...((parseResult.output as any)?.visual_audit || {}),
+            source_gate: sourceGateResult,
+            source_gate_non_blocking: true,
+          },
+        };
+        draftOutput = parseResult.output;
       }
 
       if (typeof parseResult.sourceText === 'string' && await this.hasRawTextColumn()) {
@@ -1228,16 +1311,17 @@ export class LlmJobRunner {
 
   private normalizeError(error: any): { code: string; message: string } {
     const message = error instanceof Error ? error.message : String(error);
+    const lower = message.toLowerCase();
     let code = 'UNKNOWN_ERROR';
     if (error instanceof LlmProviderError) {
       code = error.code || 'UNKNOWN_ERROR';
-    } else if (message.toLowerCase().includes('enoent') || message.toLowerCase().includes('no such file or directory')) {
+    } else if (lower.includes('enoent') || lower.includes('no such file or directory')) {
       code = 'SOURCE_FILE_MISSING';
-    } else if (message.includes('timeout')) {
+    } else if (lower.includes('timeout') || lower.includes('timed out') || lower.includes('524')) {
       code = 'TIMEOUT';
-    } else if (message.includes('network')) {
+    } else if (lower.includes('network') || lower.includes('socket hang up') || lower.includes('econnreset')) {
       code = 'NETWORK_ERROR';
-    } else if (message.includes('json')) {
+    } else if (lower.includes('json')) {
       code = 'JSON_PARSE_ERROR';
     }
     return { code, message };

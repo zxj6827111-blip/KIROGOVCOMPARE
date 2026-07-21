@@ -151,7 +151,16 @@ function createLegacyTempPdf(): string {
   return tempPdfPath;
 }
 
-function mockLegacyEjsExportQueries(sections: any[] = [{ title: 'Overview', type: 'text', content: 'Legacy content' }]) {
+// content must pass hasParsedContent (meaningful text length / table payload), or export returns 409.
+function mockLegacyEjsExportQueries(
+  sections: any[] = [
+    {
+      title: 'Overview',
+      type: 'text',
+      content: 'Legacy comparison export content for smoke testing readiness.',
+    },
+  ]
+) {
   mockedQuery.mockImplementation(async (sql: unknown, params?: unknown[]) => {
     const text = String(sql);
 

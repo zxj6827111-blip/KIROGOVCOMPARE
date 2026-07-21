@@ -9,6 +9,7 @@ import { checkStoragePathExists } from './SourceFileGuardService';
 import { hasParsedContent } from '../utils/parsedContent';
 import { resolveUnifiedLlmConfig } from '../utils/aiEnv';
 import { aiModelConfigService } from './AiModelConfigService';
+import { resolveParseMaxRetries } from '../utils/jobRetryPolicy';
 
 const NAMESPACE_uuid = '6ba7b810-9dad-11d1-80b4-00c04fd430c8'; // Standard namespace
 const REPORT_UPLOAD_DEBUG = process.env.REPORT_UPLOAD_DEBUG === '1';
@@ -187,11 +188,12 @@ async function ensureParseJob(
     return { jobId: Number(runningJob.id), reused: true };
   }
 
+  const parseMaxRetries = resolveParseMaxRetries();
   const newJobResult = await pool.query(
     `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model, max_retries, ingestion_batch_id)
-     VALUES ($1, $2, 'parse', 'queued', 0, $3, $4, 0, $5)
+     VALUES ($1, $2, 'parse', 'queued', 0, $3, $4, $6, $5)
      RETURNING id`,
-    [reportId, versionId, provider, model, ingestionBatchId]
+    [reportId, versionId, provider, model, ingestionBatchId, parseMaxRetries]
   );
   return { jobId: Number(newJobResult.rows[0].id), reused: false };
 }

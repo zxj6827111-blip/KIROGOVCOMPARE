@@ -29,15 +29,41 @@ const TABLE_TITLES = {
 } as const;
 
 const SECTION_PATTERNS: Record<SegmentKey, RegExp[]> = {
-  overallSituation: [/^\s*#{0,6}\s*\u4e00\u3001/, /^\s*[（(]\u4e00[）)]\s*\u4e3b\u52a8\u516c\u5f00/],
-  activeDisclosure: [/^\s*#{0,6}\s*\u4e8c\u3001/, /^\s*##\s*\u8868[\u4e8c2]/i],
-  applicationRequests: [/^\s*#{0,6}\s*\u4e09\u3001/, /^\s*##\s*\u8868[\u4e093]/i],
-  reviewLitigation: [/^\s*#{0,6}\s*\u56db\u3001/, /^\s*##\s*\u8868[\u56db4]/i],
-  problemsAndImprovements: [/^\s*#{0,6}\s*\u4e94\u3001/],
+  // Keyword-first where possible; bare numbered headings are fallbacks only.
+  overallSituation: [
+    /^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001\u603b\u4f53\u60c5\u51b5/,
+    /^\s*#{0,6}\s*\u4e00\u3001/,
+    /^\s*[\uFF08(]\u4e00[\uFF09)]\s*\u4e3b\u52a8\u516c\u5f00/,
+  ],
+  activeDisclosure: [
+    /^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001\u4e3b\u52a8\u516c\u5f00/,
+    /^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001.{0,20}\u4e3b\u52a8\u516c\u5f00\u653f\u5e9c\u4fe1\u606f/,
+    /^\s*##\s*\u8868[\u4e8c2]/i,
+    /^\s*#{0,6}\s*\u4e8c\u3001(?!.*\u7533\u8bf7)(?!.*\u590d\u8bae)/,
+  ],
+  applicationRequests: [
+    /^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001.{0,40}\u7533\u8bf7/,
+    /^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001.{0,40}\u6536\u5230\u548c\u5904\u7406/,
+    /^\s*##\s*\u8868[\u4e093]/i,
+    /^\s*##\s*.{0,12}\u6536\u5230\u548c\u5904\u7406.{0,12}\u7533\u8bf7/,
+  ],
+  reviewLitigation: [
+    /^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001.{0,40}\u884c\u653f\u590d\u8bae/,
+    /^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001.{0,40}\u884c\u653f\u8bc9\u8bbc/,
+    /^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001.{0,40}\u590d\u8bae.{0,12}\u8bc9\u8bbc/,
+    /^\s*##\s*\u8868[\u56db4]/i,
+  ],
+  problemsAndImprovements: [
+    /^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001.{0,20}\u4e3b\u8981\u95ee\u9898/,
+    /^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001.{0,20}\u6539\u8fdb\u60c5\u51b5/,
+    /^\s*#{0,6}\s*\u4e94\u3001(?!.*\u7533\u8bf7)(?!.*\u4fe1\u606f\u7ba1\u7406)/,
+    /^\s*[\uFF08(]\u4e00[\uFF09)]\s*\u5b58\u5728\u7684\u4e3b\u8981\u95ee\u9898/,
+  ],
   otherMatters: [
+    /^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001.{0,20}\u5176\u4ed6\u9700\u8981\u62a5\u544a/,
     /^\s*#{0,6}\s*\u516d\u3001/,
-    /^\s*[（(]\u4e00[）)]\s*\u8d2f\u5f7b\u843d\u5b9e\u653f\u52a1\u516c\u5f00\u5e74\u5ea6\u5de5\u4f5c\u8981\u70b9\u60c5\u51b5/,
-    /^\s*[（(]\u4e8c[）)]\s*\u6536\u53d6\u4fe1\u606f\u5904\u7406\u8d39\u60c5\u51b5/,
+    /^\s*[\uFF08(]\u4e00[\uFF09)]\s*\u8d2f\u5f7b\u843d\u5b9e\u653f\u52a1\u516c\u5f00\u5e74\u5ea6\u5de5\u4f5c\u8981\u70b9\u60c5\u51b5/,
+    /^\s*[\uFF08(]\u4e8c[\uFF09)]\s*\u6536\u53d6\u4fe1\u606f\u5904\u7406\u8d39\u60c5\u51b5/,
     /^\s*\u5176\u4ed6\u9700\u8981\u62a5\u544a\u7684\u4e8b\u9879/,
   ],
 };
@@ -336,6 +362,25 @@ function blockFromCells(cells: CellValue[]): Table4Block {
   };
 }
 
+
+/** True when segment text looks like administrative review / litigation (table_4). */
+export function looksLikeReviewLitigationSegment(text: string | null | undefined): boolean {
+  const t = String(text || '');
+  if (!t.trim()) return false;
+  if (/\u884c\u653f\u590d\u8bae|\u884c\u653f\u8bc9\u8bbc|\u590d\u8bae.{0,8}\u8bc9\u8bbc/.test(t)) return true;
+  // Flattened table headers commonly include 维持/纠正 with 复议 context
+  if (/\u590d\u8bae/.test(t) && /(\u7ef4\u6301|\u7ea0\u6b63|\u8bc9\u8bbc)/.test(t)) return true;
+  return false;
+}
+
+/** True when segment is applications prose (table_3 narrative) rather than litigation. */
+export function looksLikeApplicationOnlySegment(text: string | null | undefined): boolean {
+  const t = String(text || '');
+  if (!t.trim()) return false;
+  if (!/(\u7533\u8bf7|\u6536\u5230\u548c\u5904\u7406)/.test(t)) return false;
+  return !looksLikeReviewLitigationSegment(t);
+}
+
 export function splitAnnualReportForSegmentedParse(text: string): AnnualReportSplitResult {
   const fullText = cleanSegmentText(text);
   const lines = fullText.split('\n');
@@ -361,6 +406,33 @@ export function splitAnnualReportForSegmentedParse(text: string): AnnualReportSp
     acc[key] = findFirstMatchingLine(lines, SECTION_PATTERNS[key]);
     return acc;
   }, {} as Record<SegmentKey, number>);
+  // Keyword re-scan for mis-numbered sections (Shanghai / non-standard outlines).
+  if (starts.activeDisclosure < 0) {
+    starts.activeDisclosure = findFirstMatchingLine(lines, SECTION_PATTERNS.activeDisclosure);
+  }
+  if (starts.applicationRequests < 0) {
+    starts.applicationRequests = findFirstMatchingLine(lines, SECTION_PATTERNS.applicationRequests);
+  }
+  if (starts.reviewLitigation < 0) {
+    starts.reviewLitigation = findFirstMatchingLine(lines, SECTION_PATTERNS.reviewLitigation);
+  }
+  // If the first table_4 hit is applications-only prose, search further for real litigation.
+  if (starts.reviewLitigation >= 0) {
+    const reviewLine = String(lines[starts.reviewLitigation] || '');
+    const isApplicationOnly =
+      /\u7533\u8bf7/.test(reviewLine) && !/(\u590d\u8bae|\u8bc9\u8bbc)/.test(reviewLine);
+    if (isApplicationOnly) {
+      if (starts.applicationRequests < 0 || starts.applicationRequests > starts.reviewLitigation) {
+        starts.applicationRequests = starts.reviewLitigation;
+      }
+      starts.reviewLitigation = findFirstMatchingLineFrom(
+        lines,
+        SECTION_PATTERNS.reviewLitigation,
+        starts.reviewLitigation + 1
+      );
+    }
+  }
+
 
   if (starts.problemsAndImprovements < 0 && starts.reviewLitigation >= 0) {
     starts.problemsAndImprovements = findFirstMatchingLineFrom(
@@ -407,7 +479,30 @@ export function splitAnnualReportForSegmentedParse(text: string): AnnualReportSp
   }, {} as Record<SegmentKey, string | null>);
 
   const bodyText = BODY_KEYS.map((key) => segments[key]).filter(Boolean).join('\n\n');
-  const missingSections = REQUIRED_SEGMENTS.filter((key) => !segments[key]);
+
+  // table4 segment self-check: drop mis-sliced applications text and re-locate litigation.
+  if (segments.reviewLitigation && looksLikeApplicationOnlySegment(segments.reviewLitigation)) {
+    const currentStart = starts.reviewLitigation;
+    const relocated = currentStart >= 0
+      ? findFirstMatchingLineFrom(lines, SECTION_PATTERNS.reviewLitigation, currentStart + 1)
+      : findFirstMatchingLine(lines, SECTION_PATTERNS.reviewLitigation);
+    if (relocated >= 0 && relocated !== currentStart) {
+      starts.reviewLitigation = relocated;
+      // rebuild reviewLitigation segment only
+      let end = lines.length;
+      for (const key of ['problemsAndImprovements', 'otherMatters'] as SegmentKey[]) {
+        if (starts[key] > relocated) {
+          end = starts[key];
+          break;
+        }
+      }
+      segments.reviewLitigation = lines.slice(relocated, end).join('\n');
+    } else if (!looksLikeReviewLitigationSegment(segments.reviewLitigation)) {
+      segments.reviewLitigation = null;
+    }
+  }
+
+const missingSections = REQUIRED_SEGMENTS.filter((key) => !segments[key]);
 
   return {
     canUseSegmentedParse: missingSections.length === 0,
