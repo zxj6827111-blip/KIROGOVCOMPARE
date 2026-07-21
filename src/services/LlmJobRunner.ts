@@ -16,6 +16,8 @@ import { calculateReportMetrics } from '../utils/reportAnalysis';
 import { hasParsedContent } from '../utils/parsedContent';
 import { PROJECT_ROOT } from '../config/constants';
 import { normalizeAnnualReportOutputFromSource } from './SegmentedAnnualReportParse';
+import { auditSourceOutline, reconcileTable2SourceVsParsed } from './SourceOutlineAuditService';
+import { selectBestTableSection } from './TableSectionScoring';
 import { resolveParsePrimaryConfigAsync } from '../utils/llmProviderConfig';
 import { aiModelConfigService } from './AiModelConfigService';
 import { buildParseConfigSnapshot, parseRunService } from './ParseRunService';
@@ -239,7 +241,7 @@ export class LlmJobRunner {
     if (axios.isCancel(error) || isUserCancellationError(error, message)) {
       console.log(`[Job ${job.id}] Job was cancelled.`);
       await pool.query(`
-        UPDATE jobs 
+        UPDATE jobs
         SET status = 'cancelled',
             error_message = '用户手动取消',
             progress = 100,
@@ -476,6 +478,41 @@ export class LlmJobRunner {
         typeof parseResult.sourceText === 'string' ? parseResult.sourceText : ''
       );
       parseResult.output = annualReportNormalized.output;
+      try {
+        const sourceText = typeof parseResult.sourceText === 'string' ? parseResult.sourceText : '';
+        const outlineAudit = auditSourceOutline(sourceText);
+        const t2Sel = selectBestTableSection(sourceText, 'table_2');
+        const table2Section = Array.isArray((parseResult.output as any)?.sections)
+          ? (parseResult.output as any).sections.find((s: any) => s?.type === 'table_2')
+          : null;
+        const recon = t2Sel.selected
+          ? reconcileTable2SourceVsParsed(t2Sel.selected.text, table2Section?.activeDisclosureData)
+          : [];
+        const allAuditIssues = [...outlineAudit.issues, ...recon];
+        parseResult.output = {
+          ...(parseResult.output as any),
+          raw_source_outline: outlineAudit.raw_source_outline,
+          source_structure_audit: {
+            issue_count: allAuditIssues.length,
+            issues: allAuditIssues,
+            table_section_selection: {
+              table_2: t2Sel.candidates.slice(0, 5).map((c) => ({
+                score: c.score,
+                title: c.titleLine,
+                startLine: c.startLine,
+                reasons: c.reasons,
+                selected: t2Sel.selected?.startLine === c.startLine,
+              })),
+            },
+          },
+        };
+        draftRepairs.push(`source_audit_issues:${allAuditIssues.length}`);
+        if (t2Sel.selected) {
+          draftRepairs.push(`table2_selected_line:${t2Sel.selected.startLine}:score=${t2Sel.selected.score}`);
+        }
+      } catch (auditErr: any) {
+        console.warn(`[Job ${job.id}] source audit failed:`, auditErr?.message || auditErr);
+      }
       draftRepairs.push(...annualReportNormalized.repairs);
       if (annualReportNormalized.repairs.length > 0) {
         console.log(
@@ -749,7 +786,7 @@ export class LlmJobRunner {
       console.log(`[Recovery] Found ${runningJobs.length} non-PDF running jobs, resetting to queued...`);
 
       await pool.query(`
-        UPDATE jobs 
+        UPDATE jobs
         SET status = 'queued',
             progress = $1,
             step_code = $2,
@@ -835,7 +872,7 @@ export class LlmJobRunner {
     } catch (error: any) {
       console.error(`[CompareWorker] Job ${job.id} failed:`, error.message);
       await pool.query(`
-        UPDATE jobs 
+        UPDATE jobs
         SET status = 'failed',
             error_message = $1,
             finished_at = NOW()
@@ -1118,14 +1155,14 @@ export class LlmJobRunner {
     }
 
     await pool.query(`
-        UPDATE jobs 
-        SET status = 'succeeded', 
+        UPDATE jobs
+        SET status = 'succeeded',
             progress = $1,
             step_code = $2,
             step_name = $3,
             error_code = NULL,
             error_message = NULL,
-            finished_at = NOW() 
+            finished_at = NOW()
         WHERE id = $4`,
       [STEPS.DONE.progress, STEPS.DONE.code, STEPS.DONE.name, job.id]);
   }
@@ -1199,12 +1236,12 @@ export class LlmJobRunner {
     );
 
     await pool.query(`
-      UPDATE jobs 
-      SET status = 'succeeded', 
+      UPDATE jobs
+      SET status = 'succeeded',
           progress = $1,
           step_code = $2,
           step_name = $3,
-          finished_at = NOW() 
+          finished_at = NOW()
       WHERE id = $4`,
       [STEPS.DONE.progress, STEPS.DONE.code, STEPS.DONE.name, job.id]);
   }
@@ -1265,8 +1302,8 @@ export class LlmJobRunner {
     }
 
     const result = await pool.query(`
-      SELECT column_name 
-      FROM information_schema.columns 
+      SELECT column_name
+      FROM information_schema.columns
       WHERE table_name = 'report_versions' AND column_name = 'parsed_json'
     `);
     this.parsedJsonColumnExists = result.rows.length > 0;
@@ -1384,7 +1421,7 @@ export class LlmJobRunner {
     const content = JSON.stringify({
       reportId: report.report_id,
       versionId: versionId,
-      message: `File ${report.file_name} parsed and materialized successfully.`, 
+      message: `File ${report.file_name} parsed and materialized successfully.`,
       timestamp: new Date().toISOString()
     });
 
@@ -1686,4 +1723,3 @@ export class LlmJobRunner {
 }
 
 export const llmJobRunner = new LlmJobRunner();
-

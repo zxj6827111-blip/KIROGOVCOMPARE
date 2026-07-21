@@ -1,3 +1,4 @@
+import { selectBestTableSection, tryParseTable2FromSourceText } from './TableSectionScoring';
 import { buildTable3Skeleton } from './LlmCommon';
 import { injectCommonRules } from './PromptRules';
 
@@ -509,11 +510,18 @@ const missingSections = REQUIRED_SEGMENTS.filter((key) => !segments[key]);
     missingSections,
     fullText,
     bodyText: cleanSegmentText(bodyText),
-    table2Text: cleanSegmentText(segments.activeDisclosure || ''),
-    table3Text: cleanSegmentText(segments.applicationRequests || ''),
-    table4Text: cleanSegmentText(segments.reviewLitigation || ''),
+    table2Text: cleanSegmentText(
+      selectBestTableSection(fullText, 'table_2').selected?.text || segments.activeDisclosure || ''
+    ),
+    table3Text: cleanSegmentText(
+      selectBestTableSection(fullText, 'table_3').selected?.text || segments.applicationRequests || ''
+    ),
+    table4Text: cleanSegmentText(
+      selectBestTableSection(fullText, 'table_4').selected?.text || segments.reviewLitigation || ''
+    ),
     segments,
   };
+
 }
 
 export function buildBodyParseSystemInstruction(): string {
@@ -1006,3 +1014,5 @@ export const SEGMENTED_ANNUAL_REPORT_TITLES = {
   ...TITLES,
   ...TABLE_TITLES,
 };
+
+export { tryParseTable2FromSourceText, selectBestTableSection } from './TableSectionScoring';
