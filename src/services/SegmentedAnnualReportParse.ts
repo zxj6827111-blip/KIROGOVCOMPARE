@@ -31,8 +31,8 @@ const TABLE_TITLES = {
 const SECTION_PATTERNS: Record<SegmentKey, RegExp[]> = {
   overallSituation: [/^\s*#{0,6}\s*\u4e00\u3001/, /^\s*[（(]\u4e00[）)]\s*\u4e3b\u52a8\u516c\u5f00/],
   activeDisclosure: [/^\s*#{0,6}\s*\u4e8c\u3001/, /^\s*##\s*\u8868[\u4e8c2]/i],
-  applicationRequests: [/^\s*#{0,6}\s*\u4e09\u3001/, /^\s*##\s*\u8868[\u4e093]/i],
-  reviewLitigation: [/^\s*#{0,6}\s*\u56db\u3001/, /^\s*##\s*\u8868[\u56db4]/i],
+  applicationRequests: [/^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001.{0,40}\u7533\u8bf7/, /^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001.{0,40}\u6536\u5230\u548c\u5904\u7406/, /^\s*##\s*\u8868[\u4e093]/i, /^\s*##\s*.{0,12}\u6536\u5230\u548c\u5904\u7406.{0,12}\u7533\u8bf7/],
+  reviewLitigation: [/^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001.{0,40}\u884c\u653f\u590d\u8bae/, /^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001.{0,40}\u884c\u653f\u8bc9\u8bbc/, /^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001.{0,40}\u590d\u8bae.{0,12}\u8bc9\u8bbc/, /^\s*##\s*\u8868[\u56db4]/i],
   problemsAndImprovements: [/^\s*#{0,6}\s*\u4e94\u3001/],
   otherMatters: [
     /^\s*#{0,6}\s*\u516d\u3001/,
