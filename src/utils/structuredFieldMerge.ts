@@ -1,7 +1,9 @@
 /**
  * Field-level merge for structured table payloads.
- * Prefer deterministic explicit values; keep LLM/native when deterministic is empty;
- * record conflicts for human review.
+ * Prefer deterministic explicit values (including 0); keep LLM/native when
+ * deterministic is empty; record conflicts for human review.
+ *
+ * Production use for det-wins is limited to table_2 via mergeTable2Fields.
  */
 
 export type MergeConflict = {
@@ -17,6 +19,8 @@ export type FieldMergeResult<T> = {
   conflicts: MergeConflict[];
 };
 
+export type FieldMergePolicy = 'deterministic_wins' | 'existing_wins_on_conflict';
+
 function isEmptyValue(v: unknown): boolean {
   return v === null || v === undefined || v === '';
 }
@@ -25,14 +29,27 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
+function valuesEqual(a: unknown, b: unknown): boolean {
+  if (String(a) === String(b)) return true;
+  if (typeof a === 'number' || typeof b === 'number' || typeof a === 'string' || typeof b === 'string') {
+    const na = Number(a);
+    const nb = Number(b);
+    if (Number.isFinite(na) && Number.isFinite(nb) && na === nb) return true;
+  }
+  return false;
+}
+
 /**
- * Deep merge objects: deterministic non-empty wins; empty deterministic keeps existing;
- * both non-empty and unequal → keep existing, record conflict (safer for human review).
+ * Deep merge objects.
+ * policy:
+ * - deterministic_wins (default for table2): det non-empty wins on conflict (0 is non-empty)
+ * - existing_wins_on_conflict: keep existing on conflict, still record conflict
  */
 export function mergeStructuredFields<T extends Record<string, any>>(
   existing: T | null | undefined,
   deterministic: T | null | undefined,
-  basePath = ''
+  basePath = '',
+  policy: FieldMergePolicy = 'deterministic_wins'
 ): FieldMergeResult<T> {
   const usedDeterministicPaths: string[] = [];
   const keptExistingPaths: string[] = [];
@@ -69,7 +86,6 @@ export function mergeStructuredFields<T extends Record<string, any>>(
       if (isPlainObject(dVal)) {
         if (!isPlainObject(eVal)) {
           if (!isEmptyValue(dVal) && Object.keys(dVal).length > 0) {
-            // if any nested non-empty, create object and walk
             const nestedEx = {};
             outNestedAssign(out, p, nestedEx);
             walk(nestedEx, dVal, p);
@@ -84,20 +100,20 @@ export function mergeStructuredFields<T extends Record<string, any>>(
         if (isEmptyValue(eVal)) {
           setPath(out, p, dVal);
           usedDeterministicPaths.push(p);
-        } else if (String(eVal) === String(dVal) || Number(eVal) === Number(dVal)) {
-          // same value
+        } else if (valuesEqual(eVal, dVal)) {
           setPath(out, p, dVal);
           usedDeterministicPaths.push(p);
         } else {
-          // conflict: keep existing LLM value, flag
           conflicts.push({ path: p, deterministic: dVal, existing: eVal });
-          keptExistingPaths.push(p);
+          if (policy === 'deterministic_wins') {
+            setPath(out, p, dVal);
+            usedDeterministicPaths.push(p);
+          } else {
+            keptExistingPaths.push(p);
+          }
         }
-      } else {
-        // deterministic empty → keep existing
-        if (!isEmptyValue(eVal)) {
-          keptExistingPaths.push(p);
-        }
+      } else if (!isEmptyValue(eVal)) {
+        keptExistingPaths.push(p);
       }
     }
   };
@@ -109,6 +125,40 @@ export function mergeStructuredFields<T extends Record<string, any>>(
     keptExistingPaths,
     conflicts,
   };
+}
+
+/**
+ * Table-2 only merge path: deterministic non-empty (incl. 0) always wins over AI.
+ * Prefer this in production callers so other tables are not implicitly retargeted.
+ */
+export function mergeTable2Fields<T extends Record<string, any>>(
+  existing: T | null | undefined,
+  deterministic: T | null | undefined
+): FieldMergeResult<T> {
+  return mergeStructuredFields(existing, deterministic, '', 'deterministic_wins');
+}
+
+
+/**
+ * Production helper for table_2 after AI parse (parallel or serial path).
+ * Deterministic non-empty wins; empty det keeps AI; conflicts preserved.
+ */
+export function applyTable2DeterministicOverlay(
+  existingTable2: { activeDisclosureData?: any } | null | undefined,
+  deterministic: Record<string, any> | null | undefined
+): { activeDisclosureData: any; merge_conflicts?: MergeConflict[] } {
+  if (!deterministic) {
+    return { activeDisclosureData: existingTable2?.activeDisclosureData ?? null };
+  }
+  const existing = existingTable2?.activeDisclosureData || {};
+  const merged = mergeTable2Fields(existing as any, deterministic as any);
+  const out: { activeDisclosureData: any; merge_conflicts?: MergeConflict[] } = {
+    activeDisclosureData: merged.merged,
+  };
+  if (merged.conflicts.length) {
+    out.merge_conflicts = merged.conflicts;
+  }
+  return out;
 }
 
 function setPath(obj: Record<string, any>, path: string, value: unknown): void {
@@ -135,7 +185,6 @@ export function estimatePageFromLine(fullText: string, lineNumber1Based: number)
     if (lines[i] && lines[i].includes('\f')) page += 1;
   }
   if (page === 1) {
-    // heuristic: ~48 lines per page for typical annual report text extraction
     page = Math.max(1, Math.floor(idx / 48) + 1);
   }
   return page;

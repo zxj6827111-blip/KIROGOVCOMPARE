@@ -270,6 +270,52 @@ function issue(
   };
 }
 
+
+function normalizeDedupeText(s: string): string {
+  return String(s || '')
+    .replace(/\s+/g, '')
+    .replace(/[，,。．.：:；;、"'“”‘’《》【】（）()\[\]]/g, '')
+    .slice(0, 80);
+}
+
+function evidenceCore(issue: SourceAuditIssue): string {
+  const ev = issue.evidence_json as Record<string, unknown> | undefined;
+  if (ev && typeof ev.core === 'string' && ev.core) {
+    return normalizeDedupeText(ev.core);
+  }
+  const ex = normalizeDedupeText(issue.source_excerpt || '');
+  const dup = ex.match(/([\u4e00-\u9fff]{2,8})\1/);
+  if (dup) return dup[0];
+  if (ex.includes('审查管')) return '审查管';
+  if (ex.includes('资金资金')) return '资金资金';
+  return ex.slice(0, 24);
+}
+
+function evidenceLine(issue: SourceAuditIssue): string {
+  const ev = issue.evidence_json as Record<string, unknown> | undefined;
+  if (ev && typeof ev.line === 'number') return 'L' + ev.line;
+  if (ev && typeof ev.index === 'number') return 'I' + ev.index;
+  return '';
+}
+
+function dedupeSourceAuditIssues(issues: SourceAuditIssue[]): SourceAuditIssue[] {
+  const seen = new Set<string>();
+  const out: SourceAuditIssue[] = [];
+  for (const issue of issues) {
+    const loc = evidenceLine(issue);
+    // No stable position: keep (do not collapse cross-location structure issues)
+    if (!loc) {
+      out.push(issue);
+      continue;
+    }
+    const key = [issue.check_key, evidenceCore(issue), loc].join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(issue);
+  }
+  return out;
+}
+
 export function auditSourceOutline(sourceText: string): SourceOutlineAuditResult {
   const lines = String(sourceText || '').split(/\n/);
   const outline: RawOutlineHeading[] = [];
@@ -372,6 +418,7 @@ export function auditSourceOutline(sourceText: string): SourceOutlineAuditResult
           canonical_title: '三、收到和处理政府信息公开申请情况 / 或总体情况-依申请公开方面',
           expected_value: '三、…申请… 或 （二）依申请公开方面',
           actual_value: h.raw_title,
+          evidence_json: { line: h.line },
         })
       );
     }
@@ -393,6 +440,7 @@ export function auditSourceOutline(sourceText: string): SourceOutlineAuditResult
           canonical_title: '二、主动公开政府信息情况',
           expected_value: '二、主动公开政府信息情况',
           actual_value: h.raw_title,
+          evidence_json: { line: h.line },
         })
       );
     }
@@ -425,94 +473,36 @@ export function auditSourceOutline(sourceText: string): SourceOutlineAuditResult
 
   // Content issues
   const full = String(sourceText || '');
-  if (/资金资金/.test(full)) {
-    const idx = full.indexOf('资金资金');
-    issues.push(
-      issue({
-        check_key: 'SRC_TEXT_DUPLICATED_WORD',
-        issue_class: 'source_content',
-        responsibility: 'source',
-        severity: 'warning',
-        group_key: 'text',
-        title: '疑似用词重复：“资金资金”',
-        message: '正文出现“资金资金”，疑似“资金”重复。',
-        source_page: null,
-        source_excerpt: full.slice(Math.max(0, idx - 20), idx + 30),
-      })
-    );
-  }
-  if (/审查管(?!理)/.test(full) || /信息发布审查管[^理]/.test(full)) {
-    const idx = full.search(/审查管/);
-    issues.push(
-      issue({
-        check_key: 'SRC_TEXT_INCOMPLETE_SENTENCE',
-        issue_class: 'source_content',
-        responsibility: 'source',
-        severity: 'warning',
-        group_key: 'text',
-        title: '疑似残句：“审查管”',
-        message: '正文出现“审查管”，语句疑似残缺，可能缺少“理”（审查管理）。',
-        source_page: null,
-        source_excerpt: full.slice(Math.max(0, idx - 20), idx + 25),
-      })
-    );
-  }
-  if (/重新涉及部门网站/.test(full)) {
-    const idx = full.indexOf('重新涉及');
-    issues.push(
-      issue({
-        check_key: 'SRC_TEXT_SUSPICIOUS_WORDING',
-        issue_class: 'source_content',
-        responsibility: 'source',
-        severity: 'warning',
-        group_key: 'text',
-        title: '疑似用词错误：“重新涉及部门网站…”',
-        message: '结合上下文，“重新涉及部门网站政务公开栏目”疑似应为“重新设计…”。',
-        source_page: null,
-        source_excerpt: full.slice(Math.max(0, idx - 10), idx + 40),
-      })
-    );
-  }
-  if (/六部分,/.test(full) || /六部分，/.test(full) === false && /六部分,/.test(full)) {
-    // english comma after 六部分
-  }
-  if (/六部分,/.test(full)) {
-    issues.push(
-      issue({
-        check_key: 'SRC_TEXT_PUNCTUATION',
-        issue_class: 'source_content',
-        responsibility: 'source',
-        severity: 'info',
-        group_key: 'text',
-        title: '标点不规范：使用英文逗号',
-        message: '正文“六部分,”使用了英文逗号，建议使用中文标点。',
-        source_page: null,
-        source_excerpt: '六部分,',
-      })
-    );
-  }
-
 
   const lexicon = [...TEXT_QUALITY_LEXICON, ...loadExtraTextLexicon()];
   for (const rule of lexicon) {
-    if (!rule.re.test(full)) continue;
-    rule.re.lastIndex = 0;
-    const m = full.match(rule.re);
-    const idx = m ? full.search(rule.re) : -1;
-    issues.push(
-      issue({
-        check_key: rule.check_key,
-        issue_class: 'source_content',
-        responsibility: 'source',
-        severity: rule.severity,
-        group_key: 'text',
-        title: rule.title,
-        message: rule.message,
-        source_page: idx >= 0 ? estimatePageFromLine(full, full.slice(0, idx).split(/\n/).length) : null,
-        source_excerpt: idx >= 0 ? full.slice(Math.max(0, idx - 20), idx + 40) : '',
-        evidence_json: { lexicon_id: rule.id },
-      })
-    );
+    const flags = rule.re.flags.includes('g') ? rule.re.flags : rule.re.flags + 'g';
+    const re = new RegExp(rule.re.source, flags);
+    let match: RegExpExecArray | null;
+    const seenCore = new Set<string>();
+    while ((match = re.exec(full)) !== null) {
+      const idx = match.index;
+      const core = String(match[0] || '').replace(/\s+/g, '');
+      const line = full.slice(0, idx).split(/\n/).length;
+      const coreKey = rule.check_key + '|' + core + '|L' + line;
+      if (seenCore.has(coreKey)) continue;
+      seenCore.add(coreKey);
+      issues.push(
+        issue({
+          check_key: rule.check_key,
+          issue_class: 'source_content',
+          responsibility: 'source',
+          severity: rule.severity,
+          group_key: 'text',
+          title: rule.title,
+          message: rule.message,
+          source_page: estimatePageFromLine(full, line),
+          source_excerpt: full.slice(Math.max(0, idx - 12), idx + Math.min(core.length + 12, 48)),
+          evidence_json: { lexicon_id: rule.id, line, core, index: idx },
+        })
+      );
+      if (match[0].length === 0) re.lastIndex += 1;
+    }
   }
 
 // Internal contradiction: all finished vs carry-over 1
@@ -536,7 +526,7 @@ export function auditSourceOutline(sourceText: string): SourceOutlineAuditResult
 
   return {
     raw_source_outline: outline,
-    issues,
+    issues: dedupeSourceAuditIssues(issues),
     has_multiple_numbering_systems: hasMultiple,
     overall_subtopics_as_top_level: overallSubs.length >= 2,
   };

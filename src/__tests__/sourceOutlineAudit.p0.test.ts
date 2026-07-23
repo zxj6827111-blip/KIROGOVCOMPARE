@@ -87,4 +87,72 @@ describe('TableSectionScoring + SourceOutlineAudit (P0)', () => {
       expect(typeof det).toBe('object');
     }
   });
+
+  it('keeps distinct line positions for same text quality core', () => {
+    // Two independent positions for 资金资金 (lines 1 and 3) and 审查管 (lines 4 and 5)
+    const synthetic = [
+      '第1行科技计划资金资金分配结果。',
+      '第2行正常内容无重复词。',
+      '第3行再次出现资金资金独立问题。',
+      '第4行信息发布审查管，根据要求。',
+      '第5行再次出现审查管独立问题。',
+    ].join('\n');
+    const audit = auditSourceOutline(synthetic);
+    const fund = audit.issues.filter(
+      (i) =>
+        i.check_key === 'SRC_TEXT_DUPLICATED_WORD' &&
+        String((i.evidence_json as any)?.core || i.source_excerpt || '').includes('资金资金')
+    );
+    const guan = audit.issues.filter(
+      (i) =>
+        i.check_key === 'SRC_TEXT_INCOMPLETE_SENTENCE' &&
+        String((i.evidence_json as any)?.core || i.source_excerpt || '').includes('审查管')
+    );
+    expect(fund).toHaveLength(2);
+    expect(guan).toHaveLength(2);
+    const fundLines = fund.map((i) => (i.evidence_json as any)?.line).sort((a, b) => a - b);
+    const guanLines = guan.map((i) => (i.evidence_json as any)?.line).sort((a, b) => a - b);
+    expect(fundLines).toEqual([1, 3]);
+    expect(guanLines).toEqual([4, 5]);
+  });
+
+  it('reports single-position 资金资金 and 审查管 once each', () => {
+    const synthetic = '一行内资金资金与审查管各一次。';
+    const audit = auditSourceOutline(synthetic);
+    const fund = audit.issues.filter(
+      (i) =>
+        i.check_key === 'SRC_TEXT_DUPLICATED_WORD' &&
+        String((i.evidence_json as any)?.core || '').includes('资金资金')
+    );
+    const guan = audit.issues.filter(
+      (i) =>
+        i.check_key === 'SRC_TEXT_INCOMPLETE_SENTENCE' &&
+        String((i.evidence_json as any)?.core || '').includes('审查管')
+    );
+    expect(fund).toHaveLength(1);
+    expect(guan).toHaveLength(1);
+  })
+
+  it('two identical ordinal-mismatch titles at different lines remain two issues', () => {
+    const synthetic = [
+      '正文开头。',
+      '四、收到和处理政府信息公开申请情况',
+      '中间无关段落。',
+      '四、收到和处理政府信息公开申请情况',
+      '结尾。',
+    ].join('\n');
+    const audit = auditSourceOutline(synthetic);
+    const ordinals = audit.issues.filter(
+      (i) =>
+        i.check_key === 'SRC_SECTION_ORDINAL_MISMATCH' &&
+        String(i.source_excerpt || i.raw_title || '').includes('四、') &&
+        String(i.source_excerpt || i.raw_title || '').includes('申请')
+    );
+    expect(ordinals).toHaveLength(2);
+    const lines = ordinals
+      .map((i) => (i.evidence_json as any)?.line)
+      .filter((x) => typeof x === 'number')
+      .sort((a, b) => a - b);
+    expect(lines).toEqual([2, 4]);
+  });
 });

@@ -9,6 +9,8 @@ let pdfjsPromise: Promise<PdfJsModule> | null = null;
 
 function loadPdfjs(): Promise<PdfJsModule> {
   if (!pdfjsPromise) {
+    // Dynamic import of pure-ESM pdfjs. In Jest (CJS), callers should extract via
+    // a forked Node process or ensure NODE_OPTIONS includes experimental-vm-modules.
     pdfjsPromise = import('pdfjs-dist/legacy/build/pdf.mjs').then((mod: any) => mod.default || mod);
   }
   return pdfjsPromise;
