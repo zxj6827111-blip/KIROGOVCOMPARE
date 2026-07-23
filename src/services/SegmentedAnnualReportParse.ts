@@ -55,10 +55,16 @@ const SECTION_PATTERNS: Record<SegmentKey, RegExp[]> = {
     /^\s*##\s*\u8868[\u56db4]/i,
   ],
   problemsAndImprovements: [
-    /^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001.{0,20}\u4e3b\u8981\u95ee\u9898/,
-    /^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001.{0,20}\u6539\u8fdb\u60c5\u51b5/,
+    /^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001.{0,40}\u4e3b\u8981\u95ee\u9898/,
+    /^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001.{0,40}\u6539\u8fdb\u60c5\u51b5/,
+    /^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001.{0,60}\u95ee\u9898.{0,20}\u6539\u8fdb/,
+    /^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001.{0,40}\u5de5\u4f5c\u4e2d\u5b58\u5728\u7684\u4e3b\u8981\u95ee\u9898/,
     /^\s*#{0,6}\s*\u4e94\u3001(?!.*\u7533\u8bf7)(?!.*\u4fe1\u606f\u7ba1\u7406)/,
     /^\s*[\uFF08(]\u4e00[\uFF09)]\s*\u5b58\u5728\u7684\u4e3b\u8981\u95ee\u9898/,
+    // Official sample: （一）2024 年工作中存在问题的改进情况 — without explicit 五、
+    /^\s*[\uFF08(]\u4e00[\uFF09)]\s*\d{4}\s*\u5e74\u5de5\u4f5c\u4e2d\u5b58\u5728\u95ee\u9898\u7684\u6539\u8fdb\u60c5\u51b5/,
+    /^\s*[\uFF08(]\u4e8c[\uFF09)]\s*\d{4}\s*\u5e74\u5de5\u4f5c\u4e2d\u5b58\u5728\u7684\u4e3b\u8981\u95ee\u9898/,
+    /^\s*\u5b58\u5728\u7684\u4e3b\u8981\u95ee\u9898\u53ca\u6539\u8fdb\u60c5\u51b5\s*$/,
   ],
   otherMatters: [
     /^\s*#{0,6}\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d]\u3001.{0,20}\u5176\u4ed6\u9700\u8981\u62a5\u544a/,
@@ -102,6 +108,8 @@ export interface BodyParseResponse {
 
 export interface Table2ParseResponse {
   activeDisclosureData: Record<string, unknown> | null;
+  /** Field-level det-vs-AI conflicts retained for human review / parsed_json. */
+  merge_conflicts?: Array<{ path: string; deterministic: unknown; existing: unknown }>;
 }
 
 export interface Table3ParseResponse {
@@ -216,6 +224,9 @@ function normalizeTable4Block(block: unknown): Table4Block | null {
 
 export function normalizeTable2ParseResponse(response: unknown): Table2ParseResponse {
   const source = isPlainObject(response) ? response : {};
+  const merge_conflicts = Array.isArray((source as any).merge_conflicts)
+    ? (source as any).merge_conflicts
+    : undefined;
   const data = isPlainObject(source.activeDisclosureData)
     ? source.activeDisclosureData
     : isPlainObject(source.table_2)
@@ -239,6 +250,7 @@ export function normalizeTable2ParseResponse(response: unknown): Table2ParseResp
       coercion: normalizeTable2Row(data.coercion, { processed: ['handled', 'count', 'processedCount', '处理决定数量'] }),
       fees: normalizeTable2Row(data.fees, { amount: ['processed', 'count', 'total', '收费金额'] }),
     },
+    ...(merge_conflicts && merge_conflicts.length ? { merge_conflicts } : {}),
   };
 }
 
@@ -382,6 +394,63 @@ export function looksLikeApplicationOnlySegment(text: string | null | undefined)
   return !looksLikeReviewLitigationSegment(t);
 }
 
+
+/**
+ * Prefer scored table window when it does not spill past accurate chapter bounds.
+ * Long scoring windows must not overwrite problems/improvements boundaries.
+ */
+function pickTableSegmentText(
+  fullText: string,
+  tableId: 'table_2' | 'table_3' | 'table_4',
+  chapterSegment: string | null | undefined
+): string {
+  const selected = selectBestTableSection(fullText, tableId).selected;
+  const chapter = cleanSegmentText(chapterSegment || '');
+  if (!selected || !selected.text) {
+    return chapter;
+  }
+  let scored = cleanSegmentText(selected.text);
+
+  if (tableId === 'table_4') {
+    const cut = scored.search(
+      /\n\s*[（(][一二三四五六][）)].{0,40}(工作中存在问题|存在的主要问题|改进情况|主要问题)|\n\s*[一二三四五六]、.{0,40}(主要问题|改进情况|其他需要报告)/
+    );
+    if (cut > 40) {
+      scored = cleanSegmentText(scored.slice(0, cut));
+    }
+  }
+
+  if (!chapter) {
+    return scored;
+  }
+
+  const scoredHasProblems =
+    /工作中存在问题的改进情况|工作中存在的主要问题/.test(scored) &&
+    !/工作中存在问题的改进情况|工作中存在的主要问题/.test(chapter.slice(0, 120));
+  if (scoredHasProblems) {
+    return chapter;
+  }
+
+  if (tableId === 'table_4') {
+    const chapterHasLit = /行政复议|行政诉讼|未经复议/.test(chapter);
+    const scoredHasLit = /行政复议|行政诉讼|未经复议/.test(scored);
+    if (chapterHasLit && scoredHasLit && chapter.length + 40 < scored.length) {
+      return chapter;
+    }
+  }
+
+  if (tableId === 'table_3') {
+    if (
+      /表[四4]|政府信息公开行政复议|行政复议、行政诉讼/.test(scored) &&
+      !/表[四4]|政府信息公开行政复议|行政复议、行政诉讼/.test(chapter)
+    ) {
+      return chapter;
+    }
+  }
+
+  return scored || chapter;
+}
+
 export function splitAnnualReportForSegmentedParse(text: string): AnnualReportSplitResult {
   const fullText = cleanSegmentText(text);
   const lines = fullText.split('\n');
@@ -511,13 +580,13 @@ const missingSections = REQUIRED_SEGMENTS.filter((key) => !segments[key]);
     fullText,
     bodyText: cleanSegmentText(bodyText),
     table2Text: cleanSegmentText(
-      selectBestTableSection(fullText, 'table_2').selected?.text || segments.activeDisclosure || ''
+      pickTableSegmentText(fullText, 'table_2', segments.activeDisclosure)
     ),
     table3Text: cleanSegmentText(
-      selectBestTableSection(fullText, 'table_3').selected?.text || segments.applicationRequests || ''
+      pickTableSegmentText(fullText, 'table_3', segments.applicationRequests)
     ),
     table4Text: cleanSegmentText(
-      selectBestTableSection(fullText, 'table_4').selected?.text || segments.reviewLitigation || ''
+      pickTableSegmentText(fullText, 'table_4', segments.reviewLitigation)
     ),
     segments,
   };
@@ -985,6 +1054,9 @@ export function mergeSegmentedAnnualReportParse(parts: {
         title: TITLES.activeDisclosure,
         type: 'table_2',
         activeDisclosureData: parts.table2?.activeDisclosureData ?? null,
+        ...(parts.table2?.merge_conflicts && parts.table2.merge_conflicts.length
+          ? { merge_conflicts: parts.table2.merge_conflicts }
+          : {}),
       },
       {
         title: TITLES.applicationRequests,

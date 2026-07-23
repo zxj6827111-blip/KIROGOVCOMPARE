@@ -140,7 +140,7 @@ export function collectTableSectionCandidates(
     if (tableId === 'table_3' && /本列数据的勾稽关系|本年新收政府信息公开申请/.test(lines[i])) {
       startIndexes.push(Math.max(0, i - 2));
     }
-    if (tableId === 'table_4' && /未经复议直接起诉|行政复议行政诉讼/.test(lines[i])) {
+    if (tableId === 'table_4' && (/##\s*表[四4]|表四[:：]|未经复议直接起诉|行政复议[、,，]?行政诉讼|政府信息公开行政复议/.test(lines[i]) && !/收到和处理|本年新收政府信息公开申请/.test(lines[i]))) {
       startIndexes.push(Math.max(0, i - 2));
     }
   }
@@ -152,8 +152,32 @@ export function collectTableSectionCandidates(
     let end = Math.min(lines.length, start + windowLines);
     for (let j = start + 1; j < end; j += 1) {
       const l = lines[j].trim();
-      if (j > start + 3 && /^[一二三四五六]、/.test(l) && !titleHints.some((re) => re.test(l))) {
-        // stop early only for unrelated top-level headings far enough
+      if (j <= start + 2) continue;
+
+      // Hard stop: table_3 must not cross into table_4 / review-litigation title
+      if (
+        tableId === 'table_3' &&
+        (/^#{0,6}\s*表[四4]/.test(l) ||
+          /^[一二三四五六]、.{0,40}(行政复议|行政诉讼)/.test(l) ||
+          /^四、.{0,40}(行政复议|行政诉讼)/.test(l))
+      ) {
+        end = j;
+        break;
+      }
+
+      // table_4 must end before problems/improvements body
+      if (tableId === 'table_4') {
+        if (
+          /^[一二三四五六]、.{0,40}(主要问题|改进情况|其他需要报告)/.test(l) ||
+          /^[（(][一二三四五六][）)].{0,40}(工作中存在问题|存在的主要问题|改进情况)/.test(l) ||
+          (/(工作中存在问题的改进情况|工作中存在的主要问题|^[（(][一二三四五六][）)]\s*主要问题)/.test(l) && l.length < 80)
+        ) {
+          end = j;
+          break;
+        }
+      }
+
+      if (/^[一二三四五六]、/.test(l) && !titleHints.some((re) => re.test(l))) {
         if (tableId === 'table_2' && /申请|复议|诉讼|问题|其他/.test(l)) {
           end = j;
           break;
@@ -162,7 +186,11 @@ export function collectTableSectionCandidates(
           end = j;
           break;
         }
-        if (tableId === 'table_4' && (/主要问题|改进情况|其他需要报告/.test(l) || (/问题|其他|主动公开|申请情况/.test(l) && !/复议|诉讼/.test(l)))) {
+        if (
+          tableId === 'table_4' &&
+          (/主要问题|改进情况|其他需要报告/.test(l) ||
+            (/问题|其他|主动公开|申请情况/.test(l) && !/复议|诉讼/.test(l)))
+        ) {
           end = j;
           break;
         }
@@ -190,7 +218,16 @@ export function collectTableSectionCandidates(
       if (/主动公开工作情况/.test(titleLine) && !/第二十条|本年制发/.test(slice)) penalty += 35;
       if (/工作机制保障/.test(titleLine)) penalty += 40;
     }
-    if (tableId === 'table_3' && /政府信息公开申请情况/.test(titleLine) && !/本列数据的勾稽|本年新收/.test(slice)) {
+        if (tableId === 'table_4') {
+      // table4 candidates must not start from table3 title region
+      if (/表[三3]|收到和处理政府信息公开申请|本年新收政府信息公开申请/.test(titleLine)) {
+        penalty += 50; /* table4_start_at_table3_penalty */
+      }
+      if (!/表[四4]|复议|诉讼|未经复议/.test(titleLine) && !/表[四4]|未经复议|行政复议/.test(slice.slice(0, 120))) {
+        penalty += 20;
+      }
+    }
+if (tableId === 'table_3' && /政府信息公开申请情况/.test(titleLine) && !/本列数据的勾稽|本年新收/.test(slice)) {
       // overall-subtopic narrative about applications
       if (slice.length < 400 && !/\|/.test(slice)) penalty += 30;
     }
@@ -240,52 +277,127 @@ export function tryParseTable2FromSourceText(text: string): Record<string, any> 
     fees: { amount: null },
   };
 
-  const num = (s: string | undefined): number | null => {
+  const num = (s: string | undefined | null): number | null => {
     if (s === undefined || s === null) return null;
-    const m = String(s).replace(/,/g, '').match(/-?\d+(?:\.\d+)?/);
+    const raw = String(s).trim();
+    if (!raw || /^[-–—:：]+$/.test(raw)) return null;
+    const m = raw.replace(/,/g, '').match(/-?\d+(?:\.\d+)?/);
     if (!m) return null;
     const n = Number(m[0]);
     return Number.isFinite(n) ? n : null;
   };
 
-  // Markdown rows: | 规章 | 0 | 0 | 0 |
-  const rowRe = /\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|/g;
-  let m: RegExpExecArray | null;
-  while ((m = rowRe.exec(t))) {
-    const label = m[1].replace(/\s+/g, '');
-    const a = num(m[2]);
-    const b = num(m[3]);
-    const c = num(m[4]);
-    if (/规章/.test(label) && !/规范/.test(label)) {
-      out.regulations = { made: a, repealed: b, valid: c };
-    } else if (/规范性文件|规范文件/.test(label)) {
-      out.normativeDocuments = { made: a, repealed: b, valid: c };
+  const isHeaderLabel = (label: string) =>
+    /信息内容|本年制发|制发件数|废止件数|现行有效|^[-:]+$/.test(label);
+
+  let regulationsFromFullRow = false;
+  let normativeFromFullRow = false;
+
+  // Line-based pipe rows (avoid catastrophic backtracking from global |...| scans)
+  for (const rawLine of t.split(/\n/)) {
+    const line = rawLine.trim();
+    if (!line.includes('|')) continue;
+    const cells = line
+      .split('|')
+      .map((c) => c.trim())
+      .filter((c, idx, arr) => !(idx === 0 && c === '') && !(idx === arr.length - 1 && c === ''));
+    // drop pure separator rows
+    if (cells.length > 0 && cells.every((c) => /^[-:]+$/.test(c) || c === '')) continue;
+    if (cells.length < 2) continue;
+
+    const label = cells[0].replace(/\s+/g, '');
+    if (isHeaderLabel(label)) continue;
+
+    if (cells.length >= 4) {
+      const a = num(cells[1]);
+      const b = num(cells[2]);
+      const c = num(cells[3]);
+      if (a === null || b === null || c === null) {
+        // fall through to 2-value if only two numbers present
+      } else if (/规章/.test(label) && !/规范/.test(label)) {
+        out.regulations = { made: a, repealed: b, valid: c };
+        regulationsFromFullRow = true;
+        continue;
+      } else if (/行政规范性文件|规范性文件|规范文件/.test(label)) {
+        out.normativeDocuments = { made: a, repealed: b, valid: c };
+        normativeFromFullRow = true;
+        continue;
+      }
+    }
+
+    if (cells.length >= 3) {
+      const a = num(cells[1]);
+      const b = num(cells[2]);
+      if (a === null || b === null) continue;
+      if (/规章/.test(label) && !/规范/.test(label)) {
+        if (!regulationsFromFullRow) {
+          if (out.regulations.made == null) out.regulations.made = a;
+          if (out.regulations.valid == null) out.regulations.valid = b;
+        }
+      } else if (/行政规范性文件|规范性文件|规范文件/.test(label)) {
+        if (!normativeFromFullRow) {
+          if (out.normativeDocuments.made == null) out.normativeDocuments.made = a;
+          if (out.normativeDocuments.valid == null) out.normativeDocuments.valid = b;
+        }
+      }
     }
   }
 
-  // Labeled lines: 行政许可 97 / 本年处理决定数量
-  const pickAfter = (label: RegExp): number | null => {
-    const mm = t.match(new RegExp(label.source + '[^\\d]{0,12}(\\d+(?:\\.\\d+)?)', 'i'));
-    return mm ? num(mm[1]) : null;
-  };
+  // Art.20(1) standalone line numbers fill MISSING middle (repealed) cells in column order:
+  // 1st standalone → regulations.repealed, 2nd → normativeDocuments.repealed.
+  const art1 = t.match(
+    /第二十条第[（(][一1][）)]项([\s\S]{0,280}?)(?=第二十条第[（(][五5六6八8]|##\s*表|表二[:：]|信息内容本年处理|$)/
+  );
+  if (art1) {
+    const lineNums: number[] = [];
+    for (const line of art1[1].split(/\n/)) {
+      const only = line.trim().match(/^(\d{1,4})\s*$/);
+      if (only) lineNums.push(Number(only[1]));
+    }
 
-  const lic = pickAfter(/行政许可|第二十条第[（(][五5][）)]项/);
-  if (lic !== null) out.licensing.processed = lic;
-  // Prefer number near 行政许可
-  const licLine = t.match(/行政许可[^\n]{0,30}?(\d+)/);
+    // When 2-col rows already provided made+valid, standalone numbers fill repealed only.
+    let fillIdx = 0;
+    if (!regulationsFromFullRow && out.regulations.repealed == null && lineNums[fillIdx] != null) {
+      if (out.regulations.made != null) {
+        out.regulations.repealed = lineNums[fillIdx];
+        fillIdx += 1;
+      }
+    }
+    if (!normativeFromFullRow && out.normativeDocuments.repealed == null && lineNums[fillIdx] != null) {
+      if (out.normativeDocuments.made != null || out.normativeDocuments.valid != null) {
+        out.normativeDocuments.repealed = lineNums[fillIdx];
+        fillIdx += 1;
+      }
+    }
+
+    // Fallback only when no labeled table numbers at all
+    if (
+      !regulationsFromFullRow &&
+      out.regulations.made == null &&
+      out.regulations.valid == null &&
+      lineNums.length >= 1
+    ) {
+      out.regulations.made = lineNums[0];
+      if (lineNums.length >= 2) out.regulations.valid = lineNums[1];
+    }
+  }
+
+  const licLine = t.match(/行政许可[^\n\d]{0,20}(\d+)/);
   if (licLine) out.licensing.processed = num(licLine[1]);
-
-  const pun = t.match(/行政处罚[^\n]{0,30}?(\d+)/);
+  const pun = t.match(/行政处罚[^\n\d]{0,20}(\d+)/);
   if (pun) out.punishment.processed = num(pun[1]);
-  const coe = t.match(/行政强制[^\n]{0,30}?(\d+)/);
+  const coe = t.match(/行政强制[^\n\d]{0,20}(\d+)/);
   if (coe) out.coercion.processed = num(coe[1]);
-  const fee = t.match(/行政事业性收费[^\n]{0,40}?(\d+(?:\.\d+)?)/);
+  const fee = t.match(/行政事业性收费[^\n\d]{0,20}(\d+(?:\.\d+)?)/);
   if (fee) out.fees.amount = num(fee[1]);
 
-  // If only narrative "规范性文件 13 件"
   if (out.normativeDocuments.made == null) {
     const n = t.match(/行政规范性文件\s*(\d+)\s*件/);
     if (n) out.normativeDocuments.made = num(n[1]);
+  }
+  if (out.regulations.made == null) {
+    const n = t.match(/(?:^|[\n|])\s*规章\s*(\d+)\s*件/);
+    if (n) out.regulations.made = num(n[1]);
   }
 
   const hasAny = [

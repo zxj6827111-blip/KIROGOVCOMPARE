@@ -10,6 +10,7 @@ import {
   splitAnnualReportForSegmentedParse,
   tryParseFlattenedTable4,
 } from '../services/SegmentedAnnualReportParse';
+import { applyTable2DeterministicOverlay } from '../utils/structuredFieldMerge';
 
 const sampleReport = [
   '正文',
@@ -450,4 +451,42 @@ describe('SegmentedAnnualReportParse', () => {
     expect(split.canUseSegmentedParse).toBe(true);
   });
 
+
+  it('preserves table2 merge_conflicts through apply overlay and mergeSegmentedAnnualReportParse', () => {
+    const aiTable2 = {
+      activeDisclosureData: {
+        regulations: { made: 9, repealed: null, valid: 1 },
+        licensing: { processed: 3 },
+      },
+    };
+    const det = {
+      regulations: { made: 0, repealed: 0, valid: 0 },
+      licensing: { processed: null },
+    };
+    const overlay = applyTable2DeterministicOverlay(aiTable2 as any, det as any);
+    expect(overlay.merge_conflicts?.length).toBeGreaterThan(0);
+    expect(overlay.merge_conflicts?.some((c) => c.path === 'regulations.made')).toBe(true);
+
+    const merged = mergeSegmentedAnnualReportParse({
+      body: {
+        overallSituation: '总体',
+        problemsAndImprovements: '问题',
+        otherMatters: null,
+      },
+      table2: overlay as any,
+      table3: { tableData: null },
+      table4: { reviewLitigationData: null },
+    });
+    const t2 = merged.sections.find((s) => s.type === 'table_2') as any;
+    expect(t2).toBeTruthy();
+    expect(t2.activeDisclosureData.regulations.made).toBe(0);
+    expect(t2.activeDisclosureData.licensing.processed).toBe(3);
+    expect(Array.isArray(t2.merge_conflicts)).toBe(true);
+    expect(t2.merge_conflicts.some((c: any) => c.path === 'regulations.made')).toBe(true);
+    expect(t2.merge_conflicts.some((c: any) => c.path === 'regulations.valid')).toBe(true);
+
+    // normalize must also retain conflicts
+    const normalized = normalizeTable2ParseResponse(overlay as any) as any;
+    expect(normalized.merge_conflicts?.some((c: any) => c.path === 'regulations.made')).toBe(true);
+  });
 });

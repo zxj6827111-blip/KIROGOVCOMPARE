@@ -1,4 +1,4 @@
-import { mergeStructuredFields } from '../utils/structuredFieldMerge';
+import { applyTable2DeterministicOverlay } from '../utils/structuredFieldMerge';
 import { tryParseTable2FromSourceText } from './TableSectionScoring';
 import OpenAI from 'openai';
 import axios from 'axios';
@@ -490,16 +490,12 @@ export class OpenAILlmProvider implements LlmProvider {
                 {
                     const detT2 = tryParseTable2FromSourceText(split.table2Text || '');
                     if (detT2) {
-                        const existing = table2?.activeDisclosureData || {};
-                        const merged = mergeStructuredFields(existing, detT2);
-                        table2 = { activeDisclosureData: merged.merged };
+                        const overlay = applyTable2DeterministicOverlay(table2, detT2);
+                        table2 = overlay;
                         console.log(
                             '[OpenAI] Merged table_2 deterministic fields',
-                            { used: merged.usedDeterministicPaths.length, conflicts: merged.conflicts.length }
+                            { conflicts: (overlay.merge_conflicts || []).length }
                         );
-                        if (merged.conflicts.length) {
-                            (table2 as any).merge_conflicts = merged.conflicts;
-                        }
                     }
                 }
             } else {
@@ -507,8 +503,12 @@ export class OpenAILlmProvider implements LlmProvider {
                 {
                     const detT2Seq = tryParseTable2FromSourceText(split.table2Text || '');
                     if (detT2Seq) {
-                        console.log('[OpenAI] Parsed table_2 via deterministic source anchors.');
-                        table2 = { activeDisclosureData: detT2Seq };
+                        const overlay = applyTable2DeterministicOverlay(table2, detT2Seq);
+                        table2 = overlay;
+                        console.log(
+                            '[OpenAI] Merged table_2 deterministic fields (serial)',
+                            { conflicts: (overlay.merge_conflicts || []).length }
+                        );
                     }
                 }
                 table3 = await runTable3();
