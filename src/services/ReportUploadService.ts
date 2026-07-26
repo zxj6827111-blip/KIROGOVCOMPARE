@@ -10,6 +10,7 @@ import { hasParsedContent } from '../utils/parsedContent';
 import { resolveUnifiedLlmConfig } from '../utils/aiEnv';
 import { aiModelConfigService } from './AiModelConfigService';
 import { resolveParseMaxRetries } from '../utils/jobRetryPolicy';
+import { resolveOrCreateReport, ReportUniqueConflictError, findReportIdByRegionYear } from './reportIdentity';
 
 const NAMESPACE_uuid = '6ba7b810-9dad-11d1-80b4-00c04fd430c8'; // Standard namespace
 const REPORT_UPLOAD_DEBUG = process.env.REPORT_UPLOAD_DEBUG === '1';
@@ -105,58 +106,6 @@ function normalizeUnitName(input?: string | null, fallback: string = ''): string
   return String(fallback || '').trim();
 }
 
-async function resolveOrCreateReport(regionId: number, year: number, unitName: string): Promise<{ id: number }> {
-  const existingResult = await pool.query(
-    `SELECT id, unit_name
-     FROM reports
-     WHERE region_id = $1 AND year = $2
-     ORDER BY (active_version_id IS NOT NULL) DESC, updated_at DESC, id DESC
-     LIMIT 1`,
-    [regionId, year]
-  );
-
-  const existing = existingResult.rows[0];
-  if (existing?.id) {
-    await pool.query(
-      `UPDATE reports
-       SET updated_at = NOW(),
-           unit_name = CASE
-             WHEN (unit_name IS NULL OR BTRIM(unit_name) = '') AND $2 <> '' THEN $2
-             ELSE unit_name
-           END
-       WHERE id = $1`,
-      [existing.id, unitName]
-    );
-    return { id: Number(existing.id) };
-  }
-
-  try {
-    const insertResult = await pool.query(
-      `INSERT INTO reports (region_id, year, unit_name)
-       VALUES ($1, $2, $3)
-       RETURNING id`,
-      [regionId, year, unitName]
-    );
-    return { id: Number(insertResult.rows[0].id) };
-  } catch (error: any) {
-    if (error?.code === '23505') {
-      const concurrentResult = await pool.query(
-        `SELECT id
-         FROM reports
-         WHERE region_id = $1 AND year = $2
-         ORDER BY (active_version_id IS NOT NULL) DESC, updated_at DESC, id DESC
-         LIMIT 1`,
-        [regionId, year]
-      );
-      const concurrent = concurrentResult.rows[0];
-      if (concurrent?.id) {
-        return { id: Number(concurrent.id) };
-      }
-    }
-    throw error;
-  }
-}
-
 async function ensureParseJob(
   reportId: number,
   versionId: number,
@@ -229,7 +178,18 @@ export class ReportUploadService {
     const unitName = normalizeUnitName(payload.unitName, region.name);
     const ingestionBatchId = await resolveIngestionBatchId(payload.batchUuid, null);
 
-    const report = await resolveOrCreateReport(payload.regionId, payload.year, unitName);
+    let report: { id: number };
+    try {
+      report = await resolveOrCreateReport(payload.regionId, payload.year, unitName);
+    } catch (e: any) {
+      if (e instanceof ReportUniqueConflictError || e?.code === 'REPORT_UNIQUE_CONFLICT') {
+        const id = await findReportIdByRegionYear(payload.regionId, payload.year);
+        if (!id) throw e;
+        report = { id };
+      } else {
+        throw e;
+      }
+    }
 
     // Check existing version
     const versionResult = await pool.query(
@@ -360,7 +320,18 @@ export class ReportUploadService {
     const fileHash = crypto.createHash('sha256').update(rawText, 'utf8').digest('hex');
     const ingestionBatchId = await resolveIngestionBatchId(payload.batchUuid, null);
 
-    const report = await resolveOrCreateReport(payload.regionId, payload.year, unitName);
+    let report: { id: number };
+    try {
+      report = await resolveOrCreateReport(payload.regionId, payload.year, unitName);
+    } catch (e: any) {
+      if (e instanceof ReportUniqueConflictError || e?.code === 'REPORT_UNIQUE_CONFLICT') {
+        const id = await findReportIdByRegionYear(payload.regionId, payload.year);
+        if (!id) throw e;
+        report = { id };
+      } else {
+        throw e;
+      }
+    }
 
     // Check existing version
     const versionResult = await pool.query(

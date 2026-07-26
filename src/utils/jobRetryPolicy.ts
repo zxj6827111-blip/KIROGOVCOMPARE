@@ -6,6 +6,8 @@
  * upload, re-parse, and manual retry stay consistent.
  */
 
+import { STRUCTURED_PACKAGE_ERROR_CODES } from '../config/structuredPackage';
+
 /** How many automatic requeues after the first attempt. Default 2 => up to 3 total runs. */
 export const DEFAULT_PARSE_MAX_RETRIES = 2;
 
@@ -42,6 +44,12 @@ const NON_RETRYABLE_ERROR_CODES = new Set([
   'invalid_request',
   'PARSE_CONSENSUS_CONFIG_INVALID',
   'ANNUAL_REPORT_SEGMENT_VALIDATION_FAILED',
+  // Structured package import failures are deterministic (bad ZIP, schema
+  // mismatch, hash mismatch, duplicate package). They never succeed on retry
+  // and just waste CPU/IO. Marked non-retryable regardless of job kind so the
+  // observed error_code is preserved on the job row instead of being masked by
+  // UNKNOWN_ERROR + a transient retry.
+  ...Object.values(STRUCTURED_PACKAGE_ERROR_CODES),
 ]);
 
 function toBooleanEnv(value: string | undefined, defaultValue: boolean): boolean {

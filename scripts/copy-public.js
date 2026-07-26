@@ -72,6 +72,20 @@ async function copyFileWithRetry(srcFile, destFile, maxRetries = 6) {
   }
 }
 
+async function copyDirRecursive(src, dest) {
+  await fs.promises.mkdir(dest, { recursive: true });
+  const entries = await fs.promises.readdir(src, { withFileTypes: true });
+  for (const entry of entries) {
+    const from = path.join(src, entry.name);
+    const to = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      await copyDirRecursive(from, to);
+    } else if (entry.isFile()) {
+      await copyFileWithRetry(from, to);
+    }
+  }
+}
+
 async function main() {
   await fs.promises.mkdir(path.join(__dirname, '..', 'dist'), { recursive: true });
 
@@ -90,6 +104,13 @@ async function main() {
       const destFile = path.join(destDir, file.relative);
       await copyFileWithRetry(file.src, destFile);
     }
+  }
+
+  // Runtime JSON schemas (structured package import, annual report schemas, etc.)
+  const schemaSrc = path.join(__dirname, '..', 'src', 'schemas');
+  const schemaDest = path.join(__dirname, '..', 'dist', 'schemas');
+  if (fs.existsSync(schemaSrc)) {
+    await copyDirRecursive(schemaSrc, schemaDest);
   }
 }
 

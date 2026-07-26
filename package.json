@@ -57,7 +57,8 @@
     "fix:fail-missing-jobs": "ts-node src/scripts/fail-missing-parse-jobs.ts --apply",
     "fix:merge-duplicates": "ts-node src/scripts/merge-duplicate-reports.ts --apply",
     "lint": "eslint src --ext .ts",
-    "format": "prettier --write src"
+    "format": "prettier --write src",
+    "test:e2e:structured-import": "ts-node --transpile-only scripts/e2e-structured-import.ts"
   },
   "keywords": [
     "government",
@@ -70,6 +71,7 @@
   "dependencies": {
     "@types/archiver": "^7.0.0",
     "@types/ejs": "^3.1.5",
+    "ajv": "^8.20.0",
     "archiver": "^7.0.1",
     "axios": "^1.6.2",
     "cheerio": "^1.1.2",
@@ -88,7 +90,8 @@
     "puppeteer": "^24.43.1",
     "read-excel-file": "^9.0.6",
     "redis": "^4.6.12",
-    "write-excel-file": "^4.0.2"
+    "write-excel-file": "^4.0.2",
+    "yauzl": "^3.4.0"
   },
   "devDependencies": {
     "@types/cheerio": "^0.22.35",
@@ -100,6 +103,7 @@
     "@types/pdfkit": "^0.17.4",
     "@types/pg": "^8.11.2",
     "@types/supertest": "^2.0.12",
+    "@types/yauzl": "^3.4.0",
     "@typescript-eslint/eslint-plugin": "^6.17.0",
     "@typescript-eslint/parser": "^6.17.0",
     "cross-env": "^7.0.3",

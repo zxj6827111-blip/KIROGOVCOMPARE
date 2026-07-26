@@ -411,6 +411,19 @@ CREATE INDEX IF NOT EXISTS idx_table_visual_reviews_status
 CREATE INDEX IF NOT EXISTS idx_table_visual_reviews_table
   ON table_visual_reviews(report_version_id, table_id);
 
+
+-- Admin users table (must exist before FKs that reference it)
+CREATE TABLE IF NOT EXISTS admin_users (
+  id BIGSERIAL PRIMARY KEY,
+  username VARCHAR(50) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  display_name VARCHAR(100),
+  permissions TEXT DEFAULT '{}',
+  data_scope TEXT DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_login_at TIMESTAMPTZ
+);
 CREATE TABLE IF NOT EXISTS ocr_corrections (
   id BIGSERIAL PRIMARY KEY,
   report_id BIGINT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
@@ -819,15 +832,22 @@ INSERT INTO canonical_unit_mapping_overrides (
   confidence,
   note,
   updated_at
-) VALUES
-  (1437, '浦东新区', 'district', 1426, 1426, 1.0, 'phase1 frozen boundary seed', NOW()),
-  (781, '湖滨新区', 'functional_zone', 720, 720, 1.0, 'phase1 frozen boundary seed', NOW()),
-  (782, '洋河新区', 'functional_zone', 720, 720, 1.0, 'phase1 frozen boundary seed', NOW()),
-  (2182, '南通市经济技术开发区管委会', 'functional_zone', 2135, 2135, 1.0, 'phase1 frozen boundary seed', NOW()),
-  (2268, '高新区（如城街道、城南街道）', 'functional_zone', 2176, 2135, 1.0, 'phase1 frozen boundary seed', NOW()),
-  (1084, '泗阳棉花原种场', 'department', 779, 720, 1.0, 'phase1 frozen boundary seed: 原种场按县级部门口径纳入', NOW()),
-  (1085, '泗阳农场', 'department', 779, 720, 1.0, 'phase1 frozen boundary seed: 农场按县级部门口径纳入', NOW()),
-  (2348, '启东市国家统计局启东调查', 'department', 2178, 2135, 1.0, 'phase1 frozen boundary seed: 调查机构按县级部门口径纳入', NOW())
+)
+SELECT s.region_id, s.canonical_name, s.unit_type, s.parent_region_id, s.city_region_id, s.confidence, s.note, s.updated_at
+FROM (
+  VALUES
+    (1437::bigint, '浦东新区', 'district', 1426::bigint, 1426::bigint, 1.0::numeric, 'phase1 frozen boundary seed', NOW()),
+    (781::bigint, '湖滨新区', 'functional_zone', 720::bigint, 720::bigint, 1.0::numeric, 'phase1 frozen boundary seed', NOW()),
+    (782::bigint, '洋河新区', 'functional_zone', 720::bigint, 720::bigint, 1.0::numeric, 'phase1 frozen boundary seed', NOW()),
+    (2182::bigint, '南通市经济技术开发区管委会', 'functional_zone', 2135::bigint, 2135::bigint, 1.0::numeric, 'phase1 frozen boundary seed', NOW()),
+    (2268::bigint, '高新区（如城街道、城南街道）', 'functional_zone', 2176::bigint, 2135::bigint, 1.0::numeric, 'phase1 frozen boundary seed', NOW()),
+    (1084::bigint, '泗阳棉花原种场', 'department', 779::bigint, 720::bigint, 1.0::numeric, 'phase1 frozen boundary seed', NOW()),
+    (1085::bigint, '泗阳农场', 'department', 779::bigint, 720::bigint, 1.0::numeric, 'phase1 frozen boundary seed', NOW()),
+    (2348::bigint, '启东市国家统计局启东调查', 'department', 2178::bigint, 2135::bigint, 1.0::numeric, 'phase1 frozen boundary seed', NOW())
+) AS s(region_id, canonical_name, unit_type, parent_region_id, city_region_id, confidence, note, updated_at)
+WHERE EXISTS (SELECT 1 FROM regions r WHERE r.id = s.region_id)
+  AND (s.parent_region_id IS NULL OR EXISTS (SELECT 1 FROM regions r WHERE r.id = s.parent_region_id))
+  AND (s.city_region_id IS NULL OR EXISTS (SELECT 1 FROM regions r WHERE r.id = s.city_region_id))
 ON CONFLICT (region_id) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS gov_open_annual_stats_v2 (
@@ -1482,6 +1502,9 @@ export async function runLLMMigrations(): Promise<void> {
         ('vision_review', NULL)
       ON CONFLICT (purpose) DO NOTHING;
     `);
+
+    // Structured package import DDL lives in migration 0002 (structuredPackageSchema.ts).
+    // Kept out of this monolith to avoid dual-write drift.
 
   } catch (error: any) {
     console.error('Failed to run Postgres schema migrations:', error);

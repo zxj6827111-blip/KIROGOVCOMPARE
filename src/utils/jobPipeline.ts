@@ -1,6 +1,9 @@
 /**
  * Upload pipeline stages: parse → materialize → checks.
  * Used by jobs API (and mirrored labels on the frontend).
+ *
+ * structured_import maps to the **parse** stage only (write parsed_json).
+ * Materialize and checks remain separate jobs, same as AI parse.
  */
 
 export type PipelineStageKey = 'parse' | 'materialize' | 'checks';
@@ -46,10 +49,8 @@ export interface PipelineStageView {
 
 export interface UploadPipelineSummary {
   stages: PipelineStageView[];
-  /** Index of the stage currently blocking progress (failed / running / queued / first pending). */
   current_stage_key: PipelineStageKey | null;
   current_stage_label: string | null;
-  /** One-line Chinese summary for list/detail headers. */
   headline: string;
   all_core_succeeded: boolean;
 }
@@ -62,9 +63,9 @@ const STAGE_META: Array<{
 }> = [
   {
     key: 'parse',
-    label: 'AI 解析',
+    label: '解析 / 导入',
     shortLabel: '解析',
-    description: '读取年报并抽取表二/三/四与正文',
+    description: 'AI 解析年报，或本地材料包写入 parsed_json',
   },
   {
     key: 'materialize',
@@ -80,11 +81,8 @@ const STAGE_META: Array<{
   },
 ];
 
-function latestJobForKind(jobs: PipelineJobLike[], kind: PipelineStageKey): PipelineJobLike | null {
-  const matched = jobs.filter((job) => String(job.kind || '') === kind);
-  if (matched.length === 0) return null;
-  return matched[matched.length - 1];
-}
+/** Kinds that fulfill the parse/import stage. */
+const PARSE_STAGE_KINDS = ['parse', 'structured_import'] as const;
 
 function mapJobStatus(statusRaw: string | null | undefined): PipelineStageStatus {
   const status = String(statusRaw || '').toLowerCase();
@@ -94,6 +92,27 @@ function mapJobStatus(statusRaw: string | null | undefined): PipelineStageStatus
   if (status === 'failed') return 'failed';
   if (status === 'cancelled') return 'cancelled';
   return 'pending';
+}
+
+function latestJobMatching(jobs: PipelineJobLike[], kinds: readonly string[]): PipelineJobLike | null {
+  const kindSet = new Set(kinds.map((k) => k.toLowerCase()));
+  const matched = jobs.filter((job) => kindSet.has(String(job.kind || '').toLowerCase()));
+  if (matched.length === 0) return null;
+  return matched[matched.length - 1];
+}
+
+function latestJobForKind(jobs: PipelineJobLike[], kind: PipelineStageKey): PipelineJobLike | null {
+  if (kind === 'parse') {
+    return latestJobMatching(jobs, PARSE_STAGE_KINDS);
+  }
+  return latestJobMatching(jobs, [kind]);
+}
+
+function stageLabel(meta: (typeof STAGE_META)[number], job: PipelineJobLike | null): string {
+  if (meta.key === 'parse' && String(job?.kind || '') === 'structured_import') {
+    return '本地材料包导入';
+  }
+  return meta.label;
 }
 
 /**
@@ -116,7 +135,6 @@ export function determineCorePipelineStatus(jobs: PipelineJobLike[]): string {
     return 'failed';
   }
   if (latest.some((job) => mapJobStatus(job.status) === 'cancelled')) {
-    // Cancelled mid-flight: treat as cancelled only if nothing still queued/running (already handled)
     return 'cancelled';
   }
   if (latest.some((job) => mapJobStatus(job.status) === 'queued')) {
@@ -130,7 +148,6 @@ export function determineCorePipelineStatus(jobs: PipelineJobLike[]): string {
 
   const materialize = latestJobForKind(jobs, 'materialize');
   if (!materialize) {
-    // Parse done but materialize not enqueued yet
     return 'processing';
   }
   if (mapJobStatus(materialize.status) !== 'succeeded') {
@@ -173,9 +190,12 @@ export function buildUploadPipelineSummary(jobs: PipelineJobLike[]): UploadPipel
     const maxRetries = Number(job.max_retries || 0);
     return {
       key: meta.key,
-      label: meta.label,
-      shortLabel: meta.shortLabel,
-      description: meta.description,
+      label: stageLabel(meta, job),
+      shortLabel: meta.key === 'parse' && String(job.kind) === 'structured_import' ? '导入' : meta.shortLabel,
+      description:
+        meta.key === 'parse' && String(job.kind) === 'structured_import'
+          ? '校验材料包并写入 parsed_json（不调用 AI）'
+          : meta.description,
       status,
       progress: Number(job.progress || 0),
       step_code: job.step_code ? String(job.step_code) : null,
@@ -187,17 +207,6 @@ export function buildUploadPipelineSummary(jobs: PipelineJobLike[]): UploadPipel
       attempt: retryCount + 1,
     };
   });
-
-  // If an earlier stage failed, later stages stay pending even if somehow present
-  let blocked = false;
-  for (const stage of stages) {
-    if (blocked && (stage.status === 'pending' || stage.status === 'queued')) {
-      continue;
-    }
-    if (stage.status === 'failed' || stage.status === 'cancelled') {
-      blocked = true;
-    }
-  }
 
   const failed = stages.find((s) => s.status === 'failed');
   const running = stages.find((s) => s.status === 'running');
@@ -215,7 +224,7 @@ export function buildUploadPipelineSummary(jobs: PipelineJobLike[]): UploadPipel
 
   let headline = '等待开始';
   if (allSucceeded) {
-    headline = '解析 → 入库 → 校验 已全部完成';
+    headline = '解析 · 入库 · 校验 已全部完成';
   } else if (failed) {
     headline = `卡在「${failed.shortLabel}」：${failed.error_code || failed.step_name || '失败'}`;
   } else if (running) {
@@ -235,9 +244,6 @@ export function buildUploadPipelineSummary(jobs: PipelineJobLike[]): UploadPipel
   };
 }
 
-/**
- * Map pipeline progress for the legacy 5-step bar (coarse).
- */
 export function computePipelineOverallProgress(jobs: PipelineJobLike[]): number {
   const summary = buildUploadPipelineSummary(jobs);
   if (summary.all_core_succeeded) return 100;

@@ -6,6 +6,7 @@ import path from 'path';
 import pool from '../config/database-llm';
 import { PROJECT_ROOT, UPLOADS_TMP_DIR } from '../config/constants';
 import { reportUploadService } from '../services/ReportUploadService';
+import structuredImportRouter from './structured-import';
 import { urlCollectionImportService } from '../services/UrlCollectionImportService';
 import { consistencyCheckService } from '../services/ConsistencyCheckService';
 import { materializeService } from '../services/data-center/MaterializeService';
@@ -16,9 +17,22 @@ import PdfParseService from '../services/PdfParseService';
 import HtmlParseService from '../services/HtmlParseService';
 import { authMiddleware, requirePermission, AuthRequest } from '../middleware/auth';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
-import { checkStoragePathExists } from '../services/SourceFileGuardService';
-import { hasParsedContent } from '../utils/parsedContent';
-import { resolveParseMaxRetries } from '../utils/jobRetryPolicy';
+import {
+  enqueueReportParseJob,
+  hasAnyFactsForVersion,
+  resolvePreferredVersionId,
+  STRUCTURED_VERSION_AI_REPARSE_FORBIDDEN,
+} from '../services/ParseEnqueueService';
+
+// Backward-compatible re-exports: the shared parse-enqueue function and the
+// structured-import guard moved to services/ParseEnqueueService. Existing
+// importers (tests, ops scripts) that pull them from routes/reports keep working.
+export {
+  enqueueReportParseJob,
+  STRUCTURED_VERSION_AI_REPARSE_FORBIDDEN,
+  STRUCTURED_VERSION_AI_REPARSE_FORBIDDEN_MESSAGE,
+} from '../services/ParseEnqueueService';
+export type { ParseJobSubmitResult } from '../services/ParseEnqueueService';
 import { getReportContentQuality } from '../utils/reportMaintenance';
 import { collectReportSectionTitleIssues } from '../utils/sectionTitleQuality';
 import {
@@ -29,6 +43,7 @@ import {
 } from '../utils/consistencyReviewSemantics';
 
 const router = express.Router();
+router.use(structuredImportRouter);
 
 const HIERARCHY_DELTA_ISSUE_SQL =
   `group_key = 'hierarchy'
@@ -104,47 +119,6 @@ async function hasRawTextColumn(): Promise<boolean> {
   return rawTextColumnExistsCache;
 }
 
-async function hasAnyFactsForVersion(reportId: number, versionId: number): Promise<boolean> {
-  const result = await pool.query(
-    `SELECT
-       EXISTS(
-         SELECT 1 FROM fact_active_disclosure
-         WHERE report_id = $1 AND version_id = $2
-       ) OR EXISTS(
-         SELECT 1 FROM fact_application
-         WHERE report_id = $1 AND version_id = $2
-       ) OR EXISTS(
-         SELECT 1 FROM fact_legal_proceeding
-         WHERE report_id = $1 AND version_id = $2
-       ) AS has_facts`,
-    [reportId, versionId]
-  );
-  return Boolean(result.rows[0]?.has_facts);
-}
-
-async function resolvePreferredVersionId(reportId: number): Promise<number | null> {
-  const result = await pool.query(
-    `SELECT id
-     FROM report_versions
-     WHERE report_id = $1
-       AND review_status = 'pending_review'
-     ORDER BY created_at DESC, id DESC
-     LIMIT 1`,
-    [reportId]
-  );
-  if (result.rows[0]?.id) {
-    return Number(result.rows[0].id);
-  }
-
-  const activeRes = await pool.query(
-    `SELECT active_version_id
-     FROM reports
-     WHERE id = $1
-     LIMIT 1`,
-    [reportId]
-  );
-  return activeRes.rows[0]?.active_version_id ? Number(activeRes.rows[0].active_version_id) : null;
-}
 
 async function loadReportVersion(reportId: number, versionId: number) {
   const result = await pool.query(
@@ -375,250 +349,7 @@ async function publishVersionForReport(
   return warnings.length > 0 ? { ok: true, warnings } : { ok: true };
 }
 
-async function ensureMaterializeJob(
-  reportId: number,
-  versionId: number,
-  ingestionBatchId: number | null
-): Promise<{ jobId: number; status: 'queued' | 'running'; reused: boolean }> {
-  const existingJobRes = await pool.query(
-    `SELECT id, status
-     FROM jobs
-     WHERE report_id = $1
-       AND version_id = $2
-       AND kind = 'materialize'
-       AND status IN ('queued', 'running')
-     ORDER BY id DESC
-     LIMIT 1`,
-    [reportId, versionId]
-  );
-
-  const existing = existingJobRes.rows[0];
-  if (existing?.id) {
-    return {
-      jobId: Number(existing.id),
-      status: (existing.status === 'running' ? 'running' : 'queued'),
-      reused: true,
-    };
-  }
-
-  const insertRes = await pool.query(
-    `INSERT INTO jobs (report_id, version_id, kind, status, progress, step_code, step_name, max_retries, ingestion_batch_id)
-     VALUES ($1, $2, 'materialize', 'queued', 60, 'MATERIALIZE', '等待结构化', 1, $3)
-     RETURNING id`,
-    [reportId, versionId, ingestionBatchId]
-  );
-
-  return { jobId: Number(insertRes.rows[0].id), status: 'queued', reused: false };
-}
-
-type ParseJobSubmitResult =
-  | {
-    ok: true;
-    reportId: number;
-    versionId: number;
-    jobId: number;
-    status: 'queued' | 'running' | string;
-    reused: boolean;
-    reason?: string;
-  }
-  | {
-    ok: false;
-    statusCode: number;
-    error: string;
-    message?: string;
-    storagePath?: string | null;
-    resolvedPath?: string | null;
-    fixedStaleJobId?: number;
-  };
-
-async function enqueueReportParseJob(input: {
-  reportId: number;
-  allowedRegionIds: number[] | null;
-  requestedVersionId?: number | null;
-  forceParse?: boolean;
-}): Promise<ParseJobSubmitResult> {
-  const { reportId, allowedRegionIds, requestedVersionId = null, forceParse = false } = input;
-
-  if (!reportId || Number.isNaN(reportId) || !Number.isInteger(reportId) || reportId < 1) {
-    return { ok: false, statusCode: 400, error: 'report_id 无效' };
-  }
-
-  if (allowedRegionIds && allowedRegionIds.length === 0) {
-    return { ok: false, statusCode: 403, error: 'forbidden' };
-  }
-
-  const reportRes = await pool.query(
-    `SELECT r.id, r.region_id, r.active_version_id
-     FROM reports r
-     WHERE r.id = $1
-     LIMIT 1`,
-    [reportId]
-  );
-  const report = reportRes.rows[0];
-  if (!report) {
-    return { ok: false, statusCode: 404, error: 'report not found' };
-  }
-
-  if (allowedRegionIds && !allowedRegionIds.includes(Number(report.region_id))) {
-    return { ok: false, statusCode: 403, error: 'forbidden' };
-  }
-
-  let versionId = report.active_version_id as number | null;
-  if (requestedVersionId && Number.isInteger(requestedVersionId) && requestedVersionId > 0) {
-    const explicitVersion = await loadReportVersion(reportId, requestedVersionId);
-    if (!explicitVersion) {
-      return { ok: false, statusCode: 404, error: 'target version not found' };
-    }
-    versionId = requestedVersionId;
-  } else {
-    versionId = await resolvePreferredVersionId(reportId);
-    if (!versionId) {
-      const latestRes = await pool.query(
-        `SELECT id FROM report_versions
-         WHERE report_id = $1
-         ORDER BY created_at DESC
-         LIMIT 1`,
-        [reportId]
-      );
-      versionId = latestRes.rows?.[0]?.id ?? null;
-    }
-  }
-
-  if (!versionId) {
-    return { ok: false, statusCode: 404, error: 'report_version not found' };
-  }
-
-  const versionRes = await pool.query(
-    `SELECT provider, model, ingestion_batch_id, parsed_json, storage_path
-     FROM report_versions
-     WHERE id = $1
-     LIMIT 1`,
-    [versionId]
-  );
-  const versionRow = versionRes.rows?.[0];
-  if (!versionRow) {
-    return { ok: false, statusCode: 404, error: 'report_version not found' };
-  }
-  const sourceCheck = checkStoragePathExists(versionRow.storage_path ?? null);
-
-  const existingJobRes = await pool.query(
-    `SELECT id, status FROM jobs
-     WHERE report_id = $1
-       AND version_id = $2
-       AND kind = 'parse'
-       AND status IN ('queued', 'running')
-     ORDER BY id DESC
-     LIMIT 1`,
-    [reportId, versionId]
-  );
-  const existingJob = existingJobRes.rows?.[0];
-  if (existingJob?.id) {
-    if (existingJob.status === 'queued' && !sourceCheck.ok) {
-      await pool.query(
-        `UPDATE jobs
-         SET status = 'failed',
-             error_code = 'SOURCE_FILE_MISSING',
-             error_message = $2,
-             progress = 100,
-             step_code = 'DONE',
-             step_name = 'Failed',
-             finished_at = NOW()
-         WHERE id = $1
-           AND status = 'queued'`,
-        [existingJob.id, sourceCheck.errorMessage || 'source file missing']
-      );
-      return {
-        ok: false,
-        statusCode: 422,
-        error: 'SOURCE_FILE_MISSING',
-        message: sourceCheck.errorMessage || 'source file missing',
-        storagePath: sourceCheck.storagePath,
-        resolvedPath: sourceCheck.resolvedPath,
-        fixedStaleJobId: Number(existingJob.id),
-      };
-    }
-    return {
-      ok: true,
-      reportId,
-      versionId: Number(versionId),
-      jobId: Number(existingJob.id),
-      status: existingJob.status,
-      reused: true,
-    };
-  }
-
-  if (!forceParse && hasParsedContent(versionRow.parsed_json)) {
-    const hasFacts = await hasAnyFactsForVersion(reportId, Number(versionId));
-    if (!hasFacts) {
-      const materializeJob = await ensureMaterializeJob(
-        reportId,
-        Number(versionId),
-        versionRow.ingestion_batch_id ?? null
-      );
-      return {
-        ok: true,
-        reportId,
-        versionId: Number(versionId),
-        jobId: materializeJob.jobId,
-        status: materializeJob.status,
-        reused: materializeJob.reused,
-        reason: 'parsed_missing_facts_materialize',
-      };
-    }
-
-    const latestParseJobRes = await pool.query(
-      `SELECT id, status
-       FROM jobs
-       WHERE report_id = $1
-         AND version_id = $2
-         AND kind = 'parse'
-       ORDER BY id DESC
-       LIMIT 1`,
-      [reportId, versionId]
-    );
-    const latestParseJob = latestParseJobRes.rows?.[0];
-    if (latestParseJob?.id) {
-      return {
-        ok: true,
-        reportId,
-        versionId: Number(versionId),
-        jobId: Number(latestParseJob.id),
-        status: latestParseJob.status,
-        reused: true,
-        reason: 'already_parsed',
-      };
-    }
-  }
-
-  if (!sourceCheck.ok) {
-    return {
-      ok: false,
-      statusCode: 422,
-      error: 'SOURCE_FILE_MISSING',
-      message: sourceCheck.errorMessage || 'source file missing',
-      storagePath: sourceCheck.storagePath,
-      resolvedPath: sourceCheck.resolvedPath,
-    };
-  }
-
-  const parseMaxRetries = resolveParseMaxRetries();
-  const jobRes = await pool.query(
-    `INSERT INTO jobs (report_id, version_id, kind, status, progress, provider, model, max_retries, ingestion_batch_id)
-     VALUES ($1, $2, 'parse', 'queued', 0, $3, $4, $6, $5)
-     RETURNING id`,
-    [reportId, versionId, versionRow.provider ?? null, versionRow.model ?? null, versionRow.ingestion_batch_id ?? null, parseMaxRetries]
-  );
-  const jobId = jobRes.rows[0]?.id;
-
-  return {
-    ok: true,
-    reportId,
-    versionId: Number(versionId),
-    jobId: Number(jobId),
-    status: 'queued',
-    reused: false,
-  };
-}
+// enqueueReportParseJob and its helpers moved to ../services/ParseEnqueueService (re-exported above).
 
 async function rebuildSourceTextFromStorage(storagePath: string, reportId: number): Promise<{ text: string; sourceType: string }> {
   let absolutePath = storagePath;
@@ -728,6 +459,9 @@ const handleReportUpload: express.RequestHandler = (req, res, next) => {
     next();
   });
 };
+
+
+// Structured package import routes: see ./structured-import (mounted below via structuredImportRouter)
 
 // Protect upload route
 router.post('/reports', authMiddleware, requirePermission('upload_reports'), handleReportUpload, async (req: AuthRequest, res) => {
@@ -984,6 +718,15 @@ router.post('/reports/batch-parse', authMiddleware, requirePermission('upload_re
             reused: result.reused,
             reason: result.reason,
           });
+        } else if (result.error === STRUCTURED_VERSION_AI_REPARSE_FORBIDDEN) {
+          // Structured-import versions are skipped, not failed: the batch keeps going.
+          results.push({
+            report_id: reportId,
+            report_version_id: result.versionId ?? null,
+            status: 'skipped',
+            error: result.error,
+            message: result.message,
+          });
         } else {
           results.push({
             report_id: reportId,
@@ -1004,13 +747,20 @@ router.post('/reports/batch-parse', authMiddleware, requirePermission('upload_re
 
     const submitted = results.filter((item: any) => item.job_id && !item.reused).length;
     const reused = results.filter((item: any) => item.job_id && item.reused).length;
-    const failed = results.filter((item: any) => !item.job_id).length;
+    const skippedItems = results.filter((item: any) => item.status === 'skipped');
+    const failed = results.filter((item: any) => !item.job_id && item.status !== 'skipped').length;
 
     return res.json({
       requested: reportIds.length,
       submitted,
       reused,
       failed,
+      skipped: skippedItems.length,
+      skipped_items: skippedItems.map((item: any) => ({
+        report_id: item.report_id,
+        report_version_id: item.report_version_id ?? null,
+        reason: item.error,
+      })),
       results,
     });
   } catch (error) {

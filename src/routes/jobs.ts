@@ -12,6 +12,8 @@ import {
   computePipelineOverallProgress,
   determineCorePipelineStatus,
 } from '../utils/jobPipeline';
+import { aggregateStructuredImportTaskDisplay } from '../utils/structuredImportTaskAggregate';
+import { recoverVersionDownstream } from '../services/PipelineRecoveryService';
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -102,8 +104,8 @@ router.get('/', async (req, res) => {
             params.push(String(dbStatus));
         }
 
-        // Only show 'parse' kind jobs in the main list (materialize/checks are sub-tasks shown in detail page)
-        conditions.push(`j.kind = 'parse'`);
+        // Show parse and structured_import in the main list (materialize/checks are sub-tasks on the detail page)
+        conditions.push(`j.kind IN ('parse', 'structured_import')`);
 
         // DATA SCOPE FILTER
         const allowedRegionIds = await getAllowedRegionIdsAsync((req as AuthRequest).user);
@@ -160,9 +162,50 @@ router.get('/', async (req, res) => {
         const rows = rowsRes.rows;
         const total = rows.length > 0 ? Number(rows[0].total_count || 0) : 0;
 
-        // Map to response format
+        // Map to response format. structured_import uses pipeline aggregate (same as GET /task/:id).
+        const versionIdsNeedingAgg = [
+          ...new Set(
+            rows
+              .filter((r: any) => String(r.kind) === 'structured_import' && r.version_id)
+              .map((r: any) => Number(r.version_id))
+          ),
+        ];
+        const subJobsByVersion = new Map<number, any[]>();
+        if (versionIdsNeedingAgg.length > 0) {
+          const subRes = await pool.query(
+            `SELECT version_id, kind, status, progress, step_code, step_name, error_code, error_message, retry_count, max_retries
+             FROM jobs WHERE version_id = ANY($1::int[]) ORDER BY id ASC`,
+            [versionIdsNeedingAgg]
+          );
+          for (const sj of subRes.rows) {
+            const vid = Number(sj.version_id);
+            const list = subJobsByVersion.get(vid) || [];
+            list.push(sj);
+            subJobsByVersion.set(vid, list);
+          }
+        }
+
         const jobs = rows.map((row: any) => {
-            const displayStatus = row.status === 'running' ? 'processing' : row.status;
+            let displayStatus = row.status === 'running' ? 'processing' : row.status;
+            let progress = row.progress || 0;
+            let stepCode = row.step_code || 'QUEUED';
+            let stepName = row.step_name || '等待处理';
+            let errorCode = row.error_code;
+            let errorMessage = row.error_message;
+
+            if (String(row.kind) === 'structured_import' && row.version_id) {
+              const versionJobs = subJobsByVersion.get(Number(row.version_id)) || [];
+              if (versionJobs.length > 0) {
+                const agg = aggregateStructuredImportTaskDisplay(row, versionJobs);
+                displayStatus = agg.status;
+                progress = agg.progress;
+                stepCode = agg.step_code || stepCode;
+                stepName = agg.step_name || stepName;
+                errorCode = agg.error_code || errorCode;
+                errorMessage = agg.error_message || errorMessage;
+              }
+            }
+
             return {
                 job_id: row.job_id,
                 version_id: row.version_id,
@@ -173,14 +216,14 @@ router.get('/', async (req, res) => {
                 file_name: row.file_name,
                 kind: row.kind,
                 status: displayStatus,
-                progress: row.progress || 0,
-                step_code: row.step_code || 'QUEUED',
-                step_name: row.step_name || '等待处理',
+                progress,
+                step_code: stepCode,
+                step_name: stepName,
                 attempt: row.attempt || 1,
                 provider: row.provider,
                 model: row.model,
-                error_code: row.error_code,
-                error_message: row.error_message,
+                error_code: errorCode,
+                error_message: errorMessage,
                 batch_id: row.batch_id,
                 created_at: row.job_created_at,
                 updated_at: row.finished_at || row.started_at || row.job_created_at,
@@ -250,7 +293,30 @@ router.get('/task/:jobId', async (req, res) => {
             return res.status(403).json({ error: 'forbidden' });
         }
 
-        const displayStatus = job.status === 'running' ? 'processing' : job.status;
+                let displayStatus = job.status === 'running' ? 'processing' : job.status;
+        let progress = job.progress || 0;
+        let stepCode = job.step_code || 'QUEUED';
+        let stepName = job.step_name || 'waiting';
+        let errorCode = job.error_code;
+        let errorMessage = job.error_message;
+
+        // For structured_import, expose version pipeline aggregate so task drawer
+        // does not show "done" while materialize/checks are still running.
+        if (String(job.kind) === 'structured_import' && job.version_id) {
+          const subJobsRes = await pool.query(
+            `SELECT kind, status, progress, step_code, step_name, error_code, error_message, retry_count, max_retries
+             FROM jobs WHERE version_id = $1 ORDER BY id ASC`,
+            [job.version_id]
+          );
+          const agg = aggregateStructuredImportTaskDisplay(job, subJobsRes.rows);
+          displayStatus = agg.status;
+          progress = agg.progress;
+          stepCode = agg.step_code || stepCode;
+          stepName = agg.step_name || stepName;
+          errorCode = agg.error_code || errorCode;
+          errorMessage = agg.error_message || errorMessage;
+        }
+
         return res.json({
             job_id: job.job_id,
             version_id: job.version_id,
@@ -260,14 +326,14 @@ router.get('/task/:jobId', async (req, res) => {
             unit_name: job.unit_name,
             kind: job.kind,
             status: displayStatus,
-            progress: job.progress || 0,
-            step_code: job.step_code || 'QUEUED',
-            step_name: job.step_name || '等待处理',
+            progress,
+            step_code: stepCode,
+            step_name: stepName,
             attempt: job.attempt || 1,
             provider: job.provider,
             model: job.model,
-            error_code: job.error_code,
-            error_message: job.error_message,
+            error_code: errorCode,
+            error_message: errorMessage,
             created_at: job.created_at,
             updated_at: job.finished_at || job.started_at || job.created_at,
         });
@@ -346,7 +412,7 @@ router.get('/:version_id', async (req, res) => {
         const pipeline = buildUploadPipelineSummary(jobs);
         const overallProgress = computePipelineOverallProgress(jobs);
 
-        const coreJobs = jobs.filter((j: any) => ['parse', 'materialize', 'checks'].includes(j.kind));
+        const coreJobs = jobs.filter((j: any) => ['parse', 'structured_import', 'materialize', 'checks'].includes(j.kind));
         const currentCoreJob =
           coreJobs.find((j: any) => j.status === 'running' || j.status === 'queued') ||
           coreJobs.filter((j: any) => j.status === 'failed').slice(-1)[0] ||
@@ -355,7 +421,7 @@ router.get('/:version_id', async (req, res) => {
         // Keep legacy step_code mapping for the 5-step bar
         let stepCode = currentCoreJob?.step_code || 'QUEUED';
         let stepName = currentCoreJob?.step_name || '等待处理';
-        if (pipeline.current_stage_key === 'parse' && currentCoreJob?.kind === 'parse') {
+        if (pipeline.current_stage_key === 'parse' && (currentCoreJob?.kind === 'parse' || currentCoreJob?.kind === 'structured_import')) {
           // unchanged
         } else if (pipeline.current_stage_key === 'materialize') {
           stepCode = currentCoreJob?.status === 'failed' ? 'POSTPROCESS' : 'POSTPROCESS';
@@ -485,14 +551,55 @@ router.post('/:version_id/retry', requirePermission('manage_jobs'), async (req, 
             return res.status(404).json({ error: 'No jobs found for this version' });
         }
 
-        // Check if all jobs are in final failed state
-        const hasNonFailed = jobs.some((j: any) => j.status !== 'failed');
-        if (hasNonFailed) {
+        // Downstream recovery: when the parse stage (parse OR structured_import)
+        // already succeeded, requeue only the failed/missing materialize or
+        // checks job. Never re-runs structured_import, never creates AI parse
+        // jobs. Idempotent (active-job unique indexes + 23505 winner reuse).
+        const recovery = await recoverVersionDownstream(versionId);
+        if (recovery.action === 'requeued') {
+            console.log(`[Retry] Requeued downstream ${recovery.kind} job ${recovery.jobId} for version ${versionId} (reused=${recovery.reused})`);
+            return res.json({
+                message: `Downstream ${recovery.kind} job requeued for retry`,
+                version_id: versionId,
+                retried_kind: recovery.kind,
+                job_id: recovery.jobId,
+                reused: recovery.reused,
+                jobs_reset: recovery.reused ? 0 : 1,
+            });
+        }
+        if (recovery.action === 'none' && recovery.reason === 'nothing_to_retry') {
+            return res.json({
+                message: 'Nothing to retry: pipeline already succeeded',
+                version_id: versionId,
+                jobs_reset: 0,
+            });
+        }
+        if (recovery.action === 'none' && recovery.reason === 'jobs_in_progress') {
+            return res.status(400).json({ error: 'Cannot retry: jobs still queued or running' });
+        }
+        // reason upstream_failed / no_jobs → legacy behavior below
+        // (recreate all failed jobs, e.g. failed parse or failed structured_import).
+
+        // Legacy full-reset path judges and clones CORE pipeline jobs only.
+        // Side jobs (vision_review / compare / pdf_export) must not gate the
+        // retry: a queued vision_review left over from an earlier successful
+        // checks run would otherwise block retrying a failed core pipeline.
+        // Failed side jobs are recreated by their own flows (e.g. a re-run of
+        // checks enqueues vision_review again), so they are not cloned here.
+        const CORE_RETRY_KINDS = new Set(['parse', 'structured_import', 'materialize', 'checks']);
+        const coreJobs = jobs.filter((j: any) => CORE_RETRY_KINDS.has(String(j.kind || '')));
+
+        // Cancelled counts as terminal, matching recoverVersionDownstream and
+        // the clone filter below (which has always included cancelled jobs).
+        const hasNonTerminalCore = coreJobs.some(
+            (j: any) => !['failed', 'cancelled'].includes(String(j.status || ''))
+        );
+        if (coreJobs.length > 0 && hasNonTerminalCore) {
             return res.status(400).json({ error: 'Cannot retry: not all jobs are in failed state' });
         }
 
         let retryCount = 0;
-        const failedJobs = jobs.filter((j: any) => j.status === 'failed' || j.status === 'cancelled');
+        const failedJobs = coreJobs.filter((j: any) => j.status === 'failed' || j.status === 'cancelled');
 
         if (failedJobs.length === 0) {
             return res.status(400).json({ error: 'No failed or cancelled jobs to retry' });
@@ -559,7 +666,7 @@ router.post('/:version_id/retry', requirePermission('manage_jobs'), async (req, 
         return res.json({
             message: 'Jobs reset to queued for retry',
             version_id: versionId,
-            jobs_reset: jobs.length,
+            jobs_reset: retryCount,
         });
     } catch (error) {
         console.error('Error retrying jobs:', error);

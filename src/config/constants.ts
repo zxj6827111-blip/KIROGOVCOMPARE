@@ -16,6 +16,14 @@ function resolveProjectRoot(): string {
 }
 
 export const PROJECT_ROOT = resolveProjectRoot();
-export const DATA_DIR = path.join(PROJECT_ROOT, 'data');
+
+/**
+ * Data root for uploads/staging/published packages.
+ * KIROGOV_DATA_DIR overrides the default <project>/data so isolated test runs
+ * (e.g. structured-import E2E) never write into the real data directory.
+ */
+export const DATA_DIR = process.env.KIROGOV_DATA_DIR
+    ? path.resolve(process.env.KIROGOV_DATA_DIR)
+    : path.join(PROJECT_ROOT, 'data');
 export const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 export const UPLOADS_TMP_DIR = path.join(UPLOADS_DIR, 'tmp');
