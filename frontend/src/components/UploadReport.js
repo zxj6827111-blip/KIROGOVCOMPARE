@@ -653,6 +653,7 @@ function UploadReport() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [unitName, setUnitName] = useState('');
   const [file, setFile] = useState(null);
+  const [sourceKind, setSourceKind] = useState('pdf'); // 'pdf' | 'package'
   const [, setTextContent] = useState('');
   const [model, setModel] = useState('');
   const [modelOptions, setModelOptions] = useState([]);
@@ -838,6 +839,25 @@ function UploadReport() {
     setFile(selectedFile);
     setMessage('');
 
+        const lowerName = String(selectedFile.name || '').toLowerCase();
+    if (lowerName.endsWith('.kirogov.zip')) {
+      setSourceKind('package');
+      setTextContent('');
+      setMessage('');
+      return;
+    }
+    if (lowerName.endsWith('.zip')) {
+      setFile(null);
+      setTextContent('');
+      setMessage('⚠️ 本地解析包请使用 .kirogov.zip（普通上传不支持 zip）');
+      return;
+    }
+    if (sourceKind === 'package' && !lowerName.endsWith('.kirogov.zip')) {
+      setFile(null);
+      setMessage('⚠️ 当前为材料包模式，请选择 .kirogov.zip 文件');
+      return;
+    }
+
     const filename = selectedFile.name || '';
     const extractedYear = extractYearFromFilename(filename);
     if (extractedYear) {
@@ -977,6 +997,15 @@ function UploadReport() {
     setMessage('');
 
     try {
+      const isPackage = sourceKind === 'package';
+      if (isPackage && !String(file.name || '').toLowerCase().endsWith('.kirogov.zip')) {
+        const warning = '本地解析包仅支持 .kirogov.zip 文件';
+        setMessage('\u26a0\ufe0f ' + warning);
+        toast.warning('文件类型不正确', warning);
+        setLoading(false);
+        return;
+      }
+
       const formData = new FormData();
       formData.append('region_id', regionId);
       formData.append('year', year);
@@ -984,10 +1013,13 @@ function UploadReport() {
         formData.append('unit_name', unitName);
       }
       formData.append('file', file);
-      if (autoParse) formData.append('auto_parse', 'true');
-      if (model) formData.append('model', model);
+      if (!isPackage) {
+        if (autoParse) formData.append('auto_parse', 'true');
+        if (model) formData.append('model', model);
+      }
 
-      const response = await apiClient.post('/reports', formData, {
+      const endpoint = isPackage ? '/reports/structured-import' : '/reports';
+      const response = await apiClient.post(endpoint, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
@@ -1005,7 +1037,7 @@ function UploadReport() {
           version_id: uploadResult.versionId,
           status: 'queued',
           progress: 0,
-          step_name: '等待解析',
+          step_name: isPackage ? '等待结构化导入' : '等待解析',
           file_name: file?.name,
         });
         taskDrawer.openDrawer();
@@ -1105,6 +1137,48 @@ function UploadReport() {
       {uploadMode === 'single' ? (
         <div className="upload-report-modal">
           <div className="upload-modal-content">
+                        <div className="form-section source-kind-section">
+              <label>上传方式</label>
+              <div className="source-kind-options" role="radiogroup" aria-label="上传方式">
+                <label className={`source-kind-option ${sourceKind === 'pdf' ? 'active' : ''}`}>
+                  <input
+                    type="radio"
+                    name="sourceKind"
+                    checked={sourceKind === 'pdf'}
+                    onChange={() => {
+                      setSourceKind('pdf');
+                      setFile(null);
+                      setTextContent('');
+                      setMessage('');
+                    }}
+                    disabled={loading}
+                  />
+                  <span>普通 PDF / HTML / 文本（AI 解析）</span>
+                </label>
+                <label className={`source-kind-option ${sourceKind === 'package' ? 'active' : ''}`}>
+                  <input
+                    type="radio"
+                    name="sourceKind"
+                    checked={sourceKind === 'package'}
+                    onChange={() => {
+                      setSourceKind('package');
+                      setFile(null);
+                      setTextContent('');
+                      setMessage('');
+                    }}
+                    disabled={loading}
+                  />
+                  <span>本地解析包（.kirogov.zip）</span>
+                </label>
+              </div>
+              {sourceKind === 'package' && (
+                <p className="hint source-kind-hint">
+                  上传本地生成的标准材料包。服务器只做校验、入库与规则审查，不调用 AI。
+                </p>
+              )}
+            </div>
+
+            {sourceKind !== 'package' && (
             <div className="form-section">
               <label>AI 模型</label>
               <select
@@ -1125,6 +1199,7 @@ function UploadReport() {
                 )}
               </select>
             </div>
+            )}{/* package-mode: end model */}
 
             <div
               className={`drop-zone ${isDragging ? 'dragging' : ''} ${file ? 'has-file' : ''}`}
@@ -1137,7 +1212,7 @@ function UploadReport() {
                 type="file"
                 ref={fileInputRef}
                 onChange={handleFileSelect}
-                accept=".pdf,.html,.txt,.md,.markdown"
+                accept={sourceKind === 'package' ? '.kirogov.zip,application/zip' : '.pdf,.html,.txt,.md,.markdown'}
                 className="hidden"
               />
               {file ? (
@@ -1200,7 +1275,7 @@ function UploadReport() {
                     onClick={() => handleUpload(true)}
                     disabled={loading || !file}
                   >
-                    {loading ? '处理中...' : '上传并启动解析'}
+                    {loading ? '处理中...' : sourceKind === 'package' ? '上传材料包并导入' : '上传并启动解析'}
                   </button>
                 </>
               )}

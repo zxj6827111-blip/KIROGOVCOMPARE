@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kirogov.local/schemas/kirogov-package/1.0/source.schema.json",
+  "title": "Kirogov structured package source.json v1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "package_version",
+    "generator",
+    "source",
+    "parsed_json"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Package envelope schema version"
+    },
+    "package_version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Logical package format version (v1 fixed)"
+    },
+    "generator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pdf_filename",
+        "markdown_filename",
+        "pdf_sha256",
+        "markdown_sha256"
+      ],
+      "properties": {
+        "pdf_filename": {
+          "type": "string",
+          "const": "source.pdf"
+        },
+        "markdown_filename": {
+          "type": "string",
+          "const": "source.md"
+        },
+        "pdf_sha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "markdown_sha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "organization_name": {
+          "type": ["string", "null"],
+          "maxLength": 256
+        },
+        "report_year": {
+          "type": ["integer", "null"],
+          "minimum": 2000,
+          "maximum": 2100
+        },
+        "report_title": {
+          "type": ["string", "null"],
+          "maxLength": 512
+        }
+      }
+    },
+    "parsed_json": {
+      "type": "object",
+      "description": "Same shape as report_versions.parsed_json used by materialize",
+      "additionalProperties": true,
+      "required": ["sections"],
+      "properties": {
+        "sections": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "title": {
+                "type": ["string", "null"]
+              },
+              "content": {
+                "type": ["string", "null"]
+              },
+              "activeDisclosureData": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "tableData": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "reviewLitigationData": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "basic_info": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "tables": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}

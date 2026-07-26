@@ -3,6 +3,8 @@ import { LlmParseResult, LlmProvider, LlmProviderError } from './LlmProvider';
 import { createLlmProvider } from './LlmProviderFactory';
 import { consistencyCheckService } from './ConsistencyCheckService';
 import { materializeService } from './data-center/MaterializeService';
+import { runStructuredImportJob } from './structured-import/runStructuredImportJob';
+import { StructuredPackageError } from '../config/structuredPackage';
 import { ingestionBatchService } from './data-center/IngestionBatchService';
 import { govInsightStatsService } from './GovInsightStatsService';
 import { stabilizeParsedOutput } from './ParsedOutputStabilityService';
@@ -108,6 +110,8 @@ function getFailureStep(jobKind: string): { code: string; name: string; progress
   switch (jobKind) {
     case 'parse':
       return { code: STEPS.PARSING.code, name: 'AI 解析失败', progress: STEPS.PARSING.progress };
+    case 'structured_import':
+      return { code: STEPS.POSTPROCESS.code, name: '结构化导入失败', progress: STEPS.POSTPROCESS.progress };
     case 'materialize':
     case 'checks':
     case 'vision_review':
@@ -129,7 +133,7 @@ const PARSE_STABILIZE_OPTIONS = resolveStabilizeOptions(PARSE_STABILIZE_MODE);
 
 function resolveAllowedKinds(mode: string): Set<string> {
   if (!mode || mode === 'all') {
-    return new Set(['parse', 'materialize', 'checks', 'vision_review', 'compare']);
+    return new Set(['parse', 'materialize', 'checks', 'vision_review', 'compare', 'structured_import']);
   }
   if (mode.includes(',')) {
     return new Set(mode.split(',').map((k) => k.trim()).filter(Boolean));
@@ -195,8 +199,12 @@ export class LlmJobRunner {
         await this.processChecksJob(job);
       } else if (job.kind === 'vision_review') {
         await this.processVisionReviewJob(job);
-      } else {
+      } else if (job.kind === 'structured_import') {
+        await this.processStructuredImportJob(job);
+      } else if (job.kind === 'parse') {
         await this.processParseJob(job);
+      } else {
+        throw new Error(`Unsupported job kind: ${job.kind}`);
       }
     } catch (error: any) {
       await this.handleJobFailure(job, error);
@@ -211,6 +219,33 @@ export class LlmJobRunner {
    * If it's currently running, abort it.
    * If it's queued/running but not current (race condition?), update DB.
    */
+
+  /**
+   * Drain next non-compare queued job using the same claim + process path as the live worker tick.
+   * Returns processed job id, or null if queue empty for allowed kinds.
+   * Intended for isolated E2E / ops scripts (does not start the background loop).
+   */
+  public async processNextQueuedJob(): Promise<number | null> {
+    const job = await this.claimNextJob();
+    if (!job) return null;
+    await this.processJob(job);
+    return job.id;
+  }
+
+  /**
+   * Process up to maxJobs queued non-compare jobs sequentially (production claim/process path).
+   */
+  public async drainQueuedJobs(maxJobs = 32): Promise<{ processed: number; lastJobId: number | null }> {
+    let processed = 0;
+    let lastJobId: number | null = null;
+    for (let i = 0; i < maxJobs; i++) {
+      const id = await this.processNextQueuedJob();
+      if (id == null) break;
+      lastJobId = id;
+      processed += 1;
+    }
+    return { processed, lastJobId };
+  }
   public async cancelJob(jobId: number): Promise<boolean> {
     // 1. If it's the current running job, abort it
     if (this.currentJobId === jobId && this.currentAbortController) {
@@ -330,6 +365,12 @@ export class LlmJobRunner {
     if (job.version_id) {
       await this.generateNotificationIfNeeded(job.version_id);
     }
+  }
+
+
+  /** Dispatch structured package import (no LLM). Implementation: runStructuredImportJob. */
+  private async processStructuredImportJob(job: QueuedJob): Promise<void> {
+    await runStructuredImportJob(job);
   }
 
   private async processParseJob(job: QueuedJob): Promise<void> {
@@ -922,23 +963,47 @@ export class LlmJobRunner {
       WITH next_job AS (
         SELECT id
         FROM jobs
-        WHERE status = 'queued' AND kind != 'pdf_export'
-          AND kind = ANY($4::text[])
-        ORDER BY (CASE kind WHEN 'materialize' THEN 0 WHEN 'checks' THEN 1 WHEN 'vision_review' THEN 2 WHEN 'parse' THEN 3 WHEN 'compare' THEN 4 ELSE 9 END) ASC, created_at ASC
+          WHERE status = 'queued' AND kind != 'pdf_export'
+          AND kind = ANY($1::text[])
+        ORDER BY (CASE kind WHEN 'materialize' THEN 0 WHEN 'checks' THEN 1 WHEN 'vision_review' THEN 2 WHEN 'structured_import' THEN 3 WHEN 'parse' THEN 4 WHEN 'compare' THEN 5 ELSE 9 END) ASC, created_at ASC
         LIMIT 1
         FOR UPDATE SKIP LOCKED
       )
       UPDATE jobs j
       SET status = 'running',
           started_at = NOW(),
-          step_code = $1,
-          step_name = $2,
-          progress = $3
+          step_code = CASE j.kind
+            WHEN 'parse' THEN 'PARSING'
+            WHEN 'materialize' THEN 'MATERIALIZE'
+            WHEN 'checks' THEN 'POSTPROCESS'
+            WHEN 'vision_review' THEN 'POSTPROCESS'
+            WHEN 'structured_import' THEN 'POSTPROCESS'
+            ELSE 'RECEIVED'
+          END,
+          step_name = CASE j.kind
+            WHEN 'parse' THEN 'AI parsing'
+            WHEN 'materialize' THEN 'Materializing'
+            WHEN 'checks' THEN 'Validating and saving'
+            WHEN 'vision_review' THEN 'Running visual review'
+            WHEN 'structured_import' THEN 'structured_import running'
+            ELSE '处理中'
+          END,
+          progress = CASE j.kind
+            WHEN 'parse' THEN 50
+            WHEN 'materialize' THEN 70
+            WHEN 'checks' THEN 80
+            WHEN 'vision_review' THEN 30
+            WHEN 'structured_import' THEN 80
+            ELSE 10
+          END
       FROM next_job n
       WHERE j.id = n.id
       RETURNING j.id, j.report_id, j.version_id, j.kind, j.comparison_id, j.retry_count, j.max_retries, j.provider, j.model
     `,
-      [STEPS.PARSING.code, STEPS.PARSING.name, STEPS.PARSING.progress, NON_COMPARE_ALLOWED_KIND_LIST]);
+      // Only the allowed-kinds array is parameterized; step_code/step_name/progress
+      // are now driven by CASE on j.kind so structured_import is never labelled
+      // as "AI parsing" by the claim step.
+      [NON_COMPARE_ALLOWED_KIND_LIST]);
 
     const updatedJobs = updateResult.rows;
 
@@ -1350,6 +1415,13 @@ export class LlmJobRunner {
     const message = error instanceof Error ? error.message : String(error);
     const lower = message.toLowerCase();
     let code = 'UNKNOWN_ERROR';
+    if (error instanceof StructuredPackageError) {
+      // Structured package import failures (ZIP/Schema/Hash/Metadata) are
+      // deterministic — never transient. Surface their precise error code so
+      // job.error_code/error_message stay actionable for the UI and ops.
+      code = error.code || 'UNKNOWN_ERROR';
+      return { code, message };
+    }
     if (error instanceof LlmProviderError) {
       code = error.code || 'UNKNOWN_ERROR';
     } else if (lower.includes('enoent') || lower.includes('no such file or directory')) {

@@ -6,6 +6,7 @@ import {
   resolveParseMaxRetries,
   shouldAutomaticallyRetryJob,
 } from '../utils/jobRetryPolicy';
+import { STRUCTURED_PACKAGE_ERROR_CODES } from '../config/structuredPackage';
 
 describe('jobRetryPolicy', () => {
   it('defaults parse max_retries to 2', () => {
@@ -43,5 +44,21 @@ describe('jobRetryPolicy', () => {
     expect(isUserCancellationError(userCancel)).toBe(true);
 
     expect(isUserCancellationError(new Error('canceled'))).toBe(true);
+  });
+
+  describe('structured_import error codes (deterministic, non-retryable)', () => {
+    it('every STRUCTURED_PACKAGE_ERROR_CODES value is non-retryable', () => {
+      for (const code of Object.values(STRUCTURED_PACKAGE_ERROR_CODES)) {
+        expect(isNonRetryableJobErrorCode(code)).toBe(true);
+      }
+    });
+
+    it('structured_import failures do not requeue regardless of job kind', () => {
+      expect(shouldAutomaticallyRetryJob({ kind: 'structured_import', errorCode: 'PDF_HASH_MISMATCH' })).toBe(false);
+      expect(shouldAutomaticallyRetryJob({ kind: 'structured_import', errorCode: 'ZIP_PATH_TRAVERSAL' })).toBe(false);
+      expect(shouldAutomaticallyRetryJob({ kind: 'structured_import', errorCode: 'SCHEMA_VALIDATION_FAILED' })).toBe(false);
+      // Sanity: unknown errors (no code) are still retryable when budgeted — preserves prior behavior
+      expect(shouldAutomaticallyRetryJob({ kind: 'structured_import', errorCode: undefined })).toBe(true);
+    });
   });
 });
