@@ -1,0 +1,5 @@
+# Structured-import fixtures are byte-exact test inputs (hash-verified by the
+# test suite and regenerated deterministically with LF). Never apply text/EOL
+# conversion, or Windows checkouts flip them to CRLF and every test run leaves
+# a phantom "modified" status.
+tests/fixtures/structured-import/** -text
