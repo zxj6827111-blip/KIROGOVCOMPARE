@@ -1,0 +1,156 @@
+{
+  "schema_version": "1.0",
+  "package_version": "1.0",
+  "generator": {
+    "name": "kirogov-fixture-builder",
+    "version": "0.1.0"
+  },
+  "source": {
+    "pdf_filename": "source.pdf",
+    "markdown_filename": "source.md",
+    "pdf_sha256": "d6ff23d6ab010f369e4f961987904c422e2a106033a04f6e29782a6685b4a1fd",
+    "markdown_sha256": "03015befad5ca321c9dcff5f7a2a85766b328381d9cf10005c22bd47ed9b3d01",
+    "organization_name": "测试机构",
+    "report_year": 2024,
+    "report_title": "测试年报"
+  },
+  "parsed_json": {
+    "sections": [
+      {
+        "type": "table_2",
+        "title": "二、主动公开政府信息情况",
+        "activeDisclosureData": {
+          "regulations": {
+            "made": 0,
+            "valid": 1,
+            "repealed": 0
+          },
+          "normativeDocuments": {
+            "made": 2,
+            "valid": null,
+            "repealed": 0
+          },
+          "licensing": {
+            "processed": 0
+          },
+          "punishment": {
+            "processed": 3
+          },
+          "coercion": {
+            "processed": null
+          },
+          "fees": {
+            "amount": 0
+          }
+        }
+      },
+      {
+        "type": "table_3",
+        "title": "三、收到和处理政府信息公开申请情况",
+        "tableData": {
+          "naturalPerson": {
+            "newReceived": 10,
+            "carriedOver": 0,
+            "results": {
+              "granted": 5,
+              "partialGrant": 0,
+              "denied": {
+                "stateSecret": 0,
+                "lawForbidden": 0,
+                "safetyStability": 0,
+                "thirdPartyRights": 0,
+                "internalAffairs": 0,
+                "processInfo": 0,
+                "enforcementCase": 0,
+                "adminQuery": 0
+              },
+              "unableToProvide": {
+                "noInfo": 0,
+                "needCreation": 0,
+                "unclear": 0
+              },
+              "notProcessed": {
+                "complaint": 0,
+                "repeat": 0,
+                "publication": 0,
+                "massiveRequests": 0,
+                "confirmInfo": 0
+              },
+              "other": {
+                "overdueCorrection": 0,
+                "overdueFee": 0,
+                "otherReasons": 0
+              },
+              "totalProcessed": 5,
+              "carriedForward": 0
+            }
+          },
+          "total": {
+            "newReceived": 10,
+            "carriedOver": 0,
+            "results": {
+              "granted": 5,
+              "partialGrant": 0,
+              "denied": {
+                "stateSecret": 0,
+                "lawForbidden": 0,
+                "safetyStability": 0,
+                "thirdPartyRights": 0,
+                "internalAffairs": 0,
+                "processInfo": 0,
+                "enforcementCase": 0,
+                "adminQuery": 0
+              },
+              "unableToProvide": {
+                "noInfo": 0,
+                "needCreation": 0,
+                "unclear": 0
+              },
+              "notProcessed": {
+                "complaint": 0,
+                "repeat": 0,
+                "publication": 0,
+                "massiveRequests": 0,
+                "confirmInfo": 0
+              },
+              "other": {
+                "overdueCorrection": 0,
+                "overdueFee": 0,
+                "otherReasons": 0
+              },
+              "totalProcessed": 5,
+              "carriedForward": 0
+            }
+          }
+        }
+      },
+      {
+        "type": "table_4",
+        "title": "四、行政复议行政诉讼情况",
+        "reviewLitigationData": {
+          "review": {
+            "maintain": 0,
+            "correct": 0,
+            "other": 0,
+            "unfinished": 0,
+            "total": 0
+          },
+          "litigationDirect": {
+            "maintain": 0,
+            "correct": 0,
+            "other": 0,
+            "unfinished": 0,
+            "total": 0
+          },
+          "litigationPostReview": {
+            "maintain": 0,
+            "correct": 0,
+            "other": 0,
+            "unfinished": 0,
+            "total": 0
+          }
+        }
+      }
+    ]
+  }
+}
