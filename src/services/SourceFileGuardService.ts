@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import pool from '../config/database-llm';
-import { PROJECT_ROOT } from '../config/constants';
+import { DATA_DIR, PROJECT_ROOT } from '../config/constants';
 
 export type SourceFileErrorCode = 'SOURCE_FILE_MISSING';
 
@@ -22,6 +22,20 @@ export interface VersionSourceFileCheckResult extends SourceFileCheckResult {
 export function resolveAbsoluteStoragePath(storagePath: string): string {
   if (path.isAbsolute(storagePath)) {
     return storagePath;
+  }
+
+  // storage_path values are stored as project-root-relative labels
+  // ("data/uploads/..."). When KIROGOV_DATA_DIR overrides DATA_DIR (isolated
+  // test/acceptance runs), the physical files live under DATA_DIR instead of
+  // <project>/data, so map the "data/" prefix onto DATA_DIR first. Without the
+  // override DATA_DIR === <project>/data and this resolves identically to the
+  // PROJECT_ROOT branch below.
+  const normalized = storagePath.replace(/\\/g, '/');
+  if (/^data\//i.test(normalized)) {
+    const byDataDir = path.resolve(DATA_DIR, normalized.slice('data/'.length));
+    if (fs.existsSync(byDataDir)) {
+      return byDataDir;
+    }
   }
 
   const byProjectRoot = path.resolve(PROJECT_ROOT, storagePath);
