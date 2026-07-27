@@ -20,6 +20,7 @@ import dataCenterRouter from './routes/data-center';
 import govInsightRouter from './routes/gov-insight';
 import govInsightPdfRouter from './routes/gov-insight-pdf';
 import retiredCompareTasksRouter from './routes/retired-compare-tasks';
+import filingsRouter from './routes/filings';
 import { createRateLimiter, createRedisStore } from './middleware/rateLimit';
 import { redactSensitive } from './utils/logRedactor';
 
@@ -109,6 +110,7 @@ export function createLlmApp(): express.Express {
   app.use('/api/comparisons', pdfExportRouter);
   app.use('/api', llmComparisonsRouter);
   app.use('/api', reportsRouter);
+  app.use('/api', filingsRouter);
   app.use('/api', require('./routes/consistency').default);
   app.use('/api', issuesSummaryRouter);
   app.use('/api', dataCenterRouter);

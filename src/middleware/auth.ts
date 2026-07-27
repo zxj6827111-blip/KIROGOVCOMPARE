@@ -37,6 +37,7 @@ export const ADMIN_DEFAULT_PERMISSIONS: Record<string, boolean> = {
   manage_jobs: true,
   delete_reports: true,
   system_admin: true,
+  file_reports: true,
 };
 
 /**
@@ -50,6 +51,15 @@ export function normalizePermissions(permissions: Record<string, boolean> | null
     normalized[REGION_MANAGEMENT_PERMISSION] = true;
   }
   delete normalized.manage_cities;
+
+  // Department filing: operators who can upload/admin can enter the filing portal.
+  // (Backend APIs still use requirePermission('file_reports') after this normalize.)
+  if (
+    normalized.file_reports !== true &&
+    (normalized.system_admin === true || normalized.upload_reports === true)
+  ) {
+    normalized.file_reports = true;
+  }
 
   return normalized;
 }
@@ -173,6 +183,7 @@ export async function authMiddleware(req: AuthRequest, res: Response, next: Next
         manage_regions: true,
         manage_jobs: true,
         delete_reports: true,
+        file_reports: true,
       },
       dataScope: {}
     };

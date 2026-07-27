@@ -11,6 +11,7 @@ const DEFAULT_PERMISSIONS = {
     manage_jobs: false,
     view_reports: false,
     upload_reports: false,
+    file_reports: false,
     compare_reports: false,
     delete_reports: false,
 };
@@ -154,6 +155,7 @@ export default function UserManagement() {
                     manage_jobs: user.permissions?.manage_jobs || false,
                     view_reports: user.permissions?.view_reports || false,
                     upload_reports: user.permissions?.upload_reports || false,
+                    file_reports: user.permissions?.file_reports || false,
                     compare_reports: user.permissions?.compare_reports || false,
                     delete_reports: user.permissions?.delete_reports || false,
                 },
@@ -172,6 +174,7 @@ export default function UserManagement() {
                     manage_users: false,
                     manage_regions: false,
                     upload_reports: true,
+                    file_reports: true,
                     compare_reports: true,
                     delete_reports: false,
                 },
@@ -284,6 +287,7 @@ export default function UserManagement() {
                                             {user.permissions?.manage_regions && <span className="tag-green">城市管理</span>}
                                             {user.permissions?.view_reports && <span className="tag-cyan">查看</span>}
                                             {user.permissions?.upload_reports && <span className="tag-orange">上传</span>}
+                                            {user.permissions?.file_reports && <span className="tag-orange">填报</span>}
                                             {user.permissions?.compare_reports && <span className="tag-purple">比对</span>}
                                             {user.permissions?.delete_reports && <span className="tag-rose">删除</span>}
                                             {user.permissions?.manage_jobs && <span className="tag-red">任务</span>}
@@ -365,6 +369,7 @@ export default function UserManagement() {
                                 <label className="checkbox-label"><input type="checkbox" checked={formData.permissions.manage_regions} onChange={() => togglePermission('manage_regions')} /> 城市管理</label>
                                 <label className="checkbox-label"><input type="checkbox" checked={formData.permissions.view_reports} onChange={() => togglePermission('view_reports')} /> 查看报告</label>
                                 <label className="checkbox-label"><input type="checkbox" checked={formData.permissions.upload_reports} onChange={() => togglePermission('upload_reports')} /> 上传报告</label>
+                                <label className="checkbox-label"><input type="checkbox" checked={!!formData.permissions.file_reports} onChange={() => togglePermission('file_reports')} /> 年报填报</label>
                                 <label className="checkbox-label"><input type="checkbox" checked={formData.permissions.compare_reports} onChange={() => togglePermission('compare_reports')} /> 比对报告</label>
                                 <label className="checkbox-label"><input type="checkbox" checked={formData.permissions.delete_reports} onChange={() => togglePermission('delete_reports')} /> 删除报告</label>
                                 <label className="checkbox-label"><input type="checkbox" checked={formData.permissions.manage_jobs} onChange={() => togglePermission('manage_jobs')} /> 任务管理</label>

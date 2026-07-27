@@ -9,7 +9,8 @@ import {
   Eye,
   Trash2,
   Plus,
-  RefreshCw
+  RefreshCw,
+  FilePenLine,
 } from 'lucide-react';
 import Button from './common/Button';
 import PageHeader from './common/PageHeader';
@@ -877,6 +878,9 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
             </Button>
             <Button variant="secondary" icon={<AlertCircle size={16} />} onClick={() => goTo(appendReturnTo('/report-maintenance', currentCatalogPath))}>
               年报维护
+            </Button>
+            <Button variant="secondary" icon={<FilePenLine size={16} />} onClick={() => goTo('/filing')}>
+              年报填报
             </Button>
             <Button variant="primary" icon={<Plus size={16} />} onClick={() => goTo('/upload')}>
               录入新报告

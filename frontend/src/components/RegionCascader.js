@@ -5,12 +5,19 @@ import './RegionCascader.css';
 /**
  * 4-level Cascading Region Selector
  * Province -> City -> District -> Department/Street
- * 
+ *
  * @param {Array} regions - Flat list of all regions
  * @param {string|number} value - Currently selected region ID
  * @param {function} onChange - Callback (id) => {}
+ * @param {'default'|'strict'} [emptyLabelMode='default']
+ *   default: upload-style "全市/全区(不限…)" empty options
+ *   strict: filing-style "请选择市/区县" empty options
  */
-function RegionCascader({ regions = [], value, onChange }) {
+function RegionCascader({ regions = [], value, onChange, emptyLabelMode = 'default' }) {
+    const emptyL1 = emptyLabelMode === 'strict' ? '请选择省/直辖市' : '-- 省/直辖市 --';
+    const emptyL2 = emptyLabelMode === 'strict' ? '请选择市' : '-- 全市 (不限区县) --';
+    const emptyL3 = emptyLabelMode === 'strict' ? '请选择区/县' : '-- 全区 (不限部门) --';
+    const emptyL4 = emptyLabelMode === 'strict' ? '请选择部门/街道（可选）' : '-- 部门/街道 (可选) --';
     // Internal selection state
     const [level1, setLevel1] = useState(''); // Province / Top-level
     const [level2, setLevel2] = useState(''); // City
@@ -43,8 +50,12 @@ function RegionCascader({ regions = [], value, onChange }) {
             }
         });
 
-        // Helper sort
-        const sortFn = (a, b) => a.id - b.id;
+        // Prefer sort_order (城市管理), then id
+        const sortFn = (a, b) => {
+            const sa = Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0);
+            if (sa !== 0) return sa;
+            return Number(a.id) - Number(b.id);
+        };
         roots.sort(sortFn);
         cMap.forEach(list => list.sort(sortFn));
 
@@ -134,7 +145,7 @@ function RegionCascader({ regions = [], value, onChange }) {
                     value={level1}
                     onChange={e => handleChange(1, e.target.value)}
                 >
-                    <option value="">-- 省/直辖市 --</option>
+                    <option value="">{emptyL1}</option>
                     {l1Options.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                 </select>
             </div>
@@ -145,9 +156,9 @@ function RegionCascader({ regions = [], value, onChange }) {
                     className="region-select"
                     value={level2}
                     onChange={e => handleChange(2, e.target.value)}
-                    disabled={!level1 && !level2} // Allow clearing if selected
+                    disabled={!level1 && !level2}
                 >
-                    <option value="">-- 全市 (不限区县) --</option>
+                    <option value="">{emptyL2}</option>
                     {l2Options.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                 </select>
             </div>
@@ -160,7 +171,7 @@ function RegionCascader({ regions = [], value, onChange }) {
                     onChange={e => handleChange(3, e.target.value)}
                     disabled={!level2 && !level3}
                 >
-                    <option value="">-- 全区 (不限部门) --</option>
+                    <option value="">{emptyL3}</option>
                     {l3Options.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                 </select>
             </div>
@@ -173,7 +184,7 @@ function RegionCascader({ regions = [], value, onChange }) {
                     onChange={e => handleChange(4, e.target.value)}
                     disabled={!level3 && !level4}
                 >
-                    <option value="">-- 部门/街道 (可选) --</option>
+                    <option value="">{emptyL4}</option>
                     {l4Options.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                 </select>
             </div>
