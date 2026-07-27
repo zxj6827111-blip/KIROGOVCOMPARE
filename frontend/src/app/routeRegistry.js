@@ -1,6 +1,7 @@
 import {
   Activity,
   FileCheck2,
+  FilePenLine,
   FolderKanban,
   GitCompare,
   ListTodo,
@@ -9,6 +10,7 @@ import {
 
 export const NAV_GROUPS = {
   WORKBENCH: 'workbench',
+  FILING: 'filing',
   REVIEW: 'review',
   COMPARISON: 'comparison',
   EXPORT: 'export',
@@ -18,6 +20,7 @@ export const NAV_GROUPS = {
 
 export const NAV_GROUP_LABELS = {
   [NAV_GROUPS.WORKBENCH]: '年报工作台',
+  [NAV_GROUPS.FILING]: '年报填报',
   [NAV_GROUPS.REVIEW]: '问题清单',
   [NAV_GROUPS.COMPARISON]: '比对中心',
   [NAV_GROUPS.EXPORT]: '任务中心',
@@ -43,6 +46,27 @@ export const routeRegistry = [
     navGroup: NAV_GROUPS.WORKBENCH,
     fallbackReturnTo: '/catalog',
     match: (pathname) => pathname === '/upload',
+  },
+  {
+    key: 'filing-editor',
+    path: '/filing/:id',
+    title: '填报编辑',
+    navGroup: NAV_GROUPS.FILING,
+    permission: 'file_reports',
+    fallbackReturnTo: '/filing',
+    match: (pathname) => /^\/filing\/\d+/.test(pathname),
+  },
+  {
+    key: 'filing',
+    path: '/filing',
+    title: '年报填报',
+    navLabel: '年报填报',
+    navGroup: NAV_GROUPS.FILING,
+    icon: FilePenLine,
+    // 与后端一致：file_reports；system_admin / upload_reports 在登录 normalize 后会继承
+    permission: 'file_reports',
+    fallbackReturnTo: '/filing',
+    match: (pathname) => pathname === '/filing' || pathname.startsWith('/filing/'),
   },
   {
     key: 'report-detail',
@@ -149,6 +173,7 @@ export const routeRegistry = [
 
 export const primaryNavItems = [
   routeRegistry.find((route) => route.key === 'catalog'),
+  routeRegistry.find((route) => route.key === 'filing'),
   routeRegistry.find((route) => route.key === 'issues'),
   routeRegistry.find((route) => route.key === 'history'),
   routeRegistry.find((route) => route.key === 'jobs'),
@@ -169,6 +194,14 @@ export function userCanAccessRoute(route, user) {
     return route.permissionsAny.some((permission) => Boolean(user?.permissions?.[permission]));
   }
   if (!route?.permission) return true;
+  // 年报填报：管理员/有上传权限的运营账号默认可见入口（后端仍校验 file_reports）
+  if (route.permission === 'file_reports') {
+    return Boolean(
+      user?.permissions?.file_reports ||
+        user?.permissions?.system_admin ||
+        user?.permissions?.upload_reports
+    );
+  }
   return Boolean(user?.permissions?.[route.permission]);
 }
 

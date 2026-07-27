@@ -1,0 +1,501 @@
+/* Align with system tokens (CityIndex / ComparisonHistory) */
+.filing-page {
+  width: 100%;
+  max-width: 100%;
+  padding: 0 0 32px;
+  box-sizing: border-box;
+}
+
+.filing-page .kc-page-header {
+  margin-bottom: 16px;
+}
+
+.filing-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  padding: 16px 18px;
+  background: var(--color-bg-main, #fff);
+  border: 1px solid var(--color-border, #cbd5e1);
+  border-radius: var(--radius-md, 8px);
+  box-shadow: var(--shadow-sm);
+}
+
+.filing-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary, #475569);
+  min-width: 120px;
+}
+
+.filing-field > span {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.filing-field input,
+.filing-field select {
+  min-width: 120px;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border, #cbd5e1);
+  border-radius: var(--radius-sm, 6px);
+  font-size: 13px;
+  background: var(--color-bg-main, #fff);
+  color: var(--color-text-primary, #171717);
+}
+
+.filing-field input:focus,
+.filing-field select:focus {
+  outline: none;
+  border-color: var(--primary, #2563eb);
+  box-shadow: 0 0 0 3px var(--primary-light, #eff6ff);
+}
+
+.filing-field--region {
+  flex: 1 1 100%;
+  min-width: min(100%, 640px);
+}
+
+.filing-field--region .region-cascader {
+  width: 100%;
+}
+
+.filing-field--region .region-select {
+  border-color: var(--color-border, #cbd5e1);
+  border-radius: var(--radius-sm, 6px);
+  min-height: 36px;
+  font-size: 13px;
+  color: var(--color-text-primary, #171717);
+}
+
+.filing-field--region .region-select:hover {
+  border-color: var(--color-border-hover, #94a3b8);
+}
+
+.filing-field--region .region-select:focus {
+  border-color: var(--primary, #2563eb);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.filing-selected-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--primary, #2563eb);
+}
+
+.filing-selected-hint--muted {
+  color: var(--color-text-tertiary, #94a3b8);
+}
+
+.filing-table-wrap {
+  border: 1px solid var(--color-border, #cbd5e1);
+  border-radius: var(--radius-md, 8px);
+  overflow: auto;
+  background: var(--color-bg-main, #fff);
+  box-shadow: var(--shadow-sm);
+}
+
+.filing-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.filing-table th,
+.filing-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-bg-hover, #f1f5f9);
+  text-align: left;
+  color: var(--color-text-primary, #171717);
+}
+
+.filing-table th {
+  background: var(--color-bg-secondary, #f5f7fa);
+  color: var(--color-text-secondary, #475569);
+  font-weight: 600;
+}
+
+.filing-table tbody tr:hover {
+  background: var(--color-bg-hover, #f1f5f9);
+}
+
+.filing-empty {
+  padding: 48px 16px;
+  text-align: center;
+  color: var(--color-text-tertiary, #94a3b8);
+}
+
+.filing-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-full, 9999px);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.filing-badge--draft {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.filing-badge--submitted {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.filing-badge--checks_failed {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.filing-badge--effective {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+/* Editor document */
+.filing-document {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.filing-section {
+  background: var(--color-bg-main, #fff);
+  border: 1px solid var(--color-border, #cbd5e1);
+  border-radius: var(--radius-md, 8px);
+  padding: 18px 20px 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.filing-section h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  color: var(--color-text-primary, #171717);
+}
+
+.filing-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--color-bg-hover, #f1f5f9);
+}
+
+.filing-textarea {
+  width: 100%;
+  min-height: 180px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border, #cbd5e1);
+  border-radius: var(--radius-sm, 6px);
+  font-size: 14px;
+  line-height: 1.75;
+  resize: vertical;
+  font-family: inherit;
+  color: var(--color-text-primary, #171717);
+  background: var(--color-bg-main, #fff);
+  box-sizing: border-box;
+}
+
+.filing-textarea:disabled {
+  background: var(--color-bg-secondary, #f5f7fa);
+  color: var(--color-text-secondary, #475569);
+}
+
+.filing-textarea:focus {
+  outline: none;
+  border-color: var(--primary, #2563eb);
+  box-shadow: 0 0 0 3px var(--primary-light, #eff6ff);
+}
+
+/* ===== 国办矩阵表 ===== */
+.filing-matrix-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.filing-matrix-row2 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.filing-matrix-card {
+  border: 1px solid var(--color-border, #cbd5e1);
+  border-radius: var(--radius-md, 8px);
+  background: var(--color-bg-main, #fff);
+  overflow: hidden;
+}
+
+.filing-matrix-card__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--color-text-primary, #171717);
+  background: var(--color-bg-secondary, #f5f7fa);
+  border-bottom: 1px solid var(--color-border, #cbd5e1);
+}
+
+.filing-matrix-card__meta {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-tertiary, #94a3b8);
+}
+
+.filing-matrix-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.filing-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--color-bg-main, #fff);
+  font-size: 13px;
+}
+
+.filing-matrix th,
+.filing-matrix td {
+  border: 1px solid var(--color-border, #cbd5e1);
+  padding: 8px 6px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.filing-matrix th {
+  background: var(--primary-light, #eff6ff);
+  color: var(--color-text-secondary, #475569);
+  font-weight: 600;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.filing-matrix__rowhead {
+  text-align: left !important;
+  min-width: 120px;
+}
+
+.filing-matrix__label {
+  text-align: left !important;
+  color: var(--color-text-primary, #171717);
+  font-weight: 500;
+  background: var(--color-bg-secondary, #f5f7fa);
+  white-space: normal;
+  line-height: 1.4;
+  padding-left: 10px !important;
+  padding-right: 10px !important;
+}
+
+/* 表三：铺满容器，7 个数据列均分 */
+.filing-matrix--fill {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.filing-matrix--table3 {
+  width: 100%;
+  min-width: 900px;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.filing-matrix--table3 col.col-label {
+  width: 22%;
+  min-width: 180px;
+}
+
+.filing-matrix--table3 col.col-data {
+  width: 11.14%;
+}
+
+.filing-matrix--table3 .filing-matrix__sticky {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--color-bg-secondary, #f5f7fa);
+  box-shadow: 2px 0 0 var(--color-border, #cbd5e1);
+}
+
+.filing-matrix--table3 thead .filing-matrix__sticky {
+  background: var(--primary-light, #eff6ff);
+  z-index: 3;
+}
+
+.filing-matrix__group-row td {
+  text-align: left !important;
+  background: #f1f5f9;
+  color: var(--color-text-secondary, #475569);
+  font-weight: 650;
+  font-size: 12px;
+  padding: 7px 12px !important;
+  border-color: var(--color-border, #cbd5e1);
+}
+
+.filing-matrix--table4 {
+  width: 100%;
+  min-width: 640px;
+}
+
+.filing-num-input {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0 auto;
+  display: block;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border, #cbd5e1);
+  border-radius: var(--radius-sm, 6px);
+  font-size: 13px;
+  text-align: right;
+  background: var(--color-bg-main, #fff);
+  color: var(--color-text-primary, #171717);
+  box-sizing: border-box;
+}
+
+.filing-num-input:disabled {
+  background: var(--color-bg-secondary, #f5f7fa);
+  color: var(--color-text-secondary, #475569);
+}
+
+.filing-num-input:focus {
+  outline: none;
+  border-color: var(--primary, #2563eb);
+  box-shadow: 0 0 0 2px var(--primary-light, #eff6ff);
+}
+
+.filing-gate-panel {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md, 8px);
+  font-size: 13px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.filing-gate-panel--fail {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  display: block;
+}
+
+.filing-gate-panel--ok {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+
+.filing-gate-panel h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.filing-gate-panel ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.filing-gate-expr {
+  opacity: 0.85;
+}
+
+@media (max-width: 1100px) {
+  .filing-matrix-row2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .filing-section {
+    padding: 14px;
+  }
+
+  .filing-matrix--table3 {
+    min-width: 820px;
+  }
+
+  .filing-matrix--table3 col.col-label {
+    width: 26%;
+    min-width: 150px;
+  }
+
+  .filing-num-input {
+    padding: 5px 4px;
+    font-size: 12px;
+  }
+}
+
+.filing-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.filing-import-bar {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px 12px;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  background: var(--color-bg-main, #fff);
+  border: 1px solid var(--color-border, #cbd5e1);
+  border-radius: var(--radius-md, 8px);
+  box-shadow: var(--shadow-sm);
+}
+
+.filing-import-bar__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary, #475569);
+  white-space: nowrap;
+}
+
+.filing-import-input {
+  min-width: 0;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border, #cbd5e1);
+  border-radius: var(--radius-sm, 6px);
+  font-size: 13px;
+  color: var(--color-text-primary, #171717);
+  background: var(--color-bg-main, #fff);
+}
+
+.filing-import-input:focus {
+  outline: none;
+  border-color: var(--primary, #2563eb);
+  box-shadow: 0 0 0 3px var(--primary-light, #eff6ff);
+}
+
+.filing-import-hint {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--color-text-tertiary, #94a3b8);
+}
+
+@media (max-width: 900px) {
+  .filing-import-bar {
+    grid-template-columns: 1fr;
+  }
+}

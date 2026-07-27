@@ -188,12 +188,16 @@ export async function enqueueReportParseJob(input: {
   }
 
   // Guard BEFORE any job reuse/creation: structured imports never enter the AI queue.
-  if (String(versionRow.ingestion_mode || '') === 'structured_import') {
+  const ingestionMode = String(versionRow.ingestion_mode || '');
+  if (ingestionMode === 'structured_import' || ingestionMode === 'manual_filing') {
     return {
       ok: false,
       statusCode: 422,
       error: STRUCTURED_VERSION_AI_REPARSE_FORBIDDEN,
-      message: STRUCTURED_VERSION_AI_REPARSE_FORBIDDEN_MESSAGE,
+      message:
+        ingestionMode === 'manual_filing'
+          ? '在线填报版本不可触发 AI 重解析，请在填报页修改后重新提交。'
+          : STRUCTURED_VERSION_AI_REPARSE_FORBIDDEN_MESSAGE,
       versionId: Number(versionId),
     };
   }

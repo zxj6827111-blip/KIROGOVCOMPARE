@@ -19,6 +19,8 @@ import JobCenter from './components/JobCenter';
 import JobDetail from './components/JobDetail';
 import IssueList from './components/IssueList';
 import ReportMaintenance from './components/ReportMaintenance';
+import FilingList from './components/filing/FilingList';
+import FilingEditor from './components/filing/FilingEditor';
 import { ToastProvider } from './components/common/ToastProvider';
 import { ConfirmDialogProvider } from './components/common/ConfirmDialogProvider';
 import { TaskDrawerProvider } from './components/tasks/TaskDrawerProvider';
@@ -125,6 +127,22 @@ function ComparisonDetailRoute({ navigate }) {
   );
 }
 
+function FilingListRoute({ navigate }) {
+  return (
+    <FilingList
+      onOpen={(id) => navigate(`/filing/${id}`)}
+      onCreate={(filing) => {
+        if (filing?.id) navigate(`/filing/${filing.id}`);
+      }}
+    />
+  );
+}
+
+function FilingEditorRoute({ navigate }) {
+  const { filingId } = useParams();
+  return <FilingEditor filingId={filingId} onBack={() => navigate('/filing')} />;
+}
+
 function AuthenticatedApp({ onLogout, user }) {
   const location = useLocation();
   const routerNavigate = useNavigate();
@@ -156,6 +174,8 @@ function AuthenticatedApp({ onLogout, user }) {
               <Route path="/catalog/reports" element={<CatalogRoute currentPath={currentPath} navigate={navigate} />} />
               <Route path="/catalog/reports/:reportId" element={<ReportDetailRoute navigate={navigate} />} />
               <Route path="/upload" element={<UploadReport />} />
+              <Route path="/filing" element={<FilingListRoute navigate={navigate} />} />
+              <Route path="/filing/:filingId" element={<FilingEditorRoute navigate={navigate} />} />
               <Route path="/jobs" element={<JobCenter />} />
               <Route path="/jobs/:versionId" element={<JobDetailRoute navigate={navigate} />} />
               <Route path="/history" element={<ComparisonHistory />} />

@@ -1,5 +1,6 @@
 import { runLLMMigrations } from './migrations-llm';
 import { ensureStructuredPackageSchema } from './structuredPackageSchema';
+import { ensureFilingSchema } from './filingSchema';
 import { RegisteredMigration } from './migrationRunner';
 
 export const MIGRATION_SYSTEM_NAME = 'llm_schema_migrations';
@@ -35,6 +36,17 @@ export const registeredMigrations: RegisteredMigration[] = [
       'Single source for structured package DDL. Irreversible by design: dropping columns would destroy artifact metadata and re-label structured versions as ai_parse. See structuredPackageSchema.ts:dropStructuredPackageSchema for the explicit destructive path.',
     async up(client) {
       await ensureStructuredPackageSchema(client);
+    },
+  },
+  {
+    id: '0003_department_annual_report_filing',
+    name: 'Department annual report online filing',
+    reversible: false,
+    runOnEveryStart: true,
+    transaction: true,
+    notes: 'report_filings table for 国办模板在线填报草稿/提交/勾稽生效.',
+    async up(client) {
+      await ensureFilingSchema(client);
     },
   },
 ];
