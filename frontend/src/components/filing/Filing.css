@@ -499,3 +499,167 @@
     grid-template-columns: 1fr;
   }
 }
+
+.filing-batch-panel {
+  margin-bottom: 16px;
+  padding: 14px 16px 16px;
+  background: var(--color-bg-main, #fff);
+  border: 1px solid var(--color-border, #cbd5e1);
+  border-radius: var(--radius-md, 8px);
+  box-shadow: var(--shadow-sm);
+}
+
+.filing-batch-panel__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.filing-batch-panel__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--color-text-primary, #171717);
+}
+
+.filing-batch-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.filing-field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  min-width: auto;
+}
+
+.filing-field--inline input {
+  min-width: 88px;
+  width: 96px;
+}
+
+.filing-batch-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 96px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border, #cbd5e1);
+  border-radius: var(--radius-sm, 6px);
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  line-height: 1.45;
+  resize: vertical;
+  color: var(--color-text-primary, #171717);
+  background: var(--color-bg-main, #fff);
+}
+
+.filing-batch-textarea:focus {
+  outline: none;
+  border-color: var(--primary, #2563eb);
+  box-shadow: 0 0 0 3px var(--primary-light, #eff6ff);
+}
+
+.filing-batch-table-wrap {
+  margin-top: 12px;
+  overflow-x: auto;
+}
+
+.filing-batch-table-toolbar {
+  margin-bottom: 8px;
+}
+
+.filing-batch-table {
+  min-width: 960px;
+}
+
+.filing-batch-check {
+  border: none;
+  background: transparent;
+  padding: 4px;
+  cursor: pointer;
+  color: var(--color-text-secondary, #475569);
+  display: inline-flex;
+}
+
+.filing-batch-check:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.filing-batch-url {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary, #171717);
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filing-batch-url-sub {
+  font-size: 11px;
+  color: var(--color-text-tertiary, #94a3b8);
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filing-batch-year {
+  width: 76px;
+  min-height: 32px;
+  padding: 4px 6px;
+  border: 1px solid var(--color-border, #cbd5e1);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.filing-batch-msg {
+  font-size: 12px;
+  color: var(--color-text-secondary, #475569);
+  max-width: 280px;
+}
+
+.filing-batch-row--fail {
+  background: #fff7f7;
+}
+
+.filing-batch-badge--ready {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.filing-batch-badge--needs_region {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.filing-batch-badge--failed {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.filing-batch-badge--applied {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.filing-batch-badge--skipped {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+@media (max-width: 900px) {
+  .filing-batch-panel__head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

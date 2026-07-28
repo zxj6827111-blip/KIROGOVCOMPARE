@@ -147,4 +147,92 @@ describe('FilingHtmlImportService (rule-based, no AI)', () => {
     expect(stats.table4Filled).toBeGreaterThan(0);
     expect(stats.text1Chars).toBeGreaterThan(10);
   });
+
+  it('parses Fengxian-style body HTML including explicit zeros', () => {
+    const html = `<html><body>
+<p>一、总体情况</p>
+<p>2025年，区科委扎实推进信息公开。</p>
+<p>二、主动公开政府信息情况</p>
+<table>
+<tr><td colspan="4">第二十条第（一）项</td></tr>
+<tr><td>信息内容</td><td>本年制发件数</td><td>本年废止件数</td><td>现行有效件数</td></tr>
+<tr><td>规章</td><td>0</td><td>0</td><td>0</td></tr>
+<tr><td>行政规范性文件</td><td>0</td><td>1</td><td>1</td></tr>
+<tr><td colspan="4">第二十条第（五）项</td></tr>
+<tr><td>信息内容</td><td colspan="3">本年处理决定数量</td></tr>
+<tr><td>行政许可</td><td colspan="3">6</td></tr>
+<tr><td colspan="4">第二十条第（六）项</td></tr>
+<tr><td>信息内容</td><td colspan="3">本年处理决定数量</td></tr>
+<tr><td>行政处罚</td><td colspan="3">0</td></tr>
+<tr><td>行政强制</td><td colspan="3">0</td></tr>
+<tr><td colspan="4">第二十条第（八）项</td></tr>
+<tr><td>信息内容</td><td colspan="3">本年收费金额（单位：万元）</td></tr>
+<tr><td>行政事业性收费</td><td colspan="3">0</td></tr>
+</table>
+<p>三、收到和处理政府信息公开申请情况</p>
+<table>
+<tr><td colspan="3" rowspan="3">勾稽说明</td><td colspan="7">申请人情况</td></tr>
+<tr><td>自然人</td><td colspan="5">法人或其他组织</td><td>总计</td></tr>
+<tr><td></td><td>商业企业</td><td>科研机构</td><td>社会公益组织</td><td>法律服务机构</td><td>其他</td><td></td></tr>
+<tr><td colspan="3">一、本年新收政府信息公开申请数量</td><td>2</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>2</td></tr>
+<tr><td colspan="3">二、上年结转政府信息公开申请数量</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
+<tr><td rowspan="3">三、本年度办理结果</td><td colspan="2">（一）予以公开</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
+<tr><td colspan="2">（二）部分公开</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
+<tr><td colspan="2">（七）总计</td><td>2</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>2</td></tr>
+<tr><td colspan="3">四、结转下年度继续办理</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
+</table>
+<p>四、政府信息公开行政复议、行政诉讼情况</p>
+<table>
+<tr><td colspan="5">行政复议</td><td colspan="10">行政诉讼</td></tr>
+<tr><td>结果维持</td><td>结果纠正</td><td>其他结果</td><td>尚未审结</td><td>总计</td>
+<td colspan="5">未经复议直接起诉</td><td colspan="5">复议后起诉</td></tr>
+<tr><td></td><td></td><td></td><td></td><td></td>
+<td>结果维持</td><td>结果纠正</td><td>其他结果</td><td>尚未审结</td><td>总计</td>
+<td>结果维持</td><td>结果纠正</td><td>其他结果</td><td>尚未审结</td><td>总计</td></tr>
+<tr><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
+</table>
+<p>五、存在问题及改进情况</p>
+<p>暂无突出问题。</p>
+<p>六、其他需要报告的事项</p>
+<p>无。</p>
+</body></html>`;
+
+    const { form_json, stats } = parseAnnualReportHtmlToForm(html, { year: 2025 });
+    const t2 = form_json.sections[1].activeDisclosureData;
+    expect(t2.regulations).toEqual({ made: 0, repealed: 0, valid: 0 });
+    expect(t2.normativeDocuments).toEqual({ made: 0, repealed: 1, valid: 1 });
+    expect(t2.licensing.processed).toBe(6);
+    expect(t2.fees.amount).toBe(0);
+
+    const t3 = form_json.sections[2].tableData;
+    expect(t3.naturalPerson.newReceived).toBe(2);
+    expect(t3.total.newReceived).toBe(2);
+    expect(t3.total.results.totalProcessed).toBe(2);
+
+    const t4 = form_json.sections[3].reviewLitigationData;
+    expect(t4.review.total).toBe(0);
+    expect(t4.litigationDirect.total).toBe(0);
+
+    expect(form_json.sections[0].content).toContain('区科委');
+    expect(stats.tablesFound).toBe(3);
+  });
+
+  it('keeps all-zero table2/table4 as filled structure (not empty import)', () => {
+    const html = `<html><body>
+<p>一、总体情况</p><p>本年度信息公开工作平稳有序推进，各项制度落实到位。</p>
+<p>二、主动公开政府信息情况</p>
+<table>
+<tr><td>规章</td><td>0</td><td>0</td><td>0</td></tr>
+<tr><td>行政规范性文件</td><td>0</td><td>0</td><td>0</td></tr>
+<tr><td>行政许可</td><td>0</td></tr>
+</table>
+<p>三、收到和处理政府信息公开申请情况</p>
+<table>
+<tr><td colspan="3">一、本年新收政府信息公开申请数量</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>
+</table>
+</body></html>`;
+    const { form_json, stats } = parseAnnualReportHtmlToForm(html, { year: 2025 });
+    expect(form_json.sections[1].activeDisclosureData.regulations.made).toBe(0);
+    expect(stats.text1Chars).toBeGreaterThan(20);
+  });
 });

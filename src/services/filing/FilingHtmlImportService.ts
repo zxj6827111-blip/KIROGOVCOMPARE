@@ -14,7 +14,383 @@ const REQUEST_TIMEOUT_MS = 30000;
 const MAX_PAGE_BYTES = 8 * 1024 * 1024;
 const MAX_REDIRECTS = 5;
 const USER_AGENT =
-  'Mozilla/5.0 (compatible; GovReportFilingImport/1.0; +https://localhost) AppleWebKit/537.36';
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+
+function hasAnnualReportMarkers(html: string): boolean {
+  const raw = String(html || '');
+  return (
+    /一[、.．]\s*总体情况/.test(raw) ||
+    /二[、.．]\s*主动公开/.test(raw) ||
+    /本年新收政府信息公开申请/.test(raw) ||
+    /收到和处理政府信息公开申请/.test(raw)
+  );
+}
+
+/** Vue/React 壳页：首屏 HTML 无年报表格，正文靠 XHR 拉取 */
+function looksLikeSpaShell(html: string): boolean {
+  const raw = String(html || '');
+  const compact = raw.replace(/\s+/g, ' ');
+  if (hasAnnualReportMarkers(raw) && /<table[\s>]/i.test(raw)) return false;
+
+  const spaSignals =
+    /id=["'](?:app|container|root)["']/i.test(raw) ||
+    /Please enable it to continue/i.test(raw) ||
+    /chunk-vendors/i.test(raw) ||
+    /window\.__INITIAL_STATE__/i.test(raw);
+  const fewTables = (raw.match(/<table[\s>]/gi) || []).length <= 1;
+  return spaSignals && fewTables && !hasAnnualReportMarkers(raw) && compact.length < 20000;
+}
+
+/**
+ * 新点 WebBuilder 详情壳（虹口/静安/松江等）：
+ * showinfo.html?infoGuid=uuid 或路径含 uuid，正文靠 rest getGovInfoDetail
+ */
+function looksLikeWebBuilderShell(html: string, pageUrl: string): boolean {
+  if (hasAnnualReportMarkers(html)) return false;
+  const raw = String(html || '');
+  const urlHit =
+    /(?:[?&](?:infoGuid|infoid|infoId)=|[\/-])([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i.test(
+      pageUrl
+    ) || /showinfo\.html/i.test(pageUrl);
+  const pageHit =
+    /info_spnContent|getGovInfoDetail|webBuilderCommon|gxhWebBuilderCommon|shhkZwgk|webbuilder\.get/i.test(
+      raw
+    );
+  return urlHit && pageHit;
+}
+
+function extractInfoGuid(pageUrl: string, html?: string): string | null {
+  try {
+    const u = new URL(pageUrl);
+    for (const key of ['infoGuid', 'infoid', 'infoId', 'id']) {
+      const v = u.searchParams.get(key);
+      if (v && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)) {
+        return v;
+      }
+    }
+    const pathMatch = u.pathname.match(
+      /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
+    );
+    if (pathMatch?.[1]) return pathMatch[1];
+  } catch {
+    /* ignore */
+  }
+  if (html) {
+    const m = String(html).match(
+      /(?:infoGuid|infoid|infoId)["'\s:=]+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i
+    );
+    if (m?.[1]) return m[1];
+  }
+  return null;
+}
+
+function extractSiteInfoFromHtml(html: string): { siteGuid?: string; projectName?: string } {
+  const raw = String(html || '');
+  const block =
+    raw.match(/var\s+siteInfo\s*=\s*(\{[\s\S]*?\})\s*;/i)?.[1] ||
+    raw.match(/siteInfo\s*=\s*(\{[\s\S]*?\})\s*;/i)?.[1] ||
+    '';
+  const siteGuid = block.match(/["']?siteGuid["']?\s*:\s*["']([^"']+)["']/i)?.[1];
+  const projectName = block.match(/["']?projectName["']?\s*:\s*["']([^"']+)["']/i)?.[1];
+  return { siteGuid, projectName };
+}
+
+function extractProjectNameFromScripts(html: string): string | null {
+  const raw = String(html || '');
+  const m = raw.match(/["'](\/[^"']+)["']\s*\+\s*["']\/rest\//i);
+  if (m?.[1]) return m[1];
+  const m2 = raw.match(/projectName["']?\s*:\s*["'](\/[^"']+)["']/i);
+  return m2?.[1] || null;
+}
+
+/**
+ * 奉贤等上海区县政务公开 SPA：/art/info/:columnId/:artId
+ * 正文接口 POST {origin}/html/info/detail  (x-www-form-urlencoded id=artId)
+ */
+function extractSpaArticleId(pageUrl: string): { artId: string; origin: string } | null {
+  try {
+    const u = new URL(pageUrl);
+    const m = u.pathname.match(/\/art\/info\/[^/]+\/([^/]+)\/?$/i);
+    if (m?.[1]) {
+      return { artId: decodeURIComponent(m[1]), origin: u.origin };
+    }
+    // 兜底：路径末段形如 i20260109-xxxx
+    const tail = u.pathname.split('/').filter(Boolean).pop() || '';
+    if (/^i[0-9a-z-]{8,}$/i.test(tail)) {
+      return { artId: tail, origin: u.origin };
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+type SpaArticlePayload = { html: string; title?: string | null; dept?: string | null };
+
+async function fetchSpaArticleHtml(
+  pageUrl: string,
+  artId: string,
+  origin: string
+): Promise<SpaArticlePayload | null> {
+  const detailUrl = `${origin}/html/info/detail`;
+  const security = await validateURLSecurity(detailUrl);
+  if (!security.valid) return null;
+
+  try {
+    const response = await axios.post(detailUrl, new URLSearchParams({ id: artId }).toString(), {
+      timeout: REQUEST_TIMEOUT_MS,
+      maxContentLength: MAX_PAGE_BYTES,
+      maxBodyLength: MAX_PAGE_BYTES,
+      headers: {
+        'User-Agent': USER_AGENT,
+        Accept: 'application/json, text/plain, */*',
+        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+        Referer: pageUrl,
+        Origin: origin,
+      },
+      validateStatus: (status) => status >= 200 && status < 300,
+    });
+    const payload = response.data;
+    if (!payload || payload.success === false) return null;
+    const data = payload.data ?? payload;
+    const body = data?.body ?? data?.content ?? data?.html ?? data?.infoContent ?? null;
+    if (typeof body === 'string' && body.replace(/\s+/g, '').length > 50) {
+      const title =
+        (typeof data?.title === 'string' && data.title.trim()) ||
+        (typeof data?.name === 'string' && data.name.trim()) ||
+        (typeof data?.infoTitle === 'string' && data.infoTitle.trim()) ||
+        null;
+      const dept =
+        (typeof data?.dept === 'string' && data.dept.trim()) ||
+        (typeof data?.publisher === 'string' && data.publisher.trim()) ||
+        null;
+      return { html: body, title, dept };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/** 从标题/正文/域名推断单位名（批量匹配用） */
+export function inferUnitNameFromPage(params: {
+  pageTitle?: string | null;
+  html?: string;
+  pageUrl?: string;
+  dept?: string | null;
+}): string | null {
+  const title = String(params.pageTitle || '').trim();
+  if (title) {
+    const fromTitle = title
+      .replace(/[-_]{1,2}.+$/, '')
+      .replace(/(市政府门户网站|人民政府网站|政府网站)$/g, '')
+      .replace(
+        /(?:20\d{2}\s*年(?:度)?)?(?:政府信息公开工作年度报告|政府信息公开年度报告|信息公开工作年度报告|信息公开年度报告|政府信息公开年报|年度报告|年报)\s*$/g,
+        ''
+      )
+      .replace(/20\d{2}\s*年(?:度)?/g, '')
+      .replace(/^关于/, '')
+      .replace(/[：:，,。\s]+$/g, '')
+      .trim();
+    if (fromTitle.length >= 2 && fromTitle.length <= 80) return fromTitle;
+  }
+  const dept = String(params.dept || '').trim();
+  if (dept.length >= 2 && dept.length <= 80) return dept;
+
+  const html = String(params.html || '');
+  if (html) {
+    const $ = cheerio.load(html);
+    const h1 = String($('h1').first().text() || '').trim();
+    if (h1.length >= 4) {
+      const cleaned = h1
+        .replace(
+          /(?:20\d{2}\s*年(?:度)?)?(?:政府信息公开工作年度报告|政府信息公开年度报告|信息公开工作年度报告|年报)\s*$/g,
+          ''
+        )
+        .replace(/20\d{2}\s*年(?:度)?/g, '')
+        .trim();
+      if (cleaned.length >= 2 && cleaned.length <= 80) return cleaned;
+    }
+    // 正文常见：「2025年，区经济委员会…」
+    const plain = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+    const m = plain.match(
+      /20\d{2}\s*年[，,\s]{0,4}([\u4e00-\u9fa5A-Za-z0-9（）()]{2,40}?(?:委员会|管理局|局|办公室|政府|街道|镇))/
+    );
+    if (m?.[1]) return m[1].replace(/^我[局委厅部]$/, '').trim() || m[1];
+  }
+  return null;
+}
+
+type WebBuilderFetchResult =
+  | { kind: 'html'; html: string }
+  | { kind: 'pdf_only'; title?: string; attachName?: string }
+  | { kind: 'none' };
+
+function hostProjectNameGuesses(hostname: string): string[] {
+  const h = hostname.toLowerCase();
+  const guesses: string[] = [];
+  if (h.includes('shhk') || h.includes('hongkou')) guesses.push('/shhk-zwgk', '/shhk-zwgks-interface');
+  if (h.includes('jingan')) guesses.push('/shja-cms');
+  if (h.includes('songjiang')) guesses.push('/shsj-application-front');
+  if (h.includes('shcm') || h.includes('chongming')) guesses.push('/shcm-application-front', '/shcm-cms');
+  if (h.includes('shyp') || h.includes('yangpu')) guesses.push('/shyp-application-front');
+  if (h.includes('shpt') || h.includes('putuo')) guesses.push('/shpt-application-front');
+  if (h.includes('shmh') || h.includes('minhang')) guesses.push('/shmh-application-front');
+  if (h.includes('shbs') || h.includes('baoshan')) guesses.push('/shbs-application-front');
+  guesses.push('/EpointWebBuilder', '');
+  return [...new Set(guesses.filter((x) => x !== undefined))];
+}
+
+function detailActionPaths(projectName: string): string[] {
+  const base = projectName.replace(/\/$/, '');
+  const actions = [
+    '/rest/shhkZwgkFrontAppNotNeedLoginAction/getGovInfoDetail',
+    '/rest/commonapiaction/getgovinfodetail',
+    '/rest/zdjceapiaction/getgovinfodetail',
+    '/rest/frontAppNotNeedLoginAction/getGovInfoDetail',
+    '/rest/frontAppNotNeedLoginAction/getOneArchiveInformation',
+  ];
+  return actions.map((a) => `${base}${a}`);
+}
+
+async function postWebBuilderParams(
+  apiUrl: string,
+  pageUrl: string,
+  params: Record<string, string>
+): Promise<any | null> {
+  const security = await validateURLSecurity(apiUrl);
+  if (!security.valid) return null;
+  const origin = new URL(pageUrl).origin;
+  const body = new URLSearchParams({ params: JSON.stringify(params) }).toString();
+  try {
+    const response = await axios.post(apiUrl, body, {
+      timeout: REQUEST_TIMEOUT_MS,
+      maxContentLength: MAX_PAGE_BYTES,
+      maxBodyLength: MAX_PAGE_BYTES,
+      headers: {
+        'User-Agent': USER_AGENT,
+        Accept: 'application/json, text/javascript, */*; q=0.01',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        Referer: pageUrl,
+        Origin: origin,
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+      validateStatus: (status) => status >= 200 && status < 300,
+    });
+    return response.data;
+  } catch {
+    return null;
+  }
+}
+
+function pickWebBuilderData(payload: any): any | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const custom = payload.custom ?? payload;
+  if (custom?.status === 'false' || custom?.status === false) return null;
+  if (custom?.data && typeof custom.data === 'object') return custom.data;
+  if (custom?.infocontent || custom?.title || custom?.infotype) return custom;
+  return null;
+}
+
+async function fetchWebBuilderArticle(
+  pageUrl: string,
+  html: string,
+  infoGuid: string
+): Promise<WebBuilderFetchResult> {
+  const origin = new URL(pageUrl).origin;
+  const site = extractSiteInfoFromHtml(html);
+  const projectFromHtml = site.projectName || extractProjectNameFromScripts(html);
+  const projectNames = [
+    ...(projectFromHtml ? [projectFromHtml] : []),
+    ...hostProjectNameGuesses(new URL(pageUrl).hostname),
+  ];
+  const uniqueProjects = [...new Set(projectNames.map((p) => (p.startsWith('/') ? p : `/${p}`)))];
+
+  for (const project of uniqueProjects) {
+    for (const actionPath of detailActionPaths(project)) {
+      const apiUrl = `${origin}${actionPath}`;
+      const paramVariants: Record<string, string>[] = [
+        { infoid: infoGuid },
+        { infoGuid: infoGuid },
+        { id: infoGuid },
+      ];
+      if (site.siteGuid) {
+        paramVariants.push(
+          { siteGuid: site.siteGuid, infoid: infoGuid },
+          { siteGuid: site.siteGuid, infoGuid: infoGuid }
+        );
+      }
+      for (const params of paramVariants) {
+        const payload = await postWebBuilderParams(apiUrl, pageUrl, params);
+        const data = pickWebBuilderData(payload);
+        if (!data) continue;
+
+        const content =
+          data.infocontent ||
+          data.infoContent ||
+          data.content ||
+          data.html ||
+          data.body ||
+          '';
+        if (typeof content === 'string' && content.replace(/\s+/g, '').length > 50) {
+          return { kind: 'html', html: content };
+        }
+
+        const infotype = String(data.infotype || data.infoType || '').toLowerCase();
+        const pdfList = data.pdflist || data.pdfList || data.attach || data.attachlist || [];
+        const hasPdf =
+          infotype === 'pdf' ||
+          (Array.isArray(pdfList) &&
+            pdfList.some(
+              (a: any) =>
+                String(a?.attachtype || a?.attachType || '').toLowerCase() === 'pdf' ||
+                /\.pdf$/i.test(String(a?.attachname || a?.attachName || a?.attachurl || ''))
+            ));
+        if (hasPdf) {
+          const first = Array.isArray(pdfList) ? pdfList[0] : null;
+          return {
+            kind: 'pdf_only',
+            title: data.title,
+            attachName: first?.attachname || first?.attachName,
+          };
+        }
+      }
+    }
+  }
+  return { kind: 'none' };
+}
+
+/** 列表页仅有 CMS 动态加载、无年报正文 */
+function looksLikeCmsListShell(html: string): boolean {
+  const raw = String(html || '');
+  if (hasAnnualReportMarkers(raw)) return false;
+  return (
+    (/new\s+CMS\s*\(/i.test(raw) || /\/front\/api\/data\/(?:search|affair)/i.test(raw)) &&
+    /columnlist|v-for\s*=\s*["']item\s+in\s+list["']/i.test(raw)
+  );
+}
+
+function countNumericCellsDeep(obj: any): number {
+  let n = 0;
+  const walk = (v: any) => {
+    if (v === null || v === undefined) return;
+    if (typeof v === 'number') {
+      if (Number.isFinite(v)) n += 1;
+      return;
+    }
+    if (typeof v === 'string') {
+      if (parseNumberCell(v) !== null) n += 1;
+      return;
+    }
+    if (Array.isArray(v)) {
+      v.forEach(walk);
+      return;
+    }
+    if (typeof v === 'object') Object.values(v).forEach(walk);
+  };
+  walk(obj);
+  return n;
+}
 
 export interface FilingHtmlImportStats {
   text1Chars: number;
@@ -31,6 +407,8 @@ export interface FilingHtmlImportResult {
   form_json: Record<string, any>;
   finalUrl: string;
   stats: FilingHtmlImportStats;
+  /** 页面/接口标题（用于单位匹配；SPA 站点尤其依赖） */
+  pageTitle?: string | null;
 }
 
 type Matrix = string[][];
@@ -509,34 +887,37 @@ export function parseAnnualReportHtmlToForm(
 
   let table2 = normalizeTable2(null);
   if (byKind.table_2) {
-    const md = matrixToMarkdown(byKind.table_2);
-    table2 = normalizeTable2(tryParseTable2FromSourceText(md));
-    // Direct matrix fallback for labeled rows
-    if (countFilledDeep(table2) === 0) {
-      for (const row of byKind.table_2) {
-        const label = (row[0] || '').replace(/\s+/g, '');
-        if (/规章/.test(label) && !/规范/.test(label) && row.length >= 4) {
-          table2.regulations = {
-            made: coalesceNum(row[1]),
-            repealed: coalesceNum(row[2]),
-            valid: coalesceNum(row[3]),
-          };
-        } else if (/规范性文件/.test(label) && row.length >= 4) {
-          table2.normativeDocuments = {
-            made: coalesceNum(row[1]),
-            repealed: coalesceNum(row[2]),
-            valid: coalesceNum(row[3]),
-          };
-        } else if (/行政许可/.test(label)) {
-          table2.licensing.processed = coalesceNum(row[1]);
-        } else if (/行政处罚/.test(label)) {
-          table2.punishment.processed = coalesceNum(row[1]);
-        } else if (/行政强制/.test(label)) {
-          table2.coercion.processed = coalesceNum(row[1]);
-        } else if (/行政事业性收费/.test(label)) {
-          table2.fees.amount = coalesceNum(row[1]);
-        }
+    // Prefer direct matrix mapping (preserves explicit 0 cells).
+    const fromMatrix: any = normalizeTable2(null);
+    for (const row of byKind.table_2) {
+      const label = (row[0] || '').replace(/\s+/g, '');
+      if (/规章/.test(label) && !/规范/.test(label) && row.length >= 4) {
+        fromMatrix.regulations = {
+          made: coalesceNum(row[1]),
+          repealed: coalesceNum(row[2]),
+          valid: coalesceNum(row[3]),
+        };
+      } else if (/规范性文件/.test(label) && row.length >= 4) {
+        fromMatrix.normativeDocuments = {
+          made: coalesceNum(row[1]),
+          repealed: coalesceNum(row[2]),
+          valid: coalesceNum(row[3]),
+        };
+      } else if (/行政许可/.test(label)) {
+        fromMatrix.licensing.processed = coalesceNum(row[1]);
+      } else if (/行政处罚/.test(label)) {
+        fromMatrix.punishment.processed = coalesceNum(row[1]);
+      } else if (/行政强制/.test(label)) {
+        fromMatrix.coercion.processed = coalesceNum(row[1]);
+      } else if (/行政事业性收费/.test(label)) {
+        fromMatrix.fees.amount = coalesceNum(row[1]);
       }
+    }
+    if (countNumericCellsDeep(fromMatrix) > 0) {
+      table2 = fromMatrix;
+    } else {
+      const md = matrixToMarkdown(byKind.table_2);
+      table2 = normalizeTable2(tryParseTable2FromSourceText(md));
     }
   } else {
     warnings.push('未识别到表二（主动公开）');
@@ -661,6 +1042,13 @@ async function fetchHtmlPage(url: string, redirectDepth = 0): Promise<{ html: st
   }
 
   const contentType = String(response.headers['content-type'] || '');
+  if (/application\/pdf/i.test(contentType) || /\.pdf(\?|#|$)/i.test(url)) {
+    const err: any = new Error(
+      '该链接直接指向 PDF 文件，规则 HTML 导入无法解析。请改用含表格的 HTML 年报页，或走上传/AI 采集'
+    );
+    err.code = 'IMPORT_PDF_ONLY';
+    throw err;
+  }
   if (contentType && !/html|xml|text\/plain/i.test(contentType) && !/octet-stream/i.test(contentType)) {
     const err: any = new Error(`不支持的内容类型: ${contentType}（仅支持 HTML 年报页面）`);
     err.code = 'URL_UNSUPPORTED_CONTENT';
@@ -697,17 +1085,135 @@ export async function importFilingFormFromUrl(
     throw err;
   }
 
-  const { html, finalUrl } = await fetchHtmlPage(trimmed);
-  const { form_json, stats } = parseAnnualReportHtmlToForm(html, options);
+  let { html, finalUrl } = await fetchHtmlPage(trimmed);
+  const pageUrl = finalUrl || trimmed;
+  let pageTitle: string | null = null;
+  let pageDept: string | null = null;
 
+  // 年报列表壳（长宁/普陀/金山 CMS）：仅栏目列表，无文章正文
+  if (looksLikeCmsListShell(html) && !hasAnnualReportMarkers(html)) {
+    const err: any = new Error(
+      '该链接是年报列表页（动态加载列表），不是单篇年报正文。请打开具体「××年政府信息公开工作年度报告」文章页后再导入'
+    );
+    err.code = 'IMPORT_LIST_PAGE';
+    throw err;
+  }
+
+  // SPA 站点（如奉贤 xxgk）：首屏无正文，改走同站详情接口拉 body HTML
+  if (looksLikeSpaShell(html)) {
+    const spa = extractSpaArticleId(pageUrl);
+    if (spa) {
+      const article = await fetchSpaArticleHtml(pageUrl, spa.artId, spa.origin);
+      if (article?.html) {
+        html = article.html;
+        pageTitle = article.title || null;
+        pageDept = article.dept || null;
+      } else {
+        const err: any = new Error(
+          '该链接为前端渲染页面，未能通过公开接口拉取正文。请打开页面后复制正文/表格粘贴，或换用含完整 HTML 表格的链接（如杭州门户静态页）'
+        );
+        err.code = 'IMPORT_SPA_UNSUPPORTED';
+        throw err;
+      }
+    } else {
+      const err: any = new Error(
+        '该链接为前端渲染页面且无法识别文章 ID，规则导入无法读取动态正文。请换用静态 HTML 年报页，或手工粘贴表格'
+      );
+      err.code = 'IMPORT_SPA_UNSUPPORTED';
+      throw err;
+    }
+  } else {
+    // 静态页：从 title / h1 / meta 取标题
+    try {
+      const $ = cheerio.load(html);
+      pageTitle =
+        String($('meta[name="ArticleTitle"]').attr('content') || '').trim() ||
+        String($('meta[property="og:title"]').attr('content') || '').trim() ||
+        String($('h1').first().text() || '').trim() ||
+        String($('title').first().text() || '').trim() ||
+        null;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // 新点 WebBuilder 详情壳（虹口 showinfo 等）：GET 壳页后走 rest getGovInfoDetail
+  if (!hasAnnualReportMarkers(html) && looksLikeWebBuilderShell(html, pageUrl)) {
+    const infoGuid = extractInfoGuid(pageUrl, html);
+    if (!infoGuid) {
+      const err: any = new Error(
+        '该链接为政务公开动态详情页，但未能识别 infoGuid。请换用含完整 HTML 表格的年报正文链接，或手工粘贴'
+      );
+      err.code = 'IMPORT_SPA_UNSUPPORTED';
+      throw err;
+    }
+    const wb = await fetchWebBuilderArticle(pageUrl, html, infoGuid);
+    if (wb.kind === 'html') {
+      html = wb.html;
+    } else if (wb.kind === 'pdf_only') {
+      const name = wb.attachName || wb.title || '附件';
+      const err: any = new Error(
+        `该年报以 PDF 附件发布（${name}），规则 HTML 导入无法解析 PDF。请下载 PDF 后走上传/AI 采集，或手工粘贴表格`
+      );
+      err.code = 'IMPORT_PDF_ONLY';
+      throw err;
+    } else {
+      const err: any = new Error(
+        '该链接为政务公开动态详情页，未能通过公开接口拉取正文。请换用静态 HTML 年报页，或手工粘贴表格'
+      );
+      err.code = 'IMPORT_SPA_UNSUPPORTED';
+      throw err;
+    }
+  }
+
+  // 路径含 infoGuid 但壳页特征不明显时仍尝试一次 WebBuilder
+  if (!hasAnnualReportMarkers(html)) {
+    const infoGuid = extractInfoGuid(pageUrl, html);
+    if (infoGuid && /showinfo|infoGuid|govxxgk|hkxxgk/i.test(pageUrl + html.slice(0, 4000))) {
+      const wb = await fetchWebBuilderArticle(pageUrl, html, infoGuid);
+      if (wb.kind === 'html') html = wb.html;
+      else if (wb.kind === 'pdf_only') {
+        const name = wb.attachName || wb.title || '附件';
+        const err: any = new Error(
+          `该年报以 PDF 附件发布（${name}），规则 HTML 导入无法解析 PDF。请下载 PDF 后走上传/AI 采集，或手工粘贴表格`
+        );
+        err.code = 'IMPORT_PDF_ONLY';
+        throw err;
+      }
+    }
+  }
+
+  const inferredUnit =
+    options?.unitName ||
+    inferUnitNameFromPage({ pageTitle, html, pageUrl, dept: pageDept }) ||
+    undefined;
+
+  const { form_json, stats } = parseAnnualReportHtmlToForm(html, {
+    ...options,
+    unitName: inferredUnit,
+  });
+
+  if (inferredUnit && !form_json.unit_name) {
+    form_json.unit_name = inferredUnit;
+  }
+  if (pageTitle && !form_json.source_title) {
+    form_json.source_title = pageTitle;
+  }
+
+  // 以「识别到的表二/三/四或有效正文」为准；导航杂表 + 空白骨架数字不得算导入成功
   const filled =
-    stats.table2Filled + stats.table3Filled + stats.table4Filled + (stats.text1Chars > 20 ? 1 : 0);
+    stats.table2Filled +
+    stats.table3Filled +
+    stats.table4Filled +
+    (stats.text1Chars > 20 ? 1 : 0);
   if (filled === 0) {
-    const err: any = new Error('未能从页面抽取到年报数据，请确认链接为政府信息公开工作年度报告 HTML 页面');
+    const err: any = new Error(
+      '未能从页面抽取到年报数据，请确认链接为政府信息公开工作年度报告正文页（含六章正文/表格的 HTML）。列表页、PDF-only、纯壳页不支持'
+    );
     err.code = 'IMPORT_EMPTY';
     err.stats = stats;
     throw err;
   }
 
-  return { form_json, finalUrl, stats };
+  return { form_json, finalUrl, stats, pageTitle: pageTitle || form_json.source_title || null };
 }
