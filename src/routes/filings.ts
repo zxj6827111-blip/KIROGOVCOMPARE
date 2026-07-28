@@ -4,6 +4,7 @@ import { getAllowedRegionIdsAsync } from '../utils/dataScope';
 import { filingService } from '../services/filing/FilingService';
 import { buildBlankAnnualReportForm } from '../services/filing/BlankTemplateService';
 import { importFilingFormFromUrl } from '../services/filing/FilingHtmlImportService';
+import { filingBatchUrlImportService } from '../services/filing/FilingBatchUrlImportService';
 
 const router = Router();
 
@@ -32,8 +33,12 @@ function sendServiceError(res: Response, error: any) {
     URL_REDIRECT_INVALID: 400,
     URL_UNSUPPORTED_CONTENT: 400,
     IMPORT_EMPTY: 422,
+    IMPORT_SPA_UNSUPPORTED: 422,
+    IMPORT_PDF_ONLY: 422,
+    IMPORT_LIST_PAGE: 422,
     REPORT_RESOLVE_FAILED: 500,
     FORBIDDEN_SCOPE: 403,
+    INVALID_YEAR: 400,
   };
   const status = map[code] || 500;
   res.status(status).json({
@@ -118,6 +123,53 @@ router.post('/filings', requirePermission('file_reports'), async (req: AuthReque
     res.status(result.created ? 201 : 200).json(result);
   } catch (error: any) {
     console.error('[filings] create', error);
+    sendServiceError(res, error);
+  }
+});
+
+/**
+ * Batch URL → rule-based form_json preview (no AI).
+ * Registered before "/filings/:id" so path is not captured as id.
+ * Body: { urls: string | string[], defaultYear?: number }
+ */
+router.post('/filings/batch-import-from-url/preview', requirePermission('file_reports'), async (req: AuthRequest, res) => {
+  try {
+    const allowed = await getAllowedRegionIdsAsync(req.user);
+    const defaultYear = req.body?.defaultYear != null ? Number(req.body.defaultYear) : undefined;
+    const result = await filingBatchUrlImportService.preview({
+      urls: req.body?.urls ?? req.body?.urlList ?? '',
+      defaultYear: Number.isFinite(defaultYear) ? defaultYear : undefined,
+      allowedRegionIds: allowed,
+    });
+    res.json(result);
+  } catch (error: any) {
+    console.error('[filings] batch-import preview', error);
+    sendServiceError(res, error);
+  }
+});
+
+/**
+ * Confirm batch write into report_filings drafts (no auto-submit / no AI).
+ * Body: { items: [{ url, regionId, year, form_json? }] }
+ */
+router.post('/filings/batch-import-from-url/apply', requirePermission('file_reports'), async (req: AuthRequest, res) => {
+  try {
+    const allowed = await getAllowedRegionIdsAsync(req.user);
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!items.length) {
+      return res.status(400).json({ error: 'items 必填', code: 'INVALID_INPUT' });
+    }
+    if (items.length > 50) {
+      return res.status(400).json({ error: '单次最多 50 条', code: 'INVALID_INPUT' });
+    }
+    const result = await filingBatchUrlImportService.apply({
+      items,
+      userId: req.user?.id,
+      allowedRegionIds: allowed,
+    });
+    res.json(result);
+  } catch (error: any) {
+    console.error('[filings] batch-import apply', error);
     sendServiceError(res, error);
   }
 });

@@ -317,7 +317,8 @@ export default function FilingEditor({ filingId, onBack }) {
             {importing ? '抽取中…' : '导入填入'}
           </Button>
           <div className="filing-import-hint">
-            纯规则解析，不调用 AI；仅支持 HTML 年报页。导入后请核对再提交。
+            纯规则解析，不调用 AI。支持静态 HTML 年报页，以及部分 SPA（如奉贤
+            xxgk…/art/info/…）自动拉详情。导入后请核对再提交。
           </div>
         </div>
       )}

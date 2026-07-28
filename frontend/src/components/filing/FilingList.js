@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, Plus, Trash2 } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { RefreshCw, Plus, Trash2, Link2, CheckSquare, Square } from 'lucide-react';
 import { apiClient } from '../../apiClient';
 import { useToast } from '../common/ToastProvider';
 import PageHeader from '../common/PageHeader';
@@ -14,6 +14,24 @@ const STATUS_LABELS = {
   effective: '已生效',
 };
 
+const BATCH_STATUS_LABELS = {
+  ready: '可导入',
+  needs_region: '待选单位',
+  failed: '失败',
+  applied: '已写入',
+  skipped: '已跳过',
+};
+
+function summarizeStats(stats) {
+  if (!stats) return '';
+  const parts = [];
+  if (stats.table2Filled) parts.push(`表二 ${stats.table2Filled}`);
+  if (stats.table3Filled) parts.push(`表三 ${stats.table3Filled}`);
+  if (stats.table4Filled) parts.push(`表四 ${stats.table4Filled}`);
+  if (stats.text1Chars) parts.push(`正文 ${stats.text1Chars}字`);
+  return parts.join(' · ');
+}
+
 export default function FilingList({ onOpen, onCreate }) {
   const toast = useToast();
   const [items, setItems] = useState([]);
@@ -23,6 +41,13 @@ export default function FilingList({ onOpen, onCreate }) {
   const [regions, setRegions] = useState([]);
   const [regionId, setRegionId] = useState('');
   const [creating, setCreating] = useState(false);
+
+  const [batchUrls, setBatchUrls] = useState('');
+  const [batchYear, setBatchYear] = useState(String(new Date().getFullYear() - 1));
+  const [batchRows, setBatchRows] = useState([]);
+  const [batchSummary, setBatchSummary] = useState(null);
+  const [batchPreviewing, setBatchPreviewing] = useState(false);
+  const [batchApplying, setBatchApplying] = useState(false);
 
   const loadRegions = useCallback(async () => {
     try {
@@ -65,6 +90,11 @@ export default function FilingList({ onOpen, onCreate }) {
     return hit?.name || '';
   })();
 
+  const selectedBatchCount = useMemo(
+    () => batchRows.filter((r) => r.selected && (r.status === 'ready' || r.status === 'needs_region') && r.regionId && r.year).length,
+    [batchRows]
+  );
+
   const handleCreate = async () => {
     if (!regionId || !year) {
       toast.warning('请选择单位与年份', '请通过省 / 市 / 区县 / 部门逐级选择');
@@ -106,6 +136,116 @@ export default function FilingList({ onOpen, onCreate }) {
       await load();
     } catch (err) {
       toast.error('删除失败', err.response?.data?.error || err.message);
+    }
+  };
+
+  const handleBatchPreview = async () => {
+    if (!String(batchUrls || '').trim()) {
+      toast.warning('请粘贴年报链接', '一行一条 HTML 年报正文 URL（不要列表页/纯 PDF）');
+      return;
+    }
+    setBatchPreviewing(true);
+    try {
+      const res = await apiClient.post('/filings/batch-import-from-url/preview', {
+        urls: batchUrls,
+        defaultYear: batchYear ? Number(batchYear) : undefined,
+      });
+      const rows = (res.data?.items || []).map((row) => ({
+        ...row,
+        selected: row.selected !== false && (row.status === 'ready' || row.status === 'needs_region'),
+        regionId: row.regionId != null ? String(row.regionId) : '',
+        year: row.year != null ? String(row.year) : batchYear,
+      }));
+      setBatchRows(rows);
+      setBatchSummary(res.data?.summary || null);
+      const s = res.data?.summary;
+      if (s) {
+        toast.success(
+          '预检完成（未写入）',
+          `共 ${s.total} 条：可导入 ${s.ready}，待选单位 ${s.needs_region}，失败 ${s.failed}`
+        );
+      } else {
+        toast.success('预检完成（未写入）');
+      }
+    } catch (err) {
+      toast.error('批量预检失败', err.response?.data?.error || err.message);
+    } finally {
+      setBatchPreviewing(false);
+    }
+  };
+
+  const patchBatchRow = (id, patch) => {
+    setBatchRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  };
+
+  const toggleSelectAllReady = () => {
+    const selectable = batchRows.filter(
+      (r) => r.status === 'ready' || (r.status === 'needs_region' && r.regionId)
+    );
+    const allOn = selectable.length > 0 && selectable.every((r) => r.selected);
+    setBatchRows((prev) =>
+      prev.map((r) => {
+        if (r.status === 'failed') return r;
+        if (r.status === 'needs_region' && !r.regionId) return { ...r, selected: false };
+        if (r.status === 'ready' || r.status === 'needs_region') {
+          return { ...r, selected: !allOn };
+        }
+        return r;
+      })
+    );
+  };
+
+  const handleBatchApply = async () => {
+    const toApply = batchRows.filter(
+      (r) => r.selected && r.regionId && r.year && (r.status === 'ready' || r.status === 'needs_region')
+    );
+    if (!toApply.length) {
+      toast.warning('没有可确认的条目', '请勾选已匹配单位的行（失败行不可导入）');
+      return;
+    }
+    if (
+      !window.confirm(
+        `将把 ${toApply.length} 条规则抽表结果写入填报草稿（不自动提交生效、不走 AI）。是否继续？`
+      )
+    ) {
+      return;
+    }
+    setBatchApplying(true);
+    try {
+      const res = await apiClient.post('/filings/batch-import-from-url/apply', {
+        items: toApply.map((r) => ({
+          url: r.url,
+          regionId: Number(r.regionId),
+          year: Number(r.year),
+          unitName: r.unitName || undefined,
+          form_json: r.form_json,
+        })),
+      });
+      const resultItems = res.data?.items || [];
+      setBatchRows((prev) =>
+        prev.map((row) => {
+          const hit = resultItems.find((x) => x.url === row.url);
+          if (!hit) return row;
+          return {
+            ...row,
+            status: hit.status,
+            message: hit.message,
+            filingId: hit.filingId,
+            selected: hit.status === 'applied' ? false : row.selected,
+            form_json: hit.status === 'applied' ? undefined : row.form_json,
+          };
+        })
+      );
+      const s = res.data?.summary;
+      toast.success(
+        '批量写入完成',
+        s ? `成功 ${s.applied}，失败 ${s.failed}，跳过 ${s.skipped}` : ''
+      );
+      await load();
+    } catch (err) {
+      toast.error('批量写入失败', err.response?.data?.error || err.message);
+    } finally {
+      setBatchApplying(false);
     }
   };
 
@@ -179,12 +319,162 @@ export default function FilingList({ onOpen, onCreate }) {
         </div>
       </div>
 
+      <div className="filing-batch-panel">
+        <div className="filing-batch-panel__head">
+          <div className="filing-batch-panel__title">
+            <Link2 size={16} />
+            <span>批量网址导入（规则抽表 → 填报草稿，不经 AI）</span>
+          </div>
+          <div className="filing-batch-panel__actions">
+            <label className="filing-field filing-field--inline">
+              <span>默认年份</span>
+              <input
+                type="number"
+                value={batchYear}
+                onChange={(e) => setBatchYear(e.target.value)}
+                min={2000}
+                max={2100}
+              />
+            </label>
+            <Button
+              variant="secondary"
+              onClick={handleBatchPreview}
+              disabled={batchPreviewing || batchApplying}
+            >
+              {batchPreviewing ? '预检中…' : '1. 预检（不写入）'}
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleBatchApply}
+              disabled={batchApplying || batchPreviewing || selectedBatchCount === 0}
+            >
+              {batchApplying ? '写入中…' : `2. 确认导入草稿 (${selectedBatchCount})`}
+            </Button>
+          </div>
+        </div>
+        <textarea
+          className="filing-batch-textarea"
+          rows={4}
+          value={batchUrls}
+          onChange={(e) => setBatchUrls(e.target.value)}
+          placeholder={'一行一条年报正文 HTML 链接，例如：\nhttps://www.xuhui.gov.cn/xxgk/portal/article/detail?id=...\nhttps://xxgk.fengxian.gov.cn/art/info/...'}
+          disabled={batchPreviewing || batchApplying}
+        />
+        <div className="filing-import-hint">
+          仅支持含六章表格的 HTML 正文页（含奉贤 SPA）。列表页 / 纯 PDF 会标失败。预检自动匹配城市管理中的单位；匹配不上可手工选区后勾选确认。写入草稿后请打开核对，再单独提交生效。
+          {batchSummary
+            ? ` 最近预检：共 ${batchSummary.total} · 可导入 ${batchSummary.ready} · 待选 ${batchSummary.needs_region} · 失败 ${batchSummary.failed}`
+            : ''}
+        </div>
+
+        {batchRows.length > 0 && (
+          <div className="filing-batch-table-wrap">
+            <div className="filing-batch-table-toolbar">
+              <Button variant="ghost" size="sm" onClick={toggleSelectAllReady} icon={<CheckSquare size={14} />}>
+                全选/取消可导入
+              </Button>
+            </div>
+            <table className="filing-table kc-data-table filing-batch-table">
+              <thead>
+                <tr>
+                  <th style={{ width: 44 }}>选</th>
+                  <th>链接 / 标题</th>
+                  <th style={{ width: 88 }}>年份</th>
+                  <th style={{ minWidth: 200 }}>匹配单位</th>
+                  <th style={{ width: 100 }}>状态</th>
+                  <th>说明</th>
+                  <th style={{ width: 72 }}>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {batchRows.map((row) => {
+                  const canSelect =
+                    (row.status === 'ready' || row.status === 'needs_region') && Boolean(row.regionId) && Boolean(row.year);
+                  const canPickRegion = row.status === 'ready' || row.status === 'needs_region';
+                  return (
+                    <tr key={row.id} className={row.status === 'failed' ? 'filing-batch-row--fail' : undefined}>
+                      <td>
+                        <button
+                          type="button"
+                          className="filing-batch-check"
+                          disabled={!canSelect || batchApplying}
+                          onClick={() => patchBatchRow(row.id, { selected: !row.selected })}
+                          title={canSelect ? '勾选后确认导入' : '需先选择单位或该行不可导入'}
+                        >
+                          {row.selected && canSelect ? <CheckSquare size={16} /> : <Square size={16} />}
+                        </button>
+                      </td>
+                      <td>
+                        <div className="filing-batch-url" title={row.url}>
+                          {row.title || row.url}
+                        </div>
+                        <div className="filing-batch-url-sub">{row.finalUrl || row.url}</div>
+                        {row.stats ? (
+                          <div className="filing-batch-url-sub">{summarizeStats(row.stats)}</div>
+                        ) : null}
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          className="filing-batch-year"
+                          value={row.year || ''}
+                          min={2000}
+                          max={2100}
+                          disabled={!canPickRegion || batchApplying}
+                          onChange={(e) => patchBatchRow(row.id, { year: e.target.value })}
+                        />
+                      </td>
+                      <td>
+                        {canPickRegion ? (
+                          <RegionCascader
+                            regions={regions}
+                            value={row.regionId || ''}
+                            onChange={(id) =>
+                              patchBatchRow(row.id, {
+                                regionId: id ? String(id) : '',
+                                regionName: id
+                                  ? regions.find((r) => String(r.id) === String(id))?.name || row.regionName
+                                  : null,
+                                selected: Boolean(id),
+                                status: id ? 'ready' : 'needs_region',
+                              })
+                            }
+                            emptyLabelMode="strict"
+                          />
+                        ) : (
+                          row.regionName || row.unitName || '—'
+                        )}
+                      </td>
+                      <td>
+                        <span className={`filing-badge filing-batch-badge filing-batch-badge--${row.status}`}>
+                          {BATCH_STATUS_LABELS[row.status] || row.status}
+                        </span>
+                      </td>
+                      <td className="filing-batch-msg">{row.message || row.code || '—'}</td>
+                      <td>
+                        {row.filingId ? (
+                          <Button variant="ghost" size="sm" onClick={() => onOpen?.(row.filingId)}>
+                            打开
+                          </Button>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       <div className="filing-table-wrap">
         {loading ? (
           <div className="filing-empty">加载中…</div>
         ) : items.length === 0 ? (
           <div className="filing-empty">
-            暂无填报记录。请在上方逐级选择单位与年份后点击「新建/打开填报」。
+            暂无填报记录。请在上方逐级选择单位与年份后点击「新建/打开填报」，或使用批量网址导入。
           </div>
         ) : (
           <table className="filing-table kc-data-table">
