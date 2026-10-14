@@ -7,6 +7,9 @@ import './GovDataTable.css';
 
 const cx = (...classes) => classes.filter(Boolean).join(' ');
 
+// 与 MaterializeService 的 EMPTY 语义同义：parsed_json 里是 null/空串，统计层取不到数。
+const MISSING_VALUE_TOOLTIP = '解析未取到值，待复核';
+
 const getIssueCategory = (item) => {
   const key = String(item?.check_key || item?.checkKey || '').toLowerCase();
   const title = String(item?.title || '');
@@ -482,6 +485,11 @@ const Table3View = ({ data, compact = false, highlightCells = [], ocrCorrections
       }
     }
 
+    // 表一的申请人对象整个缺失（这份报告没拆这一行）与"取到了行但这一格没取到值"
+    // 在 cells 表里是两种记录：前者没有行，后者是 EMPTY。显示层照此区分，
+    // 原文的字面「-」（cells 里的 NA）继续按原样渲染。
+    const isUnparsedValue = v === null && Boolean(getData(String(category || '').split('.').pop()));
+
     // Build tooltip
     const correctionTitle = correction
       ? `OCR修正：原解析值 ${correction.parsedValue ?? '-'}，OCR值 ${correction.ocrValue ?? '-'}`
@@ -496,7 +504,12 @@ const Table3View = ({ data, compact = false, highlightCells = [], ocrCorrections
       });
       issueTooltip = `该单元格涉及 ${issueIndexes.length} 个问题：\n${lines.join('\n')}`;
     }
-    const cellTitle = [correctionTitle, issueTooltip, suspicious?.type === 'split' ? suspicious.title : ''].filter(Boolean).join('\n');
+    const cellTitle = [
+      correctionTitle,
+      issueTooltip,
+      suspicious?.type === 'split' ? suspicious.title : '',
+      isUnparsedValue ? MISSING_VALUE_TOOLTIP : '',
+    ].filter(Boolean).join('\n');
 
     const effectiveEmphasis = issueEmphases.includes('primary')
       ? 'primary'
@@ -555,7 +568,9 @@ const Table3View = ({ data, compact = false, highlightCells = [], ocrCorrections
             ))}
           </span>
         )}
-        {renderCellContent(v === null ? '-' : v, correction)}
+        {isUnparsedValue
+          ? <span className="cell-value-missing">缺失</span>
+          : renderCellContent(v === null ? '-' : v, correction)}
       </td>
     );
   };
