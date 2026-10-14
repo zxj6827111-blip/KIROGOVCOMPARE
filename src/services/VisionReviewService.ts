@@ -11,7 +11,14 @@ import { parseStructuredJsonFromText } from './LlmCommon';
 import { parseRunService } from './ParseRunService';
 import { resolveFirstNonEmpty, normalizeLlmProviderName } from '../utils/aiEnv';
 import { aiModelConfigService } from './AiModelConfigService';
-import { ConsistencyItem } from './ConsistencyCheckService';
+import { ConsistencyCheckService, ConsistencyItem } from './ConsistencyCheckService';
+import {
+  collectSuspectTables,
+  type DualChannelSignals,
+  type SuspectMap,
+  type SuspectTableId,
+} from './pdf-dual-channel/suspectTables';
+import { assessRepairImprovement, type RepairAssessment } from './pdf-dual-channel/visionRepair';
 import { HIERARCHY_COMPLETENESS_SQL_EXCLUSION } from '../utils/consistencyReviewSemantics';
 import { TABLE3_ROW_LABELS, TABLE3_ENTITY_LABELS as TABLE3_COLUMN_LABELS } from '../utils/table3FieldTaxonomy';
 
@@ -984,14 +991,26 @@ export class VisionReviewService {
     reportId: number,
     versionId: number,
     items: ConsistencyItem[],
-    forceRerun = false
+    forceRerun = false,
+    signals?: {
+      visualBorderMissing?: boolean;
+      dualChannel?: DualChannelSignals | null;
+    }
   ): Promise<number> {
     const config = await this.resolveConfig();
     if (!config.enabled) return 0;
 
-    const tableIds = TABLE_IDS.filter((tableId) => hasTableTriggerFailure(items, tableId));
+    // Phase 3: the 勾稽 failures stay the authority for what is wrong, and the dual-channel /
+    // border signals add tables that fail silently (a missing table produces no FAIL item).
+    const consistencyFailureTableIds = TABLE_IDS.filter((tableId) => hasTableTriggerFailure(items, tableId));
+    const suspect = collectSuspectTables({
+      consistencyFailureTableIds: consistencyFailureTableIds as SuspectTableId[],
+      visualBorderMissing: signals?.visualBorderMissing,
+      dualChannel: signals?.dualChannel ?? null,
+    });
+    const tableIds = TABLE_IDS.filter((tableId) => suspect[tableId as SuspectTableId].length > 0);
     if (tableIds.length === 0) return 0;
-    return this.enqueueReviewRows(reportId, versionId, tableIds, this.buildTriggerReason(items), forceRerun);
+    return this.enqueueReviewRows(reportId, versionId, tableIds, this.buildTriggerReason(items, suspect), forceRerun);
   }
 
   async enqueueReviewRows(
@@ -1208,6 +1227,26 @@ export class VisionReviewService {
       const comparison = compareVisionOcrWithParsed(tableId, parsedJson, ocr.ocrJson, triggers, focus?.paths);
       const status: VisionReviewStatus = comparison.conclusion === 'inconclusive' ? 'completed' : 'completed';
 
+      // Phase 3 re-verification: patch the reading into a copy, re-run the 勾稽 checks on both
+      // sides, and record whether adopting it would actually clear the failures. Assessment
+      // only — the write stays behind PDF_VISION_AUTO_ADOPT below.
+      let repairAssessment: RepairAssessment | null = null;
+      if (comparison.differences.length > 0 && parsedJson && typeof parsedJson === 'object') {
+        try {
+          const year = await this.lookupReportYear(Number(review.report_id));
+          repairAssessment = assessRepairImprovement({
+            parsedJson,
+            tableId,
+            differences: comparison.differences,
+            reportYear: year,
+            runChecks: (payload) => new ConsistencyCheckService().runChecks(payload, year),
+          });
+        } catch (error: any) {
+          console.warn(`[VisionReview] repair assessment failed for ${tableId}: ${error?.message || error}`);
+        }
+      }
+      const persistedComparison = repairAssessment ? { ...comparison, repairAssessment } : comparison;
+
       const updateRes = await pool.query(
         `UPDATE table_visual_reviews
          SET status = $2,
@@ -1235,12 +1274,13 @@ export class VisionReviewService {
             ...(screenshot.metadata || {}),
           }),
           JSON.stringify(ocr.ocrJson),
-          JSON.stringify(comparison),
+          JSON.stringify(persistedComparison),
           comparison.conclusion,
         ]
       );
       if (comparison.conclusion === 'parse_mapping_anomaly') {
         await this.upsertPendingCorrections(updateRes.rows[0], comparison);
+        await this.autoAdoptImprovedRepair(updateRes.rows[0], repairAssessment);
       }
       return this.serializeReviewRow(updateRes.rows[0]);
     } catch (error: any) {
@@ -1257,6 +1297,60 @@ export class VisionReviewService {
       [reportId, versionId]
     );
     return (result.rows[0] as ReportVersionRow | undefined) || null;
+  }
+
+  private async lookupReportYear(reportId: number): Promise<number | null> {
+    try {
+      const result = await pool.query(`SELECT year FROM reports WHERE id = $1 LIMIT 1`, [reportId]);
+      const year = Number(result.rows[0]?.year);
+      return Number.isFinite(year) ? year : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Phase 3 adoption. Off unless PDF_VISION_AUTO_ADOPT is set, and even then only when the
+   * re-verification cleared every failure: a repair that only moves the error stays in the
+   * human review queue instead of being written over the accepted output.
+   */
+  private async autoAdoptImprovedRepair(review: any, assessment: RepairAssessment | null): Promise<void> {
+    if (!review?.id || !assessment || !assessment.adopt) {
+      return;
+    }
+    if (!parseBooleanEnv(process.env.PDF_VISION_AUTO_ADOPT, false)) {
+      return;
+    }
+
+    try {
+      const pending = await pool.query(
+        `SELECT id FROM ocr_corrections WHERE review_id = $1 AND status = 'pending'`,
+        [review.id]
+      );
+      const ids = pending.rows
+        .map((row: any) => Number(row.id))
+        .filter((id: number) => Number.isInteger(id) && id > 0);
+      if (ids.length === 0) {
+        return;
+      }
+
+      // Loaded here on purpose: OcrCorrectionService queues visual reviews, so a top-level
+      // import would make the two services depend on each other at module init.
+      const { ocrCorrectionService } = await import('./OcrCorrectionService');
+      const result = await ocrCorrectionService.resolveCorrections(
+        Number(review.report_id),
+        Number(review.report_version_id),
+        ids,
+        'confirm',
+        null
+      );
+      console.log(
+        `[VisionReview] auto-adopted ${ids.length} OCR correction(s) for ${review.table_id}: ` +
+          `FAIL ${assessment.beforeFailCount}->${assessment.afterFailCount}, materialized=${result.materialized ? 'yes' : 'no'}`
+      );
+    } catch (error: any) {
+      console.warn(`[VisionReview] auto-adopt skipped, corrections left pending: ${error?.message || error}`);
+    }
   }
 
   private async upsertPendingCorrections(review: any, comparison: VisionReviewComparison): Promise<void> {
@@ -1304,11 +1398,23 @@ export class VisionReviewService {
     }
   }
 
-  private buildTriggerReason(items: ConsistencyItem[]): string {
+  private buildTriggerReason(items: ConsistencyItem[], suspect?: SuspectMap): string {
     const relevant = items
       .filter((item) => ['table2', 'table3', 'table4'].includes(item.groupKey) && ['FAIL', 'UNCERTAIN'].includes(item.autoStatus))
       .map((item) => `${item.groupKey}:${item.checkKey}:${item.autoStatus}`);
-    return relevant.slice(0, 12).join('; ') || 'consistency_exception';
+
+    const signalReasons: string[] = [];
+    for (const tableId of (Object.keys(suspect || {}) as SuspectTableId[])) {
+      for (const reason of suspect?.[tableId] || []) {
+        if (reason === 'consistency_failure') {
+          continue; // already covered by the item list above
+        }
+        signalReasons.push(`${reason}:${tableId}`);
+      }
+    }
+
+    const text = [...relevant, ...signalReasons].slice(0, 16).join('; ');
+    return text || 'consistency_exception';
   }
 
   private async loadTriggerItems(versionId: number, tableId: VisionReviewTableId): Promise<ConsistencyItem[]> {

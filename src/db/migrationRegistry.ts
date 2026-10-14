@@ -2,6 +2,8 @@ import { runLLMMigrations } from './migrations-llm';
 import { ensureStructuredPackageSchema } from './structuredPackageSchema';
 import { ensureFilingSchema } from './filingSchema';
 import { ensureRegionDepartmentSchema } from './regionDepartmentSchema';
+import { ensurePdfDualChannelSchema } from './pdfDualChannelSchema';
+import { ensureParseQualitySchema } from './parseQualitySchema';
 import { RegisteredMigration } from './migrationRunner';
 
 export const MIGRATION_SYSTEM_NAME = 'llm_schema_migrations';
@@ -63,6 +65,35 @@ export const registeredMigrations: RegisteredMigration[] = [
       'regions.is_department: authoritative 部门 flag for the region tree, replacing the level===3 guess. NULL = never declared, classify by name via src/utils/regionUnitType.ts.',
     async up(client) {
       await ensureRegionDepartmentSchema(client);
+    },
+  },
+  {
+    id: '0005_pdf_dual_channel_shadow',
+    name: 'PDF dual-channel shadow audit column',
+    // Marked irreversible because shadow rows are the evidence Phase 2's enforce decision
+    // needs; dropping the column would erase them while leaving the code that reads them.
+    // The feature itself rolls back with PDF_DUAL_CHANNEL_MODE=off and needs no DDL.
+    reversible: false,
+    runOnEveryStart: true,
+    transaction: true,
+    notes:
+      'parse_runs.dual_channel_json: Channel B verdict recorded beside, never inside, output_json. Nullable; NULL means the dual channel did not run for that attempt.',
+    async up(client) {
+      await ensurePdfDualChannelSchema(client);
+    },
+  },
+  {
+    id: '0006_parse_quality_level',
+    name: 'Parse quality marker on parse_runs',
+    // History is never backfilled here (NULL keeps meaning "unknown, pre-dual-channel"), so
+    // there is no data to unwind; dropping the column would only hide the marker.
+    reversible: false,
+    runOnEveryStart: true,
+    transaction: true,
+    notes:
+      'parse_runs.parse_quality_level: ai | dual | manual | failed. Enforce writes 双通道 deterministic accepts as dual so they stay separable from LLM-accepted rows.',
+    async up(client) {
+      await ensureParseQualitySchema(client);
     },
   },
 ];

@@ -56,7 +56,15 @@ export interface FinalizeParseRunInput {
   errorCode?: string | null;
   errorMessage?: string | null;
   enqueueFollowupJobs?: boolean;
+  /**
+   * How this accepted result was produced: 'dual' for a deterministic dual-channel accept,
+   * 'ai' for the LLM path. Omitted means "do not record", which is what every pre-existing
+   * caller does, so the column stays NULL for history instead of being guessed.
+   */
+  parseQualityLevel?: ParseQualityLevel;
 }
+
+export type ParseQualityLevel = 'ai' | 'dual' | 'manual' | 'failed';
 
 export interface CurrentParsedResult {
   reportVersionId: number;
@@ -126,6 +134,35 @@ function normalizeJsonParam(value: unknown): unknown {
   if (value === undefined) return null;
   if (typeof value === 'string') return value;
   return JSON.stringify(value);
+}
+
+/**
+ * `parse_quality_level` is added by migration 0006. The probe is cached for the process, and
+ * the marker is written in its own statement, so an accept against a database that has not
+ * been migrated yet still succeeds instead of dying on the audit column.
+ */
+let parseQualityColumnPresent: boolean | null = null;
+
+export function resetParseQualityColumnCache(): void {
+  parseQualityColumnPresent = null;
+}
+
+async function hasParseQualityColumn(client: {
+  query: (sql: string, params?: any[]) => Promise<{ rows: any[] }>;
+}): Promise<boolean> {
+  if (parseQualityColumnPresent !== null) {
+    return parseQualityColumnPresent;
+  }
+  try {
+    const result = await client.query(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = $1 AND column_name = $2`,
+      ['parse_runs', 'parse_quality_level']
+    );
+    parseQualityColumnPresent = result.rows.length > 0;
+  } catch {
+    parseQualityColumnPresent = false;
+  }
+  return parseQualityColumnPresent;
 }
 
 function parseDbJson(value: unknown): unknown {
@@ -504,6 +541,17 @@ export class ParseRunService {
           input.parseRunId,
         ]
       );
+
+      if (input.parseQualityLevel) {
+        // Separate statement behind a column probe: a database that has not run migration
+        // 0006 yet must still be able to accept a parse, never fail on the marker.
+        if (await hasParseQualityColumn(client)) {
+          await client.query(
+            `UPDATE parse_runs SET parse_quality_level = $1 WHERE id = $2`,
+            [input.parseQualityLevel, input.parseRunId]
+          );
+        }
+      }
 
       await client.query(
         `UPDATE report_versions

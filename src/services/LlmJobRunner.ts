@@ -24,6 +24,9 @@ import { resolveParsePrimaryConfigAsync } from '../utils/llmProviderConfig';
 import { aiModelConfigService } from './AiModelConfigService';
 import { buildParseConfigSnapshot, parseRunService } from './ParseRunService';
 import { buildSourceGateConfig, sourceGateService } from './SourceGateService';
+import PdfParseService from './PdfParseService';
+import { pdfDualChannelService, type ShadowHandle } from './pdf-dual-channel/PdfDualChannelService';
+import { isDualChannelEnabled } from './pdf-dual-channel/config';
 import { HIERARCHY_COMPLETENESS_SQL_EXCLUSION } from '../utils/consistencyReviewSemantics';
 import {
   isNonRetryableJobErrorCode,
@@ -439,6 +442,16 @@ export class LlmJobRunner {
     parseRunId = createdRun.id;
     await parseRunService.markRunning(parseRunId);
 
+    // Channel B starts alongside this attempt and is only awaited after finalisation: the
+    // LLM call is the slow part of the job, so shadow mode overlaps the two instead of
+    // adding the sidecar's own latency. Returns null when PDF_DUAL_CHANNEL_MODE=off.
+    const dualChannelShadow: ShadowHandle | null = pdfDualChannelService.beginShadow({
+      pdfPath: resolvedStoragePath,
+      parseRunId,
+      versionId: job.version_id,
+      signal,
+    });
+
     try {
       // Skip LLM when the same parse config already produced accepted output for this version.
       const reusable = await parseRunService.findReusableAcceptedParseRun(
@@ -459,6 +472,23 @@ export class LlmJobRunner {
           gateResultJson: { type: 'fingerprint_reuse', reused_from: reusable.parseRunId },
           consensusResultJson: null,
           sourceSnapshotsJson: [],
+        });
+        return;
+      }
+
+      const dualAccept = await this.tryDualChannelAccept(job, parseRunId, dualChannelShadow, resolvedStoragePath);
+      if (dualAccept) {
+        draftOutput = dualAccept.output;
+        draftRepairs.push(`dual_channel_enforce:${dualAccept.reason}`);
+        await parseRunService.finalizeParseRun({
+          parseRunId,
+          finalStatus: 'accepted',
+          outputJson: draftOutput,
+          repairsJson: draftRepairs,
+          gateResultJson: dualAccept.gateResult,
+          consensusResultJson: null,
+          sourceSnapshotsJson: dualAccept.sourceSnapshots,
+          parseQualityLevel: 'dual',
         });
         return;
       }
@@ -788,6 +818,7 @@ export class LlmJobRunner {
         gateResultJson: draftGateResult,
         consensusResultJson: draftConsensusResult,
         sourceSnapshotsJson: draftSourceSnapshots,
+        parseQualityLevel: 'ai',
       });
     } catch (error) {
       if (parseRunId) {
@@ -808,11 +839,93 @@ export class LlmJobRunner {
         });
       }
       throw error;
+    } finally {
+      // Shadow lands only in parse_runs.dual_channel_json. completeShadow swallows its own
+      // errors, so neither a broken sidecar nor a missing column can change this job's
+      // outcome, and PDF_DUAL_CHANNEL_MODE=off leaves this branch null.
+      if (dualChannelShadow) {
+        await pdfDualChannelService.completeShadow(dualChannelShadow, draftOutput);
+      }
     }
 
     // Check if we need to generate notification (after all jobs complete)
     if (job.version_id) {
       await this.generateNotificationIfNeeded(job.version_id);
+    }
+  }
+
+  /**
+   * Phase 2 enforce: accept Channel B's candidate without calling the LLM, but only when
+   * the gate says every figure is corroborated. Returns null on any refusal or error, in
+   * which case the existing pdfjs -> LLM path runs untouched.
+   */
+  private async tryDualChannelAccept(
+    job: QueuedJob,
+    parseRunId: number | null,
+    handle: ShadowHandle | null,
+    resolvedStoragePath: string
+  ): Promise<{ output: any; reason: string; gateResult: any; sourceSnapshots: any[] } | null> {
+    if (!parseRunId || !job.version_id || !handle || handle.ctx.mode !== 'enforce') {
+      return null;
+    }
+
+    try {
+      // Channel A's markdown is needed twice here: as the cross-read reference for 表二 and
+      // as the text the source gate verifies every candidate figure against.
+      const markdown = await PdfParseService.parsePDFToMarkdown(
+        resolvedStoragePath,
+        String(job.report_id || job.version_id)
+      );
+      if (!markdown.success || !markdown.markdown) {
+        handle.enforce = { reason: 'source_text_unavailable', decision: null, sourceGateStatus: null };
+        console.warn(`[Job ${job.id}] Dual-channel enforce skipped: pdfjs produced no text, using LLM path.`);
+        return null;
+      }
+
+      const sourceGateConfig = buildSourceGateConfig();
+      const evaluation = await pdfDualChannelService.evaluateDeterministic({
+        handle,
+        sourceText: markdown.markdown,
+        sourceGateConfig,
+      });
+
+      if (!evaluation.accepted || !evaluation.candidate) {
+        console.log(
+          `[Job ${job.id}] Dual-channel enforce declined (${evaluation.reason}), falling back to the LLM path.`
+        );
+        return null;
+      }
+
+      await sourceGateService.persist(parseRunId, job.version_id, evaluation.sourceGateResult!, sourceGateConfig);
+      const sourceSnapshots = sourceGateService.buildSourceSnapshots(
+        evaluation.candidate,
+        markdown.markdown,
+        {
+          sourcePath: resolvedStoragePath,
+          sourceType: path.extname(resolvedStoragePath).replace(/^\./, '') || 'pdf',
+        }
+      );
+
+      // Claim the record write here: the run is accepted from Channel B, so there is no LLM
+      // output left for the Shadow pass in `finally` to compare against. The quality marker
+      // itself is written by finalizeParseRun, in the same transaction as the accept.
+      await pdfDualChannelService.persistRecord(parseRunId, evaluation.record);
+      handle.completed = true;
+
+      console.log(
+        `[Job ${job.id}] Dual-channel enforce accepted candidate (confidence=${evaluation.record.confidence}, no LLM call).`
+      );
+      return {
+        output: evaluation.candidate,
+        reason: evaluation.reason,
+        gateResult: { ruleGate: null, sourceGate: evaluation.sourceGateResult, dualChannel: evaluation.record },
+        sourceSnapshots,
+      };
+    } catch (error: any) {
+      // An unusable Channel B must never cost the document its parse.
+      handle.enforce = { reason: 'enforce_error', decision: null, sourceGateStatus: null };
+      console.error(`[Job ${job.id}] Dual-channel enforce trial failed: ${error?.message || error}`);
+      return null;
     }
   }
 
@@ -1190,10 +1303,19 @@ export class LlmJobRunner {
 
     if (job.report_id) {
       try {
+        // Phase 3: the visual remedy also gets Channel B's disagreement and the pdfjs border
+        // audit, because a missing or mis-gridded table produces no FAIL item at all — the old
+        // trigger could not see it. Skipped entirely when the dual channel is off.
+        const signals = {
+          visualBorderMissing: Boolean((currentResult.parsedJson as any)?.visual_audit?.visual_border_missing),
+          dualChannel: isDualChannelEnabled() ? await pdfDualChannelService.loadLatestRecord(job.version_id) : null,
+        };
         const queuedCount = await visionReviewService.enqueueForConsistencyItems(
           job.report_id,
           job.version_id,
-          consistencyItems
+          consistencyItems,
+          false,
+          signals
         );
         if (queuedCount > 0) {
           console.log(`[Job ${job.id}] Queued ${queuedCount} table visual review item(s).`);
