@@ -1,6 +1,7 @@
 import { runLLMMigrations } from './migrations-llm';
 import { ensureStructuredPackageSchema } from './structuredPackageSchema';
 import { ensureFilingSchema } from './filingSchema';
+import { ensureRegionDepartmentSchema } from './regionDepartmentSchema';
 import { RegisteredMigration } from './migrationRunner';
 
 export const MIGRATION_SYSTEM_NAME = 'llm_schema_migrations';
@@ -47,6 +48,21 @@ export const registeredMigrations: RegisteredMigration[] = [
     notes: 'report_filings table for 国办模板在线填报草稿/提交/勾稽生效.',
     async up(client) {
       await ensureFilingSchema(client);
+    },
+  },
+  {
+    id: '0004_region_department_flag',
+    name: 'Explicit department marker on region nodes',
+    // Nullable marker, never backfilled, so there is nothing to unwind except the
+    // declarations users made through 批量导入 / 移动分类. Dropping the column would
+    // silently revert those decisions, so rollback stays blocked on purpose.
+    reversible: false,
+    runOnEveryStart: true,
+    transaction: true,
+    notes:
+      'regions.is_department: authoritative 部门 flag for the region tree, replacing the level===3 guess. NULL = never declared, classify by name via src/utils/regionUnitType.ts.',
+    async up(client) {
+      await ensureRegionDepartmentSchema(client);
     },
   },
 ];

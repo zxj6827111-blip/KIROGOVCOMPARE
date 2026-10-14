@@ -1,8 +1,19 @@
 import express, { Request, Response } from 'express';
 import pool from '../config/database-llm';
 import { authMiddleware, AuthRequest, requirePermission } from '../middleware/auth';
+import { isDepartmentRegion, toDepartmentFlagInput } from '../utils/regionUnitType';
 
 const router = express.Router();
+
+const REGION_SELECT_COLUMNS =
+  'id, code, name, province, parent_id, level, sort_order, is_department';
+
+/** Attach the effective department flag so the tree never re-derives it from `level`. */
+function withDepartmentFlag<T extends { name?: string | null; level?: any; parent_id?: any; is_department?: any }>(
+  row: T
+): T & { is_department: boolean } {
+  return { ...row, is_department: isDepartmentRegion(row) };
+}
 
 type MigrationReportRow = {
   id: number | string;
@@ -314,6 +325,7 @@ router.post('/', authMiddleware, requirePermission('manage_regions'), async (req
     const { code, name, province } = req.body;
     // 兼容前端 parentId / parent_id 传参
     const parent_id = req.body.parent_id ?? req.body.parentId ?? null;
+    const isDepartment = req.body.is_department === undefined ? null : toDepartmentFlagInput(req.body.is_department);
 
     if (!code || !name) {
       return res.status(400).json({ error: 'code and name are required' });
@@ -336,11 +348,30 @@ router.post('/', authMiddleware, requirePermission('manage_regions'), async (req
       level = normalizedParentLevel + 1;
     }
 
+    // 新增弹窗被连点两次会发来两条同 (name, parent_id) 的 POST，(name, parent_id)
+    // 在库里没有任何约束，于是树上出现两张同名卡片（生产上的 3002/3003）。
+    const normalizedParentId = parent_id ? Number(parent_id) : null;
+    const existingResult = await pool.query(
+      `SELECT ${REGION_SELECT_COLUMNS} FROM regions
+        WHERE name = $1 AND parent_id IS NOT DISTINCT FROM $2
+        LIMIT 1`,
+      [name, normalizedParentId]
+    );
+    if (existingResult.rows.length > 0) {
+      return res.status(200).json({
+        ...withDepartmentFlag(existingResult.rows[0]),
+        deduplicated: true,
+      });
+    }
+
     if (!Number.isFinite(level)) {
       return res.status(400).json({ error: 'Level calculation failed' });
     }
     if (level < 1 || level > 4) {
-      return res.status(400).json({ error: 'Region level must be between 1 and 4' });
+      return res.status(400).json({
+        error: '区域层级最多 4 级，部门请直接挂在市 / 区县级节点下',
+        code: 'REGION_LEVEL_LIMIT',
+      });
     }
 
     const levelValue = level;
@@ -352,15 +383,24 @@ router.post('/', authMiddleware, requirePermission('manage_regions'), async (req
 
     const newSortOrder = maxSortOrder + 1;
 
-    const insertSql = 'INSERT INTO regions (code, name, province, parent_id, level, sort_order) VALUES ($1, $2, $3, $4, $5, $6)';
-    const params = [code, name, province || null, parent_id ? Number(parent_id) : null, levelValue, newSortOrder];
+    const insertSql = `INSERT INTO regions (code, name, province, parent_id, level, sort_order, is_department)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`;
+    const params = [
+      code,
+      name,
+      province || null,
+      normalizedParentId,
+      levelValue,
+      newSortOrder,
+      isDepartment,
+    ];
 
     const result = await pool.query(
-      `${insertSql} RETURNING id, code, name, province, parent_id, level, sort_order`,
+      `${insertSql} RETURNING ${REGION_SELECT_COLUMNS}`,
       params
     );
 
-    res.status(201).json(result.rows[0]);
+    res.status(201).json(withDepartmentFlag(result.rows[0]));
 
   } catch (error: any) {
     console.error('Error creating region:', error);
@@ -387,29 +427,29 @@ router.get('/', authMiddleware, async (req: Request, res: Response) => {
       // Note: pg usually uses $1, $2... and ANY($1) for arrays
       const sql = `
             WITH RECURSIVE allowed_tree AS (
-              SELECT id, code, name, province, parent_id, level, sort_order
+              SELECT id, code, name, province, parent_id, level, sort_order, is_department
               FROM regions 
               WHERE name = ANY($1)
               UNION ALL
-              SELECT r.id, r.code, r.name, r.province, r.parent_id, r.level, r.sort_order
+              SELECT r.id, r.code, r.name, r.province, r.parent_id, r.level, r.sort_order, r.is_department
               FROM regions r 
               JOIN allowed_tree d ON r.parent_id = d.id
             )
-            SELECT DISTINCT id, code, name, province, parent_id, level, sort_order FROM allowed_tree ORDER BY level, sort_order, id
+            SELECT DISTINCT id, code, name, province, parent_id, level, sort_order, is_department FROM allowed_tree ORDER BY level, sort_order, id
           `;
       const result = await pool.query(sql, [filterNames]);
       // Fix Orphaned Nodes (same as SQLite):
       // If a node's parent is NOT in the result set, set parent_id to null
       // This ensures frontend treats them as "roots" and displays them
-      const validIds = new Set(result.rows?.map((r: any) => r.id));
+      const validIds = new Set(result.rows?.map((r: any) => Number(r.id)) || []);
       const safeRows = result.rows?.map((r: any) => ({
         ...r,
-        parent_id: (r.parent_id && validIds.has(r.parent_id)) ? r.parent_id : null
+        parent_id: (r.parent_id && validIds.has(Number(r.parent_id))) ? r.parent_id : null
       })) || [];
-      res.json({ data: safeRows });
+      res.json({ data: safeRows.map(withDepartmentFlag) });
     } else {
-      const result = await pool.query('SELECT id, code, name, province, parent_id, level, sort_order FROM regions ORDER BY level, sort_order, id');
-      res.json({ data: result.rows });
+      const result = await pool.query(`SELECT ${REGION_SELECT_COLUMNS} FROM regions ORDER BY level, sort_order, id`);
+      res.json({ data: result.rows.map(withDepartmentFlag) });
     }
 
   } catch (error) {
@@ -423,13 +463,13 @@ router.get('/:id', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
-    const result = await pool.query('SELECT id, code, name, province, parent_id, level, sort_order FROM regions WHERE id = $1', [id]);
+    const result = await pool.query(`SELECT ${REGION_SELECT_COLUMNS} FROM regions WHERE id = $1`, [id]);
 
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Region not found' });
     }
 
-    res.json(result.rows[0]);
+    res.json(withDepartmentFlag(result.rows[0]));
 
   } catch (error) {
     console.error('Error fetching region:', error);
@@ -442,9 +482,11 @@ router.put('/:id', authMiddleware, requirePermission('manage_regions'), async (r
   try {
     const { id } = req.params;
     const { name, sort_order, level } = req.body;
+    const hasDepartmentFlag = Object.prototype.hasOwnProperty.call(req.body, 'is_department');
+    const isDepartment = hasDepartmentFlag ? toDepartmentFlagInput(req.body.is_department) : undefined;
 
-    if (!name && sort_order === undefined && level === undefined) {
-      return res.status(400).json({ error: 'At least one field (name, sort_order, or level) is required' });
+    if (!name && sort_order === undefined && level === undefined && !hasDepartmentFlag) {
+      return res.status(400).json({ error: 'At least one field (name, sort_order, level, or is_department) is required' });
     }
 
     // Validate level if provided
@@ -472,13 +514,18 @@ router.put('/:id', authMiddleware, requirePermission('manage_regions'), async (r
       updates.push(`level = $${paramIndex++}`);
       params.push(Number(level));
     }
+    if (hasDepartmentFlag) {
+      // null clears the declaration so the node falls back to name classification.
+      updates.push(`is_department = $${paramIndex++}`);
+      params.push(isDepartment ?? null);
+    }
     updates.push(`updated_at = NOW()`);
 
     const updateSql = `UPDATE regions SET ${updates.join(', ')} WHERE id = $${paramIndex}`;
     params.push(id);
 
     const result = await pool.query(
-      `${updateSql} RETURNING id, code, name, province, parent_id, level, sort_order`,
+      `${updateSql} RETURNING ${REGION_SELECT_COLUMNS}`,
       params
     );
 
@@ -486,7 +533,7 @@ router.put('/:id', authMiddleware, requirePermission('manage_regions'), async (r
       return res.status(404).json({ error: 'Region not found' });
     }
 
-    res.json(result.rows[0]);
+    res.json(withDepartmentFlag(result.rows[0]));
 
   } catch (error: any) {
     console.error('Error updating region:', error);
@@ -688,19 +735,22 @@ router.delete('/:id', authMiddleware, requirePermission('manage_regions'), async
     const dependencyResult = await pool.query(`
       SELECT
         (SELECT COUNT(*)::int FROM reports WHERE region_id = ANY($1::int[])) AS report_count,
-        (SELECT COUNT(*)::int FROM comparisons WHERE region_id = ANY($1::int[])) AS comparison_count
+        (SELECT COUNT(*)::int FROM comparisons WHERE region_id = ANY($1::int[])) AS comparison_count,
+        (SELECT COUNT(*)::int FROM report_filings WHERE region_id = ANY($1::int[])) AS filing_count
     `, [idsToDelete]);
     const dependency = dependencyResult.rows[0] || {};
     const reportCount = Number(dependency.report_count || 0);
     const comparisonCount = Number(dependency.comparison_count || 0);
+    const filingCount = Number(dependency.filing_count || 0);
 
-    if (reportCount > 0 || comparisonCount > 0) {
+    if (reportCount > 0 || comparisonCount > 0 || filingCount > 0) {
       return res.status(409).json({
         error: '该区域已有业务数据，不能直接删除。请先清理关联数据后再删除。',
-        details: `关联年报 ${reportCount} 份，关联比对记录 ${comparisonCount} 条。`,
+        details: `关联年报 ${reportCount} 份，关联比对记录 ${comparisonCount} 条，关联在线填报 ${filingCount} 条。`,
         blockers: {
           reports: reportCount,
-          comparisons: comparisonCount
+          comparisons: comparisonCount,
+          filings: filingCount
         }
       });
     }

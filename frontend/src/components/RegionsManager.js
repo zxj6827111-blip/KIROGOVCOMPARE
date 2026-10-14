@@ -20,6 +20,9 @@ import {
 } from 'lucide-react';
 import { useToast } from './common/ToastProvider';
 import { useConfirmDialog } from './common/ConfirmDialogProvider';
+// 部门 / 行政区划的判定收敛到一处：后端解析出的 region.is_department 优先，
+// 名称后缀仅作为旧数据兜底（level 不能区分：区县级部门与乡镇同为 level 4）。
+import { isDepartmentRegion as isDepartment } from '../utils/regionClassification';
 
 function RegionsManager() {
   const toast = useToast();
@@ -35,8 +38,12 @@ function RegionsManager() {
 
   // --- New State for Features ---
   const [showAddModal, setShowAddModal] = useState(false);
+  const [newRegionIsDept, setNewRegionIsDept] = useState(false);
   const [addParentId, setAddParentId] = useState(null); // ID of the column where "Add" was clicked
   const [newRegionName, setNewRegionName] = useState('');
+  // 连点确认或连按回车会在服务端建出两张同名卡片，用 ref 同步拦截（state 要等重渲染才生效）
+  const addSubmitInFlight = useRef(false);
+  const [addSubmitting, setAddSubmitting] = useState(false);
   const [showBatchUpload, setShowBatchUpload] = useState(false);
   const [batchFile, setBatchFile] = useState(null);
   const [isImporting, setIsImporting] = useState(false);
@@ -84,6 +91,7 @@ function RegionsManager() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      let finalPayload = null;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -103,10 +111,27 @@ function RegionsManager() {
             const data = JSON.parse(line);
             if (data.error) throw new Error(data.error);
             setImportProgress(data);
+            if (data.percentage === 100) finalPayload = data;
           } catch (e) {
             console.warn('Failed to parse progress line:', line, e);
           }
         }
+      }
+
+      // 导入器会跳过结构不合法的行，过去只在进度条里写一句"完成"，
+      // 现在把跳过的行号和原因摊开，避免"看着成功但其实没进去"。
+      const skipped = Number(finalPayload?.skipped || 0);
+      const rowErrors = Array.isArray(finalPayload?.row_errors) ? finalPayload.row_errors : [];
+      const rowWarnings = Array.isArray(finalPayload?.row_warnings) ? finalPayload.row_warnings : [];
+      if (skipped > 0) {
+        const detail = rowErrors.slice(0, 5).join('\n');
+        toast.warning(
+          `${skipped} 行未导入`,
+          `${finalPayload?.message || ''}\n${detail}` + (rowErrors.length > 5 ? `\n…共 ${rowErrors.length} 条` : ''),
+          { duration: 15000 }
+        );
+      } else if (rowWarnings.length > 0) {
+        toast.info('导入完成（有提示）', rowWarnings.slice(0, 3).join('\n'), { duration: 12000 });
       }
 
       // Success
@@ -336,29 +361,6 @@ function RegionsManager() {
     }
   }, [selectionPath]);
 
-  // --- Helpers ---
-  // 判断是否为部门：名称优先（名称以区县后缀结尾一定是区县），否则用 level 字段判断
-  const isDepartment = (region) => {
-    if (!region) return false;
-    const name = typeof region === 'string' ? region : region.name;
-    if (!name) return false;
-
-    // 1. 名称优先：如果名称以行政区划后缀结尾，一定是区县（非部门）
-    const regionSuffixes = ["省", "市", "区", "县", "乡", "镇", "街道"];
-    const isRegionByName = regionSuffixes.some(s => name.endsWith(s));
-    if (isRegionByName) {
-      return false; // 名称匹配行政区划，不是部门
-    }
-
-    // 2. 名称不匹配时，用 level 字段判断：level=3 表示部门，level=2 表示区县
-    if (typeof region === 'object' && region.level !== undefined && region.level !== null) {
-      return region.level === 3;
-    }
-
-    // 3. 兜底：名称不以区县后缀结尾且没有 level 字段，视为部门
-    return true;
-  };
-
   const getChildren = useCallback((parentId) => {
     return regions
       .filter(r => r.parent_id === parentId)
@@ -453,24 +455,36 @@ function RegionsManager() {
   const handleAddClick = (parentId) => {
     setAddParentId(parentId);
     setNewRegionName('');
+    setNewRegionIsDept(false);
     setShowAddModal(true);
   };
 
   const confirmAddRegion = async () => {
-    if (!newRegionName.trim()) return;
+    if (!newRegionName.trim() || addSubmitInFlight.current) return;
+    addSubmitInFlight.current = true;
+    setAddSubmitting(true);
     try {
       // Generate a unique code
       const code = `manual_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-      await apiClient.post('/regions', {
+      const resp = await apiClient.post('/regions', {
         code: code,
         name: newRegionName,
-        parent_id: addParentId
+        parent_id: addParentId,
+        // 勾选即显式声明；不勾选则留给后端按名称分类（is_department 传 null）
+        is_department: newRegionIsDept ? true : null,
       });
       setShowAddModal(false);
-      toast.success('区域已添加');
+      if (resp.data?.deduplicated) {
+        toast.info('已存在同名节点，未重复创建');
+      } else {
+        toast.success('区域已添加');
+      }
       fetchData(); // Refresh list
     } catch (err) {
       toast.error('添加失败', err.response?.data?.error || err.message);
+    } finally {
+      addSubmitInFlight.current = false;
+      setAddSubmitting(false);
     }
   };
 
@@ -495,14 +509,13 @@ function RegionsManager() {
     }
   };
 
-  // --- Change Category (Department <-> District) ---
+  // --- Change Category (Department <-> Administrative) ---
   const handleChangeCategory = async (e, item) => {
     e.stopPropagation();
     const isDept = isDepartment(item);
-    // If currently a department (level 3), move to district (level 2)
-    // If currently a district (level 2), move to department (level 3)
-    const newLevel = isDept ? 2 : 3;
-    const actionName = isDept ? '区县' : '部门';
+    // 只改写部门标记：level 表示树里的深度，动它会把节点从父级链上摘下来。
+    const nextIsDepartment = !isDept;
+    const actionName = isDept ? '行政区划' : '部门';
 
     const confirmed = await confirmAction({
       title: '移动分类',
@@ -515,7 +528,7 @@ function RegionsManager() {
     }
 
     try {
-      await apiClient.put(`/regions/${item.id}`, { level: newLevel });
+      await apiClient.put(`/regions/${item.id}`, { is_department: nextIsDepartment });
       toast.success('分类已移动', `已移动到「${actionName}」。`);
       fetchData();
     } catch (err) {
@@ -829,6 +842,14 @@ function RegionsManager() {
               onChange={e => setNewRegionName(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && confirmAddRegion()}
             />
+            <label className="flex items-center gap-2 mb-4 text-sm text-gray-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={newRegionIsDept}
+                onChange={e => setNewRegionIsDept(e.target.checked)}
+              />
+              作为「部门」添加（不勾选则按名称自动归类到行政区划 / 部门）
+            </label>
             <div className="flex justify-end gap-2">
               <button
                 className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded"
@@ -837,10 +858,11 @@ function RegionsManager() {
                 取消
               </button>
               <button
-                className="px-4 py-2 text-sm bg-blue-600 text-white hover:bg-blue-700 rounded"
+                className="px-4 py-2 text-sm bg-blue-600 text-white hover:bg-blue-700 rounded disabled:opacity-50 disabled:cursor-not-allowed"
                 onClick={confirmAddRegion}
+                disabled={addSubmitting}
               >
-                确认添加
+                {addSubmitting ? '添加中…' : '确认添加'}
               </button>
             </div>
           </div>
@@ -1052,7 +1074,8 @@ function RegionsManager() {
               </button>
             </div>
             <p className="text-sm text-gray-500 mb-4">
-              上传 Excel 或 CSV 文件，按"省份、城市、区县、街道"四列格式导入城市层级结构。
+              上传 Excel 或 CSV 文件，按「省份、城市、区县、街道、部门」五列导入层级结构。
+              区县 / 旗下面的部门请填写「部门」列，所在行的「街道」留空。
             </p>
             <div className="flex gap-2 mb-4">
               <a

@@ -23,6 +23,7 @@ import {
     X
 } from 'lucide-react';
 import { useTaskDrawer } from './tasks/TaskDrawerProvider';
+import { getEffectiveLevel } from '../utils/regionClassification';
 import { useToast } from './common/ToastProvider';
 import { useConfirmDialog } from './common/ConfirmDialogProvider';
 import { appendReturnTo } from '../app/routeRegistry';
@@ -132,7 +133,13 @@ const formatDateTime = (value) => {
     });
 };
 
-const getLevelName = (level) => {
+// 层级列与层级筛选都要和年报工作台的卡片角标同一口径：缺省省级数据的 旗/县/区
+// 挂在 level 2，直接按 level 显示会把伊金霍洛旗说成"市级"。
+const levelOfRow = (row) => getEffectiveLevel(row.level, row.region_name);
+
+const getLevelName = (level, isDepartment = false) => {
+    // 区/县/旗下面的部门与乡镇同处 level 4，必须先看后端下发的部门标记。
+    if (isDepartment) return '部门';
     switch (Number(level)) {
         case 0:
         case 1:
@@ -291,7 +298,11 @@ const applyFilters = (rows, filters) => {
         const abnormalTypes = Array.isArray(row.abnormal_types) ? row.abnormal_types : [];
 
         if (filters.regionText && !regionName.includes(filters.regionText.trim().toLowerCase())) return false;
-        if (filters.level && String(row.level) !== String(filters.level)) return false;
+        if (filters.level === 'department') {
+            if (!row.is_department) return false;
+        } else if (filters.level && String(levelOfRow(row)) !== String(filters.level)) {
+            return false;
+        }
         if (parentKeyword && !parentName.includes(parentKeyword)) return false;
         if (filters.maintenanceStatus && row.maintenance_status !== filters.maintenanceStatus) return false;
         if (keyword && !unitName.includes(keyword)) return false;
@@ -307,7 +318,7 @@ const applyFilters = (rows, filters) => {
 const buildDetailItems = (row) => [
     ['单位名称', row.unit_name || row.region_name],
     ['地区', row.region_name],
-    ['层级', getLevelName(row.level)],
+    ['层级', getLevelName(levelOfRow(row), row.is_department)],
     ['上级单位', row.parent_unit_name || row.parent_path],
     ['年份', row.year],
     ['文件名称', row.file_name],
@@ -905,6 +916,7 @@ function ReportMaintenance({ onBack, onNavigate }) {
                             <option value="2">市级</option>
                             <option value="3">区县级</option>
                             <option value="4">街道/乡镇</option>
+                            <option value="department">部门</option>
                         </select>
                     </label>
                     <label className="filter-group">
@@ -1072,7 +1084,7 @@ function ReportMaintenance({ onBack, onNavigate }) {
                                             </button>
                                         </td>
                                         <td title={row.region_name}>{formatValue(row.region_name)}</td>
-                                        <td>{getLevelName(row.level)}</td>
+                                        <td>{getLevelName(levelOfRow(row), row.is_department)}</td>
                                         <td className="muted-cell" title={row.parent_unit_name || row.parent_path}>{formatValue(row.parent_unit_name || row.parent_path)}</td>
                                         <td>{formatValue(row.year)}</td>
                                         <td><StatusBadge map={uploadStatusMap} value={row.upload_status} /></td>

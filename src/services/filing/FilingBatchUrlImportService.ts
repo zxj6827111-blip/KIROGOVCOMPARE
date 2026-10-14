@@ -11,6 +11,7 @@ import {
 import { filingService, type FilingRow } from './FilingService';
 import { evaluateFilingGate } from './FilingGateService';
 import { consistencyCheckService } from '../ConsistencyCheckService';
+import { isDepartmentRegion, COUNTY_GEO_NAME_PATTERN } from '../../utils/regionUnitType';
 
 const MAX_BATCH_URLS = 50;
 const DEFAULT_YEAR = () => new Date().getFullYear() - 1;
@@ -127,10 +128,8 @@ export function extractGeoHintsFromUrlAndText(url: string, text?: string | null)
   } catch {
     /* ignore */
   }
-  // 标题里的「奉贤区」「上海市奉贤区」
-  const districtHits = hay.match(
-    /(?:上海)?(?:市)?(浦东新区|[\u4e00-\u9fa5]{1,3}区|[\u4e00-\u9fa5]{1,3}县)/g
-  );
+  // 标题里的「奉贤区」「上海市奉贤区」「伊金霍洛旗」
+  const districtHits = hay.match(new RegExp(COUNTY_GEO_NAME_PATTERN, 'g'));
   if (districtHits) {
     for (const d of districtHits) {
       const cleaned = d.replace(/^上海市?/, '');
@@ -238,16 +237,27 @@ function pathBasename(url: string): string {
   }
 }
 
-type RegionRow = { id: number; name: string; parent_id: number | null; level: number };
+type RegionRow = {
+  id: number;
+  name: string;
+  parent_id: number | null;
+  level: number;
+  is_department?: boolean | null;
+};
 
 async function loadRegions(allowedRegionIds: number[] | null): Promise<RegionRow[]> {
-  const result = await pool.query(`SELECT id, name, parent_id, level FROM regions ORDER BY id`);
-  const rows = result.rows.map((row: any) => ({
-    id: Number(row.id),
-    name: String(row.name || ''),
-    parent_id: row.parent_id != null ? Number(row.parent_id) : null,
-    level: Number(row.level || 0),
-  }));
+  const result = await pool.query(`SELECT id, name, parent_id, level, is_department FROM regions ORDER BY id`);
+  const rows = result.rows.map((row: any) => {
+    const base = {
+      id: Number(row.id),
+      name: String(row.name || ''),
+      parent_id: row.parent_id != null ? Number(row.parent_id) : null,
+      level: Number(row.level || 0),
+    };
+    // 已声明的优先，未声明的才按名称推断
+    const declared = row.is_department == null ? null : Boolean(row.is_department);
+    return { ...base, is_department: isDepartmentRegion({ ...base, is_department: declared }) };
+  });
   if (!allowedRegionIds) return rows;
   const allow = new Set(allowedRegionIds.map(Number));
   return rows.filter((r) => allow.has(r.id));
@@ -269,7 +279,7 @@ export function matchRegionByUnitName(
   const normalizedHints = geoHints.map((h) => normalizeForMatch(h)).filter((h) => h.length >= 2);
 
   // 单位名里是否自带区县（奉贤区经济委）
-  const unitHasDistrict = /区|县|市|新区/.test(String(unitName || ''));
+  const unitHasDistrict = /[区县市旗盟]|新区/.test(String(unitName || ''));
 
   let best: { id: number; name: string; score: number; path?: string } | null = null;
 
@@ -285,7 +295,7 @@ export function matchRegionByUnitName(
     if (normalizedUnit === normalizedRegion || unitCore === regionCore) {
       score += 100;
     } else if (normalizedUnit.includes(normalizedRegion) || unitCore.includes(regionCore)) {
-      const isBroad = region.level <= 2;
+      const isBroad = !isDepartmentRegion(region);
       const isGovBody =
         normalizedUnit === `${normalizedRegion}人民政府` ||
         normalizedUnit === `${normalizedRegion}政府` ||
@@ -331,9 +341,9 @@ export function matchRegionByUnitName(
       const anyDistrictOnPath = districtHints.some(
         (h) => ancestorBlob.includes(h) || h.includes(normalizeForMatch(region.name))
       );
-      // 单位名里也抽区县
+      // 单位名里也抽区县/旗
       const unitDistricts = Array.from(
-        String(unitName || '').matchAll(/(浦东新区|[\u4e00-\u9fa5]{1,3}区|[\u4e00-\u9fa5]{1,3}县)/g)
+        String(unitName || '').matchAll(new RegExp(COUNTY_GEO_NAME_PATTERN, 'g'))
       ).map((m) => normalizeForMatch(m[1]));
       const required = [...new Set([...districtHints, ...unitDistricts])].filter(
         (h) => h.length >= 2 && !/^上海/.test(h)
@@ -352,8 +362,7 @@ export function matchRegionByUnitName(
     }
 
     // 同名委办局跨省：单位名无区县且无 geo/parent 命中 → 重罚
-    const looksLikeDept =
-      /委|局|办|中心|街道|镇/.test(String(region.name || '')) || region.level >= 3;
+    const looksLikeDept = isDepartmentRegion(region) || region.level >= 3;
     if (looksLikeDept && parentHits === 0 && geoHits === 0) {
       if (!unitHasDistrict) {
         score -= 80;
@@ -364,6 +373,7 @@ export function matchRegionByUnitName(
 
     // 偏好更深的部门节点（区经委优于区）
     score += Math.min(region.level, 6) * 2;
+    if (isDepartmentRegion(region)) score += 6;
 
     if (score < 40) continue;
 
@@ -376,7 +386,7 @@ export function matchRegionByUnitName(
   // 部门节点不在库中时：回退匹配到区县（仍可导入，提示人工核对）
   if ((!best || best.score < 50) && normalizedHints.length > 0) {
     for (const region of regions) {
-      if (region.level > 3) continue;
+      if (region.level > 3 || isDepartmentRegion(region)) continue;
       const normalizedRegion = normalizeForMatch(region.name);
       const hit = normalizedHints.some(
         (h) => normalizedRegion === h || normalizedRegion.includes(h) || h.includes(normalizedRegion)

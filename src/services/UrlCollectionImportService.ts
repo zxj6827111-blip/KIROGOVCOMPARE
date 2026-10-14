@@ -6,6 +6,7 @@ import path from 'path';
 import pool from '../config/database-llm';
 import { UPLOADS_TMP_DIR } from '../config/constants';
 import { validateRedirectURL, validateURLSecurity } from '../utils/urlValidator';
+import { isDepartmentRegion } from '../utils/regionUnitType';
 import { reportUploadService } from './ReportUploadService';
 
 export type UrlCollectionMode = 'auto' | 'single' | 'list';
@@ -447,13 +448,18 @@ async function findRegionByUnit(unitName: string, allowedRegionIds: Set<number> 
   const normalizedUnit = normalizeForMatch(unitName);
   if (!normalizedUnit) return null;
 
-  const result = await pool.query('SELECT id, name, parent_id, level FROM regions ORDER BY id');
-  const regions = result.rows.map((row: any) => ({
-    id: Number(row.id),
-    name: String(row.name || ''),
-    parent_id: row.parent_id ? Number(row.parent_id) : null,
-    level: Number(row.level || 0),
-  }));
+  const result = await pool.query('SELECT id, name, parent_id, level, is_department FROM regions ORDER BY id');
+  const regions = result.rows.map((row: any) => {
+    const base = {
+      id: Number(row.id),
+      name: String(row.name || ''),
+      parent_id: row.parent_id ? Number(row.parent_id) : null,
+      level: Number(row.level || 0),
+    };
+    // 已声明的优先，未声明的才按名称推断
+    const declared = row.is_department == null ? null : Boolean(row.is_department);
+    return { ...base, is_department: isDepartmentRegion({ ...base, is_department: declared }) };
+  });
   const byId = new Map(regions.map((region) => [region.id, region]));
 
   let best: { id: number; name: string; score: number } | null = null;
@@ -467,7 +473,7 @@ async function findRegionByUnit(unitName: string, allowedRegionIds: Set<number> 
     if (normalizedUnit === normalizedRegion) {
       score += 100;
     } else if (normalizedUnit.includes(normalizedRegion)) {
-      const isBroadAdministrativeNode = region.level <= 2;
+      const isBroadAdministrativeNode = !isDepartmentRegion(region);
       const isGovernmentBody =
         normalizedUnit === `${normalizedRegion}人民政府` ||
         normalizedUnit === `${normalizedRegion}政府办公室` ||

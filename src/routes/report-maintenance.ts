@@ -2,6 +2,7 @@ import express from 'express';
 import pool from '../config/database-llm';
 import { authMiddleware, AuthRequest, requirePermission } from '../middleware/auth';
 import { getAllowedRegionIdsAsync } from '../utils/dataScope';
+import { isDepartmentRegion, getEffectiveRegionLevel } from '../utils/regionUnitType';
 import {
     MaintenanceReportRow,
     getReportMaintenanceStatus,
@@ -19,6 +20,7 @@ interface RegionRow {
     parent_id: number | null;
     level: number;
     code?: string | null;
+    is_department?: boolean | null;
 }
 
 interface MaintenanceDetailRow {
@@ -26,6 +28,7 @@ interface MaintenanceDetailRow {
     region_name: string;
     region_code: string | null;
     level: number;
+    is_department: boolean;
     parent_region_id: number | null;
     parent_unit_name: string;
     parent_path: string;
@@ -126,19 +129,19 @@ const loadRegions = async (regionId: number | null, allowedRegionIds: number[] |
         const result = await pool.query(
             `
                 WITH RECURSIVE region_tree AS (
-                    SELECT id, name, parent_id, level, code FROM regions WHERE id = $1
+                    SELECT id, name, parent_id, level, code, is_department FROM regions WHERE id = $1
                     UNION ALL
-                    SELECT r.id, r.name, r.parent_id, r.level, r.code
+                    SELECT r.id, r.name, r.parent_id, r.level, r.code, r.is_department
                     FROM regions r
                     INNER JOIN region_tree rt ON r.parent_id = rt.id
                 )
-                SELECT id, name, level, parent_id, code FROM region_tree
+                SELECT id, name, level, parent_id, code, is_department FROM region_tree
             `,
             [regionId]
         );
         regionsResult = result.rows;
     } else {
-        const result = await pool.query('SELECT id, name, level, parent_id, code FROM regions');
+        const result = await pool.query('SELECT id, name, level, parent_id, code, is_department FROM regions');
         regionsResult = result.rows;
     }
 
@@ -464,6 +467,7 @@ const buildMaintenanceRows = async (regions: RegionRow[], year: number): Promise
             region_name: region.name,
             region_code: region.code || null,
             level: Number(region.level),
+            is_department: isDepartmentRegion(region),
             parent_region_id: region.parent_id ? Number(region.parent_id) : null,
             parent_unit_name: getParentName(region),
             parent_path: buildParentPath(Number(region.id)),
@@ -657,7 +661,7 @@ router.get('/export', authMiddleware, requirePermission('view_reports'), async (
             idx + 1,
             row.unit_name,
             row.region_name,
-            getLevelName(row.level),
+            getLevelName(row.level, row.is_department, row.region_name),
             row.parent_unit_name || row.parent_path || '--',
             row.year,
             row.upload_status === 'uploaded' ? '已上传' : '未上传',
@@ -687,8 +691,10 @@ router.get('/export', authMiddleware, requirePermission('view_reports'), async (
     }
 });
 
-function getLevelName(level: number): string {
-    switch (Number(level)) {
+function getLevelName(level: number, isDepartment = false, name = ''): string {
+    // 部门必须先看标记：区/县/旗下面的部门与乡镇同处 level 4。
+    if (isDepartment) return '部门';
+    switch (getEffectiveRegionLevel(level, name)) {
         case 0:
         case 1: return '省级';
         case 2: return '市级';
