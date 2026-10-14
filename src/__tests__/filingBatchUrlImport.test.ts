@@ -49,6 +49,27 @@ describe('FilingBatchUrlImport helpers', () => {
     expect(matchRegionByUnitName('完全不存在的单位XYZ', regions)).toBeNull();
   });
 
+  it('matchRegionByUnitName prefers the banner-level department over the banner itself', () => {
+    const regions = [
+      { id: 1, name: '内蒙古自治区', parent_id: null, level: 1 },
+      { id: 2, name: '鄂尔多斯市', parent_id: 1, level: 2 },
+      { id: 3, name: '伊金霍洛旗', parent_id: 2, level: 3 },
+      { id: 4, name: '阿勒腾席热镇', parent_id: 3, level: 4 },
+      { id: 5, name: '伊金霍洛旗财政局', parent_id: 3, level: 4 },
+      { id: 6, name: '展旦召苏木', parent_id: 3, level: 4 },
+    ];
+
+    const hit = matchRegionByUnitName('伊金霍洛旗财政局', regions, {
+      pageTitle: '2025年伊金霍洛旗财政局政府信息公开工作年度报告',
+    });
+    expect(hit?.id).toBe(5);
+
+    const town = matchRegionByUnitName('展旦召苏木', regions, {
+      pageTitle: '2025年伊金霍洛旗展旦召苏木政府信息公开工作年度报告',
+    });
+    expect(town?.id).toBe(6);
+  });
+
   it('matchRegionByUnitName uses fengxian host to disambiguate same-named depts', () => {
     const regions = [
       { id: 1, name: '上海市', parent_id: null, level: 1 },

@@ -478,7 +478,7 @@ router.get('/tree', authMiddleware, async (req: AuthRequest, res: Response) => {
 
     // 1. Fetch all regions and build lookup index for O(1) parent traversal
     const regionsRes = await pool.query(`
-      SELECT id, name, parent_id, level, sort_order
+      SELECT id, name, parent_id, level, sort_order, is_department
       FROM regions
       ORDER BY level ASC, sort_order ASC, name ASC
     `);

@@ -13,6 +13,7 @@ import { resolveFirstNonEmpty, normalizeLlmProviderName } from '../utils/aiEnv';
 import { aiModelConfigService } from './AiModelConfigService';
 import { ConsistencyItem } from './ConsistencyCheckService';
 import { HIERARCHY_COMPLETENESS_SQL_EXCLUSION } from '../utils/consistencyReviewSemantics';
+import { TABLE3_ROW_LABELS, TABLE3_ENTITY_LABELS as TABLE3_COLUMN_LABELS } from '../utils/table3FieldTaxonomy';
 
 export type VisionReviewTableId = 'table_2' | 'table_3' | 'table_4';
 export type VisionReviewStatus =
@@ -679,9 +680,25 @@ function normalizeUnreadableCells(value: unknown): string[] {
   return value.map((item) => String(item || '').trim()).filter(Boolean);
 }
 
+const VISUAL_ITEM_TABLE_PREFIX: Record<VisionReviewTableId, string> = {
+  table_2: 'visual_table2_',
+  table_3: 'visual_table3_',
+  table_4: 'visual_table4_',
+};
+
+/**
+ * 结构审计项挂在 groupKey='visual' 上，只看 group 会漏掉「表三有空白格」这类
+ * 恰恰需要重看图形的信号（丢值静默流到统计层的入口），所以按 checkKey 前缀补判。
+ */
 function hasTableTriggerFailure(items: ConsistencyItem[], tableId: VisionReviewTableId): boolean {
   const groupKey = tableId.replace('_', '') as 'table2' | 'table3' | 'table4';
-  return items.some((item) => item.groupKey === groupKey && ['FAIL', 'UNCERTAIN'].includes(item.autoStatus));
+  const visualPrefix = VISUAL_ITEM_TABLE_PREFIX[tableId];
+  return items.some((item) => {
+    const belongsToTable =
+      item.groupKey === groupKey ||
+      (item.groupKey === 'visual' && String(item.checkKey || '').startsWith(visualPrefix));
+    return belongsToTable && ['FAIL', 'UNCERTAIN'].includes(item.autoStatus);
+  });
 }
 
 function collectTriggerPaths(tableId: VisionReviewTableId, triggerItems: ConsistencyItem[]): string[] {
@@ -705,16 +722,6 @@ function collectTriggerPaths(tableId: VisionReviewTableId, triggerItems: Consist
   return uniqueStrings(paths);
 }
 
-const TABLE3_COLUMN_LABELS: Record<string, string> = {
-  naturalPerson: '自然人',
-  'legalPerson.commercial': '商业企业',
-  'legalPerson.research': '科研机构',
-  'legalPerson.social': '社会公益组织',
-  'legalPerson.legal': '法律服务机构',
-  'legalPerson.other': '其他组织',
-  total: '总计',
-};
-
 const TABLE3_COLUMN_KEYWORDS: Record<string, string[][]> = {
   naturalPerson: [['自然人']],
   'legalPerson.commercial': [['商业企业']],
@@ -723,34 +730,6 @@ const TABLE3_COLUMN_KEYWORDS: Record<string, string[][]> = {
   'legalPerson.legal': [['法律服务机构'], ['法律服务']],
   'legalPerson.other': [['其他组织'], ['其他']],
   total: [['总计']],
-};
-
-const TABLE3_ROW_LABELS: Record<string, string> = {
-  newReceived: '本年新收',
-  carriedOver: '上年结转',
-  'results.granted': '予以公开',
-  'results.partialGrant': '部分公开',
-  'results.denied.stateSecret': '属于国家秘密',
-  'results.denied.lawForbidden': '法律行政法规禁止公开',
-  'results.denied.safetyStability': '危及安全稳定',
-  'results.denied.thirdPartyRights': '保护第三方合法权益',
-  'results.denied.internalAffairs': '内部事务信息',
-  'results.denied.processInfo': '过程性信息',
-  'results.denied.enforcementCase': '行政执法案卷',
-  'results.denied.adminQuery': '行政查询事项',
-  'results.unableToProvide.noInfo': '本机关不掌握相关政府信息',
-  'results.unableToProvide.needCreation': '没有现成信息需要另行制作',
-  'results.unableToProvide.unclear': '补正后申请内容仍不明确',
-  'results.notProcessed.complaint': '信访举报投诉类申请',
-  'results.notProcessed.repeat': '重复申请',
-  'results.notProcessed.publication': '公开出版物',
-  'results.notProcessed.massiveRequests': '大量反复申请',
-  'results.notProcessed.confirmInfo': '确认或重新出具',
-  'results.other.overdueCorrection': '逾期不补正',
-  'results.other.overdueFee': '逾期未缴纳费用',
-  'results.other.otherReasons': '其他处理',
-  'results.totalProcessed': '办理结果总计',
-  'results.carriedForward': '结转下年度',
 };
 
 const TABLE4_COLUMN_LABELS: Record<string, string> = {

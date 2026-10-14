@@ -1,4 +1,6 @@
 import pool from '../config/database-llm';
+import { TABLE3_CELL_COL_KEYS, TABLE3_CELL_ROW_KEYS } from '../utils/table3CellKeys';
+import { TABLE3_ENTITY_KEYS } from '../utils/table3FieldTaxonomy';
 
 interface MaterializeInput {
   reportId: number;
@@ -372,43 +374,17 @@ function buildApplication(parsed: any): { facts: FactApplication[]; cells: CellR
   const section = getSection(parsed, 'table_3');
   const data = section?.tableData || parsed?.tableData || {};
 
-  const applicantMap = [
-    { key: ['naturalPerson'], label: 'natural_person' },
-    { key: ['legalPerson', 'commercial'], label: 'legal_person_commercial' },
-    { key: ['legalPerson', 'research'], label: 'legal_person_research' },
-    { key: ['legalPerson', 'social'], label: 'legal_person_social' },
-    { key: ['legalPerson', 'legal'], label: 'legal_person_legal' },
-    { key: ['legalPerson', 'other'], label: 'legal_person_other' },
-    { key: ['total'], label: 'total' },
-  ];
+  // cells / fact 的键是入库后不可改的对外契约，统一取自 table3CellKeys，
+  // 只读分析脚本也用同一份映射还原 tableData，两侧不可能对不上。
+  const applicantMap = TABLE3_ENTITY_KEYS.map((entityPath) => ({
+    key: entityPath.split('.'),
+    label: TABLE3_CELL_COL_KEYS[entityPath],
+  }));
 
-  const responseMap: Array<{ key: string; path: string[] }> = [
-    { key: 'new_received', path: ['newReceived'] },
-    { key: 'carried_over', path: ['carriedOver'] },
-    { key: 'granted', path: ['results', 'granted'] },
-    { key: 'partial_grant', path: ['results', 'partialGrant'] },
-    { key: 'denied_state_secret', path: ['results', 'denied', 'stateSecret'] },
-    { key: 'denied_law_forbidden', path: ['results', 'denied', 'lawForbidden'] },
-    { key: 'denied_safety_stability', path: ['results', 'denied', 'safetyStability'] },
-    { key: 'denied_third_party_rights', path: ['results', 'denied', 'thirdPartyRights'] },
-    { key: 'denied_internal_affairs', path: ['results', 'denied', 'internalAffairs'] },
-    { key: 'denied_process_info', path: ['results', 'denied', 'processInfo'] },
-    { key: 'denied_enforcement_case', path: ['results', 'denied', 'enforcementCase'] },
-    { key: 'denied_admin_query', path: ['results', 'denied', 'adminQuery'] },
-    { key: 'unable_no_info', path: ['results', 'unableToProvide', 'noInfo'] },
-    { key: 'unable_need_creation', path: ['results', 'unableToProvide', 'needCreation'] },
-    { key: 'unable_unclear', path: ['results', 'unableToProvide', 'unclear'] },
-    { key: 'not_processed_complaint', path: ['results', 'notProcessed', 'complaint'] },
-    { key: 'not_processed_repeat', path: ['results', 'notProcessed', 'repeat'] },
-    { key: 'not_processed_publication', path: ['results', 'notProcessed', 'publication'] },
-    { key: 'not_processed_massive_requests', path: ['results', 'notProcessed', 'massiveRequests'] },
-    { key: 'not_processed_confirm_info', path: ['results', 'notProcessed', 'confirmInfo'] },
-    { key: 'other_overdue_correction', path: ['results', 'other', 'overdueCorrection'] },
-    { key: 'other_overdue_fee', path: ['results', 'other', 'overdueFee'] },
-    { key: 'other_other_reasons', path: ['results', 'other', 'otherReasons'] },
-    { key: 'total_processed', path: ['results', 'totalProcessed'] },
-    { key: 'carried_forward', path: ['results', 'carriedForward'] },
-  ];
+  const responseMap = Object.entries(TABLE3_CELL_ROW_KEYS).map(([fieldPath, key]) => ({
+    key,
+    path: fieldPath.split('.'),
+  }));
 
   const facts: FactApplication[] = [];
   const cells: CellRecord[] = [];

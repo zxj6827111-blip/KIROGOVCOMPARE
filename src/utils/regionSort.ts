@@ -1,11 +1,12 @@
+import { isDepartmentRegion as classifyDepartment } from './regionUnitType';
+
 export interface SortableRegionLike {
   id?: number | string | null;
   name?: string | null;
   level?: number | string | null;
   sort_order?: number | string | null;
+  is_department?: boolean | null;
 }
-
-const ADMIN_SUFFIXES = ['省', '市', '区', '县', '乡', '镇', '街道'];
 
 const toNumberOrNull = (value: unknown): number | null => {
   if (value === null || value === undefined || value === '') return null;
@@ -19,25 +20,11 @@ const toSafeName = (value: unknown): string => {
 };
 
 /**
- * Keep the same classification rule as City Management:
- * 1) Name suffix first, 2) then level fallback.
+ * Department classification lives in `regionUnitType` so the region tree, the
+ * batch import and the data-center sorts cannot drift apart again.
  */
-export const isDepartmentRegion = (region: SortableRegionLike): boolean => {
-  const name = toSafeName(region?.name);
-  if (name) {
-    const isAdministrativeByName = ADMIN_SUFFIXES.some((suffix) => name.endsWith(suffix));
-    if (isAdministrativeByName) {
-      return false;
-    }
-  }
-
-  const level = toNumberOrNull(region?.level);
-  if (level !== null) {
-    return level === 3;
-  }
-
-  return true;
-};
+export const isDepartmentRegion = (region: SortableRegionLike): boolean =>
+  classifyDepartment(region);
 
 /**
  * Sort order aligned with City Management:

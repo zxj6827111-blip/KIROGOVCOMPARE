@@ -17,6 +17,8 @@ import PageHeader from './common/PageHeader';
 import { useToast } from './common/ToastProvider';
 import { useConfirmDialog } from './common/ConfirmDialogProvider';
 import { appendReturnTo } from '../app/routeRegistry';
+// 与区域管理树共用同一套 部门 / 行政区划 判定（后端下发的 region.is_department 优先）。
+import { getRegionType, getCardLabel } from '../utils/regionClassification';
 
 // Global cache to persist data across component remounts (e.g., navigating back from detail page)
 // This prevents the "loading..." flash when returning to the list
@@ -312,31 +314,6 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
   const [loading, setLoading] = useState(() => !globalCache.reports); // Only show loading if no cached data
   const [error, setError] = useState('');
   const [checkStatusMap, setCheckStatusMap] = useState(() => globalCache.checkStatusMap || new Map()); // 报告ID => 勾稽问题数量
-
-  // Determine region type based on naming convention
-  const getRegionType = (name) => {
-    if (!name) return 'department';
-
-    // Level 1: Province
-    if (name.endsWith('省') || name.endsWith('自治区') || name.endsWith('直辖市')) {
-      return 'province';
-    }
-
-    // Level 3: Town/Street
-    // Suffixes: 街道, 街道办事处, 镇, 乡
-    if (name.endsWith('街道') || name.endsWith('办事处') || name.endsWith('镇') || name.endsWith('乡')) {
-      return 'town'; // internal type for granularity, will map to 'district' tab logic if needed or separate
-    }
-
-    // Level 2/3: District/County/City
-    // Suffixes: 区, 县, 市, 新区
-    if (name.endsWith('区') || name.endsWith('县') || name.endsWith('市') || name.endsWith('新区')) {
-      return 'district';
-    }
-
-    // Default: Department
-    return 'department';
-  };
 
   const getInitialPath = () => {
     const params = new URLSearchParams(window.location.search);
@@ -645,24 +622,6 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
     }
   };
 
-  const getCardLabel = (region) => {
-    // 1. Priority: Explicit Level
-    if (region.level === 1) return '省级';
-    if (region.level === 2) return '地市';
-    if (region.level === 3) return '区县';
-    if (region.level === 4) return '街道/乡镇';
-
-    const type = getRegionType(region.name);
-    if (type === 'province') return '省级';
-    if (type === 'town') {
-      return '街道/乡镇';
-    }
-    if (type === 'district') {
-      return '区县';
-    }
-    return '部门';
-  };
-
   const allCards = childrenOf(currentParentId);
 
   const filteredCards = useMemo(() => {
@@ -676,7 +635,7 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
 
       // Tab Filter
       if (activeTab === 'all') return true;
-      const type = getRegionType(c.name);
+      const type = getRegionType(c);
 
       // 'district' tab includes 'district', 'town', AND 'province' (administrative regions)
       if (activeTab === 'district') {
@@ -1236,7 +1195,7 @@ function CityIndex({ onNavigate, onSelectReport, onViewComparison }) {
                 {filteredCards.map((region) => {
                   const total = countWithDescendants(region.id);
                   const directReports = reportCountMap.get(region.id) || 0;
-                  let type = getRegionType(region.name);
+                  let type = getRegionType(region);
                   if (region.level === 1) type = 'province';
 
                   // Find parent name for display

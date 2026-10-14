@@ -172,7 +172,7 @@ export class LlmJobRunner {
     this.running = true;
     console.log(`[JobRunner] Worker mode: ${WORKER_MODE} (kinds: ${ALLOWED_KIND_LIST.join(', ') || 'none'})`);
     console.log(
-      `[JobRunner] Parse stabilize mode: ${PARSE_STABILIZE_MODE || 'none'} (table3=${PARSE_STABILIZE_OPTIONS.table3}, table4=${PARSE_STABILIZE_OPTIONS.table4}), parse_rule_gate=${PARSE_RULE_GATE_ENABLED}, parse_rule_gate_blocking=${PARSE_RULE_GATE_BLOCKING}`
+      `[JobRunner] Parse stabilize mode: ${PARSE_STABILIZE_MODE || 'none'} (table3=${PARSE_STABILIZE_OPTIONS.table3}, table4=${PARSE_STABILIZE_OPTIONS.table4}, table3NullBackfill=${PARSE_STABILIZE_OPTIONS.table3NullBackfill}), parse_rule_gate=${PARSE_RULE_GATE_ENABLED}, parse_rule_gate_blocking=${PARSE_RULE_GATE_BLOCKING}`
     );
     console.log(
       `[JobRunner] Source gate enabled=${SOURCE_GATE_ENABLED} blocking=${SOURCE_GATE_BLOCKING}`
@@ -567,7 +567,10 @@ export class LlmJobRunner {
         );
       }
 
-      const stabilized = stabilizeParsedOutput(parseResult.output, PARSE_STABILIZE_OPTIONS);
+      const stabilized = stabilizeParsedOutput(parseResult.output, {
+        ...PARSE_STABILIZE_OPTIONS,
+        sourceText: parseResult.sourceText || '',
+      });
       parseResult.output = stabilized.output;
       draftRepairs.push(...stabilized.repairs);
       if (stabilized.repairs.length > 0) {
@@ -627,7 +630,10 @@ export class LlmJobRunner {
           );
         }
 
-        const verifierStabilized = stabilizeParsedOutput(verifierResult.output, PARSE_STABILIZE_OPTIONS);
+        const verifierStabilized = stabilizeParsedOutput(verifierResult.output, {
+          ...PARSE_STABILIZE_OPTIONS,
+          sourceText: verifierResult.sourceText || '',
+        });
         verifierResult.output = verifierStabilized.output;
         draftRepairs.push(...verifierStabilized.repairs.map((repair) => `verifier:${repair}`));
         if (verifierStabilized.repairs.length > 0) {

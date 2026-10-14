@@ -1928,19 +1928,26 @@ export class ConsistencyCheckService {
                     groupKey: 'visual',
                     checkKey: 'visual_table3_empty_cells',
                     fingerprint: this.generateFingerprint('visual', 'table3_empty_cells', 'empty_check'),
-                    title: `表格审计：表三存在${emptySlashCells.count}个空白或"/"单元格`,
+                    title: `表格审计：表三 ${emptySlashCells.unparsedCount} 格解析未取到值、${emptySlashCells.placeholderCount} 格原文为横杠或"/"`,
                     expr: 'empty_or_slash_cells == 0',
                     leftValue: emptySlashCells.count,
                     rightValue: 0,
                     delta: emptySlashCells.count,
                     tolerance: 0,
-                    autoStatus: emptySlashCells.count > 10 ? 'FAIL' : 'UNCERTAIN',
+                    // 解析丢值（null）一律必复核：它进统计层就是少数，不能靠数量阈值放过；
+                    // 原文横杠是报告本来的写法，只有成片出现才当异常。
+                    autoStatus:
+                        emptySlashCells.unparsedCount > 0 || emptySlashCells.placeholderCount > 3
+                            ? 'FAIL'
+                            : 'UNCERTAIN',
                     evidenceJson: {
                         paths: ['sections[type=table_3].tableData'],
                         values: {
                             empty_count: emptySlashCells.count,
+                            unparsed_count: emptySlashCells.unparsedCount,
+                            placeholder_count: emptySlashCells.placeholderCount,
                             examples: emptySlashCells.examples.slice(0, 5),
-                            note: '表格中存在空白或"/"符号，可能表示数据缺失'
+                            note: '解析未取到值需视觉复核或人工补录；原文横杠/"/"属于报告自身的写法'
                         }
                     }
                 });
@@ -1981,17 +1988,23 @@ export class ConsistencyCheckService {
     /**
      * Helper: Count empty or "/" cells in a nested object (table data)
      */
-    private countEmptyOrSlashCells(obj: any, path: string = ''): { count: number; examples: string[] } {
+    private countEmptyOrSlashCells(
+        obj: any,
+        path: string = ''
+    ): { count: number; examples: string[]; unparsedCount: number; placeholderCount: number } {
         let count = 0;
+        let unparsedCount = 0;
+        let placeholderCount = 0;
         const examples: string[] = [];
 
-        const isEmptyOrSlash = (val: any): boolean => {
-            if (val === null || val === undefined) return true;
+        const classify = (val: any): 'unparsed' | 'placeholder' | null => {
+            if (val === null || val === undefined) return 'unparsed';
             if (typeof val === 'string') {
                 const trimmed = val.trim();
-                return trimmed === '' || trimmed === '/' || trimmed === '-' || trimmed === '—';
+                if (trimmed === '') return 'unparsed';
+                if (trimmed === '/' || trimmed === '-' || trimmed === '—') return 'placeholder';
             }
-            return false;
+            return null;
         };
 
         const traverse = (current: any, currentPath: string) => {
@@ -2004,8 +2017,12 @@ export class ConsistencyCheckService {
 
                     if (typeof value === 'object' && value !== null) {
                         traverse(value, newPath);
-                    } else if (isEmptyOrSlash(value)) {
+                    } else {
+                        const kind = classify(value);
+                        if (kind === null) continue;
                         count++;
+                        if (kind === 'unparsed') unparsedCount++;
+                        else placeholderCount++;
                         if (examples.length < 10) {
                             examples.push(`${newPath}: "${value ?? 'null'}"`);
                         }
@@ -2015,7 +2032,7 @@ export class ConsistencyCheckService {
         };
 
         traverse(obj, path);
-        return { count, examples };
+        return { count, examples, unparsedCount, placeholderCount };
     }
 
     /**

@@ -408,6 +408,21 @@ table.gov-data-table {
   cursor: help;
 }
 
+/* cells 里 EMPTY（解析没取到值）与 NA（原文就是横杠）不是一回事，
+   横杠继续按原样显示，EMPTY 用灰标提示待复核，避免复核人员把丢数当成"原文没有"。 */
+.gov-data-table .cell-value-missing {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #6b7280;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: help;
+}
+
 .gov-data-table .cell-suspicious-fragment--mismatch {
   background: #ffe4e6 !important;
   box-shadow: inset 0 0 0 2px rgba(225, 29, 72, 0.58);

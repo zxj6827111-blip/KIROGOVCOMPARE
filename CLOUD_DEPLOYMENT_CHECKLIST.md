@@ -148,6 +148,18 @@ pm2 status
 
 ## 📋 部署前检查清单
 
+### 0. 本地自检（发布前必须全绿）
+
+根 `jest.config.js` 的 `testMatch` 只收 `.ts`，**永远不会扫到 `frontend/src/**` 下的用例**，前端测试要在 frontend 目录单独跑：
+
+```bash
+npx jest src/__tests__/regionUnitType.test.ts src/__tests__/regionImportDepartment.test.ts src/__tests__/regionCreateDeduplicate.test.ts
+cd frontend && npx jest src/utils/regionClassification.test.js   # 层级/部门归类
+cd frontend && npx jest
+cd frontend && npm run build   # 含 tsc --noEmit，类型问题只会在生产 build 时暴露
+npm run build
+```
+
 ### 1. 服务器环境要求
 
 | 组件 | 最低要求 | 推荐配置 |

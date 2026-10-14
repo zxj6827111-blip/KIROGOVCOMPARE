@@ -36,19 +36,19 @@ router.get('/regions/:id/issues-summary', authMiddleware, async (req: AuthReques
         if (regionId) {
             const regionTreeQuery = `
             WITH RECURSIVE region_tree AS (
-              SELECT id, name, parent_id, level, sort_order FROM regions WHERE id = $1
+              SELECT id, name, parent_id, level, sort_order, is_department FROM regions WHERE id = $1
               UNION ALL
-              SELECT r.id, r.name, r.parent_id, r.level, r.sort_order
+              SELECT r.id, r.name, r.parent_id, r.level, r.sort_order, r.is_department
               FROM regions r
               INNER JOIN region_tree rt ON r.parent_id = rt.id
             )
-            SELECT id, name, parent_id, level, sort_order FROM region_tree
+            SELECT id, name, parent_id, level, sort_order, is_department FROM region_tree
             `;
             const result = await pool.query(regionTreeQuery, [regionId]);
             regionsResult = result.rows;
         } else {
             // Get all regions
-            const regionAllQuery = `SELECT id, name, parent_id, level, sort_order FROM regions`;
+            const regionAllQuery = `SELECT id, name, parent_id, level, sort_order, is_department FROM regions`;
             const result = await pool.query(regionAllQuery);
             regionsResult = result.rows;
         }

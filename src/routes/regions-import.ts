@@ -7,6 +7,7 @@ import writeXlsxFile, { SheetData } from 'write-excel-file/node';
 import { parse as parseCsv } from 'csv-parse/sync';
 import pool from '../config/database-llm';
 import { authMiddleware, AuthRequest, requirePermission } from '../middleware/auth';
+import { isDepartmentRegion } from '../utils/regionUnitType';
 
 const router = express.Router();
 const REGION_IMPORT_MAX_ROWS = Number(process.env.REGION_IMPORT_MAX_ROWS || 10000);
@@ -39,7 +40,7 @@ function normalizeRows(rows: unknown[][]): string[][] {
 async function workbookToBuffer(data: string[][], sheetName: string): Promise<Buffer> {
   const workbook = await writeXlsxFile(data as SheetData, {
     sheet: sheetName,
-    columns: [{ width: 15 }, { width: 15 }, { width: 15 }, { width: 15 }],
+    columns: [{ width: 15 }, { width: 15 }, { width: 15 }, { width: 15 }, { width: 24 }],
   });
   return workbook.toBuffer();
 }
@@ -96,14 +97,14 @@ router.get('/template', async (_req: Request, res: Response) => {
 
     // Sample data
     const data = [
-      ['省份', '城市', '区县', '街道'],
+      ['省份', '城市', '区县', '街道', '部门'],
       ['江苏省', '南京市', '玄武区', ''],
-      ['江苏省', '南京市', '秦淮区', ''],
-      ['江苏省', '南京市', '鼓楼区', ''],
+      ['江苏省', '南京市', '玄武区', '梅园新村街道', ''],
+      ['江苏省', '南京市', '玄武区', '', '玄武区教育局'],
       ['江苏省', '苏州市', '姑苏区', ''],
-      ['江苏省', '苏州市', '工业园区', ''],
       ['浙江省', '杭州市', '西湖区', ''],
-      ['浙江省', '杭州市', '上城区', ''],
+      ['内蒙古自治区', '鄂尔多斯市', '伊金霍洛旗', '阿勒腾席热镇', ''],
+      ['内蒙古自治区', '鄂尔多斯市', '伊金霍洛旗', '', '伊金霍洛旗财政局'],
     ];
     const buffer = await workbookToBuffer(data, '区域导入模板');
 
@@ -171,206 +172,179 @@ router.post('/import', authMiddleware, requirePermission('manage_regions'), hand
     res.setHeader('Content-Type', 'application/x-ndjson');
     res.setHeader('Transfer-Encoding', 'chunked');
 
-    const sendProgress = (progress: { percentage: number; current: number; total: number; message: string }) => {
+    const sendProgress = (progress: {
+      percentage: number;
+      current: number;
+      total: number;
+      message: string;
+      created?: number;
+      existed?: number;
+      skipped?: number;
+      row_errors?: string[];
+      row_warnings?: string[];
+    }) => {
       res.write(JSON.stringify(progress) + '\n');
     };
 
     // Track created regions
-    const created: { level: number; name: string }[] = [];
-    const errors: string[] = [];
+    let createdCount = 0;
+    let skippedRowCount = 0;
+    const rowErrors: string[] = [];
+    const rowWarnings: string[] = [];
+    const REGION_IMPORT_MAX_ROW_ERRORS = 50;
     const regionCache: Map<string, number> = new Map();
-
-    // Load existing regions into cache
-    const result = await pool.query('SELECT id, name, level, parent_id FROM regions ORDER BY level');
-    const existingRegions = result.rows;
-
-    for (const r of existingRegions) {
-      const key = `${r.level}_${r.name}_${r.parent_id || 'null'}`;
-      regionCache.set(key, Number(r.id));
-    }
-
-    // Prepare data structures for level-based processing
-    // We need to process the file and determine unique regions for each level
-    // format: { name, parentName, parentLevel } - but parentID is needed.
-    // Actually, we can just process the rows and build a pending list for current level.
 
     const DIRECT_CITIES = ['上海市', '北京市', '天津市', '重庆市'];
 
     // Helper to generate cache key
     const genKey = (level: number, name: string, parentId: number | null) => `${level}_${name}_${parentId || 'null'}`;
 
-    // Helper to batch insert
-    const batchInsert = async (items: { name: string, level: number, parentId: number | null }[]) => {
-      if (items.length === 0) return;
-
-      // PostgreSQL: Use parameterized batch insert
-      for (const item of items) {
-        const code = `import_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-        await pool.query(
-          'INSERT INTO regions (code, name, level, parent_id) VALUES ($1, $2, $3, $4)',
-          [code, item.name, item.level, item.parentId]
-        );
+    const pushRowError = (message: string) => {
+      skippedRowCount += 1;
+      if (rowErrors.length < REGION_IMPORT_MAX_ROW_ERRORS) {
+        rowErrors.push(message);
       }
     };
 
-    // Helper to refresh cache for a specific level
-    const refreshCache = async (level: number) => {
-      const result = await pool.query('SELECT id, name, parent_id FROM regions WHERE level = $1', [level]);
-      const rows = result.rows;
-      for (const r of rows) {
-        const key = genKey(level, r.name, r.parent_id);
-        regionCache.set(key, Number(r.id));
+    const pushRowWarning = (message: string) => {
+      if (rowWarnings.length < REGION_IMPORT_MAX_ROW_ERRORS) {
+        rowWarnings.push(message);
       }
+    };
+
+    // Load existing regions into cache
+    const result = await pool.query('SELECT id, name, level, parent_id FROM regions ORDER BY level');
+    const existingRegions = result.rows;
+
+    for (const r of existingRegions) {
+      const key = genKey(Number(r.level), r.name, r.parent_id ? Number(r.parent_id) : null);
+      regionCache.set(key, Number(r.id));
+    }
+
+    let insertSeq = 0;
+
+    /**
+     * Get-or-create one node. `isDepartment` is only ever written as an explicit
+     * `true` for the 部门 column; `null` keeps the node on name classification.
+     */
+    const ensureRegion = async (
+      level: number,
+      name: string,
+      parentId: number | null,
+      isDepartment: boolean | null,
+      excelRow: number
+    ): Promise<number | null> => {
+      const key = genKey(level, name, parentId);
+      const cached = regionCache.get(key);
+      if (cached !== undefined) {
+        return cached;
+      }
+
+      if (level > 4) {
+        pushRowError(`${excelRow} 行：「${name}」超出 4 级层级（省/市/区县/街道），请改挂在区县列`);
+        return null;
+      }
+
+      const code = `import_${Date.now()}_${(insertSeq++).toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+      const inserted = await pool.query(
+        'INSERT INTO regions (code, name, level, parent_id, is_department) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+        [code, name, level, parentId, isDepartment]
+      );
+      const id = Number(inserted.rows[0].id);
+      regionCache.set(key, id);
+      createdCount += 1;
+      return id;
     };
 
     sendProgress({ percentage: 10, current: 0, total: totalRows, message: '分析数据结构...' });
 
-    // We process level by level.
-    // L1
-    const pendingL1 = new Map<string, { name: string }>();
+    // One pass over the rows, creating each node on demand so the file does not
+    // have to be sorted and so a broken parent surfaces as a row error instead
+    // of silently dropping every row beneath it.
+    const touchedExisting = new Set<string>();
+    const HEADER_ROWS = 1;
 
-    for (const row of dataRows) {
-      if (!row || row.length === 0) continue;
-      const province = (row[0] || '').toString().trim();
-      if (!province) continue;
+    const trackExisting = (level: number, name: string, parentId: number | null) => {
+      touchedExisting.add(genKey(level, name, parentId));
+    };
 
-      const key = genKey(1, province, null);
-      if (!regionCache.has(key)) {
-        pendingL1.set(key, { name: province });
-      }
-    }
+    for (let i = 0; i < dataRows.length; i += 1) {
+      const rawRow = dataRows[i] || [];
+      const cells = [0, 1, 2, 3, 4].map((index) => String(rawRow[index] ?? '').trim());
+      const excelRow = i + HEADER_ROWS + 1;
 
-    if (pendingL1.size > 0) {
-      sendProgress({ percentage: 20, current: 0, total: totalRows, message: '正在创建一级行政区...' });
-      await batchInsert(Array.from(pendingL1.values()).map(v => ({ name: v.name, level: 1, parentId: null })));
-      await refreshCache(1);
-    }
+      if (cells.every((cell) => !cell)) continue;
 
-    // L2
-    const pendingL2 = new Map<string, { name: string, parentId: number }>();
-
-    for (const row of dataRows) {
-      const cells = row.map(c => (c || '').toString().trim());
-      const province = cells[0];
-      if (!province) continue;
-
-      const l1Id = regionCache.get(genKey(1, province, null));
-      if (!l1Id) continue;
-
-      let l2Name = '';
-      if (DIRECT_CITIES.includes(province)) {
-        l2Name = cells[1]; // District as L2
-      } else {
-        l2Name = cells[1]; // City as L2
-      }
-
-      if (l2Name) {
-        const key = genKey(2, l2Name, l1Id);
-        if (!regionCache.has(key)) {
-          pendingL2.set(key, { name: l2Name, parentId: l1Id });
-        }
-      }
-    }
-
-    if (pendingL2.size > 0) {
-      sendProgress({ percentage: 40, current: 0, total: totalRows, message: '正在创建二级行政区...' });
-      await batchInsert(Array.from(pendingL2.values()).map(v => ({ name: v.name, level: 2, parentId: v.parentId })));
-      await refreshCache(2);
-    }
-
-    // L3
-    const pendingL3 = new Map<string, { name: string, parentId: number }>();
-
-    for (const row of dataRows) {
-      const cells = row.map(c => (c || '').toString().trim());
-      const province = cells[0];
-      if (!province) continue;
-
-      const l1Id = regionCache.get(genKey(1, province, null));
-      if (!l1Id) continue;
-
-      if (DIRECT_CITIES.includes(province)) {
-        // Direct City L3 = Street (Col C)
-        // Parent is District (L2) (Col B)
-        const districtName = cells[1];
-        const streetName = cells[2];
-
-        if (districtName && streetName) {
-          const l2Id = regionCache.get(genKey(2, districtName, l1Id));
-          if (l2Id) {
-            const key = genKey(3, streetName, l2Id);
-            if (!regionCache.has(key)) {
-              pendingL3.set(key, { name: streetName, parentId: l2Id });
-            }
-          }
-        }
-      } else {
-        // Normal L3 = District (Col C)
-        // Parent is City (L2) (Col B)
-        const cityName = cells[1];
-        const districtName = cells[2];
-
-        if (cityName && districtName) {
-          const l2Id = regionCache.get(genKey(2, cityName, l1Id));
-          if (l2Id) {
-            const key = genKey(3, districtName, l2Id);
-            if (!regionCache.has(key)) {
-              pendingL3.set(key, { name: districtName, parentId: l2Id });
-            }
-          }
-        }
-      }
-    }
-
-    if (pendingL3.size > 0) {
-      sendProgress({ percentage: 60, current: 0, total: totalRows, message: '正在创建三级行政区...' });
-      await batchInsert(Array.from(pendingL3.values()).map(v => ({ name: v.name, level: 3, parentId: v.parentId })));
-      await refreshCache(3);
-    }
-
-    // L4
-    const pendingL4 = new Map<string, { name: string, parentId: number }>();
-
-    for (const row of dataRows) {
-      const cells = row.map(c => (c || '').toString().trim());
-      const province = cells[0];
-      if (!province) continue;
-
-      if (DIRECT_CITIES.includes(province)) {
-        // No L4 for direct cities in this 3-level model
+      const [province, cityName, districtName, streetName, departmentName] = cells;
+      if (!province) {
+        pushRowError(`${excelRow} 行：缺少「省份」列，无法定位层级`);
         continue;
-      } else {
-        // Normal L4 = Street (Col D)
-        // Parent is District (L3) (Col C)
-        const cityName = cells[1];
-        const districtName = cells[2];
-        const streetName = cells[3];
+      }
 
-        if (cityName && districtName && streetName) {
-          const l1Id = regionCache.get(genKey(1, province, null));
-          if (!l1Id) continue;
-          const l2Id = regionCache.get(genKey(2, cityName, l1Id));
-          if (!l2Id) continue;
-          const l3Id = regionCache.get(genKey(3, districtName, l2Id));
+      // 行政链：省 → 市 → 区县 →（非直辖市）街道/乡镇。直辖市只到三级，
+      // 其部门请写在「部门」列，否则会与街道争同一列。
+      const isDirectCity = DIRECT_CITIES.includes(province);
+      const adminChain = [province, cityName, districtName, ...(isDirectCity ? [] : [streetName])];
 
-          if (l3Id) {
-            const key = genKey(4, streetName, l3Id);
-            if (!regionCache.has(key)) {
-              pendingL4.set(key, { name: streetName, parentId: l3Id });
-            }
-          }
+      if (isDirectCity && streetName) {
+        pushRowWarning(
+          `${excelRow} 行：直辖市模型只到「街道」一级，第 4 列的「${streetName}」不会导入；部门请写在「部门」列`
+        );
+      }
+
+      let deepestAdminIndex = 0;
+      adminChain.forEach((name, index) => {
+        if (name) deepestAdminIndex = index;
+      });
+
+      const gapIndex = adminChain.findIndex(
+        (name, index) => index > 0 && index <= deepestAdminIndex && !name
+      );
+      if (gapIndex !== -1) {
+        pushRowError(`${excelRow} 行：省/市/区县/街道需从左到右连续填写，第 ${gapIndex + 1} 列为空`);
+        continue;
+      }
+
+      let parentId: number | null = null;
+      let unresolved = false;
+      for (let index = 0; index <= deepestAdminIndex; index += 1) {
+        const level = index + 1;
+        const name = adminChain[index];
+        const cachedId = regionCache.get(genKey(level, name, parentId));
+        if (cachedId !== undefined) {
+          trackExisting(level, name, parentId);
+          parentId = cachedId;
+          continue;
+        }
+        const createdId = await ensureRegion(level, name, parentId, null, excelRow);
+        if (createdId === null) {
+          unresolved = true;
+          break;
+        }
+        parentId = createdId;
+      }
+      if (unresolved) continue;
+
+      if (departmentName) {
+        // 部门挂在同行最深的行政节点下：区/县/旗（或市本级）之下，填到街道时挂街道。
+        const departmentLevel = deepestAdminIndex + 2;
+        const cachedId = regionCache.get(genKey(departmentLevel, departmentName, parentId));
+        if (cachedId !== undefined) {
+          trackExisting(departmentLevel, departmentName, parentId);
+        } else {
+          await ensureRegion(departmentLevel, departmentName, parentId, true, excelRow);
         }
       }
-    }
 
-    if (pendingL4.size > 0) {
-      sendProgress({ percentage: 80, current: 0, total: totalRows, message: '正在创建四级行政区...' });
-      await batchInsert(Array.from(pendingL4.values()).map(v => ({ name: v.name, level: 4, parentId: v.parentId })));
-      // No need to refresh cache for L4 as it's the last level
+      if (i > 0 && i % 200 === 0) {
+        sendProgress({
+          percentage: Math.min(90, 10 + Math.round((i / totalRows) * 80)),
+          current: i,
+          total: totalRows,
+          message: `已处理 ${i}/${totalRows} 行...`,
+        });
+      }
     }
-
-    // Verify counts (approximate)
-    const createdCount = pendingL1.size + pendingL2.size + pendingL3.size + pendingL4.size;
 
     // Clean up temp file
     if (filePath) {
@@ -381,7 +355,13 @@ router.post('/import', authMiddleware, requirePermission('manage_regions'), hand
       percentage: 100,
       current: totalRows,
       total: totalRows,
-      message: `导入完成，新增 ${createdCount} 个区域`
+      message: `导入完成，新增 ${createdCount} 个区域，已存在 ${touchedExisting.size} 个`
+        + (skippedRowCount > 0 ? `，跳过 ${skippedRowCount} 行` : ''),
+      created: createdCount,
+      existed: touchedExisting.size,
+      skipped: skippedRowCount,
+      row_errors: rowErrors,
+      row_warnings: rowWarnings,
     });
 
     res.end();
@@ -404,84 +384,82 @@ router.post('/import', authMiddleware, requirePermission('manage_regions'), hand
 /**
  * GET /api/regions/export
  * Export all regions to Excel
+ *
+ * Emitted in the same 5-column shape `/import` reads, so 导出 → 改 → 导入 round-trips:
+ * administrative nodes fill 省份/城市/区县/街道 left to right, and a department is
+ * written into 部门 with the 街道 cell left blank so it hangs off its 区县/旗,
+ * not off a sibling 乡镇.
  */
 router.get('/export', authMiddleware, requirePermission('manage_regions'), async (_req: AuthRequest, res: Response) => {
   try {
     const result = await pool.query(`
-      SELECT r.id, r.name, r.level, r.parent_id, p.name as parent_name
-      FROM regions r
-      LEFT JOIN regions p ON r.parent_id = p.id
-      ORDER BY r.level, r.id
+      SELECT id, name, level, parent_id, sort_order, is_department
+      FROM regions
+      ORDER BY level, sort_order, id
     `);
-    const regions = result.rows;
 
-    // Build hierarchical data
-    const data: string[][] = [['省份', '城市', '区县', '街道']];
+    const byId = new Map<number, any>();
+    const childrenByParent = new Map<number | null, any[]>();
+    const roots: any[] = [];
 
-    // Group by hierarchy
-    const provinceMap = new Map<number, { name: string; cities: Map<number, { name: string; districts: Map<number, { name: string; streets: string[] }> }> }>();
-
-    for (const r of regions) {
-      if (r.level === 1) {
-        provinceMap.set(r.id, { name: r.name, cities: new Map() });
-      }
+    for (const row of result.rows) {
+      const node = {
+        ...row,
+        id: Number(row.id),
+        parent_id: row.parent_id != null ? Number(row.parent_id) : null,
+      };
+      byId.set(node.id, node);
     }
 
-    for (const r of regions) {
-      if (r.level === 2 && r.parent_id) {
-        const province = provinceMap.get(r.parent_id);
-        if (province) {
-          province.cities.set(r.id, { name: r.name, districts: new Map() });
-        }
-      }
-    }
-
-    for (const r of regions) {
-      if (r.level === 3 && r.parent_id) {
-        for (const province of provinceMap.values()) {
-          const city = province.cities.get(r.parent_id);
-          if (city) {
-            city.districts.set(r.id, { name: r.name, streets: [] });
-          }
-        }
-      }
-    }
-
-    for (const r of regions) {
-      if (r.level === 4 && r.parent_id) {
-        for (const province of provinceMap.values()) {
-          for (const city of province.cities.values()) {
-            const district = city.districts.get(r.parent_id);
-            if (district) {
-              district.streets.push(r.name);
-            }
-          }
-        }
-      }
-    }
-
-    // Flatten to rows
-    for (const [, province] of provinceMap) {
-      if (province.cities.size === 0) {
-        data.push([province.name, '', '', '']);
+    for (const node of byId.values()) {
+      if (node.parent_id && byId.has(node.parent_id)) {
+        const siblings = childrenByParent.get(node.parent_id) || [];
+        siblings.push(node);
+        childrenByParent.set(node.parent_id, siblings);
       } else {
-        for (const [, city] of province.cities) {
-          if (city.districts.size === 0) {
-            data.push([province.name, city.name, '', '']);
-          } else {
-            for (const [, district] of city.districts) {
-              if (district.streets.length === 0) {
-                data.push([province.name, city.name, district.name, '']);
-              } else {
-                for (const street of district.streets) {
-                  data.push([province.name, city.name, district.name, street]);
-                }
-              }
-            }
-          }
-        }
+        roots.push(node);
       }
     }
+
+    const byTreeOrder = (a: any, b: any) => {
+      const orderDiff = Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0);
+      return orderDiff !== 0 ? orderDiff : a.id - b.id;
+    };
+    roots.sort(byTreeOrder);
+    for (const siblings of childrenByParent.values()) siblings.sort(byTreeOrder);
+
+    const data: string[][] = [['省份', '城市', '区县', '街道', '部门']];
+
+    const administrativePathOf = (node: any): string[] => {
+      const names: string[] = [];
+      const seen = new Set<number>();
+      let cursor: any = node;
+      while (cursor && !seen.has(cursor.id)) {
+        seen.add(cursor.id);
+        if (!isDepartmentRegion(cursor)) names.unshift(cursor.name);
+        cursor = cursor.parent_id ? byId.get(cursor.parent_id) : null;
+      }
+      return names;
+    };
+
+    const emit = (node: any) => {
+      const path = administrativePathOf(node);
+      if (path.length >= 1 && path.length <= 4) {
+        const row = ['', '', '', '', ''];
+        path.forEach((name, index) => { row[index] = name; });
+        if (isDepartmentRegion(node)) {
+          row[4] = node.name;
+        }
+        data.push(row);
+      }
+
+      for (const child of childrenByParent.get(node.id) || []) {
+        emit(child);
+      }
+    };
+
+    for (const root of roots) emit(root);
+
     const buffer = await workbookToBuffer(data, '区域数据');
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

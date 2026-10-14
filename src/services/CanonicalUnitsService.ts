@@ -3,6 +3,7 @@ import {
   CanonicalUnitType,
   GOVINSIGHT_CANONICAL_MAPPING_VERSION,
 } from './GovInsightReportProtocol';
+import { inferRegionUnitType } from '../utils/regionUnitType';
 
 interface RegionRow {
   id: number;
@@ -68,66 +69,6 @@ function normalizeOverrideRow(row: OverrideRow): OverrideRow {
     confidence: row.confidence === null || row.confidence === undefined ? null : Number(row.confidence),
   };
 }
-
-const TOWN_STREET_SUFFIXES = ['镇', '乡', '街道', '街道办', '街道办事处'];
-const FUNCTIONAL_ZONE_KEYWORDS = [
-  '开发区',
-  '高新区',
-  '高新园',
-  '新区',
-  '园区',
-  '科技园',
-  '保税区',
-  '自贸区',
-  '示范区',
-  '功能区',
-  '创业园',
-  '产业园',
-  '科技一条街',
-];
-const FUNCTIONAL_ZONE_SUFFIXES = ['管委会'];
-const DEPARTMENT_SUFFIXES = [
-  '局',
-  '委员会',
-  '委',
-  '办',
-  '办公室',
-  '办公厅',
-  '中心',
-  '馆',
-  '院',
-  '所',
-  '支队',
-  '大队',
-  '分局',
-  '管理局',
-  '联合会',
-];
-const DEPARTMENT_KEYWORDS = [
-  '人民政府办公室',
-  '人民政府办公厅',
-  '政府办公室',
-  '国防动员办公室',
-  '信访办公室',
-  '投资促进办公室',
-  '重大项目推进办公室',
-  '国有资产监督管理办公室',
-];
-const DEPARTMENT_NAME_PARTS = [
-  '人民银行',
-  '人行',
-  '残联',
-  '妇联',
-  '联合会',
-  '供销社',
-  '供销总社',
-  '合作总社',
-  '总工会',
-  '医疗保障',
-];
-const DISTRICT_SUFFIXES = ['区', '县', '旗', '自治县'];
-const PROVINCE_SUFFIXES = ['省', '自治区', '特别行政区'];
-const CITY_SUFFIXES = ['市', '地区', '盟', '自治州'];
 
 const PHASE1_FROZEN_OVERRIDE_SEEDS: CanonicalOverrideSeed[] = [
   {
@@ -267,49 +208,16 @@ const PHASE1_FROZEN_OVERRIDE_SEEDS: CanonicalOverrideSeed[] = [
   },
 ];
 
-const endsWithAny = (value: string, suffixes: string[]) => suffixes.some((suffix) => value.endsWith(suffix));
-const includesAny = (value: string, parts: string[]) => parts.some((part) => value.includes(part));
-
 function normalizeName(name: string): string {
   return String(name || '').trim();
 }
 
 function inferUnitType(region: RegionRow, parent: RegionRow | null): { unitType: CanonicalUnitType; confidence: number } {
-  const name = normalizeName(region.name);
-
-  if (region.parent_id === null && endsWithAny(name, PROVINCE_SUFFIXES)) {
-    return { unitType: 'province', confidence: 0.99 };
-  }
-
-  if (region.parent_id === null || (!parent && (region.level <= 1 || endsWithAny(name, CITY_SUFFIXES)))) {
-    return { unitType: 'city', confidence: 0.95 };
-  }
-
-  if (endsWithAny(name, TOWN_STREET_SUFFIXES)) {
-    return { unitType: 'town_street', confidence: 0.95 };
-  }
-
-  if (region.level <= 2 && endsWithAny(name, CITY_SUFFIXES)) {
-    return { unitType: 'city', confidence: 0.92 };
-  }
-
-  if (includesAny(name, FUNCTIONAL_ZONE_KEYWORDS) || endsWithAny(name, FUNCTIONAL_ZONE_SUFFIXES)) {
-    return { unitType: 'functional_zone', confidence: 0.9 };
-  }
-
-  if (
-    endsWithAny(name, DEPARTMENT_SUFFIXES) ||
-    includesAny(name, DEPARTMENT_KEYWORDS) ||
-    includesAny(name, DEPARTMENT_NAME_PARTS)
-  ) {
-    return { unitType: 'department', confidence: 0.88 };
-  }
-
-  if (endsWithAny(name, DISTRICT_SUFFIXES) || (name.endsWith('市') && region.parent_id !== null)) {
-    return { unitType: 'district', confidence: 0.85 };
-  }
-
-  return { unitType: 'unknown', confidence: 0.35 };
+  const inferred = inferRegionUnitType(
+    { name: normalizeName(region.name), level: region.level, parent_id: region.parent_id },
+    parent !== null
+  );
+  return { unitType: inferred.unitType, confidence: inferred.confidence };
 }
 
 export class CanonicalUnitsService {
