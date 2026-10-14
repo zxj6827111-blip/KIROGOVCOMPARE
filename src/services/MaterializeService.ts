@@ -10,7 +10,7 @@ interface MaterializeInput {
 
 type ValueSemantic = 'ZERO' | 'EMPTY' | 'NA' | 'TEXT' | 'NUMERIC';
 
-interface CellRecord {
+export interface CellRecord {
   table_id: string;
   row_key: string;
   col_key: string;
@@ -450,6 +450,24 @@ function buildLegalProceeding(parsed: any): { facts: FactLegalProceeding[]; cell
   return { facts, cells };
 }
 
+/**
+ * The pre-DB half of materialize: canonical cells for any parsed_json, without touching
+ * Postgres. The dual-channel comparator needs exactly this so Channel A and Channel B
+ * are compared on the same normalised keys and value semantics, instead of a second
+ * implementation of the cell rules drifting away from the one that writes the table.
+ */
+export function buildParsedCells(parsedJson: string | Record<string, any>): CellRecord[] {
+  const parsed = normalizeParsedPayload(parsedJson);
+  if (!parsed) {
+    return [];
+  }
+  return [
+    ...buildActiveDisclosure(parsed).cells,
+    ...buildApplication(parsed).cells,
+    ...buildLegalProceeding(parsed).cells,
+  ];
+}
+
 export async function materializeReportVersion(input: MaterializeInput): Promise<void> {
   const parsed = normalizeParsedPayload(input.parsedJson);
   if (!parsed) {
@@ -528,4 +546,5 @@ export const __materializeInternals = {
   coerceNumber,
   coerceActiveDisclosureFactValue,
   buildActiveDisclosure,
+  getSection,
 };

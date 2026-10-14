@@ -45,6 +45,7 @@
     "test:integration": "jest --testPathPattern=integration",
     "test:coverage": "jest --coverage",
     "smoke:pdf": "node scripts/pdf-smoke-baseline.js",
+    "stats:dual-channel": "ts-node scripts/pdf-shadow-stats.ts",
     "db:migrate": "ts-node src/scripts/db-migrate.ts",
     "scan:integrity": "ts-node src/scripts/scan-system-integrity.ts",
     "scan:table3-fragments": "ts-node src/scripts/scan-table3-fragmentation.ts",
@@ -69,6 +70,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@napi-rs/canvas": "^0.1.100",
     "@types/archiver": "^7.0.0",
     "@types/ejs": "^3.1.5",
     "ajv": "^8.20.0",
